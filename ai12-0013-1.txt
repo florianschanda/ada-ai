@@ -1,0 +1,114 @@
+!standard C.6(16/3)                                          11-11-09  AI12-0013-1/01
+!class binding interpretation 11-11-09
+!status work item 11-11-09
+!status received 11-10-01
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject More issues with the definition of volatile
+
+!summary
+
+** TBD.
+
+!question
+
+** TBD
+
+!recommendation
+
+** TBD
+
+!wording
+
+** TBD.
+
+!discussion
+
+
+!ACATS Test
+
+!ASIS
+
+!appendix
+
+From: Geert Bosch
+Sent: Tuesday, July 12, 2011  12:58 PM
+
+As implementor, I would like to comment on AI-117.
+The proposed new wording seeks to clarify, yet seems
+slightly confused.
+
+In particular, the example in the AI is incorrect:
+
+!example
+The following will ensure that task 2 does get the value 42.
+
+ Data : Integer;
+ pragma Volatile (Data);
+
+ Flag : Boolean := False;
+ pragma Volatile (Flag);
+
+in task 1:
+ Data := 42;
+ Flag := True;
+
+in task 2:
+ loop
+    exit when Flag;
+ end loop;
+
+ Copy := Data;
+
+As written, the example will lead to erroneous execution, where
+both task 1 and task 2 access shared variable Flag, at least one
+of the accesses is a write, and the accesses are not sequential,
+see RM 9.10(11).
+
+The example requires flag to be Atomic, while Data can remain Volatile.
+
+Note the new wording of C.6(16):
+> All tasks of the program (on all processors) that read or update
+> volatile variables see the same order of updates to the variables.
+
+This wording is correct, but only because any concurrent accesses
+to shared variables (volatile or not) lead to erroneous execution,
+as clearly stated in 9.10(11). On its own C.6(16) may be misleading,
+because it seems to guarantee sequentially consistent behavior for
+concurrent accesses of non-atomic volatile variables, which is not
+the case.
+
+Additionally, because only atomic accesses are by definition
+sequential (see C.6(16)), there is in general no need for memory
+barriers between accesses to volatile variables. Barriers are only
+needed between two atomic accesses and between any atomic access and
+an access to a (potentially) shared variable by the same task.
+A barrier may be needed between an atomic access and an access of a
+shared non-volatile variable, to ensure that either the old or the 
+new value will be read, see 9.10(15b). A typical implementation would
+emit full barriers before and after atomic reads and writes, eliding
+consecutive barriers without intervening shared variable accesses.
+
+Please note that it would be impractical to allow non-sequential
+read/write access to volatile variables, as without locking a partial
+write would allow the reader to access the object while in an 
+inconsistent state, if it cannot be updated atomically. Consider 
+a 64-bit long float on a 32-bit system, or a record with discriminant.
+
+So, to conclude, C.6(16) should have an additional note:
+
+ Accesses to volatile variables must be sequential to avoid erroneous
+ execution, see 9.10(11).
+
+Additionally, Implementation Note C.6(16.a) should be replaced with:
+
+ AARM Implementation Note: To ensure this, on a multiprocessor,
+ any read or update of an atomic object should involve the use of
+ appropriate memory barriers.
+
+Here, I replaced "volatile" by "atomic" and did not say "a memory barrier"
+but used the indefinite "memory barriers", as in the general case two
+barriers may be needed per access.
+
+****************************************************************
