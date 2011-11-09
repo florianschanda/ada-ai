@@ -1,0 +1,312 @@
+!standard 3.10.2(13.2/3)                             11-11-08    AI12-0003-1/01
+!class Amendment 11-06-19
+!status work item 11-06-19
+!status received 11-03-21
+!priority Low
+!difficulty Medium
+!subject Default storage pool for storage pools
+!summary
+
+**TBD.
+
+!question
+
+If a programmer wants to specify the default storage pool as NULL through a
+configuration pragma, then how would one provide a user defined storage pool
+that does allocate a block of memory from the heap?
+
+!proposal
+
+(See wording.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Brad Moore
+Sent: Monday, March 21, 2011  8:22 AM
+
+AI05-0190-1 allows the default storage pool to be specified by a pragma.
+
+To implement an unbounded storage pool type, the first approach that comes to
+mind involves deriving a type from Root_Storage_Pool and allocating a block of
+memory from the heap and then doling objects from that block of memory.
+
+If a programmer wants to specify the default storage pool as NULL through a
+configuration pragma, then how would one provide a user defined storage pool
+that does allocate a block of memory from the heap?
+
+Is it the intent that such a configuration pragma enforces only static or stack
+based storage pools, and rules out any storage pools that allocate from the
+heap? Or does there need to be some implementation defined magic storage pool
+that does heap allocation, that can be named? Or should a storage pool object be
+exempt from the configuration pragma?
+
+with System.Storage_Pools;
+with System.Storage_Elements;
+
+package User_Defined_Pool is
+   type My_Pool is new System.Storage_Pools.Root_Storage_Pool with private;
+    ...
+
+private
+
+   type Storage_Array_Access is access System.Storage_Elements.Storage_Array;
+   for Storage_Array_Access'Storage_Pool use ???;
+   -- What heap based storage pool can be used for this if the default is NULL?
+
+   type My_Pool is new System.Storage_Pools.Root_Storage_Pool with
+         record
+            buffer : Storage_Array_Access;
+         end record;
+
+   overriding procedure Initialize (Item : in out My_Pool);
+
+end User_Defined_Pool;
+
+package body User_Defined_Pool is
+...
+
+   overriding procedure Initialize (Pool : in out My_Pool) is
+   begin
+      Pool.Buffer := new Ada.Storage_Elements.Storage_Array (1 .. 1_000_000);
+   end Initialize;
+
+end User_Defined_Pool;
+
+Configuration
+pragma Default_Storage_Pool (Null);
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Monday, March 21, 2011  1:37 PM
+
+> Is it the intent that such a configuration pragma enforces only static
+> or stack based storage pools, and rules out any storage pools that allocate from the heap?
+
+As I understand it, the intent is that it rules out the use of any default
+storage pools.
+
+> Or does there need to be some implementation defined magic storage
+> pool that does heap allocation, that can be named?
+
+If you need heap-based allocation in the presence of "null", then yes, I think
+you'd need to use an implementation-defined storage pool (such as the global
+storage pool that GNAT provides).
+
+> Or should a storage pool object be exempt from the configuration pragma?
+
+Not completely sure what you mean, but if the storage pool object itself needs
+to be allocated and managed within a storage pool, then I believe that that
+latter storage pool can't be a default storage pool (unless the storage pool
+you're talking about is outside the scope of the null).  At least that's how
+understand the proposal.
+
+Bob might have some further comments here...
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, March 21, 2011  7:35 PM
+
+> If a programmer wants to specify the default storage pool as NULL
+> through a configuration pragma, then how would one provide a user
+> defined storage pool that does allocate a block of memory from the heap?
+
+Good question!
+
+I have suggested several times that there should be some way to denote "the
+default storage pool", or "the global heap", or whatever. Some people (in
+particular, Randy and Steve, I think) objected to that, because it's
+unimplementable on compilers that by default separate "collections" into
+different pools.
+
+But I still don't see why it's unimplementable.  Every implementation has some
+sort of global heap, and could return that.  It really doesn't matter if the
+implementation wants to use local pools for some types, or whatever.
+
+> Is it the intent that such a configuration pragma enforces only static
+> or stack based storage pools, and rules out any storage pools that
+> allocate from the heap?
+
+No.  The intent is that you say "null" in a global config pragma, and that you
+can then use whatever sort of pools you like for particular access types.  (And
+for the new "new" syntax.)
+
+I don't know if this discussion is "too late".  In any case, you can always
+interface with VirtualAlloc on windows and mmap or malloc on Unix.  But it would
+be nice to have a portable way of saying "I want the most-global pool, the one
+that interfaces with the operating system (if there is one)".
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March 21, 2011  9:45 PM
+
+...
+> I have suggested several times that there should be some way to denote
+> "the default storage pool", or "the global heap", or whatever.
+> Some people (in particular, Randy and Steve, I think) objected to
+> that, because it's unimplementable on compilers that by default
+> separate "collections" into different pools.
+
+That's a misunderstanding of my position. I agree that it would be valuable to
+have some sort of named default storage pool. But that idea has been discussed
+to death and nothing significant about it has changed since it was discussed.
+Thus I oppose discussing it again; if the result was any different this time,
+that would happen simply because the membership of the ARG has changed and I
+don't think that is a good reason for making such a change. In any case, I'd
+rather spend the time on topics that have a better chance of success.
+
+The AI in question was AI95-00300-1. I suggest looking at the minutes of the
+Vienna meeting (June 2020), the meeting in which that AI was discussed (there is
+not much in the AI itself; perhaps the mail on this was stored in AI95-00299-1,
+which is related).
+
+Humm: since that was the only meeting at which that AI was considered and that
+was the "heat stroke" meeting (at which many decisions proved to be silly,
+probably from trying to work in rooms that resembled the interior of a furnace -
+outside air temps were 34-36 C during the meeting, and we met in
+unair-conditioned rooms), perhaps I can be convinced to reconsider. But we need
+a solid proposal (we've never had one). And in any case it is too late for this
+go round.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, March 22, 2011 12:49 PM
+
+> Humm: since that was the only meeting at which that AI was considered
+> and that was the "heat stroke" meeting (at which many decisions proved
+> to be silly, probably from trying to work in rooms that resembled the
+> interior of a furnace - outside air temps were 34-36 C during the
+> meeting, and we met in unair-conditioned rooms), perhaps I can be
+> convinced to reconsider. But we need a solid proposal (we've never had
+> one). And in any case it is too late for this go round.
+
+Not really. Nothing prevents any implementation from providing such a pool;
+therefore, even if it's too late for the standard, deciding how it should be
+done could help all implementations of Ada 2012 do the same thing (slightly
+tongue-in-cheek about "all implementations of Ada 2012").
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March 22, 2011  3:57 PM
+
+You're just repeating my point: it is too late for this standard. We could talk
+about ideas for the next standard (which might get implemented early), but right
+now our only goal should be to finish *this* standard. We still have important
+issues to resolve, and spending any significant effort on other issues right now
+is counter-productive. (I spent roughly one hour per 30 or so messages of each
+e-mail discussion, although of course this value varies wildly.)
+
+This is the same reason that we're not working on ASIS right now.
+
+This isn't going to be a long delay on such discussions; it makes perfect sense
+to start thinking of the future once we get past the NB review of the standard
+(hopefully in the June/July time-frame). Until then, however, let's keep our
+collective nose to the grindstone.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, March 22, 2011  4:29 PM
+
+> The AI in question was AI95-00300-1. I suggest looking at the minutes
+> of the Vienna meeting (June 2020), the meeting in which that AI was
+> discussed (there is not much in the AI itself; perhaps the mail on
+> this was stored in AI95-00299-1, which is related).
+
+I'd call that 20/20 foresight.  Do we really have a meeting scheduled for Vienna
+in 2020?  And have you really already finished the minutes? Wow!  ;-)
+
+Seriously, it was meeting #16, in June 2002.
+
+I looked at AI95-00300, AI95-00299, and the minutes for both.
+300 is addressing a somewhat different issue than what I had in mind.  In any
+case, it is seriously flawed in several ways.
+
+Thanks for the historical info, anyway.
+
+> Humm: since that was the only meeting at which that AI was considered
+> and that was the "heat stroke" meeting (at which many decisions proved
+> to be silly, probably from trying to work in rooms that resembled the
+> interior of a furnace - outside air temps were 34-36 C during the
+> meeting, and we met in unair-conditioned rooms), perhaps I can be
+> convinced to reconsider. But we need a solid proposal (we've never had
+> one). And in any case it is too late for this go round.
+
+I don't know if it was heat stroke, but the minutes show that ARG misunderstood
+the 300 proposal.  But never mind -- I'm not trying to revive it!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, June 25, 2011  6:11 AM
+
+GNAT "standard" storage pools: [excerpt from GNAT documentation]
+
+22.1 Some Useful Memory Pools
+
+The System.Pool_Global package offers the Unbounded_No_Reclaim_Pool storage pool. 
+Allocations use the standard system call malloc while deallocations use the standard 
+system call free. No reclamation is performed when the pool goes out of scope. For 
+performance reasons, the standard default Ada allocators/deallocators do not use any 
+explicit storage pools but if they did, they could use this storage pool without any 
+change in behavior. That is why this storage pool is used when the user manages to make 
+the default implicit allocator explicit as in this example:
+  	
+    type T1 is access Something;
+     -- no Storage pool is defined for T2
+    type T2 is access Something_Else;
+    for T2'Storage_Pool use T1'Storage_Pool;
+    -- the above is equivalent to
+    for T2'Storage_Pool use System.Pool_Global.Global_Pool_Object;
+
+The System.Pool_Local package offers the Unbounded_Reclaim_Pool storage pool. The 
+allocation strategy is similar to Pool_Local's except that the all storage allocated with 
+this pool is reclaimed when the pool object goes out of scope. This pool provides a 
+explicit mechanism similar to the implicit one provided by several Ada 83 compilers for 
+allocations performed through a local access type and whose purpose was to reclaim memory 
+when exiting the scope of a given local access. As an example, the following program does 
+not leak memory even though it does not perform explicit deallocation:
+
+with System.Pool_Local;
+procedure Pooloc1 is
+    procedure Internal is
+       type A is access Integer;
+       X : System.Pool_Local.Unbounded_Reclaim_Pool;
+       for A'Storage_Pool use X;
+       v : A;
+    begin
+       for I in  1 .. 50 loop
+          v := new Integer;
+       end loop;
+    end Internal;
+begin
+    for I in  1 .. 100 loop
+       Internal;
+    end loop;
+end Pooloc1;
+
+The System.Pool_Size package implements the Stack_Bounded_Pool used when Storage_Size is 
+specified for an access type. The whole storage for the pool is allocated at once, usually 
+on the stack at the point where the access type is elaborated. It is automatically 
+reclaimed when exiting the scope where the access type is defined. This package is not 
+intended to be used directly by the user and it is implicitly used for each such declaration:
+
+    type T1 is access Something;
+    for T1'Storage_Size use 10_000;
+
+****************************************************************

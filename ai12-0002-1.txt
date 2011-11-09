@@ -1,0 +1,812 @@
+!standard  E.2.3(11/1)                           11-11-08    AI12-0002-1/01
+!standard  E.2.3(17)
+!class binding interpretation 11-06-16
+!status work item 11-06-16
+!status received 11-03-09
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject RCI units should not allow types with user-defined stream attributes
+!summary
+
+!summary
+
+RCI units do not allow types with user-defined stream attributes.
+
+[Editor's note: This AI was originally an Ada 2005 AI, but it was not resolved
+and was deferred to after Ada 2012 is completed.]
+
+!question
+
+Consider the following unit:
+
+with Ada.Streams;
+package RCI_Str_Att is
+   pragma Remote_Call_Interface;
+   type T is private;
+   procedure P (X : T);
+private
+   type T is null record;
+   procedure R (S : access Ada.Streams.Root_Stream_Type'Class; V : out T);
+   procedure W (S : access Ada.Streams.Root_Stream_Type'Class; V : T);
+   for T'Read use R;
+   for T'Write use W;
+end RCI_Str_Att;
+
+package body RCI_Str_Att is
+   procedure R (S : access Ada.Streams.Root_Stream_Type'Class; V : out T) is
+   begin null; end R;
+   procedure W (S : access Ada.Streams.Root_Stream_Type'Class; V : T) is
+   begin null; end W;
+end RCI_Str_Att;
+
+The bodies of R and W are remote subprograms. But they need to be used in
+marshalling when calling remote procedure P. How can this work??
+
+!wording
+
+Add after E.2.3(16):
+
+Specification of a stream-oriented attribute is illegal in the specification
+of a remote call interface library unit. In addition to the places where
+Legality Rules normally apply (see 12.3), this rule
+applies also in the private part of an instance of a generic unit.
+
+!discussion
+
+The bug here is that we have a "leak" from the private part to the visible part.
+It allows using routines that are not remote from some other partition. It
+doesn't matter what form that leak is in, it shouldn't be allowed. It's worse of
+course that this leak actually makes the whole thing unimplementable (you can't
+marshal with remote stream implementations, because to call the remote stream
+operation you have to marshal the value of the type, which has to be done
+remotely, and on forever). Thus the leak should be closed simply by saying such
+leaks are illegal. [But I didn't specify the form of such a rule, darn.]
+There are already rules to prevent such access from the visible part of the
+unit, and it clearly seems intended that everything not remote in the unit
+is used only in the partition that the unit is assigned to.
+
+Thomas' insistence that instances should be replicated in all partitions
+seems to violate E.2.3(17): the "unit" shall be assigned to a single partition.
+I don't know whether E.2.3(17) should be changed to allow specification
+replication or whether Thomas' implementation is just wrong. In any case, I
+see no reason to treat instances differently than other non-remote bodies
+(it forces people to use generics when they're not otherwise needed - ugly).
+
+(He also seems concerned about dragging in the closure of normal bodies, yet
+seems unconcerned about doing the same with instance bodies. This seems
+weird at best.)
+
+The solution we adopt to the original problem surely depends on what the
+answer to this secondary question is - the secondary question seems to allow
+the "leak" and institutionalize it. And that's OK if we say that non-remote
+routines (including instances) get replicated -- but it doesn't make sense
+to treat instances and other bodies differently.
+
+See the e-mail thread for suggestions and additional problem cases.
+
+!ACATS Test
+
+** TBD.
+
+!ASIS
+
+** TBD.
+
+!appendix
+
+!topic Stream attributes in RCI units
+!reference Ada 2005 RM E.2.3(18), 13.13.2(52/2), 10.2
+!from Thomas Quinot 11-03-09
+!keywords user-specified stream attributes, RCI, support external streaming
+!discussion
+
+Consider the following unit:
+
+with Ada.Streams;
+package RCI_Str_Att is
+   pragma Remote_Call_Interface;
+   type T is private;
+   procedure P (X : T);
+private
+   type T is null record;
+   procedure R (S : access Ada.Streams.Root_Stream_Type'Class; V : out T);
+   procedure W (S : access Ada.Streams.Root_Stream_Type'Class; V : T);
+   for T'Read use R;
+   for T'Write use W;
+end RCI_Str_Att;
+
+package body RCI_Str_Att is
+   procedure R (S : access Ada.Streams.Root_Stream_Type'Class; V : out T) is
+   begin null; end R;
+   procedure W (S : access Ada.Streams.Root_Stream_Type'Class; V : T) is
+   begin null; end W;
+end RCI_Str_Att;
+
+P is a remote subprogram. Making a call to P from a partition other than then
+one on which P is assigned requires executing the stream attribute T'Write, i.e.
+executing the body of procedure W. However this body is not be included in the
+calling partition (per E.2.3(18): the point of the DSA is precisely that the
+body of a server is not included in client partitions -- only calling stubs).
+
+Informally, we can't use the stream attributes of type T from an arbitrary
+partition, because their body exists only on the partition on which package
+RCI_Str_Att is assigned.
+
+Proposed remediation: declare that T does not support external streaming.
+
+Proposed wording: at the end of 13.13.2(52/2), insert:
+
+"A type that has stream attributes that have been specified via attribute
+definition clauses does not support external streaming if the bodies of the
+specified subprograms occur within the body of a remote call interface library
+unit. [AARM note: because the body of a remote call interface library unit is
+included in only one partition]."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, March  9, 2011  9:12 PM
+
+...
+> P is a remote subprogram. Making a call to P from a partition other
+> than then one on which P is assigned requires executing the stream
+> attribute T'Write, i.e. executing the body of procedure W. However
+> this body is not be included in the calling partition (per E.2.3(18):
+> the point of the DSA is precisely that the body of a server is not
+> included in client partitions -- only calling stubs).
+
+I haven't thought about this very deeply, but I think I agree with your
+analysis. However, there are a number of things that come to mind:
+
+(1) Why hasn't this problem been noticed before? It's existed in this definition
+    since Ada 95. It's odd that the prohibition against limited types exists
+    because we don't want "remote stream attributes" (AARM E.2.3(11.a/2)), but
+    that there never has been any similar rules for non-limited types (nor for
+    any types in the private part). This worries me that I'm (and you also are)
+    missing something obvious.
+
+(2) The private part in your example doesn't really have much to do with the
+    problem. Any definition of a user-defined stream attribute (anywhere) would
+    have this problem.
+
+(3) The proposed wording in terms of where the bodies are located is bizarre.
+    This is ultimately a legality rule, and we don't want to have to think about
+    bodies (or breaking privacy, or how partitions are organized) in order to
+    define or enforce it. Besides, the problem is simply specifying user-defined
+    stream attributes in an RCI package; why bring unrelated junk into it.
+
+(4) The proposed rule breaks privacy (since you have to look into the private
+    part in order to determine where the bodies reside). That's a non-starter
+    for a definition that will ultimately be used in various Legality Rules.
+    Even if Mr. Private is retired. :-)
+
+(5) One rule that wouldn't have this problem would be to simply disallow
+    specifying stream attributes for a type defined in an RCI package. Remote
+    stream attributes are bizarre in any case, and almost never are what the
+    programmer intended. Why let them write something that they can't use the
+    way that they want?
+
+(6) But it worries me to effectively disallow user-defined stream attributes. I
+    suppose it is OK if they can all be effectively moved to a Remote_Types
+    package; if we believe that is true, we should simply ban problematic types
+    in the first place (that surely was the intent of rule preventing the
+    declaration of limited types). Otherwise, we ought to consider excepting
+    user-defined stream subprograms from the "remote calls" rules.
+
+****************************************************************
+
+From: Thomas Quinot
+Sent: Thursday, March 10, 2011  4:37 AM
+
+> (1) Why hasn't this problem been noticed before? It's existed in this
+> definition since Ada 95. It's odd that the prohibition against limited
+> types exists because we don't want "remote stream attributes" (AARM
+> E.2.3(11.a/2)), but that there never has been any similar rules for
+> non-limited types (nor for any types in the private part). This
+> worries me that I'm (and you also are) missing something obvious.
+
+I guess everybody had in mind to put data types in Remote_Types units.
+
+> (2) The private part in your example doesn't really have much to do
+> with the problem. Any definition of a user-defined stream attribute
+> (anywhere) would have this problem.
+
+But to exhibit the problem you need the type to be in the visible part (so that
+it can be used for the type of a formal of a remote subprogram), and the
+subprograms for the stream attributes can't be declared in the visible part of
+an RCI (E.2.3(14/2)).
+
+> (3) The proposed wording in terms of where the bodies are located is
+> bizarre. This is ultimately a legality rule, and we don't want to have
+> to think about bodies (or breaking privacy, or how partitions are
+> organized) in order to define or enforce it. Besides, the problem is
+> simply specifying user-defined stream attributes in an RCI package;
+> why bring unrelated junk into it.
+
+Because there are cases where you want to allow user-specified stream attributes
+in an RCI library unit: namely, when such stream attributes are in an instance.
+Consider:
+
+generic
+package RT_Gen_1 is
+   pragma Remote_Types;
+   type T1 is ...;
+   procedure R (...);
+   procedure W (...)
+   for T1'Read use R;
+   for T1'Write use W;
+end RT_Gen_1;
+
+generic
+pacakge RT_Gen_2 is
+   pragma Remote_Types;
+   type T2 is private;
+private
+   type T2 is ...
+   procedure R (...);
+   procedure W (...);
+   for T2'Read use R;
+   for T2'Read use W;
+end RT_Gen_2;
+
+We want users to be able to instantiate RT_Gen_1 in the private part of an RCI
+(this is the exact customer situation which led to this discussion). I think we
+should also make it legal to instantiate RT_Gen_2 in the visible part of an RCI.
+
+> (4) The proposed rule breaks privacy (since you have to look into the
+> private part in order to determine where the bodies reside). That's a
+> non-starter for a definition that will ultimately be used in various
+> Legality Rules. Even if Mr. Private is retired. :-)
+
+Fair enough, but I'm not sure how to find an alternate wording that allows the
+instantiations discussed above.
+
+Let's give it a try.
+
+A type that has stream attributes that have been specified via an attribute
+definition clause does not support external streaming if the enclosing library
+unit is a remote call interface and the attribute definition clause is not in
+the private part of some enclosing scope.
+
+> (5) One rule that wouldn't have this problem would be to simply
+> disallow specifying stream attributes for a type defined in an RCI
+> package. Remote stream attributes are bizarre in any case, and almost
+> never are what the programmer intended. Why let them write something
+> that they can't use the way that they want?
+
+See above, we need to cater for the case of a Remote_Types generic instantiated
+in an RCI unit.
+
+> (6) But it worries me to effectively disallow user-defined stream
+> attributes. I suppose it is OK if they can all be effectively moved to
+> a Remote_Types package; if we believe that is true, we should simply
+> ban problematic types in the first place (that surely was the intent
+> of rule preventing the declaration of limited types). Otherwise, we
+> ought to consider excepting user-defined stream subprograms from the "remote calls"
+> rules.
+
+I'm not in favor of such an exception because that would mean you need to drag
+the closure of the RCI body in client partitions, which pretty much defeats the
+purpose of the DSA. Example:
+
+package P is
+   pragma Remote_Call_Interface;
+   type T is private;
+   procedure P (X : T);
+private
+   type T is ...;
+   procedure R (...);
+   procedure W (...);
+   for T'Read use R;
+   for T'Write use W;
+end P;
+
+with Dep;
+package body P is
+   Count : Integer;
+   procedure P (X : T) is
+   begin
+      Count := Count + 1;
+      ...
+   end P;
+
+   procedure R (...) is
+   begin
+      Count := Count + 1;
+      ...
+   end R;
+
+   procedure W (...) is ...;
+end P;
+
+You really want to have only one copy of P's body in the complete distributed
+application, it must be located on one partition, so you really can't have (nor
+want to) the code for R or W on other partitions, nor pacakge Dep, nor a copy of
+global variable Internal_Var...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 10, 2011  11:43 AM
+
+...
+> > (2) The private part in your example doesn't really have much to do
+> > with the problem. Any definition of a user-defined stream attribute
+> > (anywhere) would have this problem.
+>
+> But to exhibit the problem you need the type to be in the visible part
+> (so that it can be used for the type of a formal of a remote
+> subprogram), and the subprograms for the stream attributes can't be
+> declared in the visible part of an RCI (E.2.3(14/2)).
+
+Ah, I told you I didn't think carefully. Missed the effect of that rule
+completely. Since you can't visibly define user-defined stream attributes in any
+case, there doesn't seem to be much point in allowing them in the private part
+(but see below).
+
+> > (3) The proposed wording in terms of where the bodies are located is
+> > bizarre. This is ultimately a legality rule, and we don't want to
+> > have to think about bodies (or breaking privacy, or how partitions
+> > are
+> > organized) in order to define or enforce it. Besides, the problem is
+> > simply specifying user-defined stream attributes in an RCI package;
+> > why bring unrelated junk into it.
+>
+> Because there are cases where you want to allow user-specified stream
+> attributes in an RCI library unit:
+> namely, when such stream attributes are in an instance. Consider:
+>
+> generic
+> package RT_Gen_1 is
+>    pragma Remote_Types;
+>    type T1 is ...;
+>    procedure R (...);
+>    procedure W (...)
+>    for T1'Read use R;
+>    for T1'Write use W;
+> end RT_Gen_1;
+>
+> generic
+> pacakge RT_Gen_2 is
+>    pragma Remote_Types;
+>    type T2 is private;
+> private
+>    type T2 is ...
+>    procedure R (...);
+>    procedure W (...);
+>    for T2'Read use R;
+>    for T2'Read use W;
+> end RT_Gen_2;
+>
+> We want users to be able to instantiate RT_Gen_1 in the private part
+> of an RCI (this is the exact customer situation which led to this
+> discussion). I think we should also make it legal to instantiate
+> RT_Gen_2 in the visible part of an RCI.
+>
+> > (4) The proposed rule breaks privacy (since you have to look into
+> > the private part in order to determine where the bodies reside).
+> > That's a non-starter for a definition that will ultimately be used
+> > in various Legality Rules. Even if Mr. Private is retired. :-)
+>
+> Fair enough, but I'm not sure how to find an alternate wording that
+> allows the instantiations discussed above.
+
+That's simple. :-) Just ban user-defined stream attributes (anywhere) on types
+declared in the visible part of an RCI unit. (Those are the only ones that could
+be remote.) Something like:
+
+* There shall not be a specification of any stream attribute for any type
+  declared in its visible part;
+
+> Let's give it a try.
+>
+> A type that has stream attributes that have been specified via an
+> attribute definition clause does not support external streaming if the
+> enclosing library unit is a remote call interface and the attribute
+> definition clause is not in the private part of some enclosing scope.
+
+This still breaks privacy - you have to look into the private part to see the
+stream attribute. I think any rule involving external streaming would have that
+problem. And it doesn't seem necessary: given that you can't *visibly* use
+user-defined stream attributes (for good reason), why should you be able to do
+the same thing when hidden??
+
+The rule I suggested doesn't have either of those problems. I believe it also
+allows your instantiations in the private part, because those types are not
+declared in the visible part. [You don't want to allow RT_Gen_2 in the visible
+part for the same reason that you don't want to allow the similar type to be
+declared -- unless you are planning to implement generic sharing for it. ;-)]
+
+...
+> > (6) But it worries me to effectively disallow user-defined stream
+> > attributes. I suppose it is OK if they can all be effectively moved
+> > to a Remote_Types package; if we believe that is true, we should
+> > simply ban problematic types in the first place (that surely was the
+> > intent of rule preventing the declaration of limited types).
+> > Otherwise, we ought to consider excepting user-defined stream
+> > subprograms from the "remote calls"
+> > rules.
+>
+> I'm not in favor of such an exception because that would mean you need
+> to drag the closure of the RCI body in client partitions, which pretty
+> much defeats the purpose of the DSA. Example:
+
+My thinking was that most stream attributes will depend on little else. But it
+certainly is true that Ada compilers today figure out dependencies on a
+unit-by-unit basis, and the exception would require doing that on a
+subprogram-by-subprogram basis. I agree that is a non-starter, so forget this
+idea. I think banning the specification of stream attributes for visible types
+works well enough anyway - it appears to have been intentional that user-defined
+stream attributes are not allowed in RCI units, but the rules missed a case.
+
+****************************************************************
+
+From: Thomas Quinot
+Sent: Friday, March 11, 2011  11:19 AM
+
+> That's simple. :-) Just ban user-defined stream attributes (anywhere)
+> on types declared in the visible part of an RCI unit. (Those are the
+> only ones that could be remote.)
+
+> * There shall not be a specification of any stream attribute for any
+> type declared in its visible part;
+
+I don't think this works.
+
+package R is
+   pragma R_C_I;
+   type T is private;
+private
+   type PT is ...;
+   procedure W (...);
+   for PT'Write use W;
+
+   type T is record
+      X : PT;
+   end record;
+end R;
+
+> > A type that has stream attributes that have been specified via an
+> > attribute definition clause does not support external streaming if
+> > the enclosing library unit is a remote call interface and the
+> > attribute definition clause is not in the private part of some
+> > enclosing scope.
+>
+> This still breaks privacy - you have to look into the private part to
+> see the stream attribute.
+
+Right, but at least you don't look in bodies anymore. Plus in any case
+supporting external streaming already breaks privacy anyway, because it depends
+(among other things) on whether or not the full view contains an access value.
+
+> I think any rule involving external streaming would have that problem.
+> And it doesn't seem necessary: given that you can't
+> *visibly* use user-defined stream attributes (for good reason), why
+> should you be able to do the same thing when hidden??
+
+Because the reason why you can't visibly use user defined stream attributes is
+because this would involve a remote call, whereas the hidden user defined stream
+attributes that come from an instance do not involve a remote call.
+
+> The rule I suggested doesn't have either of those problems. I believe
+> it also allows your instantiations in the private part, because those
+> types are not declared in the visible part. [You don't want to allow
+> RT_Gen_2 in the visible part for the same reason that you don't want
+> to allow the similar type to be declared -- unless you are planning to
+> implement generic sharing for it. ;-)]
+
+I'm not following. Why couldn't you instantiate RT_Gen_2 in a visible part?
+
+> I think banning the specification of stream attributes for visible
+> types works well enough anyway
+
+As shown above, this is not sufficient.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 11, 2011  10:46 PM
+
+...
+> > > A type that has stream attributes that have been specified via an
+> > > attribute definition clause does not support external streaming if
+> > > the enclosing library unit is a remote call interface and the
+> > > attribute definition clause is not in the private part of some
+> > > enclosing scope.
+> >
+> > This still breaks privacy - you have to look into the private part
+> > to see the stream attribute.
+>
+> Right, but at least you don't look in bodies anymore. Plus in any case
+> supporting external streaming already breaks privacy anyway, because
+> it depends (among other things) on whether or not the full view
+> contains an access value.
+
+Ohhh, you are right, but that is a major bug -- it is simply not acceptable for
+legality rules to depend on the contents of the private part. The rule should
+involve visibility in some way.
+
+I see that for Pure packages there is a rule that all partial views support
+external streaming. (10.2.1(17)). The type is illegal if that is not true.
+Because Pure packages can only depend on other Pure packages, that cannot break
+privacy.
+
+But there still needs to be a rule to assume the worst for other partial views;
+either that or we need to extend the Pure rule to other private types (but that
+seems too incompatible).
+
+Perhaps that was not done before as no one other than AdaCore cares about Annex
+E; so that fact that it is unimplementable garbage for Rational Apex was
+considered irrelevant. [That was not the case for other Legality Rules!!] Maybe
+the best plan is to just give up on this Annex completely and delete it from the
+Standard. (No other implementer has any plans to implement it, so far as I am
+aware.)
+
+In any case, we cannot change the definition of External Streaming in some way
+that would break privacy in the Legality Rules defined in the core of the
+standard (that is, in programs that don't use Annex E). That is mainly
+10.2.1(17).
+
+> > I think any rule involving external streaming would have that problem.
+> > And it doesn't seem necessary: given that you can't
+> > *visibly* use user-defined stream attributes (for good reason), why
+> > should you be able to do the same thing when hidden??
+>
+> Because the reason why you can't visibly use user defined stream
+> attributes is because this would involve a remote call, whereas the
+> hidden user defined stream attributes that come from an instance do
+> not involve a remote call.
+
+I'm afraid I don't follow this at all. The instance is still within that
+package, right? Why would you think that the routines in it are *not* remote
+routines? The rules about the unit being assigned only to a single partition
+still apply -- those rules say *unit*, not *body*!!
+
+Keep in mind that you can only get bodies into specifications with expression
+functions. I think you'll find that you have equally interesting issues with
+them if you don't treat them as remote -- especially if they cannot be inlined.
+
+Now, it is true that the definition of routines as "remote" only applies to
+things in the visible part, but I believe that is because it is thought that
+those routines in the private part cannot be called from some other partition.
+That's clearly not true for stream attributes of the visible part.
+
+> > The rule I suggested doesn't have either of those problems. I
+> > believe it also allows your instantiations in the private part,
+> > because those types are not declared in the visible part. [You don't
+> > want to allow
+> > RT_Gen_2 in the visible part for the same reason that you don't want
+> > to allow the similar type to be declared -- unless you are planning
+> > to implement generic sharing for it. ;-)]
+>
+> I'm not following. Why couldn't you instantiate RT_Gen_2 in a visible
+> part?
+
+Because it has a visible type that has hidden user-defined stream attributes.
+Legality rules are rechecked in instances, you know.
+
+> > I think banning the specification of stream attributes for visible
+> > types works well enough anyway
+>
+> As shown above, this is not sufficient.
+
+OK, but then I'm out of ideas. Breaking privacy for Legality Rules is not
+acceptable, at least not within the Standard. (What you do with
+implementation-defined stuff is your business.) It would be better to just make
+this all implementation-defined, since it cannot be portable in any case -
+E.5(27.1/2) completely eliminates any value to standardizing this Annex IMHO.
+
+****************************************************************
+
+From: Thomas Quinot
+Sent: Tuesday, March 22, 2011  6:04 AM
+
+> In any case, we cannot change the definition of External Streaming in
+> some way that would break privacy in the Legality Rules defined in the
+> core of the standard (that is, in programs that don't use Annex E).
+> That is mainly 10.2.1(17).
+
+Understood.
+
+> I'm afraid I don't follow this at all. The instance is still within
+> that package, right? Why would you think that the routines in it are
+> *not* remote routines?
+
+At least in the case where the instantiation is made in the private part of the
+RCI, the subprograms are not remote because they are not declared in the visible
+part of the RCI.
+
+> The rules about the unit being assigned only to a single partition
+> still apply -- those rules say *unit*, not *body*!!
+
+The unit is assigned on only one partition, but its spec is needed in the sense
+of 10.1.2 on all client partitions; the body, on the other hand, is needed only
+on the partition where the RCI is assigned.
+
+In the GNAT implementation at least, the instance body occurs immediately after
+the instance spec (i.e. within the RCI spec), not within the RCI body, so that
+the code for the stream attributes is present even if the RCI body isn't.
+
+> Keep in mind that you can only get bodies into specifications with
+> expression functions.
+
+Or with instances, as outline above.
+
+> > > The rule I suggested doesn't have either of those problems. I
+> > > believe it also allows your instantiations in the private part,
+> > > because those types are not declared in the visible part. [You
+> > > don't want to allow
+> > > RT_Gen_2 in the visible part for the same reason that you don't
+> > > want to allow the similar type to be declared -- unless you are
+> > > planning to implement generic sharing for it. ;-)]
+> >
+> > I'm not following. Why couldn't you instantiate RT_Gen_2 in a
+> > visible part?
+>
+> Because it has a visible type that has hidden user-defined stream
+> attributes. Legality rules are rechecked in instances, you know.
+
+Isn't 12.3(11) exempting instances' private parts from legality checks?
+
+> OK, but then I'm out of ideas. Breaking privacy for Legality Rules is
+> not acceptable, at least not within the Standard. (What you do with
+> implementation-defined stuff is your business.) It would be better to
+> just make this all implementation-defined, since it cannot be portable
+> in any case - E.5(27.1/2) completely eliminates any value to
+> standardizing this Annex IMHO.
+
+I beg to disagree. E.5(27.1/2) means that the PCS and compiler can be coupled.
+This is not any more restrictive than saying that the compiler and the runtime
+library can be coupled -- the fact that compiler A can't be used with the
+runtime from compiler B doesn't mean that the standard is useless! This clause
+just acknowledges that the PCS is part of the language runtime library, and must
+be consistent with a complete language environment.
+
+Now back to the issue at hand. I still think a general ban on stream attribute
+definition clauses in RCIs is unnecessarily broad, because there is value in
+allowing them when they come from generic instances. On the other hand, my
+previous attempts at narrowing the ban involved violations of privacy, which I
+understand is not an option.
+
+So maybe we can tackle the issue differently, by having a specific exception for
+instances, by deciding that:
+  * no attribute definition clause for a stream-oriented attribute
+    may occur anywhere in an RCI package declaration;
+  * this rule is NOT enforced in instances occurring in the private
+    part of RCI declarations (such an exception being permitted
+    by 12.3(11)).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March 22, 2011  4:22 PM
+
+Just a quickie answer, since I really need to concentrate on things that involve
+Ada 2012 (this came too late to be included).
+
+...
+> > I'm afraid I don't follow this at all. The instance is still within
+> > that package, right? Why would you think that the routines in it are
+> > *not* remote routines?
+>
+> At least in the case where the instantiation is made in the private
+> part of the RCI, the subprograms are not remote because they are not
+> declared in the visible part of the RCI.
+
+I was mainly talking about the visible part example that you gave. You seemed to
+indicate that it didn't matter where the instantiation was given, and that makes
+no sense to me. But also see below.
+
+> > The rules about the unit being assigned only to a single partition
+> > still apply -- those rules say *unit*, not *body*!!
+>
+> The unit is assigned on only one partition, but its spec is needed in
+> the sense of 10.1.2 on all client partitions; the body, on the other
+> hand, is needed only on the partition where the RCI is assigned.
+
+"needed" has nothing to do with this, so far as I can see. The language says
+that the "unit" ought to be on a single partition. That is *all* of the code,
+whether it is in the spec or body. The rules prevent any significant code from
+being visible unless it is remote. Stuff in the private part can only be
+referenced from other units in that same partition (given the other rules). At
+least that is the intent as I see it. (You still need to be able to reference
+the declarations from other units, but any code is remote.)
+
+The bug here is that we have a "leak" from the private part to the visible part.
+It allows using routines that are not remote from some other partition. It
+doesn't matter what form that leak is in, it shouldn't be allowed. It's worse of
+course that this leak actually makes the whole thing unimplementable (you can't
+marshal with remote stream implementations, because to call the remote stream
+operation you have to marshal the value of the type, which has to be done
+remotely, and on forever). Thus the leak should be closed simply by saying such
+leaks are illegal.
+
+> In the GNAT implementation at least, the instance body occurs
+> immediately after the instance spec (i.e. within the RCI spec), not
+> within the RCI body, so that the code for the stream attributes is
+> present even if the RCI body isn't.
+
+It sounds to me like you are replicating the specification's code in each
+partition. That's definitely *not* what the wording in the standard says is
+supposed to happen. ("unit" does not let you treat the spec and body
+differently!) If you think this is actually important, you'll need to make a
+case to change the standard. (And if you are *not* replicating the code, I
+cannot quite imagine how this is supposed to work.)
+
+> > Keep in mind that you can only get bodies into specifications with
+> > expression functions.
+>
+> Or with instances, as outline above.
+
+Right. But in both cases, it's still wrong to replicate (in the absence of
+inlining, of course).
+
+> > > > The rule I suggested doesn't have either of those problems. I
+> > > > believe it also allows your instantiations in the private part,
+> > > > because those types are not declared in the visible part. [You
+> > > > don't want to allow
+> > > > RT_Gen_2 in the visible part for the same reason that you don't
+> > > > want to allow the similar type to be declared -- unless you are
+> > > > planning to implement generic sharing for it. ;-)]
+> > >
+> > > I'm not following. Why couldn't you instantiate RT_Gen_2 in a
+> > > visible part?
+> >
+> > Because it has a visible type that has hidden user-defined stream
+> > attributes. Legality rules are rechecked in instances, you know.
+>
+> Isn't 12.3(11) exempting instances' private parts from legality
+> checks?
+
+Yes, but virtually every legality rule has the boilerplate about also applying
+in the private part. And almost all of the rules that don't have that
+boilerplate probably ought to have it. :-)
+
+...
+> So maybe we can tackle the issue differently, by having a specific
+> exception for instances, by deciding that:
+>   * no attribute definition clause for a stream-oriented attribute
+>     may occur anywhere in an RCI package declaration;
+>   * this rule is NOT enforced in instances occurring in the private
+>     part of RCI declarations (such an exception being permitted
+>     by 12.3(11)).
+
+I think your handling of RCI instances is just plain wrong, and even if you
+leaning on inlining to provide replication, we don't want the semantics of the
+language to change just because inlining is used. We should not be allowing
+instances to provide loopholes to the rules; if these loopholes are truly
+needed, we need to figure out a way to extend them to all types. (No one should
+be forced into using a generic just to get a replicated body into an RCI unit.)
+
+So far as I can tell, the example you gave should have been a remote types unit
+to start with, and trying to shoehorn that into an RCI unit is not likely to
+work.
+
+Anyway, we (the whole ARG) need to discuss this properly somewhere down the
+road, once Ada 2012 is finished.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, June 26, 2011  4:22 AM
+
+New wording for RCI stream attributes:
+
+!summary
+
+RCI units do not allow types with user-defined stream attributes.
+
+!wording
+
+Add after E.2.3(16):
+
+Specification of a streaming attribute is illegal in the specification
+of a remote call interface library unit.
+
+Standard boilerplate:
+In addition to the places where Legality Rules normally apply (see 12.3), this rule
+applies also in the private part of an instance of a generic unit.
+
+****************************************************************
+
