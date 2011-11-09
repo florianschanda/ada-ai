@@ -1,0 +1,207 @@
+!standard 3.10.2(12.1/2)                                        11-11-08  AI12-0007-1/01
+!class binding interpretation 11-11-08
+!status work item 11-11-08
+!status received 11-09-26
+!priority Low
+!difficulty Hard
+!qualifier Omission
+!subject Accessibility of access discriminants of a subtype
+
+!summary
+
+** TBD.
+
+!question
+
+Consider:
+
+   procedure Condit_Expr_Accessibility is
+      Flag : Boolean := True;
+      Test_Failed : exception;
+ 
+      type Drec (Int_Ref : access Integer) is null record;
+ 
+      type Global_Ref is access Drec;
+      Global_Ptr : Global_Ref;
+ 
+      Global_Var : aliased Integer;
+ 
+      procedure Nested is
+         type Local_Ref is access Drec;
+         Local_Ptr : Local_Ref;
+ 
+         Local_Var : aliased Integer;
+ 
+         function Checker return Drec is
+            -- Flag is always True at this point, but the
+            -- compiler doesn't know that.
+ 
+            subtype S is Drec
+               (Int_Ref => (if Flag then Local_Var'Access
+                                    else Global_Var'Access));
+         begin
+            Flag := False;
+ 
+            return X : S;
+         end Checker;
+      begin
+         Local_Ptr := new Drec'(Checker);
+         --
+         -- for the above call, it is ok for
+         -- Checker to return a result which
+         --- references Local_Var
+ 
+         Flag := True;
+         begin
+            Global_Ptr := new Drec'(Checker);
+            --
+            -- for the above Call, returning
+            -- a result which references Local_Var
+            -- should fail an accessibility check
+ 
+            raise Test_Failed;
+         exception
+            when Program_Error =>
+               null;
+         end;
+      end Nested;
+   begin
+      Nested;
+   end Condit_Expr_Accessibility;
+ 
+In order to make the return accessibility check, we need to know the accessibility
+of S.Int_Ref. 3.10.2(12.1/2) does not apply (because this is not in an allocator
+or return statement), so we use 3.10.2(12.5/3). But that says that it is the
+"accessibility of the enclosing object" -- and there is no enclosing object.
+
+Huh?? (Yes.)
+
+!recommendation
+
+** TBD.
+
+!wording
+
+** TBD.
+
+!discussion
+
+Musing by the editor: I think that it was intended that 3.10.2(12.1/2) apply
+to all subtypes, no matter where they appear. It doesn't make sense to restrict
+it to a limited set of contexts. It probably did apply to all cases in some of
+the many drafts of this wording, but at some point, the qualifiers were added
+to the lead-in paragraph (3.10.2(12/2)) and it no longer applied to simple cases
+like this.
+
+How to fix this escapes me at the moment, however. Adding a third level of nesting to this
+wording would work, but it also would ensure that no one would ever understand it. :-)
+
+!ACATS Test
+
+An ACATS C-Test should be created (but this is likely to be low priority).
+
+!appendix
+
+From: Steve Baird
+Sent: Monday, September 26, 2011  5:24 PM
+
+The following issue came up while reviewing interactions
+between conditional expressions and accessibility, but it seems 
+that conditional expressions are not an essential part of the 
+problem.
+ 
+Consider:
+ 
+   procedure Condit_Expr_Accessibility is
+      Flag : Boolean := True;
+      Test_Failed : exception;
+ 
+      type Drec (Int_Ref : access Integer) is null record;
+ 
+      type Global_Ref is access Drec;
+      Global_Ptr : Global_Ref;
+ 
+      Global_Var : aliased Integer;
+ 
+      procedure Nested is
+         type Local_Ref is access Drec;
+         Local_Ptr : Local_Ref;
+ 
+         Local_Var : aliased Integer;
+ 
+         function Checker return Drec is
+            -- Flag is always True at this point, but the
+            -- compiler doesn't know that.
+ 
+            subtype S is Drec
+               (Int_Ref => (if Flag then Local_Var'Access
+                                    else Global_Var'Access));
+         begin
+            Flag := False;
+ 
+            return X : S;
+         end Checker;
+      begin
+         Local_Ptr := new Drec'(Checker);
+         --
+         -- for the above call, it is ok for
+         -- Checker to return a result which
+         --- references Local_Var
+ 
+         Flag := True;
+         begin
+            Global_Ptr := new Drec'(Checker);
+            --
+            -- for the above Call, returning
+            -- a result which references Local_Var
+            -- should fail an accessibility check
+ 
+            raise Test_Failed;
+         exception
+            when Program_Error =>
+               null;
+         end;
+      end Nested;
+   begin
+      Nested;
+   end Condit_Expr_Accessibility;
+ 
+On returning from Checker, we need to perform a check
+that the discriminant of the result designates something
+which is sufficiently long-lived:
+ 
+   RM 6.5:
+       A check is made that the accessibility level of the anonymous
+       access type of each access discriminant, as determined by the
+       expression or the return_subtype_indication of the return
+       statement, is not deeper than the level of the master of
+       the call (see 3.10.2)
+ 
+So in this case, what is the "accessibility level of the anonymous 
+access type of each discriminant". What is the accessibility level 
+of, speaking loosely, the type of S.Int_Ref?
+
+I don't believe that 3.10.2 handles this case correctly, Strictly 
+speaking, I think it falls into the "when others" handler:
+ 
+    The accessibility level of the anonymous access type of an access
+    discriminant in any other context is that of the enclosing object.
+ 
+This is obviously absurd (there is no enclosing object - S is a 
+subtype).
+
+One solution would be to use the rule that is currently used only 
+in the special case where the subtype_indication in question is the 
+subtype_indication for an extended return statement or for an 
+allocator:
+ 
+      If the value of the access discriminant is determined by a
+      discriminant_association in a subtype_indication, the
+      accessibility level of the object or subprogram designated
+      by the associated value  (or library level if the value is null)
+ 
+It seems clear that this rule was very explicitly intended only for 
+the special cases of allocators and return statements.
+Was this an oversight?
+
+****************************************************************
