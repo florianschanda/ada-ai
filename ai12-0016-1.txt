@@ -1,0 +1,995 @@
+!standard 3.10.2(22)                             11-12-30    AI12-0016-1/00
+!class binding interpretation 11-12-30
+!status work item 11-11-13
+!status received 11-07-28
+!priority Medium
+!difficulty Hard
+!subject Implementation model of dynamic accessibility checking
+
+!summary
+
+**TBD.
+
+!question
+
+The AARM provides a suggested implementation model for dynamic accessibility
+checking in the Implmentation Note beginning with AARM 3.10.2(22.u). However,
+this model alone is not enough to correctly implement Ada 2005, and Ada 2012
+makes this even less true.
+
+Is the intent that the "small integer" model of dynamic accessibility is
+no longer enough? (Yes.) If so, the AARM notes should be updated to provide
+a realistic model.
+
+!recommendation
+
+** TBD.
+
+!wording
+
+** TBD.
+
+!discussion
+
+** TBD.
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Steve Baird
+Sent: Thursday, July 28, 2011  12:25 PM
+
+The AARM provides a suggested implementation model for dynamic accessibility
+checking in the Implmentation Note beginning with AARM 3.10.2(22.u). It appears
+that Ada05 introduced some constructs which require modifying this
+implementation model. Further modifications appear to be needed in order to
+implement Ada2012.
+
+At the very least, it appears that the AARM's description of the intended
+implementation model needs to be updated; the ARG may decide that other actions
+are needed if it is determined that the language as currently defined is too
+difficult/expensive to implement.
+
+First, a review of the currently suggested implementation model, unchanged since
+Ada95.
+
+===========
+Begin recap
+===========
+
+Terminology:
+   For purposes of this discussion, I'll use the term "scope" or
+   "dynamic scope" to indicate a particular elaboration of a
+   lifetime-bounding constuct such as a subprogram body or a
+   block statement. In this discussion (which is not about
+   static semantics), a package does not introduce a new scope.
+
+   One dynamic scope is "enclosed" or "statically enclosed" by another
+   if locals of the enclsoing scope are directly accessible (via
+   uplevel referencing) from within the inner scope. To emphasize,
+   this is not a relationship between static entities such as
+   subprogram bodies. If a subprogram is statically declared within
+   another, there exists (at runtime) exactly one invocation of the
+   outsr subprogram which "statically encloses" a given invocation of
+   the inner subprogram.
+
+   "Library level" is also considered to be a scope. The
+   library-level scope statically encloses all other scopes.
+
+Associated with a parameter of an anonymous access type is a Natural-valued
+implicitly-generated implementation-level parameter.
+
+If the given callable construct is nested within N enclosing dynamic scopes (for
+example, N would be zero for a subprogram declared at library level), this
+parameter (call it P) is intepreted by the callee as follows:
+
+     0 ..N - the accessibility level of the designated object is that of
+       the Pth statically enclosing scope (zero indicates library-level).
+
+     N+1 .. Integer'Last -
+       None of the above. The accessibility level of the designated
+       object corresponds to some scope which does not statically
+       enclose the scope of the callee. The accessibility level of
+       the designated object is treated in this case as if it
+       matched that of the locals of the callee.
+
+This approach relies on two assumptions:
+    - a caller is able to easily pass in these values; and
+    - these values provide anough information for the callee to
+      easily perform any required dynamic accessibility checks.
+
+We shall see (below) that changes introduced in Ada05 violate the first
+assumption and changes introduced in Ada2012 violate the second.
+
+Values greater than N+1 are allowed and treated as being equivalent in every way
+to a value of N+1. This is needed in order to implement calls through an access
+to subprogram value where the called subprogram is declared in a less nested
+scope than the access-to-subprogram type, as in
+
+     procedure Global (X : access Integer) is ... end P1;
+
+     procedure Foo is
+         procedure Bar is
+             Local_Var : aliased Integer;
+
+             type Local_Ref is access procedure (X : access Integer);
+             Ptr : Ref := Global'Access;
+             ...
+         begin
+             Ptr.all (X => Local_Var'Access);
+
+Because Ptr might designate a subprogram declared inside of Foo, a level of 2
+must be passed in even though procedure Global will treat all values greater
+than 0 identically.
+
+Note that care must be taken in implementing the rule that a value greater than
+N+1 must be treated tha same as N+1 when calling a nested subprogram, as in
+
+      procedure Global (X1 : access Integer) is
+          type Ref is access all Integer;
+          Ptr : Ref;
+
+          procedure Local (X2 : access Integer) is
+          begin
+              Ptr := Ref (X2); -- should pass runtime check
+          end Local;
+      begin
+          Local (X2 => X1);
+
+If Global is passed the value 2 and simply passes it along to Local without
+modification, the accessibilty check associated with the type conversion inside
+Local may incorrectly raise Program_Error.
+
+One way (albeit perhaps not the most efficient way) to handle this is for a
+callee to "normalize" any access levels that it is passed by "min"-ing them with
+the (statically known) accessibility level of the callee's locals. In the above
+example, this would cause Global to pass Local a value of 1 instead of 2 and all
+is well. Wrappers for access-to-subprogram callees would be another approach
+(although this seems like it would be overkill in most situations).
+Normalization of the actual parameter at the point of a call which needs it
+might be a practical solution.
+
+=========
+End recap
+=========
+
+Ada05 introduced nested extensions (AI95-00344) and anonymous access to
+subprogram types (AI95-00254; thanks to Tucker for pointing out this aspect of
+the problem).
+
+Either of these introduces the possibility of a call where there is inadequate
+statically-known information about the enclosing scope of the callee. In Ada95,
+the scope of the callee was always known (even for a dispatching call) except in
+the case of a call through an access to subprogram value. In that case, the
+scope of the access-to-subprogram type declaration could be used instead and all
+was well.
+
+Consider the case of an Ada05 dispatching call or call through a value of an
+anonymous access-to-subprogram type, where the callee takes a parameter of an
+anonymous access type, as in:
+
+     procedure Outer is
+         X : aliased Integer;
+
+         procedure Inner
+           (Ref : access procedure (Xx : aliased Integer)) is
+         begin
+            Ref.all (Xx => X'Access);
+
+The crux of the problem is that the caller knows what scope X is declared in,
+but doesn't know which Integer value would represent that scope to the callee.
+
+If the callee is declared somewhere within the same invocation of Foo which
+statically encloses the invocation of Bar, then the value 1 should be passed in.
+Otherwise, the value Integer'Last would be a good choice.
+
+For the sake of specificity, consider the following example:
+
+   procedure Ada05_Example is
+
+     package Root_Pkg is
+         type Root is abstract tagged null record;
+         procedure Prim_Op (Xxx : Root;
+                            Yyy : access Integer) is abstract;
+     end Root_Pkg;
+
+     procedure Proc (Root_Ref : access Root_Pkg.Root'Class) Is
+        type Int_Ref is access all Integer;
+        Int_Ptr : Int_Ref;
+
+        Int_Var : aliased Integer;
+
+        package Ext_Pkg is
+           type Ext is new Root_Pkg.Root with null record;
+           procedure Prim_Op (Xxx : Ext; Yyy : access Integer);
+        end Ext_Pkg;
+
+        package body Ext_Pkg is
+           procedure Prim_Op (Xxx : Ext; Yyy : access Integer) is
+           begin
+               Int_Ptr := Int_Ref (Yyy);
+           end Prim_Op;
+        end Ext_Pkg;
+
+        Ext_Var : aliased Ext_Pkg.Ext;
+
+        Refs : constant array (Boolean) of access Root_Pkg.Root'Class
+          := (Ext_Var'Access, Root_Ref);
+
+     begin
+        if Root_Ref = null then
+            Proc (Ext_Var'Access);
+
+            -- If Int_Ptr is not null at this point,
+            -- then it is a dangling reference to an
+            -- elaboration of Int_Var which no longer exists
+            -- as a result of
+
+        else
+            for Exception_Expected in Boolean loop
+                declare
+                    Test_Failed_1, Test_Failed_2 : exception;
+                begin
+                    Root_Pkg.Prim_Op (Refs (Exception_Expected).all,
+                                      Int_Var'Access);
+                    if Exception_Expected thepn
+                        raise Test_Failed_1;
+                    end if;
+                exception
+                    when Program_Error =>
+                        if not Exception_Expected then
+                            raise Test_Failed_2;
+                        end if;
+                end;
+            end loop;
+        end if;
+     end Proc;
+
+   begin
+     Proc (null);
+   end Ada05_Example;
+
+While analyzing this example, Tucker wrote (in private
+communication) the following description of its execution:
+
+   The basic point is that there are three levels here, the level of
+   Root_Pkg, the level of the outer call on Proc,
+   and the level of the recursive call on Proc.
+   The recursive call is passed an Ext_Var object from
+   the outer call.  Inside the recursive call,
+   it calls the Prim_Op operation on this outer
+   Ext_Var object, passing it a local Int_Var'Access.
+   That Prim_Op operation stores Int_Var'Access into
+   its (outer) Int_Ptr and returns.  The conversion
+   to Int_Ref is supposed to catch this.  But at
+   the point of call, it thinks it is calling a
+   Root_Pkg-level operation, when in fact it is
+   calling something much more deeply nested.
+
+I added something like
+
+    We call Prim_Op in a loop which is executed twice.
+    The first time, we need to pass in the value 2.
+    Ext_Var is declared in the "right" elaboration of
+    Proc's decl list (i.e., the one which elaborated the
+    Prim_Op which is being called). The second time
+    we need to pass in a value of 3 or more because
+    (ultimately) we are passing in a reference to
+    a declaration of Ext_Var declared in a "wrong"
+    elaboration of Proc.
+
+Tucker also pointed out that anonymous access-to-subprogram parameter types can
+be used to demonstrate the same problem, as in
+
+   package body Pkg is
+      procedure Plum(P : access procedure(X : access T)) is
+           type T_Ref is access all T;
+           T_Ptr : T_Ref;
+
+           T_Var : aliased T;
+
+           procedure Nested(X : access T) is
+           begin
+               T_Ptr := T_Ref(X);  -- Checks level of X against T_Ref
+           end Nested;
+      begin
+           if P = null then
+                Plum(Nested'Access);
+           else
+                P.all(T_Var'Access);
+           end if;
+      end Plum;
+   begin
+      Plum(null);
+   end Pkg;
+
+Consider a case (such as the Outer/Inner example above) where the caller knows
+what scope he wants to represent to the callee, but doesn't know what Integer
+value to use to represent it. A "none of the above" value (e.g., Integer'Last)
+should be used if and only if the the scope that is to be represented will not
+statically enclose the scope of the callee (once the callee is called).
+
+If the caller had some mechanism for determining whether the callee's set of
+enclosing scopes includes the "dynamic scope" mentioned above, then the caller
+could conditionally pass in Integer'Last as appropriate and all would be well.
+
+Such a mechanism could certainly be invented, but it might be quite "heavy",
+perhaps involving distributed overhead. One would like to extract the static
+link of the callee (before the call) and then traverse static links, looking for
+the scope in question; then pass in Integer'Last if and only if the scope is not
+found. Given FE/BE boundaries, IL and VM interfaces, and optimizations such as
+inlining, subprogram hoisting, and static link elimination, this kind of static
+link manipulation may turn out to be unimplementable, or at least impractical.
+FE-generated data structures of some sort may be required.
+
+On the other hand, perhaps some such mechanism is also needed for master-based
+(as opposed to static accessibility level based) accessibility checks. See
+AI05-0024, particularly the example involving an accept statement.
+
+Another approach would be to have the caller pass in both an Integer value
+(needed for cheap comparisons) and some indication (conceptually, something like
+a frame pointer) of the scope that Integer value is intended to represent; the
+callee could then compare that second value with the scope the Integer value
+represents to the callee and substitute Integer'Last if the two values don't
+match.
+
+In any case, the current AARM description makes no mention of this
+implementation issue.
+
+On to Ada2012.
+
+The second assumption mentioned above that this whole implementation model rests
+upon is that there is no need to distinguish between two distinct members of the
+set of scopes that are represented by a "none of the above" value passed in as
+part of some call.
+
+Ada2012 (AI05-0234) changed the semantics anonymous access function result types
+which return an allocator so that the accessibility level of the allocated
+object is "determined by the point of call".
+
+Consider an Ada2012 function which
+    1) has an anonymous access result type whose designated type
+       has an access Integer discriminant; and
+    2) takes an "access Integer" parameter; and
+    3) returns an allocator as follows:
+           new Discriminated (Discrim => Access_Param);
+
+Consider further the case where the two accessibility values that are passed in
+(one for the access parameter, one for the function result type level
+"determined by the point of call") are both Integer'Last or some other "none of
+the above" value.
+
+There isn't enough info here to determine whether the allocator should succeed.
+We need to know about the relationship between the two "none of the above"
+scopes, and we don't.
+
+To be specific, consider the following example:
+
+   procedure Access_Result_Test is
+
+       procedure Assert (Condition : Boolean) is
+           Test_Failed : exception;
+       begin
+           if not Condition then
+               raise Test_Failed;
+           end if;
+       end Assert;
+
+       subtype Designated is Integer;
+
+       type Discriminated (D1, D2 : access Designated) is null record;
+
+       function Make (Arg1, Arg2 : access Designated;
+                      Flag : Boolean := False)
+         return access Discriminated is
+
+           Local1, Local2 : aliased Designated := 123;
+
+           type Named is access all Discriminated;
+           Named_Var : Named;
+       begin
+           if Arg1 /= null and Arg2 /= null then
+               return new Discriminated (D1 => Arg1, D2 => Arg2);
+               --
+               -- evaluation of this allocator includes, among
+               -- other things, accessibility checks for the
+               -- two discriminant values,
+
+          elsif Arg1 /= null then
+              return Make (Arg1, Local2'Access);
+
+          elsif Flag then
+              Named_Var := Named (Make (Local1'Access, Local2'Access));
+              -- should not raise P_E
+
+          else
+              Named_Var := Named (Make (Local1'Access, null));
+              -- allocator should raise P_E
+          end if;
+
+          Named_Var.D2.all := 456; -- D2 must not be dangling here
+
+          Assert (Local1 + Local2 = 579);
+
+          return null;
+      end Make;
+
+  begin
+      for Flag in Boolean loop
+          begin
+              Assert ((Make (null, null, Flag) = null) and then Flag);
+          exception
+              when Program_Error =>
+                  Assert (not Flag);
+          end;
+      end loop;
+  end Access_Result_Test;
+
+Similar examples can be constructed which do not involve allocators or anonymous
+access function results. Consider:
+
+    function Make (X : access Integer) return Discriminated is
+    begin
+      return Discriminated'(Discrim => X, ...);
+
+An accessibility check is required in order to ensure that X does not designate
+something whose accessibility level is more deeply nested than the level
+determined by the point of call. AI05-0234's "determined by the point of call"
+rule seems to be at the heart of this issue.
+
+All of the examples given in this entire discussion seem very contrived.
+Perhaps a legality rule could be found which would disallow the cases which
+introduce these problems without rejecting cases that come up in practice. This
+may be worth pursuing.
+
+Even if we wanted to classify these cases as erroneous (which I think would be a
+bad idea), we would still need a precise definition of what it is that is being
+defined to be erroneous.
+
+Thoughts?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 28, 2011  1:15 PM
+
+(1) Your mind sure is twisted. :-)
+
+(2) Accessibility checks for objects aren't worth the headaches. I've only once
+    written code where 'Access could even be used, otherwise I've always had to
+    turn them off by using 'Unchecked_Access and do my own management. So what's
+    the point? The static checks catch low-hanging fruit, so they're probably
+    worth the effort, but the dynamic checks have huge overhead (getting
+    huge-er!) and provide a "tripping hazard" (as Bob puts it) as much as any
+    help. If you really want to prevent dangling pointers, don't use access
+    types, use a container (or some type where the language provides the support
+    for you, like dynamic arrays or mutable records).
+
+(3) A Legality Rule like "no returns of types with access discriminants", or "no
+    declaration of access discriminants", or "no declaration of access
+    parameters" probably would help. ;-) But barring that, I don't quite see how
+    you could craft a static rule to deal with things that are fundamentally
+    dynamic (access parameters, returns of access discriminants, etc.) At best,
+    you could reject anything where the scope is unknown at the call site, but I
+    would be very surprised if that didn't scoop up a lot of cases that are
+    perfectly fine. Especially as we would have to assume the worst about
+    T'Class (that it has access discriminants), so such a rule would apply to
+    any function returning T'Class. I think you'd end up rejecting almost all
+    calls that had an access parameter and returned T'Class -- that's not going
+    to fly. (I've got a lot of those in the Claw Builder. :-)
+
+(4) The "simple" implementation model always looked too good to be true, and the
+    requirement to do the minimum already showed that it was going to not work
+    in the long run. The question I have is whether it is possible to implement
+    any other implementation that works. On a mono-processor or shared memory
+    machine, you could use the stack frame addresses as an indication of the
+    scope (although compares that are not for equality are problematical, as
+    there are multiple task stacks, and they have to be in *some* order in
+    memory, such that "<" might succeed even though there is a problem [when
+    multiple tasks are involved]). If tasks are mapped to different processors
+    with some unshared memory, the problem is harder -- but in that case, one
+    couldn't really create 'Access to unshared memory, so there probably isn't
+    much point in worrying about that.
+
+So I would suggest thinking hard about an implementation model of passing
+pointers to stack frames as an accessibility indication rather than integers.
+(On most machines, that will not change the size passed as parameters anyway.)
+Why does that not work? (It wouldn't surprise me if it didn't, but I'd like to
+know why.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, July 28, 2011  1:22 PM
+
+> At the very least, it appears that the AARM's description of the
+> intended implementation model needs to be updated; the ARG may decide
+> that other actions are needed if it is determined that the language as
+> currently defined is too difficult/expensive to implement.
+
+This is an excellent write-up.  For the first time (given this write-up, plus
+our private conversations), I feel like I actually understand what's going on!
+(It won't last -- I'm going to save your email for future reference.)
+
+I vote for "too difficult/expensive to implement".
+Maybe we can come up with some compile-time rules that prevent the problems.
+But that may be impossible; the reason we don't know what level to pass will be
+the same reason we don't know that it should be illegal (without forbidding
+useful stuff).
+
+Or maybe Post-Compilation rules?
+
+Maybe making the run-time checks more conservative would work.  These are all
+convoluted examples, so maybe we could say "if we don't know what level to pass,
+raise an exception, or in some sense assume the worst".
+
+As a last resort, maybe we should make some things erroneous.
+That should be easier to define, because we can depend on global information not
+available to the compiler. I can rationalize that by saying:  Most access values
+are used to build heap-allocated data structures, so most dangling pointers are
+caused by premature Unchecked_Deallocation.  The accessibility checks are no
+help there.  And quite often, when you have pointers to stack-allocated things,
+you need to use 'Unchecked_Access; again, accessibility checks are no help.  So
+why get excited if the accessibility checks are not 100% bullet-proof? -- it's
+already the case that they only prevent SOME dangling pointers.
+
+Needs more thought -- I don't have any concrete suggestions right now.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, July 28, 2011  1:42 PM
+
+> (1) Your mind sure is twisted. :-)
+
+;-)
+
+> (2) Accessibility checks for objects aren't worth the headaches. I've
+> only once written code where 'Access could even be used, otherwise
+> I've always had to turn them off by using 'Unchecked_Access and do my own management.
+
+The GNAT sources contain 305 occurrences of 'Unchecked_Access, and 2409
+occurrences of 'Access, so "only once" is not a universal experience.
+
+But I tend to agree with your point that making the run-time accessibility
+checks bullet proof is not worth a huge implementation effort.
+
+> (3) A Legality Rule like "no returns of types with access
+> discriminants",
+
+Note that our new syntactic sugar for containers depends heavily on this
+feature!
+
+>...or
+> "no declaration of access discriminants", or "no declaration of access
+>parameters" probably would help. ;-)
+
+OK, I see the smiley.
+
+How about "you can't initialize an access discriminant from an access
+parameter"?  And "you can't return an anonymous access result that comes from an
+access parameter"?
+
+>...But barring that, I don't quite see how  you could craft a static
+>rule to deal with things that are fundamentally  dynamic (access
+>parameters, returns of access discriminants, etc.) At best,  you could
+>reject anything where the scope is unknown at the call site, but I
+>would be very surprised if that didn't scoop up a lot of cases that are
+>perfectly fine. Especially as we would have to assume the worst about
+>T'Class (that it has access discriminants), so such a rule would apply
+>to any function returning T'Class.
+
+For the same reason, whatever overhead is involved, applies to any function
+returning T'Class (hence is distributed overhead).
+
+> So I would suggest thinking hard about an implementation model of
+> passing pointers to stack frames as an accessibility indication rather
+> than integers. (On most machines, that will not change the size passed
+> as parameters anyway.) Why does that not work? (It wouldn't surprise
+> me if it didn't, but I'd like to know why.)
+
+I'm not sure, but it sounds like an implementation earthquake, because in GNAT
+(and I suppose most compilers), only the front end knows about accessibility
+levels, and only the back end knows about static links / frame pointers.
+
+On the other hand, I suppose you can get at your own frame-pointer-like thing by
+simply taking 'Address of the first local object (and concoct a zero-sized one
+if there are none).
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Thursday, July 28, 2011  2:03 PM
+
+> > So I would suggest thinking hard about an implementation model of
+> > passing pointers to stack frames as an accessibility indication
+> > rather than integers. (On most machines, that will not change the
+> > size passed as parameters anyway.) Why does that not work? (It
+> > wouldn't surprise me if it didn't, but I'd like to know why.)
+>
+> I'm not sure, but it sounds like an implementation earthquake, because
+> in GNAT (and I suppose most compilers), only the front end knows about
+> accessibility levels, and only the back end knows about static links /
+> frame pointers.
+
+Right, I don't think we want to go down that path.
+
+> On the other hand, I suppose you can get at your own
+> frame-pointer-like thing by simply taking 'Address of the first local
+> object (and concoct a zero-sized one if there are none).
+
+That occurred to me as well, but I believe that won't work on VM-based
+implementations such as for JVM (not sure about .NET).
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, July 28, 2011  2:03 PM
+
+> This is an excellent write-up.  For the first time (given this
+> write-up, plus our private conversations), I feel like I actually
+> understand what's going on!  (It won't last -- I'm going to save your
+> email for future reference.)
+
+Thanks. As you know, it took me a good while before I understood things well
+enough to produce this write-up. Thanks to you, Gary, and Tuck for helping me
+get to that point.
+
+> Maybe making the run-time checks more conservative would work.  These
+> are all convoluted examples, so maybe we could say "if we don't know
+> what level to pass, raise an exception, or in some sense assume the
+> worst".
+
+That would help with the Ada2012 problem. In implementation terms, a runtime
+accessibility check would be defined to fail if it involves the comparison of
+two "none of the above" values.
+
+> As a last resort, maybe we should make some things erroneous.
+> That should be easier to define, because we can depend on global
+> information not available to the compiler.
+> I can rationalize that by saying:  Most access values are used to
+> build heap-allocated data structures, so most dangling pointers are
+> caused by premature Unchecked_Deallocation.  The accessibility checks
+> are no help there.  And quite often, when you have pointers to
+> stack-allocated things, you need to use 'Unchecked_Access; again,
+> accessibility checks are no help.  So why get excited if the
+> accessibility checks are not 100% bullet-proof? -- it's already the
+> case that they only prevent SOME dangling pointers.
+
+When people use Unchecked_Deallocation or Unchecked_Access, they know that
+avoiding dangling pointers is their own responsibility. The constructs we are
+talking about seem different to me.
+
+I understand the argument that defining the problems away by declaring them to
+be erroneous is ok because nobody in their right mind does anything close to the
+sort of stuff that is in these examples, but this seems like a slippery slope to
+me.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 28, 2011  2:58 PM
+
+...
+> > (3) A Legality Rule like "no returns of types with access
+> > discriminants",
+>
+> Note that our new syntactic sugar for containers depends heavily on
+> this feature!
+>
+> >...or
+> > "no declaration of access discriminants", or "no declaration of
+> >access parameters" probably would help. ;-)
+>
+> OK, I see the smiley.
+>
+> How about "you can't initialize an access discriminant from an access
+> parameter"?  And "you can't return an anonymous access result that
+> comes from an access parameter"?
+
+I suspect that people using our new syntactic sugar would do exactly that, if
+they don't want to use an aliased parameter. At least aliased parameters don't
+have the different level problem (they are assumed to be the same as the
+return), but I have to wonder if we wouldn't find a similar problem with them.
+
+And, of course, I've dubious that that is enough.
+
+> >...But barring that, I don't quite see how  you could craft a static
+> >rule to deal with things that are fundamentally  dynamic (access
+> >parameters, returns of access discriminants, etc.) At best, you could
+> >reject anything where the scope is unknown at the call site, but I
+> >would be very surprised if that didn't scoop up a lot of cases that
+> >are perfectly fine. Especially as we would have to assume the worst
+> >about T'Class (that it has access discriminants), so such a rule
+> >would apply to  any function returning T'Class.
+>
+> For the same reason, whatever overhead is involved, applies to any
+> function returning T'Class (hence is distributed overhead).
+
+Right, but we already know that (from AI-51 and AI-234 - in particular, reread
+the Implementation Note 3.10.2(10.d.2-7/3)). There is nothing new about that.
+
+Indeed, that's Tucker's bait-and-switch: when we complained about the overhead
+of dynamic checks during the design of Ada 2005, he came up with a static model.
+We then agreed to allow these features into Ada 2005 (they would have never made
+it in otherwise). A few years later, Steve points out problems with the static
+model, and Tucker announces that we have to use a dynamic model with all of the
+overhead that we would never have agreed to for Ada 2005. Nice.
+
+[Note: I don't think Tucker did this on purpose and don't mean to imply that he
+did, but the effect was instead of killing the nasty coextension idea
+immediately and completely, we now have a permanent morass with distributed
+overhead to boot.]
+
+> > So I would suggest thinking hard about an implementation model of
+> > passing pointers to stack frames as an accessibility indication
+> > rather than integers. (On most machines, that will not change the
+> > size passed as parameters anyway.) Why does that not work? (It
+> > wouldn't surprise me if it didn't, but I'd like to know why.)
+>
+> I'm not sure, but it sounds like an implementation earthquake, because
+> in GNAT (and I suppose most compilers), only the front end knows about
+> accessibility levels, and only the back end knows about static links /
+> frame pointers.
+
+There is no interaction between dynamic and static accessibility levels in this
+model (you would *never* check a static level against a dynamic level, you would
+always check two dynamic levels or two static levels), so I don't know why that
+would matter. I do understand that it would take substantial implementation
+effort (it requires redoing all of the existing dynamic checks at a minimum),
+but if that would detect *all* of the errors properly *and* still be reasonably
+implementable, then I think the language should adopt that as the intended
+implementation model.
+
+But I agree that this is a big IF. I wanted to focus thought on whether that IF
+is true (especially the first part, because it if doesn't detect all of the
+errors, it couldn't be worth it). But I do think we want to avoid erroneousness
+if we can.
+
+It's clear to me that the "integer level" model is dead, and has never been all
+that alive (it was a hack at best). So I wanted to look at alternatives; if
+there is a practical implementation (given a clean slate) that does detects all
+of the errors and not too much, then we have a very different trade-off than if
+no such implementation exists.
+
+So I think we need to find an implementation that would detect all of the
+problems and not too much (forget everything that compilers actually are doing
+for the moment), so we have a clear idea of how much overhead that
+implementation causes. Only then can we make an informed decision on whether
+erroneousness or bizarre restrictions are worthwhile. I surely can't do it now.
+(And there is no rush - this is not going into Ada 2012 in any case.)
+
+> On the other hand, I suppose you can get at your own
+> frame-pointer-like thing by simply taking 'Address of the first local
+> object (and concoct a zero-sized one if there are none).
+
+Right. Or something similar. (And I'm not sure why you would need a dynamic
+level if there are no objects or access collections [which require local data
+structures] -- why would you be comparing it??)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 28, 2011  4:09 PM
+
+I think Randy might be headed the right direction here.
+
+Basically forget the static accessibility approximation in code where there is
+any danger of this sort of nastiness, and go with a true dynamic accessibility
+level.
+
+My guess is that code with no access parameters/results, no nested extensions,
+no nested access-to-subp types need not worry about these problems.  Hopefully
+that is most of the world.  Code that has any of these troublesome features
+would move toward passing around dynamic accessibility levels/descriptors as an
+additional implicit parameter.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 28, 2011  7:58 PM
+
+...
+> How about "you can't initialize an access discriminant from an access
+> parameter"?  And "you can't return an anonymous access result that
+> comes from an access parameter"?
+
+Those wouldn't work by themselves, because you could "launder" an access
+parameter by storing it in a local SAOAAT. (Stealing Steve's moniker.) Recall
+that the accessibility of a SAOAAT is the same as the assigned value, including
+a passed-in parameter. You could also ban access discriminants coming from a
+SAOAAT, but that seems pretty severe; flow analysis of the usage of a SAOAAT
+surely is more complex than existing legality rules.
+
+In any case, I'd be suspicious of adopting a complex Legality Rule to ban this
+particular problem case, because I think it is only a matter of time before
+someone runs into some other combination that's also a problem. We tried that
+strategy with general-access-to-unconstrained, and we plugged a new hole every
+year until we finally gave up with Ada 2005. (Would this problem come up when a
+generic in out parameter is used as an access discriminant, and the instance is
+local?? Etc.)
+
+P.S. SAOAAT = Stand-Alone Object of an Anonymous Access Type.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, July 29, 2011  6:09 AM
+
+> This is an excellent write-up.  For the first time (given this
+> write-up, plus our private conversations), I feel like I actually
+> understand what's going on!  (It won't last -- I'm going to save your
+> email for future reference.)
+>
++ 1
+I'll save it, just in case I decide to start a training session "Introduction to
+accessibility levels - 5 days" ;-)
+
+From what I understood from the discussions, it seems to me that:
+1) Making it safe is not practically doable
+2) Restricting to safe cases would be too restrictive.
+
+I don't like the idea of a false feeling of safety. Wouldn't it be possible to
+restrict to safe cases, and have a gateway through some Unchecked gizmo to go to
+the (necessary) unsafe state?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, July 29, 2011  1:28 PM
+
+> ...
+> > How about "you can't initialize an access discriminant from an
+> > access parameter"?  And "you can't return an anonymous access result
+> > that comes from an access parameter"?
+>
+> Those wouldn't work by themselves, because you could "launder" an
+> access parameter by storing it in a local SAOAAT. (Stealing Steve's
+> moniker.)
+
+I've always been opposed to using dynamic accessibility levels for SAOOAAAATs
+(however many "A"s it has).
+
+> Recall that the accessibility of a SAOAAT is the same as the assigned
+> value, including a passed-in parameter. You could also ban access
+> discriminants coming from a SAOAAT, but that seems pretty severe; flow
+> analysis of the usage of a SAOAAT surely is more complex than existing legality rules.
+
+I don't understand.  By "severe" do you mean "overly restrictive for the
+programmer"?  I don't mind that -- I've gotten along fine for years without ever
+using SAOAATs, so I wouldn't mind restricting them in the discrim case.
+
+But then you say, "; flow...", and I don't see what that has to do with being
+"severe".
+
+> In any case, I'd be suspicious of adopting a complex Legality Rule to
+> ban this particular problem case, because I think it is only a matter
+> of time before someone runs into some other combination that's also a
+> problem. We tried that strategy with general-access-to-unconstrained,
+> and we plugged a new hole every year until we finally gave up with Ada
+> 2005. (Would this problem come up when a generic in out parameter is
+> used as an access discriminant, and the instance is local?? Etc.)
+
+You're probably right.  But what can we do, other than come up with some rules
+and hope they're right, and fix them when we notice otherwise?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 29, 2011  2:07 PM
+
+> You're probably right.  But what can we do, other than come up with
+> some rules and hope they're right, and fix them when we notice
+> otherwise?
+
+There are clearly two other choices:
+
+(1) Do nothing - which requires implementations to do it right. So far as I can
+    tell, this is implementable -- it would require changing what compilers
+    currently do, but would not be incompatible or inconsistent (you'd get the
+    same answer in simple cases).
+
+    I'm rather unsure why this isn't acceptable [it seems to me that has to be
+    done in any case to deal with the "incomparable masters" checks of 4.8 and
+    6.5]. New language features are going to break some eggs, and it's fairly
+    clear that Ada 2005 broke a lot of eggs that we didn't realize at the time.
+
+(2) Drop some or all of the dynamic accessibility checks in favor of leaving the
+    associated cases erroneous. That might require some new rules, but they'd be
+    dynamic rules, not Legality Rules, meaning that they wouldn't have all of
+    the generic contract complications. [And I was *only* speaking about
+    Legality Rules in my previous comment.]
+
+I strongly prefer "do it right" to the other options -- and I'd like to know if
+there is any real problem with a purely dynamic dynamic check. (Say using stack
+frames.) Other than "we don't do it that way now", which is irrelevant if the
+alternatives are erroneousness or a permanent cascade of every more arbitrary
+and restrictive rules -- both of which are far worse alternatives.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, July 29, 2011  6:51 PM
+
+> There are clearly two other choices: (1) Do nothing - which requires
+> implementations to do it right. So far as I can tell, this is
+> implementable
+> -- it would require changing what compilers currently do, but would
+> not be incompatible or inconsistent (you'd get the same answer in simple cases).
+> I'm rather unsure why this isn't acceptable [it seems to me that has
+> to be done in any case to deal with the "incomparable masters" checks
+> of 4.8 and 6.5].
+
+I think this is an important point. I'm guessing that you are right that "it has
+to done" in order to implement the checks you mentioned, but I haven't thought
+about it enough. If it is true that we already need to develop some more general
+mechanism in order to handle these accessibility checks (this is what I was
+talking about in the original message when I referenced AI05-0024), then the "no
+RM changes - just implement it" solution might become more attractive. Details,
+of course, are needed (particularly about the amount, if any, of distributed
+overhead).
+
+> ...  -- and I'd like to know
+> if there is any real problem with a purely ... dynamic check. (Say
+> using stack frames.)
+
+As I mentioned in the earlier message, there may be problems with directly
+accessing the frame pointer. Say the portion of the compiler which knows about
+the dynamic semantics of Ada generates some intermediate representation in which
+this sort of manipulation cannot be expressed. Or, as I mentioned earlier,
+consider the interactions with optimizations such as subprogram hoisting,
+inlining, and static link elimination.
+
+One might give up on accessing the frame pointer directly and instead have the
+aforementioned Ada-knowledgeable part of the compiler generate its own data
+structure to capture the needed information. The compiler generates a small
+record object in each "interesting" frame containing, say, a  static nesting
+level and a link to the corresponding object of the nearest statically enclosing
+frame which has one. This is only an incomplete sketch of an approach, but this
+is the sort of thing I was talking about in the original message when I said
+"FE-generated data structures of some sort may be required".
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 29, 2011  8:18 PM
+
+Using a separate data structure automatically means "distributed overhead", of
+course. The stack frame approach is appealing because it doesn't have such
+overhead (we're already creating stack frames).
+
+OTOH, stack frames probably don't correspond exactly to dynamic masters (masters
+that are a subprogram call are very unlikely to have a frame of their own, and
+many compilers combine the frames for all blocks into one). But perhaps the data
+structures associated with finalization of masters could be "borrowed" for this
+purpose (they surely have the correct run-time nesting). There still would be
+distributed overhead, but it's overhead that already exists and the added
+overhead would probably be zero in many frames. (Janus/Ada aggressively tries to
+eliminate finalization data from frames; that would be somewhat less possible if
+it also was used for dynamic accessibility checks. Thus there still would be a
+bit of overhead.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 29, 2011  7:58 PM
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 29, 2011  7:58 PM
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 29, 2011  7:58 PM
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 29, 2011  7:58 PM
+
+****************************************************************
