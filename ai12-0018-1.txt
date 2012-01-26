@@ -1,0 +1,201 @@
+!standard A.16(112/3)                             12-01-25    AI12-0018-1/01
+!standard A.17(23/3)
+!class Amendment 12-01-25
+!status work item 12-01-25
+!status received 11-01-21
+!priority Low
+!difficulty Easy
+!subject Entity versioning
+!summary
+
+**TBD.
+
+!question
+
+Each edition of the Ada standard adds new entities, sometimes to existing
+Ada packages. Compilers will want to be able to warn on the use of new
+entities when compiling for older standard versions, and similarly on the use of
+implementation-defined entities. (Or even reject in the scope of an appropriate
+restriction.)
+
+!proposal
+
+(See wording.)
+
+!wording
+
+Add aspect Ada_Edition. This aspect can be used on any entity.
+Legal values are Ada_83, Ada_95, Ada_2005, Ada_2012, Ada_2020,
+Implementation_Defined, Third_Party_Defined, and User_Defined. Additional
+value(s) will be defined for newer editions of Ada.
+
+If not specified, an entity inherits the value of Ada_Edition from the
+enclosing entity, unless the entity is a library unit, in which case the
+value is User_Defined. [Don't want to inherit from Standard!]
+
+For language-defined entities, the Ada_Edition value should be set to the
+first edition of Ada in which the entity appeared.
+
+!discussion
+
+[Should we define an attribute to query the edition?]
+
+"Third_Party_Defined" is provided to be used with third-party libraries that
+aren't user-defined (at least by the typical user of the library) and also
+aren't (necessarily) defined by an implementer. GUI libraries would typically
+have this edition value.
+
+[Should we have a restriction against the use of any Implementation_Defined or
+Third_Party_Defined entities in a unit (clearly this has to be a unit-by-unit
+requirement)?]
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Friday, January 21, 2011  11:48 PM
+
+I've been thinking about the problem of version checking for entities declared
+in Janus/Ada. I know that GNAT has a pragma for this purpose, but pragmas are
+annoying for subprograms because of overloading. Also, we really need several
+such settings (for Ada 2005, Ada 2012, Implementation-defined entities, and
+more); having a pragma for each one doesn't extend well.
+
+It strikes me that this is a perfect use of an aspect. For instance:
+
+   package Ada.Locales with
+       Version => Ada_2012 is
+
+   package Ada.Directories with
+       Version => Ada_2005 is
+
+   package System.Basic_IO with
+       Version => Implementation_Defined is
+
+This entity can obviously be applied to nested entities as well, such as the new
+subprograms in Ada.Strings.Fixed added by Ada 2005, and the accessor stuff added
+to the containers by Ada 2012.
+
+It's obviously too late to add this aspect to Ada 2012, but since
+implementation-defined aspects are allowed, all we really need to do is agree on
+an aspect name and values - if everyone uses those names for the same purpose,
+there is no problem with conflicts, and we can standardize it in the future if
+desired.
+
+The best name isn't completely obvious. The important issue is which Ada
+standard (if any) is a particular entity defined in. So perhaps "Defined_By" is
+really the proper name:
+
+   package Ada.Locales with
+       Defined_By => Ada_2012_Standard is
+
+   package Ada.Directories with
+       Defined_By => Ada_2005_Standard is
+
+   package System.Basic_IO with
+       Defined_By => Implementation_Defined is
+
+   package My_Package with
+       Defined_By => User_Defined is
+
+Any better ideas?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, January 23, 2011  6:38 PM
+
+> It's obviously too late to add this aspect to Ada 2012, ...
+
+And it probably doesn't make sense in the ISO world, where there's exactly one
+Ada standard at any time, and "Ada 83" and "Ada 95" are nonsensical terms.  ;-)
+
+Still, it seems a reasonable idea as a de-facto standard.
+
+I don't much like "Version" and "Defined_By", for the same reason I argued
+against "pragma Implemented".  These are very general terms that could mean all
+sorts of different things.  I suggest "Ada_Version => ...".  Allowed values
+would be Ada_83, Ada_95, Ada_2005, Ada_2012, and others to be added later.
+(Note 4-digit years for after 2000.) Implementation_Defined might make sense.  I
+don't see the point of User_Defined.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 24, 2011  3:37 AM
+
+Let's make sure we don't make the pragma mistake, that allows implementation
+defined pragmas and attributes freely but not extensions to them!
+
+I hate for example
+
+    X'Range_Length
+
+in GNAT
+
+where
+
+    X'Length would make more sense
+
+Yes, I know the arguments against this :-) but you could make
+No_Implementation_Attributes forbid such extensions.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 24, 2011  8:59 PM
+
+> I don't much like "Version" and "Defined_By", for the same reason I
+> argued against "pragma Implemented".  These are very general terms
+> that could mean all sorts of different things.
+> I suggest "Ada_Version => ...".  Allowed values would be Ada_83,
+> Ada_95, Ada_2005, Ada_2012, and others to be added later.  (Note
+> 4-digit years for after 2000.) Implementation_Defined might make
+> sense.  I don't see the point of User_Defined.
+
+I don't like "Ada_Version" simply because it doesn't have anything to do with
+that in general. It really specifies who "defined" this entity -- the Ada
+standard, some implementor, or the user. That's why I suggested "Defined_By",
+especially as that makes the most sense when reading.
+
+I thought about including "_Standard" in the names to make it even clearer what
+is being talked about, but I thought that might be getting too wordy:
+
+    Defined_By => Ada_2005_Standard
+
+Implementation_Defined is useful in that it would make sense to have a matching
+restriction "No_Implementation_Defined_Usages" -- where any (direct) usages of
+items marked "Implementation_Defined" are not allowed.
+
+We need User_Defined or something like that to be the default value when it is
+not otherwise specified. (Aspects should always have a value, IMHO.) I suppose
+we don't have to give a name to that, but it makes easier wording if it exists.
+
+The question about how to allow extending this list of value is an interesting
+question; clearly we would want to allow adding other standards. But it might
+make sense to allow other names in order to support other major subsystems. I
+thought about whether it would be valuable to have a similar mechanism for Claw
+(to take one example). It's technically not "implementation-defined" (as it is a
+separate product, and if it is used with GNAT, it isn't even defined by the
+implementer), but it is outside of the control of the average user (so
+"user-defined" doesn't make much sense, either).
+
+Perhaps it would be best (thinking out loud here) if these values were strings,
+with just a few predefined values. Maybe not.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, January 25, 2011  12:35 AM
+
+>> I don't much like "Version" and "Defined_By", for the same reason I
+>> argued against "pragma Implemented".  These are very general terms
+>> that could mean all sorts of different things.
+>> I suggest "Ada_Version => ...".
+
+What about "Origin" ?
+
+****************************************************************
