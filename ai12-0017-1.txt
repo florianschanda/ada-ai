@@ -1,0 +1,820 @@
+!standard 11.4.3(0)                             12-01-25    AI12-0017-1/01
+!class Amendment 12-01-25
+!status work item 12-01-25
+!status received 11-01-07
+!priority Medium
+!difficulty Medium
+!subject Compile-time-checked exception specifications
+!summary
+
+**TBD.
+
+!question
+
+The contract of a subprogram is not complete unless it includes information
+about which exceptions it propagates (or does not propagate). Ada does not
+include such information in any formal way. It should. (?)
+
+!proposal
+
+We propose that exception contracts be added to Ada.
+
+An exception contract is specified by the aspect "Propagates". The value of
+the aspect is "anything can be propagated" by default. It can be specified
+as an Exception_Aspect_List (a list of Exception_Items). An exception item
+is the name of an exception (or set of exceptions, see below), along with an
+optional postcondition.
+
+   Exception_Aspect_List ::= Exception_Item {, Exception_Item}
+   Exception_Item ::= *Exception_*Name [when Expression]
+
+If the "Propagates" aspect is specified for a subprogram, the subprogram is
+illegal if it could propagate any exception not listed in the
+Exception_Aspect_List.
+
+This implies that all calls used in the subprogram must have exception
+contracts, or be language-defined. It also includes exceptions propagated
+via language-defined checks. Note that the compiler can accept a subprogram
+if it does not generate a check that might raise some language-defined
+exception, even if the canonical semantics would require such a check.
+[See the !discussion for more on this topic.]
+
+Note that a subprogram that has any visible contract expressions (preconditions,
+postconditions, invariants, predicates, exception postconditions) automatically
+is assumed to be able to propagate Assertion_Error. That assumption can only
+be eliminated by proof that the contracts can't fail. Note that it is the caller
+that has to deal with this; Assertion_Error only needs to appear in an
+exception contract if something inside of the subprogram might raise the
+exception (a pragma Assert, a call, etc.).
+
+The program is erroneous if a subprogram somehow manages to propage an
+exception that is not listed in it's "Propagates" aspect. (This could happen
+in interfacing [but in that case, the program is already erroneous], compiler
+bugs [the Standard shouldn't care], and possibly for access-to-subprogram types
+and generic formal subprograms [hopefully, we can prevent such holes]. So
+perhaps we don't need to say this.
+
+If an Exception_Item has a postcondition, and the named exception is propagated,
+and the assertion mode is Check, then the postcondition is evaluated before
+the exception is propagated from the subprogram. If the postcondition is False,
+then Assertion_Error is propagated instead.
+
+
+We also define an "Exception_Set". We modify the renaming of exceptions as
+follows:
+     exception_renaming_declaration ::=
+         defining_identifier : exception renames *exception_*name {| *exception_*name }
+
+If there is more than one exception named here (or the single item is an
+exception set), the resulting rename is termed an *exception set*. An exception
+set can be used anywhere that a list of exceptions is allowed (for instance,
+in a handler), and represents all of the exceptions given in the list.
+It also is allowed in an exception_item.
+
+Example:
+     IO_Errors : exception renames Mode_Error | Name_Error | Use_Error | Device_Error;
+     Non_Preventable_Errors renames Storage_Error | Tasking_Error | Use_Error | Device_Error;
+
+This is important so that exceptions that cannot be proved to be absent (like
+Storage_Error in most cases) can be specified in a single, simple contract line.
+
+!wording
+
+** TBD.
+
+!discussion
+
+We propose a simple goal statement for exception contracts:
+
+The purpose of an exception contract is to detect, at compile time, the
+unexpected propagation of a preventable exception.
+
+The goal says "unexpected" for the obvious reason that an expected propagation
+cannot represent a problem. We don't want to detect those (those would be
+false positives).
+
+The goal says "preventable" because detecting an exception that cannot be
+prevented is close to useless. The only thing you can do is handle it, and often
+that is just covering up a bug.
+
+By "preventable", we mean an exception whose propagation can be
+prevented/eliminated by simple code modifications, contract changes, or (in
+extreme cases) better compiler technology (that is, the better ability to prove
+it is not raised). The best example of an exception that is not preventable in
+general is Storage_Error. It might be preventable with heroic efforts (involving
+knowledge of the complete program and how the compiler involved uses memory),
+but even then those efforts are not transferable to a different compiler.
+
+The question of what to do with non-preventable exceptions is a hard question
+to answer. It seems best to not make the distinction at the language-level,
+as every exception is preventable with enough effort. Moreover, what exceptions
+should be preventable depends on the usage - for instance, a tightly constrained
+embedded system may in fact want proofs of no unexpected exceptions raised,
+including of Storage_Error and the rest. OTOH, a desktop application probably
+just wants notification of resource exhaustion and doesn't mind.
+
+If the language creates the distinction, then we have provide mechanisms for
+the programmer to chose what exceptions go into which categories. This would
+significantly increase the complexity of this proposal.
+
+The only significant downside to not having such a distinction is the extra
+exception contracts needed. If every exception had to be listed by name, this
+would be an untenable burden (on readers at the very least). But by providing
+the "exception set" mechanism, we reduce this to a single exception_item.
+Moreover, the presence of that item reminds the reader that the routine can
+in fact propagate Storage_Error, etc. So there can be no surprises that
+"implicit" propagation of non-preventable exceptions could cause.
+
+Note that Java tries to have two classifications of exceptions defined by
+the language. This isn't very successful, because it isn't really the language
+that can determine whether it makes sense for an exception to be classified
+as non-preventable (unchecked in Java terminology).
+
+---
+
+One additional option would be to include a mechanism for callbacks (that
+is, formal subprograms and calls to access-to-subprograms). For those, we
+may want to say "propagates whatever this callback does". That could look
+like:
+    procedure  Iterate
+     (Container : in Vector;
+      Process   : not null access procedure (Position : in Cursor))
+      with Propagates => Program_Error, -- If Process.all tampers with cursors.
+                         Process.all,
+                         Storage_Error; -- Everything can propagate this.
+meaning that Iterate propagates any exception that Process.all does. [Note
+that this example says that Constraint_Error cannot be propagated; the checks
+to ensure this would improve the quality of the implementation by eliminating
+obvious bugs.]
+
+This is not included in the proposal above because it complicates it somewhat,
+and at least the containers examples are better handled with the new Ada
+2012 constructs (reducing the need for such contracts).
+
+---
+
+Whether we should allow specifying exception contracts on access-to-subprogram
+types and on formal subprograms is unknown. We don't allow specifying
+preconditions and postconditions on such types and formals, in large part
+because static verification of them at the point of 'Access is impractical (or
+too limiting). That would not be a problem for exception contracts (the actual
+subprogram has to propagate no more than specified exceptions -- although the
+postconditions pose a problem). But it would be weird to allow these contracts
+and not the other types of contracts.
+
+If we don't allow them, then essentially no exception contracts could be used
+on subprograms that call these entities. That doesn't seem good, either.
+
+---
+
+One objection that is sure to be raised about the above proposal is that it
+does not constrain what compilers can or must prove, meaning that there is
+a potential portability problem. The problem stems from the fact that each
+compiler will have a different exact set of language-defined exceptions that
+it can prove the absense of. In particular, Constraint_Error, Program_Error,
+and Assertion_Error can be raised by checks and contracts, but compilers
+can and do eliminate those checks and contracts when they can prove they
+aren't needed. A compiler that is more clever will be able to remove more
+checks that raise Constraint_Error than a compiler that is less clever. So
+code that works on compiler A because it can prove that some check won't be
+needed might not work on compiler B because it can't prove the same thing.
+(And A and B might be different versions of the same compiler, if the original
+"proof" was caused by a bug.)
+
+It seems necessary to have minimum requirements on which exception checks are
+eliminated; otherwise it would be necessary to put a handler for
+Constraint_Error in every routine that intends not to propagate the exception.
+That seems to be overkill; besides, every Ada compiler tries to eliminate
+constraint checks.
+
+It would make sense for compilers to have two modes, one that only assumes
+the minimum requirements (checking for maximum portability), and one that
+eliminates as much as possible (allowing maximum utility).
+
+The minimum requirements aren't specified in the current proposal, as it is
+important to agree on the outline of the solution first. But some minimum
+requirements should be specified, and conceivably, some maximum requirements
+as well.
+
+!ACATS test
+
+!appendix
+
+From: Tucker Taft
+Sent: Friday, January  7, 2012  12:46 PM
+
+During Ada 9X (and perhaps Ada 200Y as well) there were some discussions of
+generalizing exceptions in some way or other, and perhaps adding some kind of
+compile-time checking of exception specifications.  That is, a subprogram could
+declare which exceptions it might propagate, and that would be checked at
+compile-time.  Java does this, though it only applies to a subset of the
+exceptions.
+
+In any case, I have never been convinced about this, and my experience with Java
+was that the checked exceptions were painful during maintenance of a large
+program.  Well it turns out other people feel similarly.  Here is a somewhat old
+discussion initiated by Bruce Eckel (popular author of programming textbooks):
+
+   http://www.mindview.net/Etc/Discussions/CheckedExceptions
+
+The general conclusion is that the compile-time-checked exception specifications
+of Java were an interesting experiment that ultimately failed.
+
+So in case anyone is hankering to use our new "aspects" syntax to add some kind
+of exception specification to subprograms, read the above discussion first.
+
+By the way, for those who have attended any of my talks on ParaSail, the lack of
+exceptions in favor of compile-time checking of *everything* is also an
+experiment at this point.  I at least am pretty curious to see what it will be
+like to code large systems using this level of compile-time checking, where
+preconditions and postconditions are no longer nice-to-haves, but are essential
+to allow code to compile.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January  7, 2012  2:50 PM
+
+>    http://www.mindview.net/Etc/Discussions/CheckedExceptions
+>
+> The general conclusion is that the compile-time-checked exception
+> specifications of Java were an interesting experiment that ultimately
+> failed.
+
+Thanks for the link.
+
+I've read about this issue numerous times in blogs and whatnot.  The majority of
+Java folks seem to agree with the above; a substantial minority does not.  The
+majority is wrong.
+
+I think it's a case of what I like to call Mark Twain's Cat Syndrome:
+
+http://thinkexist.com/quotation/the_cat-having_sat_upon_a_hot_stove_lid-will_not/262047.html
+
+That is, I think the Java model is on the right track, but it's broken, but a
+few changes could make it work well.  Ask me if you want more detail.
+
+I can't resist pointing out that the "swallowing exceptions is too tempting"
+argument is utter balogna.  That's such egregiously bad programming practice,
+that the only solution is education, not language design.  If someone can't be
+so-educated in the (obviously!) better solution, their advisor should gently
+push them into another field, like English Lit or Rocket Science.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January  7, 2012  3:02 PM
+
+> The general conclusion is that the compile-time-checked exception
+> specifications of Java were an interesting experiment that ultimately
+> failed.
+
+You mean that *Java's* compile-time-checked exception specifications failed.
+It's not at all clear that the same would be true for Ada.
+
+Four points on the article:
+
+(1) An author that thinks that exceptions were first introduced in C++ loses
+    credibility to an Ada reader.
+
+(2) One of the major complaints about checked exceptions is that they don't work
+    well for inheritance. It's common that a new routine is created that needs
+    to raise a new exception not specified by the parent. That makes trouble for
+    interfaces and dispatching calls that don't know about the new exception.
+
+    That surely is a problem for the Java model. But I don't think it applies
+    anywhere near as much to Ada. The vast majority of routines in Ada are
+    called via statically bound calls, using no inheritance or dispatching. Even
+    in a very OOP system like Claw, something like 90% of the subprograms will
+    probably not be used in dispatching calls.
+
+(3) The other complaint is that programmers often "swallow" exceptions just so
+    that they don't have to add them to the contract. This problem seems to show
+    both problems with the programmers and with the management. Laziness is
+    never a good reason to do something in a program! And if this happening when
+    it shouldn't, then it implies that management is not providing the right
+    training and culture.
+
+    Note that at least a significant part of the time, you really do want to
+    change (not swallow per-se) one exception to another. In Claw, for instance,
+    we really don't want to be propagating any exceptions other than the defined
+    ones (and Storage_Error). To do so represents a bug of some sort -- and
+    detecting bugs at compile-time is a good thing.
+
+(4) By definition, an Ada exception contract would be very different than the
+    ones in Java.
+
+    Most importantly, it would be completely optional. It has to be optional,
+    because we surely want existing Ada code to remain compatible. This means
+    that it wouldn't be necessary to change a contract every time an exception
+    is changed. My view is that these sorts of contracts are mostly useful in
+    (mostly) self-contained reusable libraries (like Claw). In these situations,
+    changing the exceptions propagated is a significant inconsistency that has
+    to be avoided, just like changing the parameters of a subprogram has to be
+    avoided.
+
+    They're much less useful in "general" code where the specifications can be
+    more fluid. Unlike Java, such code would have no requirement to use
+    exception contracts.
+
+Contracts have to be able to cover all exceptions (no checked vs. runtime
+distinction). The sorts of cases where the contracts do the most good are those
+where the compiler proves that only the contracted exceptions are propagated.
+Period. For instance, Claw call-back routines (typically user-written by
+overriding) should never propagate an exception. (If they do, Claw handles them,
+but can do nothing beyond popping up an error box and ignoring the operation,
+which typically leads to significant problems later.) If the contract could
+reflect that, the compiler could enforce the restriction, ensuring that all
+exceptions are handled. (The same is usually desired for tasks.)
+
+Similarly, as previously noted, Claw operations should never propagate an
+exception beyond those defined by the interface itself. If they do, there is a
+bug that needs to be addressed. A contract offers a way to make that a reality.
+
+Note that in the sorts of uses I'm envisioning, the fact that the contracts are
+hard to change is an advantage, not a disadvantage. Reusable subprograms simply
+must not change in any significant way without a lot of consideration of the
+effects. The exception behavior is part of these effects. That even means that
+the inheritance issues are not a real problem in these cases (we really need the
+contracts to be adhered to everywhere).
+
+> So in case anyone is hankering to use our new "aspects"
+> syntax to add some kind of exception specification to subprograms,
+> read the above discussion first.
+
+I did, and I'm unconvinced. Java's problem seems to be that it requires them
+everywhere, on a subset of exceptions, thus ensuring that they are a pain for
+code that changes frequently, and that they can't make any useful runtime
+guarantees (because "Runtime" exceptions still can propagate -- and these are
+exactly the hardest for a programmer to reason about). That seems like a path to
+lead to complete uselessness -- which is indeed the case.
+
+Ada surely can avoid these pitfalls. (I make no claim that it can avoid other
+pitfalls...)
+
+Any such contracts in Ada would not needed to be used everywhere (although I
+realize some management may insist on that). And I would only support them if
+they applied to all exceptions, especially so that the compiler could detect any
+lingering Constraint_Errors that should either have been handled or prevented.
+
+> By the way, for those who have attended any of my talks on ParaSail,
+> the lack of exceptions in favor of compile-time checking of
+> *everything* is also an experiment at this point.
+>  I at least am pretty curious to see what it will be like to code
+> large systems using this level of compile-time checking, where
+> preconditions and postconditions are no longer nice-to-haves, but are
+> essential to allow code to compile.
+
+The problem with this is that you then need to use much more complicated code to
+handle real run-time error conditions.
+
+The obvious example is End_Error in Read. There is no practical way to code a
+precondition for Read that it not reach the end of the file/tape/socket stream.
+For a file, you could do a trial read to see if there is enough bytes, but that
+implies reading everything twice -- and that does not work for something that
+can only be read once.
+
+That means you have to fall back on error returns, with all of the well-known
+difficulties and vulnerabilities of that.
+
+Similarly, there is no way to know when Claw will raise Windows_Error -- that
+happens when Windows fails a call. Usually that's a bug of some sort, but it
+also can mean that there is insufficient memory or incorrect permissions or many
+other things. It's effectively impossible to predict. Having to use error codes
+to handle these "never ought to happen, but it might because its out of our
+hands" cases sounds like a disaster.
+
+OTOH, I agree that a large portion of what raises exceptions in Ada code could
+and should use preconditions and/or predicates instead. That also has the effect
+of making exception contracts more useful (because there would be far fewer of
+them needed, meaning the problems often seen when adding them would show up much
+less often). Indeed, Pairsail is just putting an implicit
+           Propagates => None
+on every subprogram. All I want is the ability to say
+           Propagates => End_Error, Use_Error, Device_Error
+because it is too hard to determine when those will happen *before* executing
+the operation. But if this routine tries to propagate Program_Error or
+Constraint_Error, it is seriously broken and the compiler ought to complain.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January  7, 2012  3:09 PM
+
+...
+> That is, I think the Java model is on the right track, but it's
+> broken, but a few changes could make it work well.  Ask me if you want
+> more detail.
+
+I just spent 45 minutes writing up my take on the situation (in detail). I'd be
+interested in finding out if we agree or disagree on the details. (It's quite
+possible that everyone has a different idea of the "few changes" needed.)
+
+I do find it interesting that Tucker says that these contracts are not useful,
+then proposes a programming language model where essentially every subprogram
+has an implied
+        Propagates => None
+contract. He is saying that he wants the same capabilities and proof
+possibilities in his language, but there is no way that Ada should have those
+capabilities, even as an option. This seems like a bizarre position, unless he
+expects to move all existing Ada programs and programmers to ParaSail. :-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January  7, 2012  3:48 PM
+
+> I just spent 45 minutes writing up my take on the situation (in
+> detail). I'd be interested in finding out if we agree or disagree on
+> the details. (It's quite possible that everyone has a different idea of the "few changes"
+> needed.)
+
+OK, I read your other message, and I agree with most of it.
+I particularly strongly agree with (3).
+
+One thing I disagree with: I think there should be a distinction between (in
+Java terminology) checked and unchecked exceptions. But I think Java chose the
+wrong category for some of them (in both directions).  I also think that choice
+should be a default -- the programmer should then be able to change it, because
+I think it depends on the situation.  You at least partly agreed with that, when
+you said that CLAW needs very rigid exception specs, whereas other code might
+not.
+
+A couple of other points:  I hope that at least 90% of exceptions can be
+converted into preconditions (and invariants/predicates). Preconditions serve
+the same purpose as Java exception specs (they say "exception X can be raised"),
+but they're even better, because they give the exact condition under which the
+raise will occur.  There is some hope that a compiler could prove the condition
+true based on call-site info, thus obviating the need for a handler.
+
+In my hobby language you can ("software present tense"! ;-)) attach a
+postcondition to an exception, separate from the normal postcondition, which
+specifies what condition will hold if that exception is propagated from this
+procedure. False means "cannot be propagated", True means the same as the Java
+thing.  For example, you can say "if this returns normally, then X = X'Old+1,
+but if it raises Mumble_Error, then X remains unchanged".
+
+The "checked/unchecked" distinction is made by setting the default exceptional
+postcondition (for a particular exception class, over all procedures in a
+region).
+
+> I do find it interesting that Tucker says that these contracts are not
+> useful, then proposes a programming language model where essentially
+> every subprogram has an implied
+>         Propagates => None
+
+I looked at Parasail about 6 months ago, but I haven't looked at his latest
+stuff.  But Tuck and I have been arguing off and on about exceptions for at
+least a decade, and I think I detect a bit of (ahem, sorry, Tuck) wishful
+thinking, as in "All we have to do is solve the halting problem, and then we can
+eliminate the curse of exceptions from the world." My intention, on the other
+hand, is to solve 95% of the halting problem, which has a better chance of
+success.  ;-)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, January  7, 2012  4:04 PM
+
+> ...
+>> That is, I think the Java model is on the right track, but it's
+>> broken, but a few changes could make it work well.  Ask me if you
+>> want more detail.
+>
+> I just spent 45 minutes writing up my take on the situation (in
+> detail). I'd be interested in finding out if we agree or disagree on
+> the details. (It's quite possible that everyone has a different idea of the
+> "few changes" needed.)
+
+Perhaps the key is to make the default "anything goes."
+In Java, you have to say that explicitly, and people generally feel "bad" doing
+so, and so they end up doing something which is worse, namely handling an
+exception locally and not doing something intelligent with it.
+
+Note that even before reading this "blog," and even though I was never quite so
+evil as to just "swallow" an exception, I had already developed a negative
+opinion about compile-time-checked exception specifications, strictly from
+practical experience using Java for non-trivial applications.
+
+> I do find it interesting that Tucker says that these contracts are not
+> useful, then proposes a programming language model where essentially
+> every subprogram has an implied
+>          Propagates =>  None
+> contract. He is saying that he wants the same capabilities and proof
+> possibilities in his language, but there is no way that Ada should
+> have those capabilities, even as an option. This seems like a bizarre
+> position, unless he expects to move all existing Ada programs and
+> programmers to ParaSail. :-)
+
+Well that's an interesting interpretation of my intent.  I hope it isn't right!
+And I definitely see ParaSail as an experiment at this stage.  I hope it will be
+successful, but I really don't know yet. And it isn't just that every subprogram
+has an implied "Propagates => None," but also every statement, every expression,
+every built-in operator.
+
+The usual problem with trying to eliminate exceptions has to do with things like
+Storage_Error, or your "Window_Error," or "Device_Error," where the external
+environment is reporting a problem, or you have exhausted some resource.
+
+I don't see "End_Error" or "Name_Error"
+as similarly challenging, for what it's worth, since at least in ParaSail, the
+notion of a "null" value is included with every type.  So if the result type is
+"optional T" rather than simply "T" that means the result might be null, and you
+can't ignore the "null" possibility since everything, including inappropriate
+use of null values, is checked at compile-time.
+
+As far as things like Storage_Error, or Window_Error, or Device_Error, ParaSail
+does include a mechanism for effectively terminating a computation.  Although
+this might seem to be just an exception in sheep's clothing, the termination
+instigator must be lexically nested within the construct being terminated.
+Essentially, an "exit" statement may be used to exit an enclosing block, and as
+a side-effect terminate any other parallel computations taking place within the
+block.  It turns out by requiring the instigator of the termination to be
+lexically nested, a lot of nasty problems associated with exceptions and their
+non-local effects go away.
+
+Of course that means you still need some way to communicate to the "instigator"
+of the exit, which could be done in various ways.  One way would be by having a
+thread that "listens" for problem reports that get logged into some queue which
+is passed down to any operation that might "fail" in some potentially
+unrecoverable way, and this listener would decide how to deal with the problems,
+perhaps by "exiting" the associated computation.
+
+I suppose the biggest reason why the "typical" exception model doesn't work in
+ParaSail is that all computations are pervasively parallel, and no language that
+I know of has a good model for propagating exceptions out of threads.  We have
+tried to add some kind of termination handler to Ada, but if you have hundreds
+or thousands of threads popping up all over the place, I doubt that it would
+make much sense.
+
+In any case, it is worth thinking about the experience with Java if we do ever
+consider creating exception "contracts" for Ada. Perhaps the take-away from Java
+is mostly that if you have such contracts, they should be optional, and used
+sparingly.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January  7, 2012   4:14 PM
+
+...
+> In my hobby language you can ("software present tense"! ;-)) attach a
+> postcondition to an exception, separate from the normal postcondition,
+> which specifies what condition will hold if that exception is
+> propagated from this procedure.
+> False means "cannot be propagated", True means the same as the Java
+> thing.  For example, you can say "if this returns normally, then X =
+> X'Old+1, but if it raises Mumble_Error, then X remains unchanged".
+
+In the fantasy message that I sent privately the other day (in a reply to John
+that Tucker was cced on) that I suspect set off this round of discussion I
+lamented that the aspect syntax is not powerful enough to provide proper
+contracts. In particular, I proposed an aspect "Propagates" with a "when" clause
+giving a postcondition.
+
+I was already writing a message about checked vs. unchecked exceptions when your
+note came in. (This is a lot more interesting than actual work. ;-) Leave it to
+say I'm unconvinced. I think it would be better to allow people to declare their
+own convinient groupings of exceptions, and not give any special semantics to
+any grouping.
+
+OTOH, I've heard a lot of complaints about the extra noise in a specification
+from a contract - such specifications can add a lot of text. I don't find this
+compelling, because a well-documented subprogram specification already includes
+a list of exceptions that it propagates in its comments. Making that actual code
+that can be used for analysis and checking doesn't really change anything other
+than making the comments more formal. That seems like a good thing to me!
+
+To take a concrete example from Claw:
+
+    procedure Set_Check (Button : in Radio_Button_Type;
+                         Check  : in Claw.Buttons.Check_Type);
+        -- Set the check state for Button.
+        -- Raises:
+        --      Not_Valid_Error if Button does not have a valid control,
+        --              or if Check = UNKNOWN.
+        --      Windows_Error if Windows returns an error.
+
+vs.
+
+    procedure Set_Check (Button : in Radio_Button_Type;
+                         Check  : in Claw.Buttons.Check_Type) with
+        Propagates => Not_Valid_Error when (not Is_Valid(Button)) or else Check = Unknown,
+        Propagates => Windows_Error, -- if Windows returns an error.
+        Propagates => Non_Preventable_Exceptions;
+        -- Set the check state for Button.
+
+The Not_Valid_Error could usually have been part of a precondition instead.
+(Although that would not work for Claw, as validity can change asynchronously
+based on what the user of the application is doing - if they close the window
+containing the button while this routine is executing, the validity might change
+after the call is made.) You'll have to read my other message to see what
+"Non_Preventable_Exceptions" is, but I'll have to finish writing it first...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January  7, 2012   4:34 PM
+
+I've kept thinking about this instead of doing something more important (which
+would be just about anything else that I could be working on). And I've come up
+with a simple goal statement for exception contracts:
+
+The purpose of an exception contract is to detect, at compile time, the
+unexpected propagation of a preventable exception.
+
+[There are other things that can be accomplished with exception contracts, but
+they are so much less important that I don't need to consider them in the goal.]
+
+Let me break this down a bit.
+
+The goal says "unexpected" for the obvious reason that an expected propagation
+cannot represent a problem. We don't want to detect those (False positives).
+
+The goal says "preventable" because detecting an exception that cannot be
+prevented is close to useless. The only thing you can do is handle it, and often
+that is just covering up a bug.
+
+By "preventable" I mean an exception whose propagation can be
+prevented/eliminated by simple code modifications, contract changes, or (in
+extreme cases) better compiler technology (that is, the better ability to prove
+it is not raised). The best example of an exception that is not preventable in
+general is Storage_Error. It might be preventable with heroic efforts (involving
+knowledge of the complete program and how the compiler involved uses memory),
+but even then those efforts are not transferable to a different compiler.
+
+The question of what to do with non-preventable exceptions is a hard one to deal
+with. My preferred solution is to not even make the distinction, because every
+exception is preventable with enough effort. (It's just impractical to make that
+effort in some cases.) The problem with that is adding noise to specifications.
+(I think that noise can be reduced to acceptable levels so long as the language
+provides a way to give a name to a set of exceptions: "Non_Preventable_Errors
+renames Storage_Error | Tasking_Error | Program_Error |
+IO_Exceptions.Device_Error;". Then one line of a contract will provide this
+information.)
+
+Java tries to deal with this by having two classifications of exceptions.
+That leads to all kinds of issues (such as having to decide which kind a new
+exception is). But the problem is that this is a grey area, exceptions are
+preventable to different degrees. And to some extent the compiler technology
+will determine what exceptions are preventable.
+
+To look at some concrete examples. In the IO_Exceptions, Mode_Error is clearly
+preventable. A precondition/predicate on Read, for instance, would completely
+eliminate any reason for raising the exception. (Side note: Moving the check to
+a precondition or predicate does eliminate the Mode_Error exception, but in the
+general case it just changes it to the less specific Assert_Error or
+Constraint_Error. It's not clear to me that that really is much of a benefit!)
+
+Name_Error is also preventable if the error is raised for malformed syntax of
+the name (although Ada doesn't provide a predicate function for this purpose --
+perhaps it should). It's mostly preventable when it means "not found", although
+there is a race condition if you use a pre-query (via Ada.Directories) -- it
+would not be appropriate to make that check into a precondition for this reason.
+
+End_Error is preventable, but it is rather expensive to do so (requiring
+pre-reading and/or lots of buffering). I think it is better to not try to
+prevent it, but not everyone agrees. (You still see a lot of code calling
+End_of_File.)
+
+OTOH, Use_Error is only preventable with a lot of knowledge of the target
+system, since it reflects permissions and sharing problems. Device_Error is even
+less preventable: even if you pre-tested, it still can happen. (Just because you
+could read a sector successfully once doesn't mean that the next time it is read
+will succeed -- a cosmic ray could have hit it and killed the CRC in between.)
+
+So the choice of how to classify Name_Error and End_Error seem to be mainly user
+taste. It makes no sense for the language to try.
+
+We have similar problems with the predefined exceptions.
+
+Storage_Error is preventable only with heroic efforts. Nuff said.
+
+Tasking_Error is preventable in some cases, but attempting to do so usually runs
+into problems with race conditions. Moreover, compilers probably make these
+checks in a runtime somewhere, so they are not in any position to remove them.
+Still, I can imagine tools proving that this exception is not raised.
+
+Program_Error is such a catch-all that it is hard to reason about. Many of the
+errors are preventable (such as misuse of invalid values of enumeration types).
+But it's not clear that compilers could reason about it enough to make any
+value.
+
+OTOH, Constraint_Error is almost always preventable, usually with a simple
+pretest (if I in 1 .. 10 then A(I) ... or if P /= null then P.all ...).
+Moreover, many man years have been spent in compilers trying to eliminate
+constraint checks. Beyond that, these checks are hard to determine from
+inspection if they are present. All of these things mean that you very well
+might want to prove the absence of Constraint_Error propagate, and it is
+practical to do so. So we definitely want to be able to specify these in
+contracts.
+
+My greater point here is that it is nearly undecidable as to whether an
+exception is usefully preventable or not. If your compiler technology is good
+enough (the "omnipient compiler" of my compiler construction class), there may
+not be any non-preventable exceptions; it is pretty lame, pretty much all of
+them might be. Thus I don't think it is worth the effort to try to classify
+them,  and I don't think there is any real need, either. All we need to do is
+give the users a way to name sets of exceptions (something we talked about for
+Ada 2005 and had slip through the cracks).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January  7, 2012   4:41 PM
+
+...
+> In any case, it is worth thinking about the experience with Java if we
+> do ever consider creating exception "contracts"
+> for Ada. Perhaps the take-away from Java is mostly that if you have
+> such contracts, they should be optional, and used sparingly.
+
+I tend to agree with this.
+
+Of course, they'll have to be optional in Ada, specifically for compatibility
+reasons. There is no way we could consider making them mandatory, just like we
+can't do that for preconditions.
+
+Of course, clueless management might decree otherwise. But I don't think that we
+should be omitting useful language features from Ada simply because some
+pointy-haired boss might misuse them.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January  7, 2012  4:58 PM
+
+> OTOH, I've heard a lot of complaints about the extra noise in a
+> specification from a contract - such specifications can add a lot of
+> text. I don't find this compelling, because a well-documented
+> subprogram specification already includes a list of exceptions that it
+> propagates in its comments. Making that actual code that can be used
+> for analysis and checking doesn't really change anything other than
+> making the comments more formal. That seems like a good thing to me!
+
+I strongly agree!  Claw would be totally unusable if it went around raising
+unknown exceptions for undocumented reasons.  Likewise, the Ada language would
+be totally unusable if you can't tell what might raise what exceptions.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January  7, 2012  5:07 PM
+
+> I've kept thinking about this instead of doing something more
+> important (which would be just about anything else that I could be working on).
+
+Well, I suppose we should both get back to work.  But I'll say: I mostly agree
+with your thinking in this area.  I just disagree with some details, and also,
+my thinking is much more grandiose.  ;-)
+
+Re: Storage_Error: For some (small-memory, embedded, real-time, safety-critical,
+blah, blah) programs, you want to avoid heap, recursion, dynamic arrays, and you
+want the compiler to make 100% sure there's enough memory (may involve
+link-time/whole-program analysis).  Yes, it's non-portable, but if there's not
+enough memory, I want it to refuse to load the program.
+
+For a compiler, on the other hand, you want to use recursion willy-nilly, and
+not worry too much about stack overflow (just stop if it happens).
+
+It must be the programmer's choice, not the language designer's.
+
+And I think there are in-between cases (part of the program statically avoids
+S_E).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January  7, 2012  5:16 PM
+
+> Note that even before reading this "blog," and even though I was never
+> quite so evil as to just "swallow" an exception,
+
+Yeah, it's almost as easy to write:
+
+    when Checked_Exc =>
+        -- This can't happen, because....
+        raise Unchecked_Exc;
+
+instead of:
+
+    when others =>
+        null;
+
+The latter (with no comment!) is just plain evil.
+
+> I had already developed a negative opinion about compile-time-checked
+> exception specifications, strictly from practical experience using
+> Java for non-trivial applications.
+
+Yes, but don't be Mark Twain's cat.  ;-)
+
+One thing Java doesn't have (last time I looked) is needed for things like
+Iterate (in Ada.Containers), which takes an Action parameter.  "Iterate
+propagates whatever exceptions are propagated by Action."  Otherwise, you get
+stuck.  Iterate raises nothing (oops, what should Action do with errors?).  Or
+Iterate raises anything (oops, all call sites must handle anything, leading to a
+mess).  It depends on the particular Action passed at each Iterate call site.
+
+****************************************************************
+
