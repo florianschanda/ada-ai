@@ -1,0 +1,276 @@
+!standard 12.5.6(0)                                 12-01-26    AI12-0019-1/01
+!class Amendment 12-01-26
+!status work item 12-01-26
+!status received 11-04-25
+!priority Medium
+!difficulty Medium
+!subject Generic formal record types
+!summary
+
+**TBD.
+
+!problem
+
+Ada provides generic formals for most categories of types (access, array,
+incomplete, and interface among them), but it doesn't provide any sort
+of formal for (unrelated) record types. This means that packages cannot
+easily be created to exploit the common similarities between types (unlike
+the situation for arrays in particular). Such packages could add complex
+operations to a record type, so long as the record type has the appropriate
+component(s).
+
+Workarounds exist but are not very satisfactory (see the !discussion for
+more on the workarounds).
+
+The key here is that the only thing that should be necessary to match a formal
+record type (beyond the rules that exist for formal private types) is that
+the appropriate components exist in the type; other components in the type
+are irrelevant.
+
+!proposal
+
+Add generic formal record types. The type could contain one or more
+component declarations. This would look something like:
+
+   generic
+      type Rec is record
+         Next : access Rec;
+      end record;
+   package Lists is
+      procedure Insert (Obj : in out aliased Rec; Position : access Rec);
+      procedure Delete (Position : access Rec);
+   end Lists;
+
+"limited" and discriminants would be allowed in the obvious ways.
+
+Matching rules for a formal record type would be approximately:
+(1) The actual type must be a record type, and otherwise has the same
+    requirements as the actual type for a formal private type;
+(2) The actual type would need to have a component with the name of the
+    formal component, or have a component with the name specified with
+    the actual type, this is the *matching component*;
+(3) The type of the matching component must statically match the type of
+    the formal component.
+
+We would allow specifying the name of the component along with the formal
+type. This would look something like:
+
+    package My_List is new Lists (Rec => My_Rec (Next => Following_Item));
+
+In this case, My_Rec needs to have a component Following_Item with type
+access Rec.
+
+Finally, formal incomplete types should be extended so that they could be
+used just as they are in a normal declarative part, allowing a named (formal)
+access type to be used in a recursive type. (See the example.) This is
+necessary so that access types with proper storage pools (and subpools!) can
+be used with such generics.
+
+!wording
+
+** TBD.
+
+!discussion
+
+Various workarounds exist to do this in Ada 2005:
+
+(1) Formal derived types were touted as a way to get formal records in
+Ada 95. They however require the types to be closely related. For untagged
+record types, it is very rare that the types are derived. Moreover, this
+requires that the types contain the same components, which greatly reduces
+the utility of the generic -- most likely, it would be easier to do a "source
+code generic" and just make a copy of the code and modify it rather than trying
+to be make it directly reusable.
+
+(2) Formal derived tagged types can give (direct) access to the components of
+the ancestor type. This provides a direct solution to the problem, however,
+there are two drawbacks. First, all of the types involved have to be derived
+from a common root. This limits the usability of the mechanism, since Ada
+only allows on concrete root type for each tagged type. It isn't possible
+to add a component to an existing type and use it this way. Second, the types
+have to be tagged. When there will be many of these objects created, the
+overhead of a tag (and often finalization) is too substantial to be practical.
+
+(3) The generic can use a formal private type and pass a pair of accessor
+(getter/setter) subprograms as formal subprograms. This is the most flexible
+solution, but it requires writing getter/setter subprograms and probably will
+involve extra overhead for using those subprograms.
+
+(4) A formal interface type can be defined that provides the needed operations.
+However, this approach combines the worst features of (2) and (3): the types
+involved need to be tagged, and getter/setter subprograms are needed. So this
+is not a reasonable solution in most cases.
+
+---
+
+This proposal is implementable for a generic sharing implementation. The
+only difficulty is that the exact offset of the formal component(s) would
+not be known until instantiation time (and thus would have to passed as a
+parameter to the generic body). Access to the component(s) would be the same
+as access to a similar array component, so that would not add any complications.
+
+---
+
+Alternatives:
+
+A couple alternative solutions come to mind.
+
+First, if we somehow made it easier to create getter/setter subprograms for
+a component, then workaround (3) [that is, using a formal private type] becomes
+more tolerable. One way to do this is to imagine that component selection is
+syntactic sugar for a pair of (automatically created) getter/setter subprograms.
+(One could imagine an aspect to allow overriding these with user-defined
+routines, essentially allowing '.' to be user-defined -- but I digress.) Then,
+if some convinient syntax is provided to refer to the getter/setter subprograms
+in an instance, we can use them to create a generic using just the existing
+formal types. There still would be some runtime overhead, but aggressive
+optimizations by implementations could eliminate that. This might be a
+better approach, but only if we plan to get other benefits from these
+"automatic" getter/setter subprograms.
+
+Second, if we allowed full multiple inheritance in Ada, solution (2) would
+become far more practical (as the 'generic' components could be added
+to any interesting tagged type). We'd still have the overhead of a tag,
+but there wouldn't be a requirement to have all of the types derived from
+a common root. OTOH, supporting multiple inheritance is problematical for
+Ada (or any language, for that matter), and the number of worms escaping from
+the multiple inheritance can is substantial, so this solution should only be
+considered if we're seriously planning to do this anyway.
+
+!example
+
+A list sorting type could be defined as:
+
+     generic
+         type Rec;
+         type Acc_Rec is access Rec;
+         type Rec is record
+             Next : Acc_Rec;
+         end record;
+         with function "<" (Left, Right : Acc_Rec) return Boolean is <>;
+     procedure List_Sort (Head_of_List : Acc_Rec);
+
+This would work the linked list of records starting with Head_of_List. The only
+requirement would be that the record type contain a Next component.
+
+This could be used with the following types:
+
+    type Inventory_Item;
+    type Inventory_Item_Ptr is access Inventory_Item;
+    type Inventory_Item is
+       Item_Code  : Natural;
+       Item_Count : Natural;
+       Next       : Inventory_Item_Ptr;
+    end record;
+
+    Inventory_List : Inventory_Item_Ptr;
+
+    function "<" (Left, Right : Inventory_Item_Ptr) return Boolean is
+    begin
+       return Left.Item_Code < Right.Item_Code;
+    end "<";
+
+    procedure Inventory_Sort is new
+       List_Sort (Inventory_Item, Inventory_Item_Ptr, Inventory_Item, "<");
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Monday, April 25, 2011  3:54 PM
+
+I've been thinking a lot about generic formals lately (because of the formal
+incomplete proposal), and I've had a number of wild thoughts that I wanted to
+record on the record for possibly use in Ada 2020 or maybe Ada 2199 :-).
+
+Most kinds of entities have an associated generic formal; adding formal
+incomplete types will add another such formal. I started thinking about the ones
+that *don't* have associated generic formals; are these holes that should be
+fixed someday? So here are some musings on possible additional kinds of generic
+formals.
+
+-- Formal exceptions
+
+Ada 95 added a hack rather than adding formal exceptions. The hack has tended to
+be sufficient, but it seems likely to me that sooner or later, we'll have to add
+real formal exceptions. If we ever add real exception contracts to the language,
+we'll need some way to write those in a generic, and that suggests that formal
+exceptions will be needed for that. In any case, the semantics are pretty
+straightforward.
+
+-- Formal private types (formal partial view)
+
+We of course already have formal private types, but I was thinking in the sense
+of a formal partial view -- such a view could only be used in the ways that an
+unfrozen private type can be used. In particular, no initialized stand-alone
+objects. The assumption of course is that the type will be frozen in its scope,
+so there would be no need to worry about it here. This is what we really need in
+the current case. But this doesn't allow a lot that a formal incomplete does not
+(mostly declarations of components), and it really feels like a place where
+"thar be dragons". So I hope I never think of this idea again. ;-)
+
+-- Formal protected types
+
+Not quite what form these would take. We already have some of this mechanism
+available via synchronized interfaces; perhaps that is enough.
+
+-- Formal task types
+
+Same here.
+
+-- Formal record types
+
+There are some partial solutions to this using formal derived types. But those
+require the types to be related, which is unlikely and usually not what you want
+for untagged types. What we really need is a way to allow any record type that
+has the appropriate components to match. This would look something like:
+
+     generic
+         type Rec is record
+             Next : access Rec;
+         end record;
+     package Lists is
+         procedure Insert (Obj : in out aliased Rec; Position : access Rec);
+         procedure Delete (Position : access Rec);
+     end Lists;
+
+The matching rules would be something like:
+   * A component with the same identifier (Next in this example) must exist in
+     the record.
+   * That component shall not be discriminant-dependent.
+   * The type of the component statically matches (after substitution with the
+     actual types).
+
+The record type could have as many other components as needed.
+
+As shown by this example, such a formal would allow addition of operations based
+on structural characteristics. This example is adding list insert and delete
+operations to any singly linked record type. (I'd get a lot of use out of a
+generic like this!)
+
+Two issues come to mind: (1) There would need to be some way to rename
+components so that it wouldn't be necessary to use exactly the same names all
+the time. Perhaps some mechanism for naming the components in the actual part
+would also work. (2) I tried to use a named access type in this example, but the
+two types became circular. We could use a formal incomplete for that, but that
+would require additional matching rules:
+
+     generic
+         type Rec;
+         type Acc_Rec is access Rec;
+         type Rec is record
+             Next : Acc_Rec;
+         end record;
+     package Lists2 is
+         procedure Insert (Obj : in out aliased Rec; Position : Acc_Rec);
+         procedure Delete (Position : Acc_Rec);
+     end Lists2;
+
+We'd need some rule requiring the second Rec to be the completion of the first.
+
+Anyway, food for thought.
+
+****************************************************************
