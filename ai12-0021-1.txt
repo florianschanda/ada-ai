@@ -1,0 +1,125 @@
+!standard A.16(0/3)                                 12-03-13    AI12-0021-1/01
+!class Amendment 12-03-13
+!status work item 12-02-25
+!status received 12-02-25
+!priority High
+!difficulty Hard
+!subject Additional internationalization of Ada
+!summary
+
+**TBD.
+
+!proposal
+
+In addition to the facilities already provided,
+
+(1) File and directory operations should support Unicode characters (presuming
+that the target file system does so);
+
+(2) Exception messages and exception information should support Unicode
+characters;
+
+(3) Command lines should support Unicode characters (presuming that the target
+system allows these).
+
+!wording
+
+** TBD.
+
+!discussion
+
+These issues defy an easy solution. Changing the behavior of the existing routines
+would break existing workarounds (which on some targets, like most Linux systems,
+have no problems with directly using UTF-8 strings) and other commonly used
+functionality (like encoding binary data in exception messages).
+
+Adding even more Wide_Wide_ packages and routines is madness, and may not even make
+sense on many targets.
+
+The crux of this problem is that the semantics and representation of strings have
+become co-mingled. What we really need to do is to separate these; the problem with
+that mostly with retaining adequate performance.
+
+The way-out solution would be to declare a semi-magic Root_String interface (or
+perhaps an abstract type); the
+magic would be string literals (since "lvalue"s and indexing already can be
+supported with existing Ada 2012 facilities). Something on the line of:
+
+        package General_Strings is
+            type Root_String is interface with
+                Constant_Indexing => Get_Char,
+                Variable_Indexing => Set_Char,
+                String_Literal => Assign; -- A string literal calls this procedure.
+
+
+            function Get_Char (A : Root_String; I : Positive) return Wide_Wide_Character;
+                -- Returns the Ith character of A (regardless of the representation of A).
+
+            type LValue (D : access Wide_Wide_Character)
+               with Implicit_Dereferencing => D
+               is null record;
+
+            function Set_Char (A : in out Root_String; I : Positive) return LValue;
+                -- Returns a reference to the Ith character of A (regardless of the
+                -- representation of A).
+
+            function Slice (A : Root_String; L : Positive; R : Natural) return Wide_Wide_String;
+                -- Returns a slice of the string. (Not sure if this is a good idea, or best left out.)
+
+            -- One imagines an LValue slice as well; I'll leave that as an exercise for the reader.
+
+            procedure Assign (Trg : in out Root_String; Src : in Wide_Wide_String);
+                -- Assigns Src to Trg, converting the representation as needed.
+
+            function Value (Obj : Root_String) return Wide_Wide_String;
+                -- Retrieves the value of Obj as a Wide_Wide_String.
+
+            -- "&" defined in the expected way.
+
+            -- The stream attributes would be expected to work for these; perhaps they'd need
+            -- to be part of the interface.
+
+        end General_Strings;
+
+
+[Note: I didn't try to think of good names for these routines and parameters; that would need to
+done, of course.]
+
+Then we'd have a bunch of concrete instances:
+
+        type Latin_1_String (L, R : Positive) is new General_Strings.Root_String with
+            Obj : String (L .. R);
+
+        -- The obvious implementations of the routines.
+
+        
+        type Bounded_UTF_8_String (Byte_Len : Natural) is new General_Strings.Root_String with
+            Obj : UTF_8_String (1 .. Byte_Len);
+
+        -- The not-quite-so-obvious implementations of the routines.
+
+and so on for every interesting representation.
+
+In addition, we'd have Ada.Strings.General (which would have approximately the contents of
+Ada.Strings.Fixed, with all of the String parameters converted to Root_String'Class). And
+most of the IO routines that take strings would have versions that would take Root_String'Class
+(these would need different names or packages, unfortunately, to avoid ambiguity). Similarly
+for exception messages, and so on.
+
+The real key here is that the string types would carry their representation along when passed
+into routines (which have to be new for this reason). Once that is available, then any problems
+can be dealt with by simply using whatever representation is appropriate for the target system.
+
+This clearly will need a lot of work...
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+This AI was created from the ashes of AI05-0286-1 (that is, those portions
+that defied an easy solution).
+
+****************************************************************
+
