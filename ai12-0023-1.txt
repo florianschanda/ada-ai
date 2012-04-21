@@ -1,0 +1,1078 @@
+!standard 6.1.1(0/3)                                 12-04-20    AI12-0023-1/01
+!class Amendment 12-04-20
+!status work item 12-04-20
+!status received 12-01-29
+!priority Medium
+!difficulty Hard
+!subject Make Root_Stream_Type an interface
+!summary
+
+**TBD.
+
+!proposal
+
+It is annoying that it is impossible to make a type which is both a stream and
+controlled (because these are separate abstract types). There are
+ways to have the effect of this, such as having a controlled component in a
+Stream type, but it is a bit awkward, and perhaps not obvious for someone is
+trying to create such an abstraction.
+
+A better idea would be to make Ada.Streams.Root_Stream_Type into an interface.
+
+!wording
+
+** TBD.
+
+!discussion
+
+Just making Ada.Streams.Root_Stream_Type into an interface would be
+incompatible, for two reasons:
+
+(1) Interfaces cannot be hidden, while abstract types can. Thus, the following
+is illegal if Root_Stream_Type is an interface:
+
+     private with Ada.Streams;
+     package My_Stream is
+
+        type T is tagged limited private;
+
+     private
+
+        type T is new Root_Stream_Type with null record;
+
+        overriding procedure Read
+           (Stream : in out T;
+            Item   : out Stream_Element_Array;
+            Last   : out Stream_Element_Offset);
+
+        overriding procedure Write
+           (Stream : in out T;
+            Item   : Stream_Element_Array);
+
+     end My_Stream;
+
+(2) Types do not inherit limitedness from interfaces, while they do
+inherit it from abstract types. Thus:
+
+    type T is new Root_Stream_Type with -- no "limited" here
+        record
+            X: Some_Limited_Type; -- (A)
+        end record;
+
+(A) is legal in Ada now, but would be illegal if Root_Stream_Type is an
+interface.
+
+(1) is not very likely to occur in practice (why hide streamability?), but
+(2) is quite likely to happen (indeed, the GNAT runtime has several instances
+of it). At the very least, we would need to do something to eliminate (2) before
+making this change.
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Brad Moore
+Sent: Sunday, January 29, 2012  11:57 AM
+
+One of the Canadian reviewers raised a comment during the National Body Review,
+asking if Ada.Streams.Root_Stream_Type could be modified to be an interface,
+rather than an abstract type.
+
+This would for example, facilitate creating controlled stream types. There are
+ways to do this now, such as having a controlled component in a Stream type, but
+it is a bit awkward, and perhaps not obvious for someone is trying to create
+such an abstraction.
+
+It would be much nicer if one could simply say, for example;
+
+    with Ada.Finalization; use Ada.Finalization;
+    with Ada.Streams; use Ada.Streams;
+
+     package My_Stream is
+          type T is new Limited_Controlled and Root_Stream_Type with private;
+     private
+        ...
+     end My_Stream;
+
+Making Root_Stream_Type an interface however, would introduce an incompatibility
+for cases where types have private streams. For example, the following legal
+code becomes illegal if we make Root_Stream_Type an interface, since hidden
+interfaces are not allowed by 7.3 (7.3/2).
+
+     private with Ada.Streams;
+     package My_Stream is
+
+        type T is tagged limited private;
+
+     private
+
+        type T is new Root_Stream_Type with null record;
+
+        overriding procedure Read
+           (Stream : in out T;
+            Item   : out Stream_Element_Array;
+            Last   : out Stream_Element_Offset);
+
+        overriding procedure Write
+           (Stream : in out T;
+            Item   : Stream_Element_Array);
+
+     end My_Stream;
+
+However, the incompatibility is easy to fix.
+    Simply change
+        type T is limited private;
+     in the visible part of the package to
+        type T is limited new Root_Stream_Type with private;
+
+One also has to wonder how often types are declared with private streamability
+in practice. Hiding the Read and Write primitives, for example, means that the
+type cannot be used for streaming external to the package.
+
+In digging into this issue, I discovered that this issue had been raised in the
+past on Ada comment. (See the attached AC-00190.TXT)
+
+I asked Randy about this, and he said that the issue was never voted on by the
+ARG, and that if I wanted to raise the issue, I should ask the ARG for full
+consideration of AC-00190.TXT.
+
+If someone were to second this motion, then then the issue would get put into an
+AI12.
+
+I think the issue is worth pursuing, so I am asking the ARG for full
+consideration of AC-00190.TXT.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, January 29, 2012  12:37 PM
+
+> One of the Canadian reviewers raised a comment during the National
+> Body Review, asking if Ada.Streams.Root_Stream_Type could be modified
+> to be an interface, rather than an abstract type.
+
+Probably a good idea, except:
+
+> Making Root_Stream_Type an interface however, would introduce an
+> incompatibility for cases where types have private streams.
+
+That kills the idea, for me.
+
+It's also incompatible in another way:
+
+    type T is new Root_Stream_Type with -- no "limited" here
+        record
+            X: Some_Limited_Type; -- illegal if Root_Stream_Type is an interface
+        end record;
+
+And finally, I'll trot out my usual argument: it's too late for this.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, January 29, 2012  6:05 PM
+
+>> Making Root_Stream_Type an interface however, would introduce an
+>> incompatibility for cases where types have private streams.
+>
+> That kills the idea, for me.
+
+Me too, introducing this incoimpatibility is out of the question
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Monday, January 30, 2012  7:55 AM
+
+<<Brad's message>>
+
+I agree with the issue and with your proposed action.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Monday, January 30, 2012  9:18 AM
+
+> And finally, I'll trot out my usual argument: it's too late for this.
+
+A couple of points though.
+
+1) The thought here was that this would form the basis for an AI12, ie.
+Not For Ada 2012, but for the following version of Ada.
+      I presume your argument about it being too late, is referring to
+things we want to roll into Ada 2012.
+
+2) What if we could come up with a way that did not introduce any
+incompatibility?
+
+     For example, say we invented a new aspect, Hideable, that could be
+applied to an interface declaration.
+
+     i.e
+
+    type Root_Stream_Type is limited interface
+                   with => Hideable;
+
+
+     A hideable interface could only be used in an interface_type_definition, a
+     record_type_definition, or a private_type_declaration. In cannot be used in
+     a record extension or a private extension declaration. In addition, if a
+     hideable interface is a limited interface, it is implicitly and immutably
+     limited. You cannot derive a non-limited type from an implicitly limited
+     interface, and you do not need the limited keyword on a
+     record_type_definition or private_type_declaration that derives from an
+     implicitly limited interface.
+
+It seems to me that such a type declaration would not be susceptible to
+the problems that 7.3 (7.3/2) is trying to solve,
+and would also avoid the second incompatibility you mention.
+
+The ability to declare hidden interfaces might be a useful extension to
+the interface concept.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 30, 2012  9:30 AM
+
+> ... The ability to declare hidden interfaces might be a useful
+> extension to the interface concept.
+
+I agree with this in general.  I have not reviewed your particular proposal, but
+I agree that for the next version of Ada, the ability to have "hidden
+interfaces" would definitely be a feature.  Root_Stream_Type and Controlled_Type
+would be obvious candidates.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 30, 2012  10:37 AM
+
+> 1) The thought here was that this would form the basis for an AI12, ie.
+> Not For Ada 2012, but for the following version of Ada.
+
+I call the next version "Ada 2020", because then we can make silly jokes about
+20-20 vision, hindsight, &c.
+
+>       I presume your argument about it being too late, is referring to
+> things we want to roll into Ada 2012.
+
+Yes.  It's not too late for Ada 2020.  One could argue the opposite -- that it's
+premature to be adding features before the ink is dry on the Ada 2012 standard.
+;-)
+
+> 2) What if we could come up with a way that did not introduce any
+> incompatibility?
+
+Then I might be in favor, but only if the solution doesn't add significant
+complexity.  Ada 2012 is over-the-top complex, and I think we should be much
+more conservative next time around.
+
+Simply changing Root_Stream_Type into an interface doesn't add any complexity as
+far as I can see.  But adding a Hideable aspect as you suggest does.  We'd have
+to think this through carefully, because we tried allow hidden interfaces in the
+first place, and ran into all sorts of trouble.  I remember the meeting.  It was
+at SofCheck's office in Burlington.  I think I was the one who suggested cutting
+the gordian knot by making all interfaces public (after all, they're call
+"interfaces").
+
+We currently have "type inherits limitedness from parent".
+Oh, but "except if the parent is an interface". [*] Adding, and another
+exception: "except if the parent is a hideable interface" does not simplify!
+
+[*] Yeah, yeah, I know what a progenitor is, but normal Ada programs don't, and
+should have to.
+
+> It seems to me that such a type declaration would not be susceptible
+> to the problems that 7.3 (7.3/2) is trying to solve, and would also
+> avoid the second incompatibility you mention.
+
+I'm not sure -- maybe you're right.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 30, 2012  10:43 AM
+
+> > ... The ability to declare hidden interfaces might be a useful
+> > extension to the interface concept.
+>
+> I agree with this in general.  I have not reviewed your particular
+> proposal, but I agree that for the next version of Ada, the ability to
+> have "hidden interfaces" would definitely be a feature.
+> Root_Stream_Type and Controlled_Type would be obvious candidates.
+
+Yeah, but you have a seemingly-infinite tolerance of language complexity,
+perhaps because you're smarter than the average language lawyer.  ;-)
+
+We need to find a way to rein in the complexity.  That's hard, because we vote
+on individual features, and for each one, we say, "yeah sounds kind of useful,
+and not terribly complex by itself".  I'm not sure how ARG can view the "big
+picture".
+
+I find it disturbing that no single person has read the Ada 2012 manual from
+cover to cover, because it's just too big.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 30, 2012  11:14 AM
+
+> Yeah, but you have a seemingly-infinite tolerance of language
+> complexity, perhaps because you're smarter than the average language
+> lawyer.  ;-)
+
+Actually, Ada 2012 tested even my tolerance for complexity.
+
+However, I think the current restriction on interfaces adds complexity for the
+user.  I would be interested in reopening the question of whether interfaces
+cannot be hidden. I would personally only be interested in a solution that
+simplified things for the user, and just slapping on a bunch of additional rules
+would not be the answer.  Perhaps it is impossible, or perhaps there is an
+elegant solution waiting out there for us, if we have a bit more time to think
+about it.
+
+> We need to find a way to rein in the complexity.  That's hard, because
+> we vote on individual features, and for each one, we say, "yeah sounds
+> kind of useful, and not terribly complex by itself".  I'm not sure how
+> ARG can view the "big picture".
+
+I completely agree.  In fact, this is the first specific proposal that I have
+seen that feels worth investigating in the context of Ada 2020, in that the "no
+hidden interfaces" rule feels like a "wart."  The "no nested type extensions" of
+Ada 95 also felt like a "wart," and I am glad we figured out a way to eliminate
+it in Ada 2005.  It added complexity for the implementor, but didn't really
+affect the typical user, who can now extend types wherever it is appropriate.
+The "no hidden interfaces" might have a straightforward solution for the user as
+well, but perhaps not.  But it feels like it might be something worth
+investigating.
+
+> I find it disturbing that no single person has read the Ada 2012
+> manual from cover to cover, because it's just too big.
+
+If it is any comfort, I have now read large parts of the C++ manual, and I can
+safely say it makes Ada 2012 look like a "Run, Spot, Run" level primer. ;-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 30, 2012  11:15 AM
+
+>>        I presume your argument about it being too late, is referring
+>> to things we want to roll into Ada 2012.
+>
+> Yes.  It's not too late for Ada 2020.  One could argue the opposite --
+> that it's premature to be adding features before the ink is dry on the
+> Ada 2012 standard.  ;-)
+
+It's too late to make incompatible changes for Ada 2020, because there will
+never be a right time to introduce incompatibilities!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 30, 2012  11:21 AM
+
+> It's too late to make incompatible changes for Ada 2020, because there
+> will never be a right time to introduce incompatibilities!
+
+I'd prefer to keep "incompatible" and "too late" as separate concerns.  Brad has
+switched to a compatible version of his interface proposal, so we can no longer
+use "incompatible" as an argument against it.  Nor can we use "too late", since
+2020 gives plenty of time.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 30, 2012  11:32 AM
+
+> Actually, Ada 2012 tested even my tolerance for complexity.
+
+OK.
+
+> However, I think the current restriction on interfaces adds complexity
+> for the user.  I would be interested in reopening the question of
+> whether interfaces cannot be hidden.
+> I would personally only be interested in a solution that simplified
+> things for the user, and just slapping on a bunch of additional rules
+> would not be the answer.  Perhaps it is impossible, or perhaps there
+> is an elegant solution waiting out there for us, if we have a bit more
+> time to think about it.
+
+Sounds reasonable.
+
+> I completely agree.  In fact, this is the first specific proposal that
+> I have seen that feels worth investigating in the context of Ada 2020,
+> in that the "no hidden interfaces" rule feels like a "wart."
+
+Maybe, but it doesn't seem entirely unreasonable that an "interface" is
+something that is exposed to clients -- that's what the word "interface" means.
+
+>...The "no nested type extensions" of Ada 95 also felt  like a "wart,"
+>and I am glad we figured out a way to eliminate  it in Ada 2005.  It
+>added complexity for the implementor, but  didn't really affect the
+>typical user, who can now extend types  wherever it is appropriate.
+
+Agreed.
+
+> If it is any comfort, I have now read large parts of the C++ manual,
+> and I can safely say it makes Ada 2012 look like a "Run, Spot, Run"
+> level primer. ;-)
+
+Yeah, I know.  And even the supposedly-simple C standard has grown rather
+unwieldy.  And Fortran.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 30, 2012  11:49 AM
+
+>> It's too late to make incompatible changes for Ada 2020, because
+>> there will never be a right time to introduce incompatibilities!
+>
+> I'd prefer to keep "incompatible" and "too late" as separate concerns.
+> Brad has switched to a compatible version of his interface proposal,
+> so we can no longer use "incompatible"
+> as an argument against it.  Nor can we use "too late", since 2020
+> gives plenty of time.
+
+That's fine if the proposal is upwards compatible then my comment does not
+apply.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Monday, January 30, 2012  6:12 PM
+
+>> 2) What if we could come up with a way that did not introduce any
+>> incompatibility?
+> We currently have "type inherits limitedness from parent".
+> Oh, but "except if the parent is an interface". [*] Adding, and
+> another exception: "except if the parent is a hideable interface" does
+> not simplify!
+>
+> [*] Yeah, yeah, I know what a progenitor is, but normal Ada programs
+> don't, and should have to.
+
+Note: This can be simplified to one exception;
+
+      "type inherits limitedness from parent"
+      "except if the parent is a non-hideable interface"
+
+In fact, it would reduce the size of the set of cases that are an exception from
+the main rule.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, January 31, 2012  7:51 AM
+
+>> In fact, this is the first specific proposal that I have seen that
+>> feels worth investigating in the context of Ada 2020, in that the "no
+>> hidden interfaces" rule feels like a "wart."
+
+> Maybe, but it doesn't seem entirely unreasonable that an "interface"
+> is something that is exposed to clients -- that's what the word
+> "interface" means.
+
+Not all clients are public though.
+
+I think in real life, there are public interfaces, and there are hidden
+interfaces. We could consider that the public interface to a car, for example,
+is the steering wheel, gas pedal, brake pedal, gearshift, radio control knobs,
+light switch, windshield-wipers control, etc. These are the interfaces that the
+driver of the car needs to be aware of, in order to drive the car.
+
+But there are many hidden (internal) interfaces as well. The carburetor has an
+interface to the fuel system of the engine, the alternator interfaces to the
+electrical system, the spark plugs have an interface to the combustion chamber,
+the radio has an interface to the speakers, etc. These are all internal hidden
+interfaces that the driver of the car should not have to be aware of, but are
+necessary for the vehicle to function. (Maybe not the speakers, but some
+driver's might get mighty annoyed if this interface isn't working)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, January 31, 2012  4:18 PM
+
+> >> 2) What if we could come up with a way that did not introduce any
+> >> incompatibility?
+> > We currently have "type inherits limitedness from parent".
+> > Oh, but "except if the parent is an interface". [*] Adding, and
+> > another exception: "except if the parent is a hideable interface"
+> > does not simplify!
+> >
+> > [*] Yeah, yeah, I know what a progenitor is, but normal Ada programs
+> > don't, and should have to.
+
+I meant, "programMERs don't, and shouldN'T have to."
+
+> Note: This can be simplified to one exception;
+>
+>       "type inherits limitedness from parent"
+>       "except if the parent is a non-hideable interface"
+>
+> In fact, it would reduce the size of the set of cases that are an
+> exception from the main rule.
+
+True, but it's still more complicated to describe and understand.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January 31, 2012  6:38 PM
+
+But this obscures the real problem: the difficulty in describing how a hideable
+interface might work. After all, if that was easy, we would have done it in the
+first place!
+
+Defining the rules and restrictions on a hideable interface will be complex at
+best, and talking about how the concept might be applied if it in fact existed
+completely ignores that. I'm rather dubious that a set of rules that would work
+will pass the Baird filter -- after all, many other good ideas (such as
+grandparent overriding -- which is closely related to this problem) went there
+to die.
+
+I expect the rules needed to add a lot to the complexity of the language. (It
+should be noted that most of the complexity of Ada 2012 exists to keep
+compatibility [or make sense out of] existing language features, many of which
+are mistakes of one degree or other (coextensions, accessibility checks, etc.).
+
+[Let me interrupt this rant to point out that I don't object to someone trying
+to figure this out -- so long as it is for Ada 2020 -- as it's always possible
+that a solution exists and we can't find it if we don't try. My guess is the
+best solution is a new, separate streams interface that we somehow allow to be
+used interchangably.]
+
+To remind everyone of the problem with hidden interfaces, ask yourself what
+happens when a descendant tries to add the hidden interface again? Ada currently
+says that you get new versions of routines (they don't override) when you
+declare new routines with the same profile as ones that are hidden. But that
+doesn't work for interfaces, especially if you can get visibility on both
+versions of the interface (how do you select which one you get).
+
+So it seems necessary to have hidden interfaces break privacy in some sense.
+Since these same types are also inheriting concrete definitions at the same
+time, it's hard to imagine quite how this will work. (Special rules for
+primitives of hidable interfaces? How does that work in a generic? Etc.)
+
+It strikes me that the absolute first requirement for a hidable interface is "no
+null procedure primitives". If all of the primitives are abstract, then they all
+have to be overridden. (Except when the type itself is abstract, which might
+cause trouble. What if a hidable interface is combined with a non-hidable
+interface, and more primitives are added??) That at least would prevent using
+some of the hidden routines in a descendant (a clear violation of privacy).
+
+We're talking about a case like (note: I didn't waste time looking up the names
+of things, this is just an outline):
+     package P is
+        type T is tagged private;
+     private
+        type T is new Streams with null record;
+        procedure Read (A : T; B : Stream_Element_Array; C : Natural);
+        -- Same for Write.
+     end P;
+
+     package P.C is
+        type TT is new T and Streams with null record;
+        procedure Read (A : TT; B : Stream_Element_Array; C : Natural);
+        -- Same for Write.
+     end P.C;
+
+In the body of P.C, we can see both interfaces. The usual Ada rule is that the
+two Reads get different dispatching slots (they don't override each other), but
+that cannot work if the type is used in a dispatching call on Streams'Class. So
+we have to have some sort of wart on the overriding rules, one that necessarily
+breaks privacy.
+
+Note that Bob's suggestion that interfaces are never really hidden applies here.
+Interfaces are either present or not present for a single type, and that has to
+hold even when the interface is applied privately. So the fact that the
+interface is given in the private part inevitably will "leak out". It's hard to
+say for certain if this is a problem, but it doesn't look good on the surface.
+
+Anyway, this looks like a massive can of worms to me. My original thought to
+Brad was that it seemed unlikely that the incompatibilities would really happen
+much in practice. And I thought we should consider whether the gain of making
+root streams an interface would outweigh the small incompatibilities involved.
+(We've done that in other instances, such as composition of equality -- a much
+worse incompatibility, IMHO, as it happens at runtime and cannot be detected by
+tools.)
+
+I don't think interfaces could ever be worth introducing another huge can of
+worms into the language. And changing the way routines override surely could
+have that effect.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, January 31, 2012  7:21 PM
+
+> Anyway, this looks like a massive can of worms to me.
+
+Probably so.
+
+>...My original thought to
+> Brad was that it seemed unlikely that the incompatibilities would
+>really  happen much in practice.
+
+I've done some experiments, and it seems like they do happen in practice.
+I changed it to an interface in GNAT, and tried to run our regression test
+suite, but didn't get that far, because the GNAT run-time system has types that
+depend on inheriting limitedness from the Root_Stream parent. I didn't try
+fixing all those, so I couldn't run the regression test suite itself.
+
+I conclude that simply changing to "interface" won't work.
+Maybe some other solution would, but I skept.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February  1, 2012  4:39 PM
+
+Thanks for the information. In the interest of wasting more time on this because
+it is more interesting than processing comments :-), I've tried to prove that
+the "hideable" interface idea wouldn't work. But I haven't succeeded yet,
+although a number of rules are clearly necessary. Let me outline these for the
+record.
+
+One problem (and probably the worst problem) is the one I outlined yesterday
+about adding a hideable interface to a type that already has it (but hidden). We
+have to prevent that from breaking privacy.
+
+Because it is clear that there are going to be places where both interfaces are
+visible, we need to decide how to handle that. And because treating these as
+different interfaces brings up a load of implementation and usability problems
+(if there are two stream interfaces on a type, which one do we dispatch to? How
+do we choose if we care?), I suggest that we assume that hideable interfaces
+(like other interfaces) can only be on a type once (that means that the two
+different applications of the interface are considered the same in practice, and
+there is only one set of dispatching routines). I think this makes logical
+sense: it should only be necessary to have a way to stream a particular concrete
+type (substitute any interface for "stream" here; if it does make sense to have
+multiple ways, it does not make sense for it to be an interface in the Ada
+sense, hideable or not).
+
+One requirement that is clearly necessary (but probably not sufficient) is that
+we cannot ever inherit a routine that we cannot see. We will need some rules to
+prevent that from happening, either at the derivation point or by what is
+allowed to be hideable.
+
+For a concrete type, that is already true for abstract primitives (they have to
+be overridden). We would not allow invisible routines to provide the bodies for
+these, (but of course if the primitives are visible then of course they can be
+inherited). OTOH, null procedures clearly are trouble: either the new routine is
+null (possibly clobbering an existing non-null routine), or the existing
+routine is inherited, causing privacy leakage. So I think a hideable interface
+cannot have any null primitives.
+
+Second, combining a hideable interface with something else loses the "hideable"
+property. You have to specify it again to get that property on the new type (and
+of course the new type would have to meet all of the properties needed).
+
+Third, you can't add a hideable interface privately to an abstract type.
+This follows from the rule that you can't have any hidden abstract primitives.
+(One could imagine allowing this IFF all of the primitives are declared visibly,
+but what's the point of hiding the interface then?) Relaxing the "no hidden
+abstract primitives" rule is not possible, as doing so would destroy privacy
+(you would have to override routines you do not know about in order to derive
+from such an abstract type -- which is silly).
+
+I do not claim that these three rules are enough, but they seem to be the
+minimum necessary to allow "hideable interfaces". I would expect that we would
+need additional rules to deal with the various Baird-cases that are sure to pop
+up.
+
+Anyway, my conclusion is that we probably do need an AI12 in order to
+investigate this idea fully. I'm still dubious that it will work out in the end,
+but I haven't been able to identify any showstoppers that would prevent it from
+working.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Wednesday, February  1, 2012  9:03 PM
+
+> But this obscures the real problem: the difficulty in describing how a
+> hidable interface might work. After all, if that was easy, we would
+> have done it in the first place!
+
+Well maybe its easier now that we have some infrastructure in place. (eg,
+Definitions for immutably limited, and aspects, for instance).
+
+It is not clear to me at this point if the direction I was taking can lead
+toward a workable solution, or whether it will lead to a dead end, (putting
+perceived complexity aside)
+
+But there does seems to be interest in exploring the problem space for solution
+possibilities for Ada 2020.
+
+The good news is we have lots of time to explore. At this point, we don't know
+if we are opening a can of worms, a can of beans, or a can of ice cold beer.
+
+Obviously the best solution is the one we'd want to go with, if we can find one
+at all.
+
+Looking at what I had proposed, I see already some errors that did not capture
+my intent, plus Randy raised some good points below, and in his most recent
+email.
+
+My proposal has some significant differences from Randy's, and while the ideas
+are still fresh in my mind and still toying with the idea, I thought it would be
+good to incorporate some of the good points Randy has already brought up, and
+integrate into my thoughts, and hopefully provide another option for an approach
+that might work.
+
+Here is a more detailed description of my thoughts, with some refinements and
+corrections.....
+
+================================================================================
+
+The basic idea was to avoid overriding problems by disallowing problematic type
+derivations.
+
+- Essentially, a view of a hidable interface becomes a view of an abstract
+  record_type_definition within a derived_type_definition where the
+  parent_subtype_indication is abstract or is of a non-interface type that has
+  ancestors. (i.e. It cannot appear in an interface_list for such a declaration,
+  and an abstract type cannot have a hidable interface).
+
+- A hidable interface cannot appear in the interface list of a
+  private_extension_declaration (similarly, because it is a view of an abstract
+  record_type_definition).
+
+- A hidable interface can have null procedure primitives, as opposed to Randy's
+  proposal where they cannot. I'm not absolutely sure about this, but in this
+  proposal, a null procedure of a hidable interface can only be introduced once
+  to a concrete type. Any further introduction of interfaces cannot be hidable,
+  and any reoccurrences of primitives with the same profile would be an
+  override.
+
+- For a tagged formal private type, or tagged formal derived type, it is assumed
+  the actual has ancestors that are non-interfaces. (i.e, a hidable interface
+  cannot appear in the interface_list for any derivations of a tagged formal
+  private type, or tagged derived formal private type, because it is a view of
+  an abstract record_type_definition)
+
+- For formal interface types, the actual cannot be a hidable interface. (It's a
+  view of an abstract record_type_definition, which is not an interface)
+
+- The hidability is not inherited. An Interface that derives from a hidable
+  interface unless it also has the hidable aspect specified as True.
+
+Rather than try to have the aspect hidable force immutability, (as in my initial
+proposal) I think it is better to have two separate aspects. Hidable interfaces
+are a desirable language feature on its own right, and shouldn't be mixed with
+the forced limited derivation, which is only needed to support backwards
+compatibility for types like Root_Stream_Type. This allows Hideable Interfaces
+work much more like regular interfaces.
+
+The hidable aspect can be applied to an interface declaration that indicates
+that the interface can be hidden.
+
+The Limited_Derivation aspect can be applied to an interface declaration that
+indicates that any derivations of that interface are limited types.
+
+So, the original problem with Ada.Streams.Root_Stream_Type can be addressed by
+declaring it like;
+
+    type Root_Stream_Type is limited interface
+        with Hidable, Limited_Derivation;
+
+Which actually also reads nicely.
+
+This way, Bob's exception seems less complex, or at least more intuitive. "type
+inherits limitedness from parent" "except if the parent is an interface without
+Limited_Derivations aspect True " Hidability has nothing to do with this, and
+does not impact limitedness, on its own, so that seems to make that aspect quite
+a bit less complex.
+
+I'm thinking there may be times when you would want to use the
+limited_derivation aspect by itself without the Hidable aspect, and similarly,
+you might want the hidable aspect without the Limited_Derivation aspect.
+
+There likely are more holes that need to be addressed, but maybe this captures
+the bulk of the idea. With these ideas in mind, lets see how Randy's questions
+would be addressed by this proposal. See below....
+
+----------------------------------------------------------------------------------------------------
+On 31/01/2012 5:37 PM, Randy Brukardt wrote:
+> To remind everyone of the problem with hidden interfaces, ask yourself
+> what happens when a descendant tries to add the hidden interface
+> again? Ada currently says that you get new versions of routines (they
+> don't override) when you declare new routines with the same profile as ones that are hidden.
+> But that doesn't work for interfaces, especially if you can get
+> visibility on both versions of the interface (how do you select which one you get).
+
+In this case, the descendant would not be allowed to add the the hidden
+interface again. The rules are intended to prevent this from happening.
+
+> So it seems necessary to have hidden interfaces break privacy in some sense.
+> Since these same types are also inheriting concrete definitions at the
+> same time, it's hard to imagine quite how this will work. (Special
+> rules for primitives of hidable interfaces? How does that work in a
+> generic? Etc.)
+
+I dont think there should be a need to break privacy with this proposal, or at
+least I don't see it.
+
+> It strikes me that the absolute first requirement for a hidable
+> interface is "no null procedure primitives".
+
+As I mentioned above, I think with this proposal, null procedure primitives
+might actually be OK.
+
+>   If all of the primitives are abstract, then they all have to be
+> overridden. (Except when the type itself is abstract, which might
+> cause trouble. What if a hidable interface is combined with a
+> non-hidable interface, and more primitives are added??) That at least
+> would prevent using some of the hidden routines in a descendant (a
+> clear violation of privacy).
+
+Hidable interfaces can be combined with non-hidable interfaces, so long as there
+are no ancestors that are non-interfaces. Hidability is not inherited, which
+helps here also.
+
+> We're talking about a case like (note: I didn't waste time looking up
+> the names of things, this is just an outline):
+>       package P is
+>          type T is tagged private;
+>       private
+>          type T is new Streams with null record;
+>          procedure Read (A : T; B : Stream_Element_Array; C : Natural);
+>          -- Same for Write.
+>       end P;
+>
+>       package P.C is
+>          type TT is new T and Streams with null record;
+>          procedure Read (A : TT; B : Stream_Element_Array; C : Natural);
+>          -- Same for Write.
+>       end P.C;
+>
+> In the body of P.C, we can see both interfaces. The usual Ada rule is
+> that the two Reads get different dispatching slots (they don't
+> override each other), but that cannot work if the type is used in a
+> dispatching call on Streams'Class. So we have to have some sort of
+> wart on the overriding rules, one that necessarily breaks privacy.
+
+With my proposal, P.C would not be allowed to use the Streams interface, so this
+wouldn't be a problem.
+
+> Note that Bob's suggestion that interfaces are never really hidden
+> applies here. Interfaces are either present or not present for a
+> single type, and that has to hold even when the interface is applied
+> privately. So the fact that the interface is given in the private part inevitably will "leak out".
+> It's hard to say for certain if this is a problem, but it doesn't look
+> good on the surface.
+
+Hopefully it's not a problem...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February  1, 2012  9:57 PM
+
+> > But this obscures the real problem: the difficulty in describing how
+> > a hidable interface might work. After all, if that was easy, we
+> > would have done it in the first place!
+...
+...
+> > To remind everyone of the problem with hidden interfaces, ask
+> > yourself what happens when a descendant tries to add the hidden
+> > interface again? Ada currently says that you get new versions of
+> > routines (they don't override) when you declare new routines with
+> > the same profile as ones that are hidden.
+> > But that doesn't work for interfaces, especially if you can get
+> > visibility on both versions of the interface (how do you select
+> > which one you get).
+>
+> In this case, the descendant would not be allowed to add the the
+> hidden interface again.
+> The rules are intended to prevent this from happening.
+
+That would be horribly privacy breaking, would it not? The descendant doesn't
+have visibility on the parent, so it doesn't "know" that the parent has this
+interface. (That's the whole point of hiding it.)
+
+> > So it seems necessary to have hidden interfaces break privacy in
+> > some sense.
+> > Since these same types are also inheriting concrete definitions at
+> > the same time, it's hard to imagine quite how this will work.
+> > (Special rules for primitives of hidable interfaces? How does that
+> > work in a generic? Etc.)
+> I dont think there should be a need to break privacy with this
+> proposal, or at least I don't see it.
+
+Banning adding interfaces again is definitely privacy breaking, unless you have
+something else in mind? (Only if there is some point where both interfaces are
+visible *might* be OK, but still nasty.)
+
+> > It strikes me that the absolute first requirement for a hidable
+> > interface is "no null procedure primitives".
+> As I mentioned above, I think with this proposal, null procedure
+> primitives might actually be OK.
+
+I think you are breaking privacy far worse than just banning null procedures
+would.
+
+...
+> > We're talking about a case like (note: I didn't waste time looking
+> > up the names of things, this is just an outline):
+> >       package P is
+> >          type T is tagged private;
+> >       private
+> >          type T is new Streams with null record;
+> >          procedure Read (A : T; B : Stream_Element_Array; C : Natural);
+> >          -- Same for Write.
+> >       end P;
+> >
+> >       package P.C is
+> >          type TT is new T and Streams with null record;
+> >          procedure Read (A : TT; B : Stream_Element_Array; C : Natural);
+> >          -- Same for Write.
+> >       end P.C;
+> >
+> > In the body of P.C, we can see both interfaces. The usual Ada rule
+> > is that the two Reads get different dispatching slots (they don't
+> > override each other), but that cannot work if the type is used in a
+> > dispatching call on Streams'Class. So we have to have some sort of
+> > wart on the overriding rules, one that necessarily breaks privacy.
+> With my proposal, P.C would not be allowed to use the Streams
+> interface, so this wouldn't be a problem.
+
+But change P.C into Q. The same problems exist, but now there is no visibility
+into P (anywhere). You still have two streams interfaces, and you can use type
+conversions to get into P and dispatch from there. Which one do you get?
+
+If the answer is Q.TT is still illegal, you've destroyed privacy. If the
+interface is really hidden, then it's presence cannot affect the legality of any
+code that cannot see it.
+
+If the answer is that both interfaces get added, and which Read you dispatch to
+depends on where you dispatch, you are on the path to madness.
+
+So I think the Read has to override, and that requires "complete" overriding of
+all of the primitives of a hideable interface (in case it is added in the
+private part somewhere).
+
+Nice try, but I think you have to get closer to my suggestion.
+
+I do like the idea of separating out the limited derivation problem. I don't
+think that is a major issue semantically, and perhaps the *real* solution is to
+add such an aspect and then just make Root_Stream_Type an interface. That would
+be incompatible in a few unusual cases, but it doesn't make much sense to hide
+streamedness (unlike controlledness). The problems Bob reported would be taken
+care of by the new aspect. Then maybe he could tell us if hidden streaming
+actually happens in practice.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, February  2, 2012  4:06 PM
+
+> But there does seems to be interest in exploring the problem space for
+> solution possibilities for Ada 2020.
+
+I hope you won't be offended if I don't pay attention to this proposal until a
+couple of years after the ink is dry on the final Ada 2012 Standard.  ;-)
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, February  2, 2012  5:13 PM
+
+Thats totally fine with me.This all started from a comment raised by one of the
+canadian reviewers. It seemed like a good issue to raise, not knowing where it
+would end up. I think the reviewer will be happy to know that his comment
+received attention, and that it likely will receive future attention some time
+down the road, after the ink dries, as you say.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April 20, 2012  11:27 PM
+
+I'm creating an AI from this old thread, and rereading the mail shows that I
+never read Brad's last proposal for hideable interfaces very carefully. I made
+some comments, but there are a couple of others that trump those. So I'd like a
+put a couple of comments on the record here:
+
+...
+> Here is a more detailed description of my thoughts, with some
+> refinements and corrections.....
+> ==============================================================
+> ==================
+>
+> The basic idea was to avoid overriding problems by disallowing
+> problematic type derivations.
+
+This sounds like a good idea, except that it completely misses the point (coming
+up with a way to eliminate incompatibilities from switching Root_Stream_Type
+from abstract to an interface). That is, as soon as you start making type
+derivations illegal, you're reintroducing the incompatibility (as there might be
+existing code structured that way). There is also the problem that such type
+derivations are likely to require privacy breaking in order to determine if
+there is a problem.
+
+I was trying to approach this with the idea that the only restrictions could be
+on the form of the original type declaration/primitives. That way, there are no
+possible incompatibities with existing code.
+
+> - Essentially, a view of a hidable interface becomes a view of an
+> abstract record_type_definition within a derived_type_definition where
+> the parent_subtype_indication is abstract or is of a non-interface
+> type that has ancestors.
+> (i.e. It cannot appear in an interface_list for such a declaration,
+> and an abstract type cannot have a hidable interface).
+
+This surely would prevent Root_Stream_Type from being "added" as an interface to
+almost any existing type. Indeed, when would it be legal to use one of these as
+an interface? Almost of my tagged types are derived from (limited_)controlled,
+and it would never be legal to use either (limited_)controlled [which are
+abstract] nor a type derived from them as the ancestor. Isn't that the
+motivating example (wanting to have a type which is both a stream and
+controlled??)
+
+I suppose you could be assuming that controlled is also a hidable interface, but
+you ought to forget that. That won't happen unless you kill off the existing
+implementers, as it would require supporting full multiple inheritance for
+components. (Humm, actually, with this incredibly restrictive model, it actually
+would work, because you could do nothing beyond create a base type out of
+interfaces with it. The problem being that everyone is expecting to be able to
+add these interfaces to existing hierarchies, and a model that doesn't allow
+that is never going to fly.)
+
+Besides, interfaces are abstract, so even adding interfaces together
+that wouldn't work with these rules.
+
+> - A hidable interface cannot appear in the interface list of a
+> private_extension_declaration (similarly, because
+>    it is a view of an abstract record_type_definition).
+
+Again, see above.
+
+> - A hidable interface can have null procedure primitives, as opposed
+> to Randy's proposal where they cannot.
+> I'm not absolutely sure about this, but in this proposal, a null
+> procedure of a hidable interface can only be introduced once to a
+> concrete type. Any further introduction of interfaces cannot be
+> hidable, and any reoccurrences of primitives with the same profile
+> would be an override.
+
+This is surely true, since it's never legal to use a hideable interface in this
+model as an interface! So what's the point?
+
+I see my previous comments about breaking privacy (back in February) and
+incompatibility were wrong, because this proposal never allows using an
+interface as a progenitor. So you can't break privacy, and you can't be
+incompatible, because you can't use the type for anything interesting. The
+problem is that you now have a lot of mechanism for almost no gain. I don't see
+that flying - I would hope this is about more than just being able to declare a
+controlled stream type.
+
+Anyway, more food for thought on this idea.
+
+****************************************************************
