@@ -1076,3 +1076,290 @@ controlled stream type.
 Anyway, more food for thought on this idea.
 
 ****************************************************************
+
+From: Bob Duff
+Sent: Saturday, April 21, 2012  8:57 AM
+
+> I'm creating an AI from this old thread, and rereading the mail shows
+> that I never read Brad's last proposal for hideable interfaces very carefully.
+
+I'm still opposed to adding hideable interfaces.  In fact, I'm pretty much
+opposed to any large new features until the dust settles.  Preferably, there
+should be 2 or more Ada compilers in the world first.
+
+>...That won't happen unless you kill off the  existing implementers, as
+>it would require supporting full multiple  inheritance for components.
+
+In GNAT, types [Limited_]Controlled have no components (other than the Tag
+field).  I think Rational/IBM is the same.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, April 24, 2012  12:57 AM
+
+> I'm creating an AI from this old thread, and rereading the mail shows
+> that I never read Brad's last proposal for hideable interfaces very
+> carefully. I made some comments, but there are a couple of others that
+> trump those. So I'd like a put a couple of comments on the record here:
+
+I've been giving my earlier proposal some thought, and I think I have come up
+with a simpler model, that is easier to understand.
+
+Here is the meat of the new and improved proposal.
+
+A hidable interface can be added to the private or public part of a declaration,
+so long as that declaration is not derived from an ancestor that is a private
+type or a private extension (unless it is a private type that is visibly
+declared to have the No_Hidden_Interfaces aspect).
+
+A hidable interface cannot be added to the private completion of an abstract
+type declaration.
+
+In other words, this is an assume-the-worst type of rule. If any ancestor has a
+non-visible completion, then it is assumed that the non-visible completion could
+have any hidable interface, so you are not allowed to add further hidable
+interfaces to any derivations of those ancestors.
+
+Now this doesn't quite work for Ada.Finalization.Controlled or
+Limited_Controlled, because currently they are typically declared as private
+types (with a null record completion). So we'd either need to make Controlled
+and Limited_Controlled visible record type declarations, or I think a better
+approach would be to have a new aspect, No_Hidden_Interfaces, that can be
+applied to the public part of a private type declaration, to inform the client
+that the completion of the type in the private part does not involve the use of
+any hidden interfaces.
+
+So this would look like;
+
+package Ada.Finalization is
+
+    type Controlled is abstract tagged private
+            with No_Hidden_Interfaces;
+...
+    type Limited_Controlled is abstract tagged limited private
+            with No_Hidden_Interfaces;
+
+private
+...
+end Ada.Finalization
+
+
+package Ada.Streams is
+
+    type Root_Stream_Type is limited interface
+        with Hidable, Limited_Derivation; ...
+end Ada.Streams;
+
+
+private with Ada.Streams;
+
+package P is
+
+   type T is tagged private;
+
+private
+
+   use Ada.Streams;
+
+   type T is new Root_Stream_Type with null record;
+
+end P;
+
+> ...
+>> Here is a more detailed description of my thoughts, with some
+>> refinements and corrections.....
+>> ==============================================================
+>> ==================
+>>
+>> The basic idea was to avoid overriding problems by disallowing
+>> problematic type derivations.
+>
+> This sounds like a good idea, except that it completely misses the
+> point (coming up with a way to eliminate incompatibilities from
+> switching Root_Stream_Type from abstract to an interface). That is, as
+> soon as you start making type derivations illegal, you're
+> reintroducing the incompatibility (as there might be existing code
+> structured that way). There is also the problem that such type
+> derivations are likely to require privacy breaking in order to determine if there is a problem.
+
+I don't see this because the only problematic type derivations I am wanting to
+make illegal, are the problematic new ones that would be introduced if
+Root_Stream_Type became an interface. The idea is to make hidable interfaces
+look and behave more like an abstract type declaration, which is what
+Root_Stream_Type is today. I don't think there is any incompatibility being
+introduced, that I can see.
+
+>> - Essentially, a view of a hidable interface becomes a view of an
+>> abstract record_type_definition within a derived_type_definition
+>> where the parent_subtype_indication is abstract or is of a
+>> non-interface type that has ancestors.
+>> (i.e. It cannot appear in an interface_list for such a declaration,
+>> and an abstract type cannot have a hidable interface).
+>
+> This surely would prevent Root_Stream_Type from being "added" as an
+> interface to almost any existing type. Indeed, when would it be legal
+> to use one of these as an interface? Almost of my tagged types are
+> derived from (limited_)controlled, and it would never be legal to use
+> either (limited_)controlled [which are abstract] nor a type derived
+> from them as the ancestor. Isn't that the motivating example (wanting
+> to have a type which is both a stream and controlled??)
+>
+> I suppose you could be assuming that controlled is also a hidable
+> interface,
+
+I wasn't assuming that, but I think I was assuming that Controlled was a visible
+record type. Anyway, the new proposal above better addresses this.
+
+> I see my previous comments about breaking privacy (back in February)
+> and incompatibility were wrong, because this proposal never allows
+> using an interface as a progenitor. So you can't break privacy, and
+> you can't be incompatible, because you can't use the type for anything
+> interesting. The problem is that you now have a lot of mechanism for
+> almost no gain. I don't see that flying - I would hope this is about
+> more than just being able to declare a controlled stream type.
+
+The new proposal still avoids breaking privacy, and is generally usable
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, April 24, 2012  12:15 PM
+
+Here is some design on the fly:
+
+    type T is new B and others with private;
+
+to indicate that T is derived from B and perhaps some hidden interfaces.
+
+Not clear how this would help, but perhaps it might solve some problems.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, April 24, 2012  3:35 PM
+
+> > I'm creating an AI from this old thread, and rereading the mail
+> > shows that I never read Brad's last proposal for hideable
+> interfaces very carefully.
+>
+> I'm still opposed to adding hideable interfaces.  In fact, I'm pretty
+> much opposed to any large new features until the dust settles.
+> Preferably, there should be 2 or more Ada compilers in the world
+> first.
+
+I agree that we shouldn't *add* anything at this point, but that shouldn't
+prevent us from exploring the solution space from problems that are "left over"
+from previous version. And the desire to make Controlled and Streams interfaces
+has existed from the first moment that interfaces have existed.
+
+> >...That won't happen unless you kill off the existing implementers,
+> >as it would require supporting full multiple inheritance for components.
+>
+> In GNAT, types [Limited_]Controlled have no components (other than the
+> Tag field).  I think Rational/IBM is the same.
+
+I guess that means that some implementers might only need heavy inducements in
+order to go along with that. ;-)
+
+It strikes me that for "Controlled" that there is a semi-reasonable solution,
+which is that all tagged types have the controlled components and dispatching
+slots. But only tagged objects with the Controlled interface would need runtime
+registration. That would be a significant space penalty for some applications,
+but most would see little or no difference (many types are already controlled,
+and many others only have a few instances so the size difference wouldn't matter
+much). And no time penalty.
+
+If the idea gets extended to other types that have components, then it's
+extremely expensive.
+
+Still, I think I'd probably only support the idea with sufficient inducements
+(perhaps some combination of strippers, alcohol, and cameras would do the trick
+:-).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, April 24, 2012  3:42 PM
+
+...
+> In other words, this is an assume-the-worst type of rule. If any
+> ancestor has a non-visible completion, then it is assumed that the
+> non-visible completion could have any hidable interface, so you are
+> not allowed to add further hidable interfaces to any derivations of
+> those ancestors.
+
+Yes, this makes sense to me. The obvious flaws of the earlier ideas aren't
+present; there's clearly no privacy breaking, and there is no possibility of
+adding an interface twice.
+
+There is the problem that this is fairly restrictive in that most existing
+reusable types (like Claw windows) could not have a hideable interface added (as
+they wouldn't have the appropriate aspect, and presumably they're private
+types). But that's not a huge deal (you can't do it now, either).
+
+The rules would have to allow all of the existing ways these things are used,
+but probably that would happen "naturally" (if Root_Stream is the parent, there
+is no other ancestor that is private).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April 27, 2012  10:54 PM
+
+...
+> > A hidable interface can be added to the private or public part of a
+> > declaration, so long as that declaration is not derived from an
+> > ancestor that is a private type or a private extension (unless it is
+> > a private type that is visibly declared to have the
+> > No_Hidden_Interfaces aspect).
+> >
+> > A hidable interface cannot be added to the private completion of an
+> > abstract type declaration.
+> >
+> > In other words, this is an assume-the-worst type of rule. If any
+> > ancestor has a non-visible completion, then it is assumed that the
+> > non-visible completion could have any hidable interface, so you are
+> > not allowed to add further hidable interfaces to any derivations of
+> > those ancestors.
+
+It strikes me that combining Tucker's idea with this assume-the-worst rule
+eliminates the need for "hideable" interfaces altogether.
+
+Specifically, if we were to allow:
+
+    type T is new B and others with private;
+
+to indicate that T is derived from B and perhaps some interfaces. (Note the
+change from Tucker's suggestion.)
+
+In this case, we'd allow (any) interfaces on the full declaration, but any type
+derived from T could not have any interfaces.
+
+We'd also need a counterpart where there is no (visible) parent:
+
+    type T is new others with private;
+
+We'd retain the current rules on the existing forms of private view.
+
+The slight downside is that changing Streams to an interface in this scheme
+would be incompatible, in that something like:
+
+ package P is
+    type Priv is tagged private;
+ private
+    type Priv is new Root_Stream_Type with null record;  end P;
+
+would be illegal because of the hidden interface (but this cannot happen often).
+It would have to be changed to:
+
+ package P is
+    type Priv is new others with private;  private
+    type Priv is new Root_Stream_Type with null record;  end P;
+
+We'd still need the limitedness aspect, of course, but no special "hidable
+interfaces".
+
+Anyway, another idea for the pile of ideas.
+
+****************************************************************
