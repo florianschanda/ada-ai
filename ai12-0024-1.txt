@@ -1,0 +1,406 @@
+!standard 4.6(30)                                12-05-02    AI12-0024-1/01
+!class Amendment 12-05-02
+!status work item 12-05-02
+!status received 12-02-12
+!priority Medium
+!difficulty Medium
+!subject
+!summary
+
+**TBD.
+
+!problem
+
+Ada tries to detect errors at compile-time. However, range and length errors
+of objects involving static ranges and values are runtime errors. Consider:
+
+package Annoying is
+   S  : String(1..3) := "abcde";     -- (1)
+   A  : array (1..2, 1..3) of Integer := (1..3 => (1..2 => 0));   -- (2)
+   subtype T1 is Integer range 1 .. 3;
+   X1 : T1 := 5;         -- (3)
+end Annoying;
+
+All three of the marked locations unconditionally raise Constraint_Error; these
+are clear errors that should be detected at compile-time.
+
+!proposal
+
+[Editor's note: The following is not quite wording; I didn't check every
+use of every term, in particular the correct terminology for bounds in an
+aggregate. But it is pretty close; language wording should not be significantly
+more complicated than this.]
+
+Unless the expression is either itself statically unevaluated, or part of a
+statement that is statically unevaluated, an expression containing any of
+the following is illegal:
+
+* If the left operand of an integer divide operator is a static value that
+is zero;
+* A subtype conversion of a static value to a static subtype if the value
+does not satisfy the subtype;
+* A subtype conversion of an array aggregate or string literal with static
+bounds to a statically constrained array subtype, if the length of any dimension
+of the aggregate does not match the length of the corresponding dimension of the
+array subtype.
+
+A statement is statically unevaluated if it is contained in (directly or
+indirectly) a sequence_of_statements of an if_statement, and either:
+* the condition that controls the sequence_of_statements is a static expression
+with the value False; or
+* the condition that applies to some previous sequence_of_statements is
+a static expression with the value True.
+
+[Editor's note: We could try to define a similar rule for case statements.
+We could also try to define the statements directly following a goto, raise
+statement, or return statement in the same sequence_of_statements in this
+category; but those are probably errors in their own right so it probably
+doesn't pay to do so.]
+
+!wording
+
+** TBD.
+
+!discussion
+
+It has been claimed that only a "small subset of errors" can be detected this
+way. It's certainly true that these errors are only a small subset of the
+possibilities for runtime errors in Ada, but these particular cases are very
+common in Ada code as most discrete subtypes are static and most array objects
+have static bounds. It makes sense to detect these problems even if many other
+problems have to be detected at runtime.
+
+It also has been claimed that it is too hard to describe the rules in
+language terms. But that's not true; most of the terminology needed already
+exists (as should be obvious from the relatively simple description given
+above). Nor are the rules suggested above hard to implement; most (and probably
+all) compilers already implement similar warnings; changing those to errors
+is unlikely to be difficult.
+
+Still, this problem is not as clear-cut as it appears on the surface. There
+would be a significant problem with false positives with the simple version
+of these rules.
+
+Consider:
+
+   Buffer_Size : constant Natural := 0; -- No buffer needed.
+
+   ...
+   if Buffer_Size > 0 then
+      Average := Total / Buffer_Size; -- (1)
+   else
+      Average := Total;
+   end if;
+
+The basic rule is that a division by a static value that is zero is illegal.
+That means that the division at (1) would be illegal. But that code can never
+be executed when Buffer_Size = 0. Moreover, there is no sane workaround: the
+only way to get rid of such an error message would be to make Buffer_Size
+a variable (or introduce a function with the same effect). But we want to
+encourage making as many objects as possible constant, not discourage that.
+
+Thus, we introduced the "statically unevaluated" exception to the rules;
+that means that there is no error at (1).
+
+Note that this is not just a problem with the division rule (which could
+otherwise be dropped). For instance, the editor has a tool containing the
+following code:
+
+      Command_Len : constant Natural := 8;
+
+      type Command_Type is
+          Full_Name : String (1 .. Command_Len);
+          Short_Name : String (1 .. 4);
+      end record;
+
+      if Command_Len > 11 then
+          Cmd(1) := (Full_Name => "View_Project" & (13 .. Command_Len => ' '),
+                     Short_Name => "#Prj"); --(2)
+      else -- Only define the short name for the command.
+          Cmd(1) := (Full_Name => "#Prj" & (5 .. Command_Len => ' '),
+                     Short_Name => "#Prj");
+      end if;
+
+Without the statically unevaluated rules, the aggregate at (2) would be
+illegal. Again, the only way to fix that would be to make something in the
+aggregate non-static -- which would defeat the purpose of having written the
+code this way in the first place (which was allow processing of these
+definitions at compile-time).
+
+The statically unevaluated rules mitigates the false positive problem, but does
+not eliminate it. Specifically, if "Command_Len > 11" is replaced by a function
+call that returns that result, the aggregate again becomes illegal.
+
+These false positives mean that this proposal is incompatible. It's mostly
+incompatible for programs that uses these sorts of errors to raise exceptions,
+a lousy technique that we can do without. But there also will be cases where
+some code which cannot be executed because of complex runtime expressions that
+raises an exception. Those cases would present more of a problem.
+
+An alternative to making the program illegal would be to define a sort of
+"soft error" that can be ignored via a pragma. A program containing such
+an error is illegal unless the pragma applies to the site of the soft error.
+(One of the options for return statements in functions - AI12-0030-1 has a
+similar requirement, so one could use the mechanism in a variety of places;
+it wouldn't make sense to define it just for this problem.)
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Dan Eilers
+Sent: Sunday, February 12, 2012  11:04 PM
+
+[Part of a message on another topic - Editor.]
+
+I am also in favor of fixing the following language bug regarding staticness of
+ranges, which is perhaps somewhat related.
+
+package bad is
+   s: string(1..3) := "abcde";     -- currently legal but should be illegal
+   a: array (1..2, 1..3) of integer := (1..3 => (1..2 => 0));   -- ditto
+end bad;
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, February 12, 2012  11:32 PM
+
+[The relevant part of a reply to the previous message - Editor.]
+
+I don't think that's a bug, and I don't think it should be "fixed".
+A warning (which any decent compiler will give) is good enough here.
+
+****************************************************************
+
+From: Dan Eilers
+Sent: Monday, February 13, 2012  12:44 AM
+
+[The relevant part of a reply to the previous message - Editor.]
+
+Can you explain why a language known for early detection of errors, and used in
+safety-critical applications should allow stuffing 5 characters into a
+3-character string, or swapping the dimensions of an aggregate? I've seen the
+aggregate case happen.
+
+Warnings are a necessary evil when there is a high likelihood of false
+positives, or when detecting the condition is beyond the capabilities of some
+compilers.  But that isn't the case here.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 13, 2012  9:11 AM
+
+[The relevant part of a reply to the previous message - Editor.]
+
+This is really a separate issue, so you should have sent it as a separate email,
+to ease Randy's job of filing the emails. (Maybe we could automate the filing
+process!)
+
+Anyway, there are many places where run-time errors can be caught at compile
+time.  The general style of Ada is to call them run-time errors, and hope that
+compilers warn when possible. If you propose to fix that in general, it's WAY
+too much work. If you propose to fix the two examples you showed, then what's
+the point -- it doesn't fix the general problem.  Without an exact
+wording-change proposal, I can't tell which you are proposing, or maybe
+something in between.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, February 13, 2012  11:05 AM
+
+> Anyway, there are many places where run-time errors can be caught at
+> compile time.  The general style of Ada is to call them run-time
+> errors, and hope that compilers warn when possible.
+
+Let me add that I strongly support that. The general principle is that a rule is
+either a compile time rule or a runtime rule. The language avoided (OK, tried to
+avoid...) rules that are at runtime except sometimes at runtime (please, refrain
+from pronouncing "accessibility rules" ;-) ). That makes it much more
+orthogonal, at the cost of sometimes having a warning in place of an error.
+
+****************************************************************
+
+From: Dan Eilers
+Sent: Monday, February 13, 2012  11:36 AM
+
+> This is really a separate issue, so you should have sent it as a
+> separate email, to ease Randy's job of filing the emails.
+> (Maybe we could automate the filing process!)
+
+OK, I changed the subject to range violations.
+
+> If you propose to fix that in general, it's WAY too much work.
+> If you propose to fix the two examples you showed, then what's the
+> point -- it doesn't fix the general problem.  Without an exact
+> wording-change proposal, I can't tell which you are proposing, or
+> maybe something in between.
+
+I am proposing that when the bounds of an array or array aggregate are defined
+using static expressions or static positional notation, then any run-time
+constraint checks currently required by the language should be performed at
+compile time.
+
+There are a few other cases where the compiler statically knows an exception
+will be raised at runtime, without involving any value-following mechanisms,
+such as elaboration checks for instantiating a generic before its body is seen.
+I would like to see those fixed too, but consider that a separate issue.
+
+Such a language change reduces the list of Ada vulnerabilities, which ISO is
+tracking, improving Ada's suitability and marketability for high-reliability
+systems.  It also makes array range violations consistent with range violations
+for discrete types.  Compiler warnings are outside the scope of the ISO
+standard, and so the ISO standard should not depend on all compilers generating
+such warnings and all users always heeding such warnings.
+
+****************************************************************
+
+From: Dan Eilers
+Sent: Monday, February 13, 2012  12:08 PM
+
+> It also makes array range violations consistent with range violations
+> for discrete types.
+
+Actually, discrete types are sometimes checked at compile time, and sometimes
+not, for reasons not clear to me.  For example:
+
+procedure test is
+
+   subtype T1 is integer range 1..3;
+   x1: T1 := 5;         -- checked at runtime
+
+begin
+   case x1 is
+      when 5 => null;   -- checked at compile time
+      when others => null;
+   end case;
+end;
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 13, 2012  11:45 AM
+
+> Such a language change reduces the list of Ada vulnerabilities, which
+> ISO is tracking, improving Ada's suitability and marketability for
+> high-reliability systems.  It also makes array range violations
+> consistent with range violations for discrete types.  Compiler
+> warnings are outside the scope of the ISO standard, and so the ISO
+> standard should not depend on all compilers generating such warnings
+> and all users always heeding such warnings.
+
+I agree with you in principle.  I just think it's too much work (in RM wording,
+and in compilers) to fix.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 13, 2012  1:55 PM
+
+...
+> I am proposing that when the bounds of an array or array aggregate are
+> defined using static expressions or static positional notation, then
+> any run-time constraint checks currently required by the language
+> should be performed at compile time.
+
+The examples you've shown have *length* checks, not range checks. Not much
+difference in practice, but sliding is allowed.
+
+> There are a few other cases where the compiler statically knows an
+> exception will be raised at runtime, without involving any
+> value-following mechanisms, such as elaboration checks for
+> instantiating a generic before its body is seen.
+> I would like to see those fixed too, but consider that a separate
+> issue.
+>
+> Such a language change reduces the list of Ada vulnerabilities, which
+> ISO is tracking, improving Ada's suitability and marketability for
+> high-reliability systems.
+> It also makes array range violations consistent with range violations
+> for discrete types.
+
+Huh? Range violations for discrete types are not errors.
+
+   subtype Sml is Integer range 1 .. 10;
+
+   Eleven : Sml := 11; -- Raises C_E, no error here.
+
+I was thinking about this issue (for unrelated reasons) in the shower this
+morning. It would appear to be a good thing to detect these at compile-time, but
+it turns out that we need to allow these in some such cases:
+
+       Buffer_Size : constant Natural := 0; -- No buffer needed.
+
+       ...
+       if Buffer_Size > 0 then
+           Average := Total / Buffer_Size; -- !!
+       else
+	     Average := Total;
+       end if;
+
+If we required compile time checks, the divide-by-zero here would be illegal.
+But this code can never be executed when Buffer_Size = 0! You'd have to take the
+"constant" off of Buffer_Size to make this go away, which is exactly the wrong
+thing to encourage. And I can't think of any other rewrite that would work when
+Buffer_Size = 0.
+
+We could fix this by defining a notion of "statically unevaluated" for
+statements, and saying that it is only an error if the statement is *not*
+statically unevaluated. (That's what we do for static expressions.) But that's
+pretty complicated.
+
+Note that the rule you are suggesting would run afoul of a similar problem.
+Here's some code similar to that which appears in some of RR's tools:
+
+      Command_Len : constant Natural := 8;
+
+      type Command_Type is
+          Full_Name : String (1 .. Command_Len);
+          Short_Name : String (1 .. 4);
+      end record;
+
+      if Command_Len > 11 then
+          Cmd(1) := (Full_Name => "View_Project" & (13 .. Command_Len => ' '),
+                     Short_Name => "#Prj");
+      else -- Only define the short name for the command.
+          Cmd(1) := (Full_Name => "#Prj" & (5 .. Command_Len => ' '),
+                     Short_Name => "#Prj");
+      end if;
+
+With the change you are suggesting, the first aggregate is illegal -- even
+though it would never be executed. And the only solution I can think of would be
+to introduce a function into the aggregate somewhere so it isn't static -- which
+defeats the purpose of this complex construction (which was to keep everything
+compile-time).
+
+Your other point about case statements is also instructive: in situations like
+these, you have to avoid case statements. Usually, it's easy enough to use if
+statements as an alternative. But if we adopted a blanket compile-time check
+rule, there would be no alternative (other than wasting time and space in the
+finished program by making many things dynamic).
+
+So I think I'm with Bob: I can imagine trying to solve this problem in general,
+but it's fairly complex to avoid throwing out the baby with the bathwater.
+Definitely too late to do in Ada 2012. Might be worth considering for Ada 2020,
+though.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 13, 2012  1:38 PM
+
+> I agree with you in principle.  I just think it's too much work (in RM
+> wording, and in compilers) to fix.
+
+Well the set of cases that can be detected at compile time is not something that
+can be characterized in the standard. So you end up with a small subset being
+illegal, and relying on warnings for the rest ahyway. I just don't see enough
+gain in identifying this small subset precisely. It sure sounds like a lot of
+work for this case.
+
+****************************************************************
+
