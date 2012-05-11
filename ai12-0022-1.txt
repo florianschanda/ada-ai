@@ -1,4 +1,8 @@
-!standard 3.2.4(19/3)                               12-03-16    AI12-0022-1/01
+!standard 11.3(2/2)                                      12-05-11    AI12-0022-1/02
+!standard 11.3(3)
+!standard 11.3(3.1/2)
+!standard 11.3(4/2)
+!standard 11.4.1(10.1/3)
 !class Amendment 12-03-16
 !status work item 12-02-24
 !status received 12-02-24
@@ -7,7 +11,7 @@
 !subject Changing the exception raised for an assertion
 !summary
 
-**TBD.
+The raise_expression is added to Ada.
 
 !problem
 
@@ -18,39 +22,99 @@ allow specifying the exception to be raised by the failure of an assertion.
 
 !proposal
 
-There is an optional "exception" clause on predicates and
-preconditions. This specifies the exception that will be raised on the
-failure of the check.
-
-Alternative #1: There is an aspect "Raise_Exception" that specifies
-the exception to raise.
-
-Alternative #2: There a new kind of expression, the raise_expression. This
-is considered Boolean-valued for resolution purposes; otherwise it has the
-same syntax as a raise statment (enclosed in parens).
-    (raise exception_name [with string_expression])
-This raises the given exception when evaluated.
-
-Alternative #3: Do nothing. The user can write a function that works like
-alternative #2:
-     function Raise_Mode_Error (For_File : File_Type) return Boolean is
-     begin
-         raise Mode_Error with Name (For_File);
-         return False; -- At least one return is required.
-     end Raise_Mode_Error;
-
-Alternatives #2 and #3 would be used in short-circuit or conditional expression:
-
-    with Pre => Mode (File) = In_File or else (raise Mode_Error with Name (File));
-
-    with Pre => Mode (File) = In_File or else Raise_Mode_Error (File);
-
+(See summary.)
 
 !wording
 
-** TBD.
+Add to 4.4(7/3):
+
+    ... | (raise_expression)
+
+Rename 11.3 to "Raise Statements and Expressions"
+
+After 11.3(2/2) [Syntax]
+
+raise_expression ::= raise exception_name [with string_expression]
+
+Wherever the Syntax Rules allow an expression, a raise_expression may be used in place of the expression,
+so long as it is immediately surrounded by parentheses.
+
+AARM Note: The syntactic category raise_expression appears only as a primary that is parenthesized. The
+above rule allows it to additionally be used in other contexts where it would be directly surrounded by
+parentheses. This is the same rule that is used for conditional_expressions; see 4.5.7 for a detailed
+discussion of the meaning and effects of this rule. 
+
+Modify 11.3(3): [Legality Rules]
+
+The name, if any, in a raise_statement {or raise_expression} shall denote an exception. A
+raise_statement with no exception_name (that is, a re-raise statement) shall be within a
+handler, but not within a body enclosed by that handler. 
+
+Modify 11.3(3.1/2): [Name Resolution Rules]
+
+The expression, if any, in a raise_statement {or raise_expression}, is expected to be
+of type String. 
+
+Add after 11.3(3.1/2):
+
+A raise_expression is expected to be of any type.
+
+[This is the same wording as type conversions, see 4.6(6) - Editor.]
+
+Modify 11.3(4/2): [Dynamic Semantics]
+
+... For the execution of a raise_statement with an exception_name,
+the named exception is raised. {Similarly, for the evaluation of a raise_expression,
+the named exception is raised.} [{In both of these cases, if}[If] a string_expression
+is present, the expression is evaluated and its value is associated with the exception
+occurrence.] ...
+
+Modify 11.4.1(10.1/3):
+
+... For the occurrence raised by a {raise_expression or} raise_statement with an exception_name
+and a string_expression, the message is the string_expression. For the occurrence raised by a 
+{raise_expression or} raise_statement with an exception_name but without a string_expression,
+the message is a string giving implementation-defined information about the exception occurrence.
+...
 
 !discussion
+
+The intent is that the semantics of a raise_expression is the same as calling a function
+of the form:
+
+    function <raise_expression> returns <any type> is
+    begin
+        raise exception_name [with string_expression];
+        return X:<any type>; -- Junk return required by Ada 83 through at least 2012
+    end <raise_expression>;
+
+---
+
+A raise_expression resolves to "any type". That means it might be necessary to qualify it
+in some circumstances, but the need for that should be rare.
+
+It was suggested that the type be "any Boolean type", but that limits the usefulness of
+the construct in conditional expressions. For instance, imagine the following expression
+function:
+
+    function Foo (Bar : in Natural) return Natural is
+        (case Bar is
+            when 1 => 10,
+            when 2 => 20,
+            when others => (raise Program_Error)));
+
+This is allowed as a raise_expression resolves to "any type"; it it resolved to
+"any Boolean type", some junk expression like "and True" would have to appended to
+make it legal -- which would do nothing for readability or understandability.
+
+---
+
+We used the same parenthesization rules as for conditional_expressions and other complex
+expression components. We probably don't need the parens to avoid ambiguity as we
+do in some of the other cases, but it seems valuable to have consistency in how these
+"statements as part of an expression" are presented.
+  
+---
 
 Example: Imagine the following routine in a GUI library:
 
@@ -59,16 +123,16 @@ Example: Imagine the following routine in a GUI library:
        -- Raises Not_Valid_Error if Window is not valid.
 
 We would like to be able to use a predicate to check the comment. With the
-"exception" clause we can do this without changing the semantics:
+"raise_expression" we can do this without changing the semantics:
 
     subtype Valid_Root_Window is Root_Window
        with Dynamic_Predicate =>
-           Is_Valid (Valid_Root_Window) exception Not_Valid_Error;
+           Is_Valid (Valid_Root_Window) or else (raise Not_Valid_Error);
 
     procedure Show_Window (Window : in out Valid_Root_Window);
        -- Shows the window.
 
-If we didn't have the "exception" clause here, using the predicate would
+If we didn't include the raise_expression here, using the predicate would
 change the exception raised on this failure. That could cause the exception
 to fall into a different handler than currently, which is likely to not be
 acceptable.
@@ -79,9 +143,61 @@ semantics remains unchanged (raising Program_Error and Constraint_Error,
 not Assertion_Error). (The !proposal also shows how this could be used in
 Text_IO and other I/O packages.)
 
+---
+
+We considered a number of other alternatives to fix this problem:
+
+Alternative #1: There is an optional "exception" clause on predicates and
+preconditions. This specifies the exception that will be raised on the
+failure of the check.
+
+Alternative #2: There is an aspect "Pre_Exception" that specifies
+the exception to raise for Pre, and similarly for other assertions.
+
+Alternative #3: Do nothing. The user can write a function that works like
+the proposed raise expressions:
+     function Raise_Mode_Error (For_File : File_Type) return Boolean is
+     begin
+         raise Mode_Error with Name (For_File);
+         return False; -- At least one return is required (see AI12-0030-1).
+     end Raise_Mode_Error;
+
+The problem with both of the first two alternatives is that the interface of a
+subprogram may include multiple exceptions that need to be checked:
+
+     procedure Put (File : in File_Type; Str : in String)
+        with Pre => (Is_Open(File) or else (raise Status_Error)) and then
+                    (Mode(File) = Out_File or else
+                     (raise Mode_Error with "Cannot read " & Name(File)));
+
+This cannot be handled with a single exception clause or aspect. This particular
+problem could be addressed by making the Status_Error check into a predicate, but
+that isn't likely to always work.
+
+Another way to address the problem using an exception clause or aspect would be
+to allow multiple Pre aspects on a single declaration:
+
+     procedure Put (File : in File_Type; Str : in String)
+        with Pre => Is_Open(File), Pre_Exception => Status_Error,
+             Pre => Mode(File) = Out_File, Pre_Exception => Mode_Error;
+
+but notice that the order of declaration of the preconditions is significant here, which
+is likely to be confusing (and a significant change from the current rules, where the
+order of evaluation of preconditions is unspecified).
+
+In addition, we've lost the exception message that gives the name of the file with
+the wrong mode. That's a loss; we could introduce another aspect to deal with that,
+but by now it's clear that this solution is not "simpler" by any stretch of imagination.
+
+The problem with the last alternative is the need to clutter the program with a number of
+exception raising functions. This is especially problematic in existing packages (like the
+language-defined ones) where adding these routines is not allowed.
+
+Thus the selected alternative seems clearly to be the best option.
+
 !ACATS test
 
-** TBD.
+ACATS B and C-Tests would be needed for raise_expression.
 
 !appendix
 
@@ -91,3 +207,712 @@ complex than a last-minute fix would allow.
 
 ****************************************************************
 
+[The following splits from a thread about and filed in AI05-0290-1; it's more
+relevant here - Editor.]
+
+From: Tucker Taft
+Sent: Tuesday, March 6, 2012  4:56 PM
+
+> ...
+> To use preconditions or predicates in Text_IO, for ex, one needs a way
+> to specify which exception gets raised (as you suggested at the Kemah
+> meeting).  I strongly agree that's a good idea, and I strongly believe
+> it's too late to add that feature to Ada 2012 now.
+
+Geert had an interesting suggestion of writing a precondition as:
+
+   procedure Read(File : File_Type; ...)
+     with Pre => Is_Open(File) or else Raise_Status_Error;"
+
+This seems like a neat way to get the right exception raised, at least for a
+precondition.
+
+For what that's worth.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Wednesday, March 7, 2012  5:33 PM
+
+> Geert had an interesting suggestion of writing a precondition as:
+>
+>   procedure Read(File : File_Type; ...)
+>     with Pre => Is_Open(File) or else Raise_Status_Error;"
+
+If the decision goes the way it seems to go, please make sure to put this in the
+discussion in lieu of Randy's subtype predicate example with the same
+functionality that is currently there. In Houston, I blindly copied it; I should
+already have turned it into a PRE example.
+
+I'd go as far as to ratify this change even at such a late date!
+It is such an obvious and major improvement without hidden traps.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 8, 2012  1:08 AM
+
+I think you missed the point (I did, too, until you repeated it) -- there is no
+change here! Geert is defining a function Raise_Status_Error as:
+
+        function Raise_Status_Error return Boolean is
+        begin
+            raise Status_Error;
+            return False; -- To meet the requirement of a return statement.
+        end Raise_Status_Error;
+
+And then using it in the Pre expression as Tucker noted. In that case, either
+the "real" precondition works, or the "or else" is executed, which raises the
+"right" exception. We never get the chance to raise Assertion_Error.
+
+It's still a work-around (you have to define a bunch of these rather silly
+Raise_ functions), but it appears to work for both predicates and preconditions.
+(Presuming that raising an exception is not considered a "side-effect", and I
+don't think it can be.) It definitely reduces the urgency to get the exceptions
+right. Something for John's book (and the Rationale, too?).
+
+I originally read this as:
+
+   procedure Read(File : File_Type; ...)
+     with Pre => Is_Open(File) or else raise Status_Error;"
+
+which is the sort of syntax change that people wanted to think about some more
+in Kemah, and I don't think anything has changed there. But Geert's trick
+doesn't require any changes at all.
+
+P.S. I'm still bummed that the roller coaster in Kemah was broken the whole time
+I was there. It seemed such an appropriate metaphor for the whole standards
+process (lots of ups and downs!). I'm also fond of the expression "herding
+cats", but it's nowhere near as much fun to ride... :-)
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, March 8, 2012  2:19 AM
+
+> It's still a work-around (you have to define a bunch of these rather
+> silly Raise_ functions), but it appears to work for both predicates
+> and preconditions. (Presuming that raising an exception is not
+> considered a "side-effect", and I don't think it can be.) It
+> definitely reduces the urgency to get the exceptions right. Something
+> for John's book (and the Rationale, too?).
+
+Obviously. John has been glancing at this stuff but is busy with Spark book
+right now.
+
+That section of the rationale is now with the Journal. I wonder if it is too
+late for a PS at the end?
+
+I will copy this to Miguel.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  6:17 AM
+
+>         function Raise_Status_Error return Boolean is
+>         begin
+>             raise Status_Error;
+>             return False; -- To meet the requirement of a return statement.
+>         end Raise_Status_Error;
+
+(BTW, the requirement for a return statement is silly and infuriating!
+and quite useless, since you will get a compiler warning anyway if you forget to
+block a branch with a raise or return. Any compiler that does NOT give this
+warning is IMO unusable. This silly requirement should be fixed (but it is hard
+to do since you have to talk about flow), or removed.
+
+[Editor's note: AI12-0030-1 discusses this issue and possible solutions.]
+
+> And then using it in the Pre expression as Tucker noted. In that
+> case, either the "real" precondition works, or the "or else" is
+> executed, which raises the "right" exception. We never get the chance
+> to raise Assertion_Error.
+>
+> It's still a work-around (you have to define a bunch of these rather
+> silly Raise_ functions), but it appears to work for both predicates
+> and preconditions.
+
+Actually its useful in general for expanding the use of conditional expressions
+:-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  6:19 AM
+
+Another form of "Geert's trick" is
+
+   Constraint_Error'Raise;
+
+Not sure if you are allowed to make a new attribute with a reserved name, if not
+
+   Constraint_Error'Raise_Exception
+
+Geert, shall we implement this?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, March 8, 2012  7:05 AM
+
+> Another form of "Geert's trick" is
+>
+>    Constraint_Error'Raise;
+>
+> Not sure if you are allowed to make a new attribute with a reserved
+> name,
+
+It is not.  I'm not sure that rule serves any practical purpose; ARG could repeal it
+in Ada 2020, or even as a binding interp for Ada 2012.
+
+>...if not
+>
+>    Constraint_Error'Raise_Exception
+>
+> Geert, shall we implement this?
+
+How is this an improvement over:
+
+    Pre => ... or else Raise_Exception(Constraint_Error'Identity);
+
+which I suggested earlier, and you said you didn't like it, but didn't explain
+why.
+
+To me, all of these:
+
+    Pre => ... or else Raise_Constraint_Error;
+    Pre => ... or else Constraint_Error'Raise_Exception;
+    Pre => ... or else Raise_Exception(Constraint_Error'Identity);
+
+are kludges.  It would be better to allow (in Ada 2020) "raise ..." as an
+expression:
+
+    Pre => ... or else raise Constraint_Error;
+    Pre => ... or else raise Constraint_Error with "some message";
+
+I object to adding kludgy new impl-def attributes, (1) when we already have a
+kludgy standard attribute that can do the same thing ('Identity), and (2)
+there's a non-kludgy solution we can use as soon as we decide it belongs in Ada
+2020.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  7:13 AM
+
+I suggest:
+
+>>>     Constraint_Error'Raise_Exception
+
+And Bob says:
+
+>> How is this an improvement over:
+>>
+>>      Raise_Exception(Constraint_Error'Identity);
+
+Surely even language lawyers are sensitive to verbose crud? :-) :-)
+
+I really would like to be able to write
+
+   Constraint_Error'Raise
+
+In fact I am tempted to just implement that anyway.
+The rule forbidding it serves no purpose IMO.
+
+And if I could add syntax, I would not mind
+
+     raise Constraint_Error;
+
+that would be fine
+
+:-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  7:14 AM
+
+>> Not sure if you are allowed to make a new attribute with a reserved
+>> name,
+>
+> It is not.  I'm not sure that rule serves any practical purpose; ARG
+> could repeal it in Ada 2020, or even as a binding interp for Ada 2012.
+
+Right, I don't think it helps portability, unlike pragmas, you can't ignore
+unrecognized attributes. I would be in favor
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, March 8, 2012  11:46 AM
+
+> I think you missed the point (I did, too, until you repeated it) --
+> there is no change here! Geert is defining a function Raise_Status_Error as:
+
+I did indeed miss this idea. All the more reason to make it part of the language syntax so it reads something like
+
+procedure Read(File : File_Type; ...)
+    with Pre => Is_Open(File) or else raise Status_Error;
+
+or with no syntactic contortions:
+
+procedure Read(File : File_Type; Element: out Elem_Type)
+    with Pre => Is_Open(File), Pre_Exception => Status_Error;
+    with Post => valid(Element), Post_Exception => Read_Error;
+
+"All the more reason" =
+  - There is a simple implementation model that compiler vendors can
+    use.
+  - It shows that there are no traps.
+  - One can use the syntax notation in the specification of packages
+    not only for the sake of implementations, but also for the sake of
+    readers, e.g., in a scientific paper, since it is standardized.
+    (This is my most important reason in favor of the feature.)
+    The RM Annexes would be half as complicated to read.
+    I would have severe reservations to standardize the "hack" of
+    using user-provided exception-raising function calls in the
+    predicate).
+
+****************************************************************
+
+From: Tuillo Vardanega
+Sent: Thursday, March 8, 2012  11:57 AM
+
+For all it may matter, I begin -- at long last -- to see convergence in the
+recent flurry of discussion. And I second Erhard's recommendation, the one "free
+of syntactic contortions".
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, March 8, 2012  12:09 PM
+
+> For all it may matter, I begin -- at long last -- to see convergence
+> in the recent flurry of discussion.
+> And I second Erhard's recommendation, the one "free of syntactic
+> contortions".
+
+I think it looks interesting, but for Ada 2020 at this point.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 8, 2012  12:11 PM
+
+...
+> I really would like to be able to write
+>
+>    Constraint_Error'Raise
+>
+> In fact I am tempted to just implement that anyway.
+> The rule forbidding it serves no purpose IMO.
+
+If you can't specify an exception message, the value drops a lot. This
+"attribute" solution suffers from that problem; I don't see a sensible way to
+add a message.
+
+> And if I could add syntax, I would not mind
+>
+>      raise Constraint_Error;
+>
+> that would be fine
+>
+> :-)
+
+Right; I have much more sympathy for that. But I think I agree with Bob, that
+such inventions have to wait for Ada 2020. (Which doesn't mean that we can't
+design them now and vote to add them at the next meeting.) Joyce tells me that
+we need to deliver the Standard next week, and this is definitely not the time
+to add new inventions. That ended at noon on Feb 26th (that is, the end of Kemah
+meeting).
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, March 8, 2012  1:10 PM
+
+> Another form of "Geert's trick" is
+>
+>  Constraint_Error'Raise;
+>
+> Not sure if you are allowed to make a new attribute with a reserved
+> name, if not
+>
+>  Constraint_Error'Raise_Exception
+>
+> Geert, shall we implement this?
+
+No, I'd really like to avoid any implementation-specific attributes in the
+preconditions. Then any static analysis tool can reason about behavior without
+having to refer to specific compiler, or version thereof.
+
+Fortunately, it appears that with the current Ada 2012 definition that is
+entirely possible.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, March 8, 2012  2:45 PM
+
+> procedure Read(File : File_Type; Element: out Elem_Type)
+>      with Pre =>  Is_Open(File), Pre_Exception =>  Status_Error;
+>      with Post =>  valid(Element), Post_Exception =>  Read_Error;
+
+The above is an interesting suggestion, since we could implement it in any case
+without needing a language extension.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  2:47 PM
+
+>> For all it may matter, I begin -- at long last -- to see convergence
+>> in the recent flurry of discussion.
+>> And I second Erhard's recommendation, the one "free of syntactic
+>> contortions".
+>
+> I think it looks interesting, but for Ada 2020 at this point.
+
+Well I think it likely that GNAT might implement Erhard's suggestion anyway, so
+in practice for Ada 2012 :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  2:49 PM
+
+The natural exception message would be to add something about a precondition
+failing, easy enough to do!
+
+> Right; I have much more sympathy for that. But I think I agree with
+> Bob, that such inventions have to wait for Ada 2020. (Which doesn't
+> mean that we can't design them now and vote to add them at the next
+> meeting.) Joyce tells me that we need to deliver the Standard next
+> week, and this is definitely not the time to add new inventions. That
+> ended at noon on Feb 26th (that is, the end of Kemah meeting).
+
+And also doesn't mean that implementations have to wait for 2020, e.g. if we go
+along with Erhard's suggestion which seems very nice to me (Add Pre_Exception
+and Post_Exception).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  2:57 PM
+
+> Fortunately, it appears that with the current Ada 2012 definition that
+> is entirely possible.
+
+One nasty thing is that it is going to be very hard wortk to get a decent
+exception message. If we adopt Erhard's approach, which I like much better than
+your trick, this falls out free.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 8, 2012  3:06 PM
+
+> > procedure Read(File : File_Type; Element: out Elem_Type)
+> >      with Pre =>  Is_Open(File), Pre_Exception =>  Status_Error;
+> >      with Post =>  valid(Element), Post_Exception =>  Read_Error;
+>
+> The above is an interesting suggestion, since we could implement it in
+> any case without needing a language extension.
+
+That was the suggestion that had the most support in Kemah. Names of secondary
+aspects pending. You might have noticed I used something like it in my reply to
+J-P the other day. (No, you obviously didn't... :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 8, 2012  3:14 PM
+
+> And also doesn't mean that implementations have to wait for 2020, e.g.
+> if we go along with Erhard's suggestion which seems very nice to me
+> (Add Pre_Exception and Post_Exception).
+
+For the record, my notes show that Tucker originally made the suggestion of
+using additional aspects for this purpose. I was planning to write up the AI12
+that way (as that was the consensus from the Kemah ARG meeting). The other ideas
+are very similar to the sort of thing I originally proposed in the original
+AI05-0290-1, and those were not liked as much during the meeting.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  3:16 PM
+
+> That was the suggestion that had the most support in Kemah. Names of
+> secondary aspects pending. You might have noticed I used something
+> like it in my reply to J-P the other day. (No, you obviously didn't...
+> :-)
+
+sorry missed it. I like it because getting a nice exception message comes for
+free, it would just share all the mechanism we have now for nice pre/post
+condition failure messages for exceptions.
+
+I am not sure we should try to jam it into the official 2012, but for sure, my
+current thinking is that we should implement this in 2012. Of course it would be
+nice to implement it with whatever names seem best, I think Pre_Exception and
+Post_Exception are rasaonable .. short and clear.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 8, 2012  3:17 PM
+
+> > Fortunately, it appears that with the current Ada 2012 definition
+> > that is entirely possible.
+>
+> One nasty thing is that it is going to be very hard wortk to get a
+> decent exception message. If we adopt Erhard's approach, which I like
+> much better than your trick, this falls out free.
+
+This seems backwards to me. Geert's trick involves writing a tiny function, and
+that function can trivially use "raise blah with "message"; No possible problem
+there (the assertion check itself is never made, because the exception happens
+first). (You could even make the message a parameter to the function if needed.)
+
+On the other hand, the aspect solution that you are incorrectly attributing to
+Erhard does not include an exception message and thus only the implementation
+could provide it. That would be both more work and less flexible.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  3:31 PM
+
+> This seems backwards to me. Geert's trick involves writing a tiny
+> function, and that function can trivially use "raise blah with
+> "message"; No possible problem there (the assertion check itself is
+> never made, because the exception happens first). (You could even make
+> the message a parameter to the function if needed.)
+
+It would be needed and would be messy, the whole point is that the compiler
+supplies very nice messages about failed preconditions and postconditions
+(pointing to the pre or post condition involved), try it with GNAT now if you
+haven't seen this in action (it even points to the particular piece of the
+precondition that fails if you have a bunch of clauses joined by and then).
+
+But the tiny function has no idea how to raise this effectively.
+
+That's a major disadvantage to me of the Bosch trick.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  3:33 PM
+
+> On the other hand, the aspect solution that you are incorrectly
+> attributing to Erhard does not include an exception message and thus
+> only the implementation could provide it. That would be both more work
+> and less flexible.
+
+Only the implementation has the knowledge to provide a decent message.
+For instance if you have a precondition with 7 clauses joined by and then, it is
+really useless to get a message saying one of them has failed! You need to know
+which one failed.
+
+More work for whom? I think GNAT gives really nice messages in this situation
+already, and the work is already done (to me it is an essential part of
+implementing Pre/Post in a compiler!)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 8, 2012  3:45 PM
+
+It strikes me that we might in fact be thinking about different problems here.
+
+I was thinking about a case like that for the exceptions on Put:
+
+     procedure Put (File : in File_Type; Str : in String)
+        with Pre => (Is_Open(File) or else Raise_Status_Error) and then
+                    (Mode(File) = Out_File or else
+                     Raise_Mode_Error_for_Reading (File));
+
+(I used Geert's trick here to illustrate the issue.)
+
+Our implementation includes a message with Mode_Error that includes the name of
+the offending file and the expected mode. That's nothing something I would want
+to lose simply because we changed to using preconditions, and surely the
+implementation-defined message could not be so specific.
+
+Geert's technique makes that trivial (I added the file as a parameter to the
+raising routine in order to get that; there obviously are other ways); the
+aspect solution does not.
+
+OTOH, if you *don't* have a defined message, I agree that the
+implementation-defined one for the assertion probably provides more information
+than the likely to be empty message in the function created for Geert's trick. I
+think upon reflection that this is what you were talking about.
+
+Geert's technique also renders the concern about wanting to raise multiple
+different exceptions (as in the example above) moot. (Oops, sorry, can't think
+of a better word at the moment. ;-)
+
+I do agree that it is clunky, and we need to do better. But I wanted to point
+out that it actually works better in general than any of the other proposals.
+(Note: I'd avoid the multiple exception problem in the above by making the
+Is_Open part into a predicate. But it is not hard to imagine that there exist
+cases where you can't do that.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  4:11 PM
+
+Of course nothing we do will eliminate the Geert trick^^^^^technique
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, March 8, 2012  4:27 PM
+
+> One nasty thing is that it is going to be very hard wortk to get a
+> decent exception message. If we adopt Erhard's approach, which I like
+> much better than your trick, this falls out free.
+
+That is trivial. Anyway, I don't think it is appropriate to discuss
+implementation details on the ARG list at this time, while we should focus on
+Ada 2012.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, March 8, 2012  5:08 PM
+
+> Bob, what do you think
+
+I think we should all stop distracting Randy from the job at hand, which is to
+crank out an RM with minimal changes from what we've already got.  Steve has
+done a good job of nailing down the last remaining item.
+
+I suggest we defer all talk about 2020 features and impl-def features until WG9
+approves the RM.
+
+P.S. I'm going on vacation right about now...
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  7:35 PM
+
+> For the record, my notes show that Tucker originally made the
+> suggestion of using additional aspects for this purpose. I was
+> planning to write up the
+> AI12 that way (as that was the consensus from the Kemah ARG meeting).
+> The other ideas are very similar to the sort of thing I originally
+> proposed in the original AI05-0290-1, and those were not liked as much
+> during the meeting.
+
+Actually, thinking about this more, I am not so enthusiastic about the separate
+aspects. I am convinced by the argument that in general you need multiple
+different exceptions in the same precondition quite often.
+
+So I think it better to use Geert's technique, or (better), some specific form
+like
+
+      Constraint_Error'Raise
+
+or
+
+      raise Constraint_Error
+
+These are better since it is much easier for the compiler to provide useful
+default exception messages.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 8, 2012  7:49 PM
+
+I tend to agree. And
+
+      raise Constraint_Error with "Message"
+
+(the with part being optional) is best of all, since it allows using a specific
+user-defined message where that makes sense. (After all, that's the form of the
+raise statement, so it would make sense to use a similar form in an expression.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, March 8, 2012  7:55 PM
+
+Yes, that's definitely appropriate!
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Monday, March 12, 2012  9:02 AM
+
+> Actually, thinking about this more, I am not so enthusiastic about the
+> separate aspects. I am convinced by the argument that in general you
+> need multiple different exceptions in the same precondition quite
+> often.
+
+Neither am I, but then, the "real thing" would be multiple PREs, such as:
+  procedure Set_Input(File: in File_Type)
+   with PRE => Open(File) or else raise Status_Error with opt_MSG;
+   with PRE => Mode(File)=In_File or else raise Mode_Error;
+
+(Interestingly, the order of the PREs matters for definedness!)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March 12, 2012  9:29 AM
+
+I see no point in this, why is this different from
+
+        with PRE =>  (Open(File) or else raise Status_Error with opt_MSG);
+                       and then
+                     (Mode(File)=In_File or else raise Mode_Error);
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Monday, March 12, 2012  12:42 PM
+
+Halstead and McCabe metrics regard the latter as more complex, don't they? (And
+they probably are right, once your preconditions also contain more complicated
+boolean expressions, especially ones that include "and then"-expressions.)
+
+Technically, there should be no difference, of course.
+
+It is a matter of additional structure and of enabling a quick glance at all the
+raised exceptions when reading the spec. An equally readable "and then"-version
+requires a formatting discipline (as in your example) that neither people nor
+automated reformaters have.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March 12, 2012  9:43 PM
+
+> Halstead and McCabe metrics regard the latter as more complex, don't
+> they? (And they probably are right, once your preconditions also
+> contain more complicated boolean expressions, especially ones that
+> include "and then"-expressions.)
+
+I find this absurd, the use of AND THEN here is just a systematic way of having
+multiple preconditions
+
+> Technically, there should be no difference, of course.
+
+of course
+
+> It is a matter of additional structure and of enabling a quick glance
+> at all the raised exceptions when reading the spec. An equally
+> readable "and then"-version requires a formatting discipline (as in
+> your example) that neither people nor automated reformaters have.
+
+Well we certainly enforce formattint discipline at AdaCore, and anyone who does
+not is never going to write comprehensible code anyway.
+
+And automated reformatters do have appropriate capabilities!
+
+****************************************************************
