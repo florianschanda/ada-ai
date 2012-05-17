@@ -1,0 +1,1545 @@
+!standard 13.10(3)                                 12-05-16    AI12-0025-1/01
+!class Amendment 12-05-16
+!status work item 12-05-16
+!status received 12-02-21
+!priority Medium
+!difficulty Medium
+!subject Allow 'Unchecked_Access on subprograms
+!summary
+
+Define an aspect "Allow_Unchecked" which can be applied to
+an access-to-subprogram type.
+
+!problem
+
+Since Ada 95, the language has allowed 'Unchecked_Access on objects to bypass
+the accessibility rules, but it has not allowed 'Unchecked_Access on
+subprograms. There is real code
+which had a need to declare a named access-to-subprogram type and objects of
+that type which could hold an access to a subprogram nested at any level. The
+code uses 'Unrestricted_Access, which is implemented by GNAT and Irvine
+Compiler, but of course this is not portable to other compilers that don't
+implement this. Thus a language-defined attribute would be useful.
+
+!proposal
+
+The reason for disallowing 'Unchecked_Access on subprograms, according to AARM
+13.10(5.a), is that allowing this would require all access-to-subprogram types,
+including those which could not legally represent the 'Access of a nested
+subprogram (i.e. declared at library level), to carry extra overhead in case an
+'Unchecked_Access were used.
+
+This now can be solved by defining an aspect to specify that the type needs
+to include the extra overhead. Conversions of values with the extra overhead
+to values without it would need to be prohibited.
+
+!wording
+
+[Editor's note: This wording is from the original proposal, it's probably not
+a complete solution. See the !discussion.]
+
+Insert after 13.10(3):
+
+For a type declaration of an access-to-subprogram type, the following
+representation aspect may be specified:
+
+Allow_Unchecked
+        The type of aspect Allow_Unchecked is Boolean.
+
+[AJB: I'm assuming that since this I called this a represenation aspect, an
+implementation can refuse to support it, if access-to-subprogram types are
+somehow implemented in a way that would make it difficult to support an object
+holding an access to a more-nested subprogram.]
+
+The following attribute is defined for a prefix P that denotes a
+subprogram:
+
+P'Unchecked_Access
+        All rules and semantics that apply to P'Access (see 3.10.2)
+        apply also to P'Unchecked_Access, except that, for the purpose
+        of accessibility rules and checks, it is as if P were declared
+        immediately within a library package; and except that if P is
+        an explicit_deference of an object of an access-to-subprogram
+        type, the Allow_Unchecked aspect may be True for the object's
+        type. The Allow_Unchecked aspect shall be True for the
+        expected type of the attribute, or else the expected type
+        shall be the anonymous access type of an access parameter.
+
+Delete 13.10(5).
+
+Add to the end of 3.10.2(32):
+        If P is an explicit_deference of an object of an
+        access-to-subprogram type, the Allow_Unchecked aspect shall
+        not be True for the object's type.
+        [AJB: I would have said "shall be False" but I'm not clear on
+        whether an a Boolean aspect clause that is not specified means
+        that the aspect is False or that it just doesn't exist.]
+
+Delete the last sentence of 3.10.2(37).
+
+Insert after 4.6(24.21):
+
+If the Allow_Unchecked aspect is True for the operand type, it shall also be
+True for the target type, or else the target type shall be the anonymous access
+type of an access parameter.
+
+Insert after K.1(5):
+
+Allow_Unchecked
+    'Unchecked_Access of a subprogram may be used as an expression of
+    the type.
+
+Insert after K.2(257):
+
+P'Unchecked_Access
+
+        For a prefix P that denotes a subprogram:
+
+        All rules and semantics that apply to P'Access (see 3.10.2)
+        apply also to P'Unchecked_Access, except that, for the purpose
+        of accessibility rules and checks, it is as if P were declared
+        immediately within a library package.  See 13.10.
+
+!discussion
+
+Editor's notes:
+
+(1) It would make more sense to use the same conversion rules that apply to
+anonymous access-to-subprogram for types that have this new aspect, rather than
+inventing new rules. The existing types use accessibility rules for this
+purpose, and we probably ought to do the same here.
+
+(2) There needs to be a new rule about erroneousness when calling a non-existent
+subprogram. (The problem being that the subprogram always exists, but the data
+that it references may not.) The existing rules (13.10.2(16.3)) only cover
+objects.
+
+(3) Rules are needed for generic matching (so that 'Unchecked_Access could be
+used with a formal access-to-subprogram type), and so that the conversion rules
+are enforced properly.
+
+(4) Taking 'Unchecked_Access in a generic body would need to be illegal in the
+same cases that 'Access is. Where accessibility is used to enforce those rules
+now, other rules would need to be added.
+
+
+!ACATS test
+
+ACATS B and C-tests need to be defined for this new functionality.
+
+!appendix
+
+From: Adam Beneschan
+Sent: Tuesday, February 21, 2012  7:32 PM
+
+!topic Allow 'Unchecked_Access on subprograms
+!reference 13.10, 3.10.2, 4.6
+!from Adam Beneschan 12-02-21
+!discussion
+
+Since Ada 95, the language has allowed 'Unchecked_Access on objects to bypass
+the accessibility rules, but it has not allowed 'Unchecked_Access on
+subprograms.  It would be useful to allow it, however.  I have seen real code
+which had a need to declare a named access-to-subprogram type and objects of
+that type which could hold an access to a subprogram nested at any level.  The
+code uses 'Unrestricted_Access, which is implemented by GNAT and Irvine
+Compiler, but of course this is not portable to other compilers that don't
+implement this.  Thus a language-defined attribute would be useful.
+
+The reason for disallowing 'Unchecked_Access on subprograms, according to AARM
+13.10(5.a), is that allowing this would require all access-to-subprogram types,
+including those which could not legally represent the 'Access of a nested
+subprogram (i.e. declared at library level), to carry extra overhead in case an
+'Unchecked_Access were used.
+
+However, I believe that this can be solved now that the language supports aspect
+clauses.  I'm proposing that an Allow_Unchecked aspect be defined for
+access-to-subprogram types, and that P'Unchecked_Access be allowed only if the
+Allow_Unchecked aspect is True for the expected type.  Thus, the additional
+overhead needed to allow P'Unchecked_Access would be present only for those
+types that have the aspect specified.  To prevent values of types without this
+aspect (other than anonymous access-to-subprogram parameters) from representing
+"unsafe" nested accesses, the rules would prevent type conversions from types
+with the aspect to types without the aspect, and they would prohibit
+P.all'Access where P's type has the Allow_Unchecked aspect.
+
+I've appended my thoughts about how the language would be modified, in the hope
+that this helps with some of the workload if the proposal is adopted.  However,
+I can't guarantee that these suggestions are correct or complete.
+
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+Insert after 13.10(3):
+
+For a type declaration of an access-to-subprogram type, the following representation aspect may be specified:
+
+Allow_Unchecked
+        The type of aspect Allow_Unchecked is Boolean.
+
+[AJB: I'm assuming that since this I called this a represenation aspect, an
+implementation can refuse to support it, if access-to-subprogram types are
+somehow implemented in a way that would make it difficult to support an object
+holding an access to a more-nested subprogram.]
+
+The following attribute is defined for a prefix P that denotes a
+subprogram:
+
+P'Unchecked_Access
+        All rules and semantics that apply to P'Access (see 3.10.2)
+        apply also to P'Unchecked_Access, except that, for the purpose
+        of accessibility rules and checks, it is as if P were declared
+        immediately within a library package; and except that if P is
+        an explicit_deference of an object of an access-to-subprogram
+        type, the Allow_Unchecked aspect may be True for the object's
+        type.  The Allow_Unchecked aspect shall be True for the
+        expected type of the attribute, or else the expected type
+        shall be the anonymous access type of an access parameter.
+
+Delete 13.10(5).
+
+Add to the end of 3.10.2(32):
+        If P is an explicit_deference of an object of an
+        access-to-subprogram type, the Allow_Unchecked aspect shall
+        not be True for the object's type.
+        [AJB: I would have said "shall be False" but I'm not clear on
+        whether an a Boolean aspect clause that is not specified means
+        that the aspect is False or that it just doesn't exist.]
+
+Delete the last sentence of 3.10.2(37).
+
+Insert after 4.6(24.21):
+
+If the Allow_Unchecked aspect is True for the operand type, it shall also be
+True for the target type, or else the target type shall be the anonymous access
+type of an access parameter.
+
+Insert after K.1(5):
+
+Allow_Unchecked
+    'Unchecked_Access of a subprogram may be used as an expression of
+    the type.
+
+Insert after K.2(257):
+
+P'Unchecked_Access
+
+        For a prefix P that denotes a subprogram:
+
+        All rules and semantics that apply to P'Access (see 3.10.2)
+        apply also to P'Unchecked_Access, except that, for the purpose
+        of accessibility rules and checks, it is as if P were declared
+        immediately within a library package.  See 13.10.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Wednesday, February 22, 2012  8:37 AM
+
+> Since Ada 95, the language has allowed 'Unchecked_Access on objects to
+> bypass the accessibility rules, but it has not allowed
+> 'Unchecked_Access on subprograms.  It would be useful to allow it,
+> however.  I have seen real code which had a need to declare a named
+> access-to-subprogram type and objects of that type which could hold an
+> access to a subprogram nested at any level.  The code uses
+> 'Unrestricted_Access, which is implemented by GNAT and Irvine
+> Compiler, but of course this is not portable to other compilers that
+> don't implement this.  Thus a language-defined attribute would be
+> useful.
+
+I am also familiar with the code using the access-to-subprogram type use. I had
+mentioned the issue to Steve Baird from Adacore, and he suggested that the use
+of a tagged type that had a primitive with the desired profile, and then
+dispatching on the call might get the desired effect of an access-to-subprogram
+type. This would then allow Unchecked_Access on the tagged object, which would
+be portable.
+
+I wasn't sure that this suggestion would pan out, because the code needs to
+return a result from a call, before returning from the call, and the only way to
+do that, that I could see, involved using a parameter to the call that was an
+access to an access type.
+
+I did some experimenting last night however, and I believe I found a reasonable
+workaround, based on this approach.
+
+It involves instantiating a generic that creates the tagged type.
+(An interface actually), then then instantiating a child generic subprogram that
+accepts an access to the access-to-class wide type, instead of an access to an
+access-to-subbprogram, as was the case before. This seems to work, without any
+noticeable loss in performance.
+
+So it seems in this case, at least, the need for 'Unchecked_Access can be
+avoided. That's not to say that there might be other possible cases where such a
+feature might be needed.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, February 22, 2012  9:00 AM
+
+> It involves instantiating a generic that creates the tagged type.
+> (An interface actually), then then instantiating a child generic
+> subprogram that accepts an access to the access-to-class wide type,
+> instead of an access to an access-to-subbprogram
+
+Explain that to a newbie coming from C, and tell him how nice Ada is :-) !
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, February 22, 2012  9:10 AM
+
+Yeah, I wouldn't explain that to a newbie coming from C.
+
+But if a C programmer complains that it's difficult to deal with pointers to
+nested functions in Ada, I'd point out that C doesn't even have nested
+functions.  ;-)
+
+****************************************************************
+
+From: Brad Moore
+Sent: Wednesday, February 22, 2012  10:34 AM
+
+Not to mention generics, although one could go to C++ for a similar sort of
+capability in templates.
+
+Some of the other language features being used such as portable concurrency, and
+portable parallelism, would be difficult for a C programmer to complain about as
+well. ;-)
+
+Although it might be tricky to explain to the newbie C programmer the mechanisms
+being used in the generic, at least the user of the generic doesn't have to be
+aware of the nested subprograms hidden inside the generic, or other complexities
+hidden behind the generic abstraction.
+
+Explaining how to use the generic to a newbie C programmer, at least would not
+be as difficult a task, I would think.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Wednesday, February 22, 2012  1:14 PM
+
+>Some of the other language features being used such as portable
+>concurrency, and portable parallelism, would be difficult for a C
+>programmer to complain about as well.
+
+To be fair, I see that the new C11 standard had added support for thread
+creation and management, mutexes and condition variables, and atomic objects.
+
+****************************************************************
+
+From: Gautier de Montmollin
+Sent: Sunday, February 26, 2012  10:13 AM
+
+>> It involves instantiating a generic that creates the tagged type.
+>> (An interface actually), then then instantiating a child generic
+>> subprogram that accepts an access to the access-to-class wide type,
+>> instead of an access to an access-to-subbprogram
+> Explain that to a newbie coming from C, and tell him how nice Ada is :-) !
+
+Even a long-time Ada user did not understand the whereabouts of this intricated
+workaround.
+
+If it is for the sake of saying "see, you /can/ do it in Ada without
+Unrestriced_Access", it is close to perversion...
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, February 28, 2012  12:40 AM
+
+I can see how the brief but rather complex explanation above could be
+mystifying.
+
+I think its really not as bad as it sounds though. I will attempt to shed some
+light by way of an illustrative example.
+
+And actually, the workaround can be simplified. There is no need to instantiate
+a child generic subprogram for instance.
+
+First of all, the changes needed for the workaround need to be separated from
+the original problem space.
+
+The problem space can be framed in terms of;
+
+    - *What* was the problem that needed solving?
+    - *Why* is the problem worth solving?
+
+The work around can be framed in terms of;
+    - *How* was the solution coded to solve the problem.
+
+Once the "What" and "Why" are known, they can be put aside, as it is only the
+"How" that matters for comparison between the two approaches.
+
+1. *What* was the problem to solve anyway?
+
+Assume there is a need to call an instance of an Ada generic, and have that
+generic instance call a user-defined callback which is passed to the generic.
+That callback in turn needs to make a call to a nested subprogram inside the
+generic instance body that is nested within the scope of the original call into
+the generic. No global variables are to be used, i.e., all declarations are
+stack-based.
+
+2. *Why would anyone want to do this?
+
+A functional programming style is desired to provide a generic utility that
+performs some complex task, with hooks to allow users to reuse the generic for
+different purposes. By disallowing global declarations, this allows the code to
+be thread-safe without requiring synchronization or raising concurrency
+concerns, since everything about the call is on the local stack. The
+user-defined callback may need to call back into the generic to access state
+information declared in the scope of the original call.
+
+3. OK, so *How* did this look originally, with the 'Unrestricted_Access
+implementation?  (Using Ada 2012 Pre and Post conditions to clarify usage)
+
+
+generic
+    type T is range <>;
+    type Call_Into_Type is access procedure (Item : T);
+    -- Note: we have to pass in the access to subprogram type
+    -- This is not needed in the new implementation.
+procedure Execute
+   (Item : T;
+    --  Value of User Defined type
+
+    Call_Into : not null access Call_Into_Type;
+    --  Call_Into is 'set' to an internal nested procedure
+    --  before returning from this call, and before Callback
+    --  is called. (Which is why this is an access parameter,
+    --  instead of an in out parameter.) One cannot count on
+    --  an "in out" parameter being set *before* returning from this
+    --  call.
+
+    Callback : not null access procedure (Item : T)
+    --  Client Callback can call Call_Into)
+      with Pre => Call_Into.all = null,
+           Post => Call_Into.all = null;
+    -- Call_Into is only non-null within the callback
+
+------------------------------
+
+with Ada.Text_IO; use Ada.Text_IO;
+
+procedure Execute
+    (Item          : T;
+     Call_Into : not null access Call_Into_Type;
+     Callback : not null access procedure (Item : T)) is
+
+    Call_Count : Natural := 0;
+    Total : T := 0;
+
+    procedure Nested_Call (Item : T) is
+       --  Note: Nested_Call can view declarations hidden in the generic
+    begin
+       Call_Count := Call_Count + 1;
+       Total := Total + Item;
+    end Nested_Call;
+
+begin
+
+    --  Allow client to call nested procedure
+    --  Note: Unrestricted_Access is not portable
+    Call_Into.all := Nested_Call'Unrestricted_Access;
+
+    --  Note: It is OK to call the Nested_Call from within the callback,
+    --  since local variables exist until after returning from the
+    --  callback, up until returning from the Execute call below.
+    Callback (Item);
+
+    Put_Line ("Old Total=" & T'Image (Total) &
+              ", called" & Natural'Image (Call_Count) & " times");
+
+    Call_Into.all := null;
+    --  Ensure Client can't call Nested_Call once we've returned from the
+    --  generic
+end Execute;
+
+---------------------------------------------------------
+
+with Execute;
+
+procedure Old_Client (Item : Natural) is
+
+    type Call_Into_Type is access procedure (Number : Natural);
+    --  Needed to instantiate generic
+
+    Call_Into : aliased Call_Into_Type := null;
+    --  Will be non-null within scope of callback P below
+
+    procedure My_Execute is new
+      Execute (T => Natural,
+               Call_Into_Type => Call_Into_Type);
+
+    procedure P (Number : Natural) with Pre => Call_Into /= null;
+    --  Note Ada 2012 Precondition
+
+    procedure P (Number : Natural) is
+    begin
+       Call_Into (Number);
+       --  Call nested subprogram in the generic
+
+       --  Do some recursion, just to make it more interesting
+       if Number > 0 then
+          P (Number - 1);
+       end if;
+    end P;
+
+begin
+    My_Execute
+      (Item  => Item,
+       Call_Into => Call_Into'Access,
+       Callback => P'Access);
+    --  Execute sets Call_Into above, then calls callback,
+    --  which in turn calls back "into" the generic
+    --  calling a nested procedure
+end Old_Client;
+
+=============================================
+
+4. And *How* does the new implementation look using the
+'Unchecked_Access instead of 'Unrestricted_Access?
+
+generic
+    type T is range <>;
+    --  Note: No need to pass in access to subprogram type,
+    --  Instead, generic package provides access to object type
+    --  below
+package Pak is
+
+    --  Interface to call into a generic
+    type Dispatcher_Type is interface;
+
+    procedure Call_Into
+      (Dispatcher : Dispatcher_Type;
+       Item : T) is abstract;
+
+    --  Need class-wide access type for Dispatcher, so we
+    --  can dispatch calls to nested derived type declared
+    --  inside the generic.
+    type Dispatcher_Access is access all Dispatcher_Type'Class;
+
+    procedure Execute
+      (Item : T;
+       Dispatcher : not null access Dispatcher_Access;
+    --  Dispatcher is 'set' to an internal object of a derived type
+    --  before returning from this call, and before Callback
+    --  is called. (Which is why this is an access parameter,
+    --  instead of an in out parameter.) One cannot count on
+    --  an "in out" parameter being set *before* returning from this
+    --  call.
+
+       Callback : not null access procedure (Item : T))
+    --  Client Callback can dispatch calls to  Dispatcher.Call_Into
+      with Pre => Dispatcher.all = null,
+           Post => Dispatcher.all /= null;
+
+end Pak;
+
+--------------------------------------------
+
+with Ada.Text_IO; use Ada.Text_IO;
+
+package body Pak is
+
+    procedure Execute
+      (Item          : T;
+       Dispatcher    : not null access Dispatcher_Access;
+       Callback : not null access procedure (Item : T))
+    is
+
+       Call_Count : Natural := 0;
+       Total : T := 0;
+
+       type Internal_Dispatcher_Type is
+         new Dispatcher_Type with null record;
+
+       overriding procedure Call_Into
+         (Dispatcher : Internal_Dispatcher_Type;
+          Item       : T) is
+       --  Note: This nested call can view declarations hidden
+       --  in the generic
+       begin
+          Call_Count := Call_Count + 1; --  Do Stuff
+          Total := Total + Item;
+       end Call_Into;
+
+       --  Local object to use for dispatching to nested procedure
+       Internal_Dispatcher : aliased Internal_Dispatcher_Type;
+
+    begin
+
+       --  Allow client to dispatch to nested procedure
+       --  Note: Unchecked_Access is portable
+       Dispatcher.all := Internal_Dispatcher'Unchecked_Access;
+
+       --  Note: It is OK to dispatch calls to the nested call, Call_Into
+       --  from within the callback, since local variables exist until
+       --  after returning from the callback, up until returning from the
+       --  Execute call below.
+       Callback (Item);
+
+       Put_Line ("New Total=" & T'Image (Total) &
+                 ", called" & Natural'Image (Call_Count) & " times");
+
+       Dispatcher.all := null;
+       --  Ensure Client can't call nested procedure once we've
+       --  returned from this call
+
+    end Execute;
+end Pak;
+
+----------------------------------------
+
+with Pak;
+
+procedure New_Client (Item : Natural) is
+    package My_Pak is new Pak (T => Natural);
+    use type My_Pak.Dispatcher_Access;
+
+    Dispatcher : aliased My_Pak.Dispatcher_Access := null;
+
+    procedure P (Number : Natural) with Pre => Dispatcher /= null;
+
+    procedure P (Number : Natural) is
+    begin
+       --  Call into nested procedure in generic
+       Dispatcher.Call_Into (Number);
+
+       --  Do some recursion, just to make it more interesting
+       if Number  > 0 then
+          P (Number - 1);
+       end if;
+    end P;
+
+begin
+    My_Pak.Execute
+      (Item  => Item,
+       Dispatcher => Dispatcher'Access,
+       Callback => P'Access);
+    --  Execute calls callback, which in turn calls back "into" the
+    --  generic Calling a nested procedure
+end New_Client;
+
+------------------------------------
+
+-- Test driver for both old and new approaches
+
+with Old_Client;
+with New_Client;
+
+procedure Test_Call_Into is
+begin
+    Old_Client (10);
+    New_Client (10);
+end Test_Call_Into;
+
+Outputs =>
+
+    Old Total= 55, called 11 times
+    New Total= 55, called 11 times
+
+=========================================
+
+5. OK, so to summarize, what where the differences between
+the two approaches?
+
+   - Old approach uses Generic Procedure, instead of Generic Package
+   - Generic Procedure needs a formal parameter to define the access to
+     subprogram type, whereas Generic package defines an access to
+     interface object that can be used to dispatch to a derived type.
+   - Old approach passes access to subprogram access into the generic,
+     new approach passes access to interface access into the generic
+   - Old approach uses 'Unrestricted_Access to set the nested
+     procedure to the client visible access-to-subprogram object,
+     whereas new approach uses 'Unchecked_Access to set the nested
+     derived object with the desired nested primitive subprogram to the
+     client visible access-to-classwide type object.
+   - Old approach is non-portable, new approach is portable
+
+When you compare the two approaches, they really aren't that different.
+I don't find the second approach any less appealing than the first
+approach, from an elegance standpoint.
+
+
+I hope this helps clarify.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  5, 2012  5:57 PM
+
+...
+> However, I believe that this can be solved now that the language
+> supports aspect clauses.  I'm proposing that an Allow_Unchecked aspect
+> be defined for access-to-subprogram types, and that P'Unchecked_Access
+> be allowed only if the Allow_Unchecked aspect is True for the expected
+> type.  Thus, the additional overhead needed to allow
+> P'Unchecked_Access would be present only for those types that have the
+> aspect specified.  To prevent values of types without this aspect
+> (other than anonymous access-to-subprogram parameters) from
+> representing "unsafe" nested accesses, the rules would prevent type
+> conversions from types with the aspect to types without the aspect,
+> and they would prohibit P.all'Access where P's type has the
+> Allow_Unchecked aspect.
+
+This would be "necessary", but insufficient. Essentially, such access types
+would have to have the same semantics as anonymous access-to-subprogram. These
+"named anonymous access types" also could not be compatible with foreign
+languages (such as C) and there also would need to be some sort of rules for
+generic matching.
+
+In addition, if we're continuing to support generic sharing in the language (*),
+we'd need some rules to prevent taking  'Unchecked_Access in a generic body in
+the same way we already have rules preventing 'Access. (The problems with
+finding the data for a generic instance don't have anything to do with "static
+links".)
+
+Anyway, I don't think we would want to invent a totally new semantics when we
+already have essentially the correct semantics for anonymous
+access-to-subprogram. Your proposal would be better if you unified the existing
+anonymous access-to-subprogram with your new aspect.
+
+(*) I could imagine that Ada 2020 would totally abandon the idea that any
+generic sharing can take place. That would take the form of relaxing the
+contract model enough to detect errors in generic bodies (rather than raising
+Program_Error) and probably would eliminate some other anomalies as well. But I
+would hope that we'd do that based on its own merits rather than any association
+with something as "old-school" as access-to-subprogram. [After all, I don't
+think packages should contain any visible access types in their specifications,
+and that surely includes access-to-subprogram types. So I find the idea of
+expanding the use of such types unappealing.]
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Wednesday, March 21, 2012  8:42 PM
+
+> ...
+> > However, I believe that this can be solved now that the language
+> > supports aspect clauses.  I'm proposing that an Allow_Unchecked
+> > aspect be defined for access-to-subprogram types, and that
+> > P'Unchecked_Access be allowed only if the Allow_Unchecked aspect is
+> > True for the expected type.  Thus, the additional overhead needed to
+> > allow P'Unchecked_Access would be present only for those types that
+> > have the aspect specified.  To prevent values of types without this
+> > aspect (other than anonymous access-to-subprogram parameters) from
+> > representing "unsafe" nested accesses, the rules would prevent type
+> > conversions from types with the aspect to types without the aspect,
+> > and they would prohibit P.all'Access where P's type has the
+> > Allow_Unchecked aspect.
+>
+> This would be "necessary", but insufficient. Essentially, such access
+> types would have to have the same semantics as anonymous access-to-subprogram.
+
+I'm not sure what you're saying.  Do you mean that Allow_Unchecked access types
+would have the same semantics as anonymous access-to-subprogram types and are
+therefore unnecessary, or that there are some rules or semantics involving
+anonymous access-to-subprogram types that would also have to be added for access
+types with Allow_Unchecked aspects?  If it's the latter, I don't see what those
+rules are; could you elaborate?
+
+> These "named anonymous access types" also could not be compatible with
+> foreign languages (such as C)
+
+I don't see why not.  It seems like it should be possible to say something like
+
+   type Gtk_Something_Handler is access procedure (...parameters...)
+     with Allow_Unchecked, Convention => C;
+
+and then if an implementation couldn't allow 'Unchecked_Access on arbitrary
+subprograms because it couldn't implement the access type as a simple address,
+it would reject the type declaration.  I think the advantage is that this could
+be done within the language; right now, implementations have had to define their
+own language-defined attribute (GNAT's and ICC's 'Unrestricted_Access) which
+leads to non-portability.
+
+
+> and there also would need to be some sort of rules for generic
+> matching.
+
+I didn't think of that, but it seems possible.  I'd have to think a little more
+about what those rules would be.
+
+
+> In addition, if we're continuing to support generic sharing in the
+> language (*), we'd need some rules to prevent taking
+> 'Unchecked_Access in a generic body in the same way we already have
+> rules preventing 'Access. (The problems with finding the data for a
+> generic instance don't have anything to do with "static links".)
+
+Yes, that's a complication.
+
+> Anyway, I don't think we would want to invent a totally new semantics
+> when we already have essentially the correct semantics for anonymous
+> access-to-subprogram. Your proposal would be better if you unified the
+> existing anonymous access-to-subprogram with your new aspect.
+
+The sort of problem I'm trying to solve (that doesn't involve foreign-language
+interfaces) is a case where a subprogram or task S contains a nested subprogram
+NS, and S somehow has to hand NS's access off to some other program module, and
+will get it back later from that module.  The other module treats the record
+containing the subprogram access as an opaque box that it isn't allowed to open.
+
+For example, consider a case where there are multiple client task types that can
+call a routine to submit a "job" to a scheduler.  The job record contains data
+that the scheduler doesn't know anything about.  But the scheduler will then
+decide, somehow, when it's time to perform each job, and at that point the
+scheduler will call back the appropriate task and hand the job record back to
+the task.  A reasonable (I think) way to design this is to define a synchronized
+interface that the client task types will be derived from:
+
+    type Job_Type is tagged null record;
+
+    type Client_Type is synchronized interface;
+    procedure Run_Job (C : Client_Type; Job : Job_Type'Class) is abstract;
+    procedure No_More_Jobs (C : Client_Type) is abstract;
+
+    type Client_Acc is access all Client_Type'Class;
+
+A Submit procedure is called by each task to submit jobs for
+scheduling:
+
+    procedure Submit (C   : Client_Acc;
+                      Job : Job_Type'Class);
+
+This would, presumably, save C and Job in some kind of data structure.
+(In real life, there may be other parameters having to do with the job's
+priority, perhaps.)  Later, when the scheduler decides it's time to run the job,
+it calls
+
+    C.Run_Job (Job);
+
+The client task might look something like
+
+    type My_Job_1 is new Job_Type with record
+        N : Integer;
+    end record;
+
+    task type Task1 is new Client_Type with
+        entry Who_Am_I (Client : Client_Acc);
+        entry Run_Job (Job : Job_Type'Class);
+        entry No_More_Jobs;
+    end Task1;
+
+    task body Task1 is
+        procedure Perform_Job (Job : My_Job_1) is
+        begin
+            ... do the work
+        end Perform_Job;
+
+        Done : Boolean;
+        Me   : Client_Acc;
+    begin
+        accept Who_Am_I (Client : Client_Acc) do
+            Me := Client;
+        end Who_Am_I;
+        Submit (Me, My_Job_1' (N => 111));
+        Submit (Me, My_Job_1' (N => 222));
+        Submit (Me, My_Job_1' (N => 333));
+
+        Done := False;
+        while not Done loop
+            select
+                accept Run_Job (Job : Job_Type'Class) do
+                    Perform_Job (My_Job_1 (Job));
+                end Run_Job;
+            or
+                accept No_More_Jobs do
+                    Done := True;
+                end No_More_Jobs;
+            end select;
+        end loop;
+    end Task1;
+
+For each actual Task1 object T, the master that creates T would have to call
+T.Who_Am_I (T'Access) so that T would know what access value to pass to Submit.
+(Alternatively, the Submit calls could look like
+
+    Submit (Task1'Unchecked_Access, My_Job_1' (N => 111));
+
+When I wrote this, all the task objects were at library level, and I was trying
+to use as little 'Unchecked as possible.)
+
+I tried this and it worked fine, although I was a little annoyed that
+My_Job_1 had to be declared at library level, not inside Task1.  (This seems
+like a flaw, but I'm not sure what the answer is.)
+
+This method breaks down, though, when the job record contains an
+access-to-subprogram that could hold the 'Access of a nested subprogram:
+
+    type Job_Procedure is access procedure;
+    type My_Job_2 is new Job_Type with record
+        Proc : Job_Procedure;
+    end record;
+
+    task body Task1 is
+        procedure Do_Job_1 is  -- let's say this access other
+                               -- variables inside Task1 and thus
+                               -- must be nested
+        begin
+            ... do the work
+        end Do_Job_1;
+
+        procedure Do_Job_2 is ...
+        procedure Do_Job_3 is ...
+
+        Done : Boolean;
+        Me   : Client_Acc;
+    begin
+        accept Who_Am_I (Client : Client_Acc) do
+            Me := Client;
+        end Who_Am_I;
+        Submit (Me, My_Job_2' (Proc => Do_Job_1'access));
+        Submit (Me, My_Job_2' (Proc => Do_Job_2'access));
+        Submit (Me, My_Job_2' (Proc => Do_Job_3'access));
+
+        Done := False;
+        while not Done loop
+            select
+                accept Run_Job (Job : Job_Type'Class) do
+                    My_Job_2 (Job).Proc.all;
+                end Run_Job;
+            or
+                accept No_More_Jobs do
+                    Done := True;
+                end No_More_Jobs;
+            end select;
+        end loop;
+    end Task1;
+
+This is the kind of case where it would be nice to declare Job_Procedure with
+Allow_Unchecked, and then 'Unchecked_Access could be used in the Submit calls.
+
+After I submitted my earlier proposal, though, I figured out that there's
+another way to solve this particular problem:
+
+    type Job_Procedure_Holder is tagged null record;
+    type My_Job_2 is new Job_Type with record
+        Proc_Holder : access Job_Procedure_Holder'Class;
+    end record;
+
+and then in Task1:
+
+    type Job_Procedure is access procedure;
+    type My_Holder is new Job_Procedure_Holder with record
+        Op : Job_Procedure;
+    end record;
+
+    Job1_Holder : aliased My_Holder := (Op => Do_Job_1'Access);
+    Job2_Holder : aliased My_Holder := (Op => Do_Job_2'Access);
+    Job3_Holder : aliased My_Holder := (Op => Do_Job_3'Access);
+        -- these are OK since Job_Procedure is now defined inside
+        -- Task1
+
+    Submit (Me, My_Job_2' (Proc_Holder => Job1_Holder'Unchecked_Access));
+    Submit (Me, My_Job_2' (Proc_Holder => Job2_Holder'Unchecked_Access));
+    Submit (Me, My_Job_2' (Proc_Holder => Job3_Holder'Unchecked_Access));
+
+so that an 'Unchecked_Access on an object can take the place of the disallowed
+'Unchecked_Access on a subprogram.
+
+This might be somewhat similar to Brad's solution (except with the procedure
+access explicit instead of in a dispatch vector).  I'm not sure; I'd have to
+study it more.
+
+Anyway, since there's a workaround for this particular problem that isn't too
+horrible, perhaps that reduces the worth of my proposal. But I hope this
+explains the sort of problem I was trying to solve. Plus, it still seems less
+than ideal that in an interfacing-to-C case that programs having to rely on an
+implementation-defined attribute, and that there's no general language-defined
+answer.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, March 21, 2012  10:09 PM
+
+> > This would be "necessary", but insufficient. Essentially, such
+> > access types would have to have the same semantics as anonymous
+access-to-subprogram.
+>
+> I'm not sure what you're saying.  Do you mean that Allow_Unchecked
+> access types would have the same semantics as anonymous
+> access-to-subprogram types and are therefore unnecessary,
+
+No (see below).
+
+ or that there are some rules or semantics
+> involving anonymous access-to-subprogram types that would also have to
+> be added for access types with Allow_Unchecked aspects?  If it's the
+> latter, I don't see what those rules are; could you elaborate?
+
+Pretty much all of them; in particular, we don't allow conversions between
+anonymous access-to-subprogram and regular access-to-subprogram. The
+representation of the types would be the same, the requirements to successfully
+create an 'Unchecked_Access would be the same as 'Access for anonymous
+access-to-subprogram, etc.
+
+We noticed this problem back in the Ada 2005 days, but didn't pursue it mainly
+because simply the thought of a named anonymous access type caused mental
+breakdowns. :-) We'd need a better name for the concept (maybe "generalized
+access-to-subprogram", not sure) and then both anonymous access-to-subprogram
+and this new kind of type would have that category. Note that we'd need
+accessibility rules for 'Access (not everyone would want to use [or need]
+'Unchecked_Access). Best to use all of the rules already existing rather than
+invent a new bunch.
+
+> > These "named anonymous access types" also could not be compatible
+> > with foreign languages (such as C)
+>
+> I don't see why not.  It seems like it should be possible to say
+> something like
+>
+>    type Gtk_Something_Handler is access procedure (...parameters...)
+>      with Allow_Unchecked, Convention => C;
+>
+> and then if an implementation couldn't allow 'Unchecked_Access on
+> arbitrary subprograms because it couldn't implement the access type as
+> a simple address, it would reject the type declaration.  I think the
+> advantage is that this could be done within the language; right now,
+> implementations have had to define their own language-defined
+> attribute (GNAT's and ICC's 'Unrestricted_Access) which leads to
+> non-portability.
+
+But all implementations would have to reject this; the entire point is that the
+pointer includes a static link or display such that a nested routine can be
+successfully called (presuming the scope in question hasn't been exited). That
+could not be compatible with C (which has no need for such links/display).
+
+(Well, you could use self-modifying code to do this, but anyone writing that
+these days ought to be lynched. The Ada Standard surely should not be
+encouraging anyone to do that.)
+
+Anyone claiming to do this within the language (or outside) with a "bare
+address" is simply lying. (Or I completely do not understand your proposal...)
+
+> > and there also would need to be some sort of rules for generic
+> > matching.
+>
+> I didn't think of that, but it seems possible.  I'd have to think a
+> little more about what those rules would be.
+
+Assume-the-best in the spec, assume-the-worst in the body is usually the first
+cut. But that would prevent using 'Unchecked_Access in generics, which I doubt
+you want. Thus, you'd need to allow your aspect on formal access types and then
+some sort of matching rule is needed. Definitely a complication.
+
+> > In addition, if we're continuing to support generic sharing in the
+> > language (*), we'd need some rules to prevent taking
+> > 'Unchecked_Access in a generic body in the same way we already have
+> > rules preventing 'Access. (The problems with finding the data for a
+> > generic instance don't have anything to do with "static links".)
+>
+> Yes, that's a complication.
+>
+> > Anyway, I don't think we would want to invent a totally new
+> > semantics when we already have essentially the correct semantics for
+> > anonymous access-to-subprogram. Your proposal would be better if you
+> > unified the existing anonymous access-to-subprogram with your new aspect.
+>
+> The sort of problem I'm trying to solve (that doesn't involve
+> foreign-language interfaces) is a case where a subprogram or task S
+> contains a nested subprogram NS, and S somehow has to hand NS's access
+> off to some other program module, and will get it back later from that
+> module.  The other module treats the record containing the subprogram
+> access as an opaque box that it isn't allowed to open.
+
+I don't see how this differs substantially from the
+anonymous-access-to-subprogram that exists. The key is that you need to include
+extra information in the pointer in order to allow calling a nested subprogram
+(a static link, part of a display, etc.) That's the same thing you need to do
+for anonymous access-to-subprogram. You can't convert these to "regular"
+access-to-subprogram because removing that information is not at all safe (in
+Janus/Ada, no calls other than to a subprogram declared at library-level would
+work in that case), and you can't convert back because typically you don't have
+the same information at the point of conversion as you did when the
+'Unchecked_Access was taken (so you can't construct the correct extra
+information).
+
+We handled that with "infinite" accessibility for such types. Probably it would
+be better to use explicit rules, but in any case, you can't allow any such
+conversions. I don't think this would be a problem (why would you want to mix
+such types?).
+
+I looked at your example but didn't see anything in it which changed my basic
+point, and it was too long to understand very well.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, March 23, 2012  1:36 PM
+
+> >    type Gtk_Something_Handler is access procedure (...parameters...)
+> >      with Allow_Unchecked, Convention => C;
+> >
+> > and then if an implementation couldn't allow 'Unchecked_Access on
+> > arbitrary subprograms because it couldn't implement the access type
+> > as a simple address, it would reject the type declaration.  I think
+> > the advantage is that this could be done within the language; right
+> > now, implementations have had to define their own language-defined
+> > attribute (GNAT's and ICC's 'Unrestricted_Access) which leads to
+> > non-portability.
+>
+> But all implementations would have to reject this; ...
+
+GNAT would not have to reject this.  It is already supported via
+P'Unrestricted_Access.  The mechanism is to build a trampoline on the stack,
+which is some code that knows where the static link is, and passes it along to
+P.  P'Unrestricted_Access returns the address of the trampoline.
+
+I was unaware that ICC supported Unrestricted_Access.  Does it use trampolines?
+
+We got rid of almost all usage of trampolines in GNAT a while back, but this
+case (passing a nested procedure to C) still uses trampolines.
+
+> (Well, you could use self-modifying code to do this, but anyone
+> writing that these days ought to be lynched. The Ada Standard surely
+> should not be encouraging anyone to thinkdo that.)
+
+It's not exactly self-modifying code -- it's creating NEW code on the stack.
+But yeah, it requires telling the OS that that part of the stack is executable,
+if it's enforcing no-execute permissions, and it's definitely a questionable
+practise.
+
+The general thing with interface to foreign languages is that implementations
+are allowed to support whatever they like -- there's no "encouragement".  That
+is, if you can figure out what it means to export (say) a generic package to C
+code, then you're free to implement that.
+
+> Anyone claiming to do this within the language (or outside) with a
+> "bare address" is simply lying.
+
+The address of a trampoline is just a single (bare?) address pointing to some
+code.  Honest.  ;-)
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Friday, March 23, 2012  1:56 PM
+
+> I was unaware that ICC supported Unrestricted_Access.  Does it use
+> trampolines?
+
+No.  We do allow 'Unrestricted_Access on nested subprograms when the target
+access type is not a single address.  We've also added some features so that a
+nested subprogram's 'Unrestricted_Access could be passed as a single address, if
+the subprogram is declared with the C convention, which means it doesn't require
+a static link (and if the nested subprogram accesses objects that would require
+a static link, the compiler rejects it).  We've also recently added ways that
+local variables that a nested subprogram could access can be moved into a global
+data area if the programmer can ensure that the owning subprogram won't be
+called reentrantly.
+
+But I think either trampolines or some other workaround like we've done is
+necessary to get GtkAda to compile without a major rewrite.
+
+By the way, when we do reject 'Unrestricted_Access (because the access type is a
+single address and it won't work), we reject the actual 'Unrestricted_Access (or
+cause a Program_Error raise in a generic body); we don't reject the declaration
+of the access type.  This is somewhat contrary to what I wrote in the quoted
+part above.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 23, 2012  2:12 PM
+
+...
+> > (Well, you could use self-modifying code to do this, but anyone
+> > writing that these days ought to be lynched. The Ada Standard surely
+> > should not be encouraging anyone to thinkdo that.)
+>
+> It's not exactly self-modifying code -- it's creating NEW code on the
+> stack.  But yeah, it requires telling the OS that that part of the
+> stack is executable, if it's enforcing no-execute permissions, and
+> it's definitely a questionable practise.
+
+(Sorry, I was using "self-modifying code" to mean any code created and
+immediately executed by a program. I don't think it matters *where* that code
+lives.)
+
+It's more than questionable. I'm amazed that your safety-critical customers let
+you get away with such practices: such code is virtually impossible to verify,
+extremely difficult to debug, and dangerous (in that it opens additional avenues
+for attack).
+
+I would not want there to be anything in the Ada standard which even remotely
+suggested that doing this is a good idea. Suggesting that compilers ought to be
+able to provide an interface to C for a "generalized access-to-subprogram type"
+is certainly within that category.
+
+If an implementer wants to depart from good sense (for whatever reason),
+obviously the Ada Standard isn't going to have any impact on that. But let's
+restrict the discussion here to things that at least can be implemented without
+resorting to questionable practices.
+
+[Aside: I think that GNAT's support for such things causes real damage for the
+safety of Ada code, as it encourages customers to ask/demand other vendors to
+support similar features. Just because you can implement something does not mean
+that you should. I realize that there is not much that can be done about this
+now (GNAT is not suddenly going to eliminate this from their compiler), but it
+is a significant frustration for me.]
+
+> The general thing with interface to foreign languages is that
+> implementations are allowed to support whatever they like
+> -- there's no "encouragement".  That is, if you can figure out what it
+> means to export (say) a generic package to C code, then you're free to
+> implement that.
+>
+> > Anyone claiming to do this within the language (or outside) with a
+> > "bare address" is simply lying.
+>
+> The address of a trampoline is just a single (bare?) address pointing
+> to some code.  Honest.  ;-)
+
+That's not really a "bare address"; it's the address of a thunk (in the original
+sense of the term); the original routine is nowhere to be found. If the callee
+is expecting the actual code to be at that location, they're going to be out of
+luck.
+
+Anyway, it's obvious that you can implement anything with an interpreter of some
+sort. So what? We're talking about compilers and code that can be verified for
+Ada; it's unclear that there is any value to any other scheme for a language
+like Ada (if you want a real dynamic language, something like Python is a better
+bet). At worst, I'm guilty of too narrow of a view.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, March 23, 2012  2:34 PM
+
+I am against standardizing subp'Unchecked_Access.
+I believe that inside of Ada you can relatively easily support what you need
+using 'Unchecked_Access producing an access-to-class-wide value.
+
+When interfacing to C I would say you should be declaring your exported
+C-convention routine at the library level.  That doesn't seem to be a big
+imposition, if it isn't making up-level references anyway.  Probably combining
+these would also work, where you write a callback that has convention C, and
+then in the callback it calls through an access-to-class-wide value that has
+been created using 'Unchecked_Access.
+
+I may not understand all of the subtleties, but I agree with Randy that there is
+not sufficient benefit to justify standardizing this sort of thing.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, March 23, 2012  2:47 PM
+
+> It's more than questionable. I'm amazed that your safety-critical
+> customers let you get away with such practices: such code is virtually
+> impossible to verify, extremely difficult to debug, and dangerous (in
+> that it opens additional avenues for attack).
+
+Anybody who doesn't want to use trampolines can use the relevant Restriction or
+command-line switch, and get a warning or error (their choice) if they
+accidentally use one of the constructs that causes trampolines to be generated.
+
+I think they're more of an issue in a security-critical context, rather than a
+safety-critical one.  For example, in a stand-alone medical device, not
+connected to the internet, there's no problem using trampolines, other than the
+fact that they're inefficient on modern hardware (because you have to flush the
+instruction cache, or similar).
+
+Anyway, as I said, it's easy to avoid trampolines in GNAT; there are only a few
+obscure cases where they are still used. (They used to be used all over the
+place, and that was a real pain.)
+
+> I would not want there to be anything in the Ada standard which even
+> remotely suggested that doing this is a good idea. Suggesting that
+> compilers ought to be able to provide an interface to C for a
+> "generalized access-to-subprogram type" is certainly within that category.
+
+I am not suggesting that the RM should "suggest that compilers...".
+Just that compilers should be allowed to do "...".
+Annex B just wouldn't make these newly-suggested things "C compatible" or "C
+eligible" or whatever (I forget the terminology).
+
+> [Aside: I think that GNAT's support for such things causes real damage
+> for the safety of Ada code, as it encourages customers to ask/demand
+> other vendors to support similar features. Just because you can
+> implement something does not mean that you should. I realize that
+> there is not much that can be done about this now (GNAT is not
+> suddenly going to eliminate this from their compiler), but it is a
+> significant frustration for me.]
+
+GNAT inherited trampolines from the gcc C compiler.
+The gcc dialect of C supports nested functions!
+
+> > The address of a trampoline is just a single (bare?) address
+> > pointing to some code.  Honest.  ;-)
+>
+> That's not really a "bare address";
+
+OK, I don't really know what "bare" means in this context.
+An address is always the address of _something_.
+
+>... it's the address of a thunk (in the  original sense of the term);
+>the original routine is nowhere to be found.
+
+Heh?  The original routine is still there.  That is, if you say
+P'Unrestricted_Access (and pass that to C code), the usual code for P exists,
+and the trampoline simply loads the static link into a register, and jumps to P.
+Note that trampolines are not used if P is at library level.
+
+>... If
+> the callee is expecting the actual code to be at that location,
+>they're  going to be out of luck.
+
+The caller is expecting that if they do a "call" to that location, they'll end
+up in P, with a valid static link.  Nobody cares what actual code is at the
+addressed location.  On some machines, for example, there's an extra indirection
+for calls in general.
+
+> Anyway, it's obvious that you can implement anything with an
+> interpreter of some sort. So what? We're talking about compilers and
+> code that can be verified for Ada; it's unclear that there is any
+> value to any other scheme for a language like Ada (if you want a real
+> dynamic language, something like Python is a better bet). At worst, I'm guilty of too narrow of a view.
+
+I don't think interpreters are relevant.  We're talking about interfacing to C,
+under the assumption that the C implementation isn't under control of the Ada
+implementer, and typical C implementations are not interpreters.  (In the case
+of GNAT, the C implementation IS under our control, but we don't wish to modify
+the way it uses trampolines!)
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Friday, March 23, 2012  2:47 PM
+
+> > It's not exactly self-modifying code -- it's creating NEW code on
+> > the stack.  But yeah, it requires telling the OS that that part of
+> > the stack is executable, if it's enforcing no-execute permissions,
+> > and it's definitely a questionable practise.
+>
+> (Sorry, I was using "self-modifying code" to mean any code created and
+> immediately executed by a program. I don't think it matters *where*
+> that code lives.)
+>
+> It's more than questionable. I'm amazed that your safety-critical
+> customers let you get away with such practices: such code is virtually
+> impossible to verify, extremely difficult to debug, and dangerous (in
+> that it opens additional avenues for attack).
+
+Off the top of my head, I'd say that *any* program that includes C code already
+has those properties.  Not that I'm a language bigot, or anything...  :) But if
+the only use of trampolines would be to facilitate certain types of interfaces
+to C code, as appears to be the case in later versions of GNAT, then it's not
+clear to me that they'd make anything worse from a safety standpoint.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, March 23, 2012  2:49 PM
+
+> I am against standardizing subp'Unchecked_Access.
+
+Me, too.
+
+That is, please don't take my discussion of an obscure point (how/if to
+implement subp'Unchecked_Access in the interface-to-C case) as advocating for
+the feature in general.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 23, 2012  3:13 PM
+
+I'm a bit surprised to read this. I think I have better reasons to hate this
+concept than most others, but I have to say that I'm ambivalent.
+
+Specifically, I know that it is next-to-impossible to do anything with 'Access
+on objects; you almost always have to use 'Unchecked_Access. The situation is
+somewhat better for subprograms, but the same sorts of problems come to bear
+there. There are workarounds (as there was to not having 'Access in Ada 83), but
+they're complicated and don't necessarily make the program any safer or easier
+to read.
+
+In addition, Ada already has this feature in anonymous access-to-subprograms.
+But even when we invented that, there were some of us ("us" here means the ARG;
+I don't remember which group I was in) that felt that we needed a named version.
+We couldn't find the right terminology and the idea was dropped (not without a
+lot of discussion). But that need hasn't gone away; some of us would like to ban
+all anonymous types and this is one feature that cannot be implemented any other
+way. That would be good to fix.
+
+And note that 'Unchecked_Access is not always necessary with such a type; some
+users might be able to use 'Access just fine with this capability.
+
+On the other hand, a named anonymous access-to-subprogram type (I've been
+calling it a "generalized" type to avoid the insanity of "named anonymous")
+would need the same restrictions as anonymous ones do: no conversions (other
+than to other generalized access-to-subprograms - maybe), don't match generic
+formal access-to-subprogram, unlikely to support as foreign interface, and
+probably others. It's not clear if these restrictions would allow the sorts of
+uses that users are expecting. If not, the concept would essentially be
+unimplementable (and it would be a lot easier to decide my position!)
+
+In any case, not the most important thing to deal with in Ada 2020, but it seems
+worthy of discussion.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, March 23, 2012  4:12 PM
+
+> I'm a bit surprised to read this. I think I have better reasons to
+> hate this concept than most others, but I have to say that I'm ambivalent.
+
+I don't hate this feature.  I actually think it's pretty reasonable.
+But I think we need to raise the bar for Ada 2020.  Ada 2012 already has a lot
+of baggage, and we should be rather reluctant to add new stuff.
+
+In this case, the existing anonymous access-to-subp parameters cover almost all
+of the cases where you want 'Access of a nested subprogram.  For the other
+cases, an access-to-class-wide is usually a sufficient workaround.
+
+> Specifically, I know that it is next-to-impossible to do anything with
+> 'Access on objects; you almost always have to use 'Unchecked_Access.
+
+I think "almost always" is an exaggeration.  For example, in the GNAT sources
+(compiler and runtimes), there are 2311 occurrences of 'Access, and 236
+occurrences of 'Unchecked_Access.  In PolyORB, the numbers are 1280 and 90.
+
+But you're basically right -- the reasons why you often need 'Unchecked_Access
+on objects can apply to subprograms, too.
+
+>...some of us would like to ban all anonymous types ...
+
+I have no objection to the concept of anonymous types (or other anonymous
+things, for that matter -- e.g. anonymous procedures (lambdas)).
+
+But I don't like the fact that anonymous types have all sorts of magical
+properties.
+
+And I don't like the fact that Ada is inconsistent (you can have an anonymous
+array type, but not an anonymous record type).
+
+We're not going to fix those things, of course!
+
+> In any case, not the most important thing to deal with in Ada 2020,
+> but it seems worthy of discussion.
+
+Yes, it's worthy of discussion.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 23, 2012  3:21 PM
+
+> >... If
+> > the callee is expecting the actual code to be at that location,
+> >they're  going to be out of luck.
+>
+> The caller is expecting that if they do a "call" to that location,
+> they'll end up in P, with a valid static link.
+> Nobody cares what actual code is at the addressed location.
+> On some machines, for example, there's an extra indirection for calls
+> in general.
+
+"Nobody cares" is way too strong. I know a lot of development tools (profilers,
+debuggers, etc.) that assume the code is at the address (there isn't much else
+that they can do, after all), and they aren't going to work if that's not true.
+Probably my attitudes are colored too much by these admittedly unusual
+circumstances, but I think that techniques that don't work with such tools are
+best avoided. [Truth-in-advertising disclosure: Janus/Ada fails this test, too,
+as all interface calls go through a translation wrapper, which converts the
+parameter representation and order appropriately. These were intended to be
+inlined, but since we never implemented automatic inlining, they tend to cause
+(external) tools to fail.]
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, March 23, 2012  4:18 PM
+
+> > The caller is expecting that if they do a "call" to that location,
+> > they'll end up in P, with a valid static link.
+> > Nobody cares what actual code is at the addressed location.
+> > On some machines, for example, there's an extra indirection for
+> > calls in general.
+>
+> "Nobody cares" is way too strong.
+
+OK, change that to "programmers don't care".
+
+>...I know a lot of development tools
+> (profilers, debuggers, etc.) that assume the code is at the address
+>(there  isn't much else that they can do, after all), and they aren't
+>going to work  if that's not true.
+
+Sure, profilers and debuggers need to understand the code generated by the
+compiler.  But it's wrong to think that such tools must assume "the code is at
+the address".  AdaCore supports such tools, and they work just fine with
+trampolines, and with targets where the standard ABI involves an extra
+indirection for calls in general.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 23, 2012  4:57 PM
+
+> > > The caller is expecting that if they do a "call" to that location,
+> > > they'll end up in P, with a valid static link.
+> > > Nobody cares what actual code is at the addressed location.
+> > > On some machines, for example, there's an extra indirection for
+> > > calls in general.
+> >
+> > "Nobody cares" is way too strong.
+>
+> OK, change that to "programmers don't care".
+
+Programmers care if tools work.
+
+> >...I know a lot of development tools
+> > (profilers, debuggers, etc.) that assume the code is at the address
+> >(there  isn't much else that they can do, after all), and
+> they aren't
+> >going to work  if that's not true.
+>
+> Sure, profilers and debuggers need to understand the code generated by
+> the compiler. But it's wrong to think that such tools must assume "the
+> code is at the address".  AdaCore supports such tools, and they work
+> just fine with trampolines, and with targets where the standard ABI
+> involves an extra indirection for calls in general.
+
+A profiler (in particular) needs to know where the *real* subprogram is, or it
+will give you timings only for the trampoline or wrapper. The tool will "work",
+but the results it gives will be useless.
+
+In general, these tools are a "black-box" to us smaller vendors. We can only use
+what they already know how to understand (and typically, far less than that).
+Moreover, we're not in a position to test many of these tools ourselves; users
+are just going to expect them to work.
+
+The list of Ada-aware tools is very short, and the vast majority of those think
+Ada is the same as GNAT. The only tools we can really assume to work are those
+we write ourselves, but of course that's not really practical.
+
+Some tools claim to allow configuration or other such ways to support "other"
+mechanisms. But my experience is that such mechanisms almost never work unless
+some other compiler (typically the C compiler) already uses it. (Indeed, I don't
+recall any case where such a mechanism *did* work on Windows OR Unix.) So,
+unless you're important enough to forge some sort of business relationship with
+the other tools vendor, you're going to have to ignore everything fancy -- or
+build your own tools.
+
+The net effect is that a compiler (at least from a smaller vendor) really does
+have to match the *exact* expected calling convention on a target, or forget
+using any of the tools. And that includes the meaning of pointers to subprograms
+and the like. Moreover, you almost always have to find out what's *really*
+expected from reverse engineering. (The documentation, if any, never reflects
+the real reality.) And that probably goes as far as code placement.
+
+Of course, if you actually follow those things, you'll end up eliminating
+virtually any reason for anyone to use your compiler. So, personally, I've given
+up on third-party anything. It's just too hard to make them work usefully; you
+can build your own tool with the same amount of effort (and you won't have to
+worry about the next release breaking everything you've done).
+
+I think we've gotten way off topic here, so I'll try to give this a rest.
+
+****************************************************************
