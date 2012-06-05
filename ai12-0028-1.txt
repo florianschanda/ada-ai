@@ -1,0 +1,221 @@
+!standard B.3(75)                                 12-06-04    AI12-0028-1/01
+!class binding interpretation 12-06-04
+!status work item 12-06-04
+!status received 12-04-13
+!priority Medium
+!difficulty Medium
+!subject Import of variadic C functions
+!summary
+
+**TBD.
+
+!question
+
+B.3(75) contains the following statement: "10  A C function that takes a
+variable number of arguments can correspond to several Ada subprograms, taking
+various specific numbers and types of parameters.".
+
+This is only true for ABIs where the regular C calling convention is
+the same as the calling convention used for variadic C functions. On systems
+using the System V ABI AMD64 (used e.g. on 64bit Linux, see
+http://www.x86-64.org/documentation/abi.pdf) the calling conventions are
+different, which leads to unpredictable results when importing variadic C
+functions.
+
+Should this note should be rewritten or deleted? (Yes.)
+
+Should Ada have some standard way of interfacing to variadic C functions? (Yes.)
+
+!recommendation
+
+** TBD.
+
+!wording
+
+** TBD.
+
+!discussion
+
+The classification of this AI is difficult.
+
+If we only fix the note B.3(75), then the AI is a Ramification (as no normative
+changes are made).
+
+If we add some language-defined way to support variadic C functions, then we
+have a choice: the AI could be either a Binding Interpretation (if we consider
+this problem important and fundamental, as I do), or an Amendment (if we
+consider the extra support an extension). Note that adding a language name is
+something that any implementation can do, so even classifying the AI as an
+Amendment AI would not prevent compilers from implementing the solution in Ada
+95 and Ada 2005 compilers. As such the classification does not matter that much,
+but it seems better to encourage adoption in Ada 2005 compilers (else it is
+impossible to write portable interfaces without resorting to writing C code,
+which should never be required lest programmers wonder why they're using Ada at
+all).
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Schoepfin, Markus
+Sent: Friday, April 13, 2012  3:41 AM
+
+!topic Problematic wording regarding the import of variadic C functions
+!reference Ada 2005 RM B.3(75)
+!from Markus Sch”pflin 12-04-13
+!keywords varargs
+!discussion
+
+B.3(75) contains the following statement: "10  A C function that takes a
+variable number of arguments can correspond to several Ada subprograms, taking
+various specific numbers and types of parameters. ".
+
+Currently this is only true for ABIs where the regular C calling convention is
+the same as the calling convention used for variadic C functions. On systems
+using the System V ABI AMD64 (used e.g. on 64bit Linux, see
+http://www.x86-64.org/documentation/abi.pdf) the calling conventions are
+different, which leads to unpredictable results when importing variadic C
+functions.
+
+Possible solution 1: Amend B.3(75) with a warning that this only works on ABIs
+where the calling convention for variadic C functions is the same as for regular
+C functions.
+
+Possible solution 2: As an implementation advice in B.3, add a new import
+convention (e.g. `C_Varargs' or `C_Variadic') which allows to explicitly specify
+a different calling convention for variadic C functions. This new calling
+convention of course should map to `C' on ABIs where `C_Varargs' and `C' are
+identical.
+
+The discussion on comp.lang.ada which stipulated this mail can be found here:
+http://groups.google.com/group/comp.lang.ada/browse_thread/thread/235855e3822c83d1#
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, April 13, 2012  2:51 PM
+
+Thanks for bringing this to our attention.
+
+I would agree that a special "convention" might be the best way to handle this.
+However, in some cases just using, for example, C_Varargs as the convention,
+might not provide enough information, as perhaps it is necessary to know where
+the varargs part starts.
+
+However, it sounds like the AMD64 ABI for varargs doesn't need anything more
+than a count provided in the %al register.  Here is a quote from the ABI
+document:
+
+     ... %al does not need to match exactly the number of
+     vector registers, but must be an upper bound on
+     the number of vector registers used and is in the
+     range 0-8 inclusive.
+
+So setting it to 8 will always work, apparently, through presumably incur a
+heavier overhead, so even a simple-minded compiler could get something that
+worked, seeing only a calling convention of, say, C_Varargs.
+
+For now, the recommendation in the GNAT user manual seems like the correct
+approach.  That is, create a wrapper function in C that takes a fixed number of
+arguments, and then have that call the variadic function.
+
+****************************************************************
+
+From: Schoepfin, Markus
+Sent: Monday, April 16, 2012  4:42 AM
+
+> So setting it to 8 will always work, apparently, through presumably incur a
+> heavier overhead, so even a simple-minded compiler could get something that
+> worked, seeing only a calling convention of, say, C_Varargs.
+
+As long as the compiler doesn't use the vector registers (which I think is the
+case for GNAT), just setting %al to 0 also works without resulting in a possible
+performance degradation.
+
+But that wasn't really the point of my mail. I think it is problematic that the
+Ada standard seems to imply by B.3(75) that variadic C functions can be called
+by using various Ada overloads and a simple import pragma. And this should be
+fixed some way or another.
+
+Providing an official way to import variadic C function of course would be the
+best solution, but even replacing B.3(75) by a statement that explicitly warns
+that variadic C functions in general cannot be imported in this way (or perhaps
+use a wording similar to the one in the GNAT user guide) would be an improvement
+over the current wording, in my opinion.
+
+On the other hand, B.3(75) has been unmodified since the original Ada 83
+standard, and perhaps it's more a problem with my reading of the standard than a
+problem with the standard itself.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, April 16, 2012  6:53 AM
+
+Actually, there was no B.3(75) before Ada 95.
+
+In any case, it is only relatively recently that this became a problem.
+In old versions of C, function prototypes were completely optional, so even the
+C compiler didn't know it was calling a variadic function.  C++ always required
+prototypes, but the compilers still attempted to use calling conventions that
+didn't take advantage of this for many years (actually, for decades).
+Apparently when they designed the ABI for the X86-64 architecture, they finally
+decided to require prototypes, even for C.
+
+So I think this was correct as written until relatively recently, and
+unfortunately, no one pointed out this problem during the Ada 2012 revision
+process.  We can only fix problems we know about!  This is certainly a good
+candidate for a fix to the standard, but it will be a while before there is
+another "official" Ada standard, so hopefully we can get the word out that
+variadic functions may require special handling.
+
+****************************************************************
+
+From: Schoepfin, Markus
+Sent: Monday, April 16, 2012  8:15 AM
+
+Yes, you are right of course, B.3(75) was added for Ada 95. Sorry for the
+thinko.
+
+Is there anything else I need to do that this issue stays on the radar of the
+ARG?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, April 16, 2012  7:50 PM
+
+No, Randy Brukardt is very diligent about creating official "AI"s if the issue
+is substantive, and this one seems to be so.  Official AIs are tracked very
+carefully and pop up next time we have an ARG meeting.
+
+****************************************************************
+
+From: Florian Weimer
+Sent: Tuesday, April 17, 2012  2:26 AM
+
+> In any case, it is only relatively recently that this became a
+> problem.  In old versions of C, function prototypes were completely
+> optional, so even the C compiler didn't know it was calling a variadic
+> function.  C++ always required prototypes, but the compilers still
+> attempted to use calling conventions that didn't take advantage of
+> this for many years (actually, for decades).
+
+C compilers use different calling conventions for functions with and without
+prototypes.  Historically, a prototype-less declaration had to be matched with
+an old-style function definition.  The default argument promotions (such as
+conversion from float to double) are automatically applied when you call a
+function without a prototype. For variadic functions with prototypes, default
+argument promotions are applied only for the optional arguments.  This can be
+compensated for on the Ada by using promoted types there.  But prototypes had an
+ABI impact right from the beginning.
+
+With the x86_64 psABI (and apparently, the Windows amd64 ABI), it is
+insufficient to apply the default argument promotions manually.  This is indeed
+a difference.  But a knowledge when to apply default argument promotions would
+still help Ada compilers to detect incorrect interface declarations.  Knowing
+the number of fixed arguments is needed for that, too.
+
+****************************************************************
