@@ -1,0 +1,160 @@
+!standard 12.5.3(8)                                 12-06-04    AI12-0026-1/01
+!class binding interpretation 12-06-04
+!status work item 12-06-04
+!status received 12-04-09
+!priority Low
+!difficulty Medium
+!subject
+!summary
+
+**TBD.
+
+!question
+
+Type conversions from array types with unaliased components to array types with
+aliased components (4.6(24.8)) are prohibited, in order to prevent the discriminant of an
+aliased discriminated component from being modified. 4.6(8) says that for a
+view conversion used as an OUT or IN OUT actual parameter, the types have to be
+convertible both ways, which means that an array type with aliased components
+can't be converted to an array type with unaliased components either.
+
+However, it seems that you can get around this by using generics, since by
+12.5.3(8) and AARM 12.5.3(8.a) it's OK if a formal array type's components are
+unaliased and the actual's are aliased, and Legality Rules such as 4.6(24.8)
+aren't checked in an instance body.
+
+This creates a hole which should be fixed, right? (Yes.)
+
+!recommendation
+
+** TBD.
+
+!wording
+
+** TBD.
+
+!discussion
+
+There seem to be four possibilities, none of which seem very good:
+
+(1) Modify the matching rule to require that the aliased (or not) state of
+the components match exactly. This is probably what the rule ought to have
+been, but it is incompatible. Moreover, such a rule would require having
+an extra version of generic sort routines and the like just to support
+the possibility that the components are aliased. Bleech!!
+
+(2) Use an assume-the-worst rule in generic bodies for the problematic type
+conversions. That is, array type conversions would essentially be banned for
+types derived from generic formal types unless the formal type had aliased
+components. This seems pretty draconian.
+
+(3) Use the old "raise Program_Error for a contract violation" trick. That is,
+have a array type conversion raise Program_Error if the target components are
+aliased and the source components are not (or vice-versa). This would work
+but would provide a "tripping hazard" that could easily be missed in testing
+of a reusable component (the component would only fail with specific parameter
+types).
+
+(4) Determine if we really need the rule at all, as the original reason was
+to prevent the changing of a discriminant of an aliased component (something
+we no longer try to prohibit in general, because there always were holes
+in the rules). So perhaps we don't need the strong conversion rule. But this
+seems like a large can of worms to open up.
+
+All-in-all, (3) seems to be the least of the evils, especially as this case
+is likely to be rare. (1) would prevent the Ada.Containers.Generic_Array_Sort
+with arrays of aliased components, which seems insane given that procedure
+probably don't use any problematic type conversions. (2) prevents the use
+of the type conversions at all; moving them to the specification would be
+the only workaround, but that would at least require defining a helper
+"expression function" in the specification. (At least there would be an
+Ada 2012 workaround; there would be none in earlier versions of Ada.)
+(4) just seems too dangerous (and eliminating the type conversion rule was
+considered and rejected for Ada 2005, so it seems likely that it is still need).
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+!topic Aliased components: generic contract model violation?
+!reference 4.6(24.8), 4.6(8), 12.5.3(8)
+!from Adam Beneschan 12-04-09
+!discussion
+
+Consider:
+
+-------------------------------------------------------------------------------
+
+package Pack1 is
+    type T (D : Integer := 0) is null record;
+    type T_Arr is array (Natural range <>) of T;  -- unaliased components
+    procedure Increment_Discriminant (Arr : in out T_Arr; Index : Natural);
+end Pack1;
+
+package body Pack1 is
+    procedure Increment_Discriminant (Arr : in out T_Arr; Index : Natural) is
+    begin
+        Arr (Index) := (D => Arr (Index).D + 1);
+    end Increment_Discriminant;
+end Pack1;
+
+with Pack1;
+package Pack2 is
+    type My_Arr is array (Natural range <>) of aliased Pack1.T;
+end Pack2;
+
+with Pack2;
+package Pack3 is
+    procedure Illegal (Arr : in out Pack2.My_Arr; Index : Natural);
+end Pack3;
+
+with Pack1;
+package body Pack3 is
+    procedure Illegal (Arr : in out Pack2.My_Arr; Index : Natural) is
+    begin
+        Pack1.Increment_Discriminant (Pack1.T_Arr (Arr), Index);
+            -- view conversion illegal by 4.6(24.8) and 4.6(8)
+    end Illegal;
+end Pack3;
+
+with Pack1;
+generic
+    type Formal_Arr is array (Natural range <>) of Pack1.T; package Pack4 is
+    procedure Mess_With (Arr : in out Formal_Arr; Index : Natural);
+end Pack4;
+
+package body Pack4 is
+    procedure Mess_With (Arr : in out Formal_Arr; Index : Natural) is
+    begin
+        Pack1.Increment_Discriminant (Pack1.T_Arr (Arr), Index);
+    end Mess_With;
+end Pack4;
+
+with Pack2;
+with Pack4;
+package Pack5 is
+    package New_Pack4 is new Pack4 (Pack2.My_Arr);
+        -- generic contract model violation?
+end Pack5;
+
+-------------------------------------------------------------------------------
+
+As I understand it, a rule was added in AI95-168 and AI95-363 to prohibit type
+conversions from array types with unaliased components to array types with
+aliased components (4.6(24.8)), in order to prevent the discriminant of an
+aliased discriminated component from being modified.  4.6(8) says that for a
+view conversion used as an OUT or IN OUT actual parameter, the types have to be
+convertible both ways, which means that an array type with aliased components
+can't be converted to an array type with unaliased components either.  This
+makes the type conversion in the body of Pack3 illegal, which is the desired
+behavior since otherwise the discriminant of an aliased component of My_Arr
+would be modified.  Did I understand this correctly?
+
+However, it seems that you can get around this by using generics, since by
+12.5.3(8) and AARM 12.5.3(8.a) it's OK if a formal array type's components are
+unaliased and the actual's are aliased, and Legality Rules such as 4.6(24.8)
+aren't checked in an instance body.
+
+****************************************************************
