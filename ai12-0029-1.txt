@@ -1,0 +1,1437 @@
+!standard 6.5(5/3)                                 12-06-05    AI12-0029-1/01
+!class Amendment 12-06-13
+!status work item 12-06-25
+!status received 12-04-27
+!priority Medium
+!difficulty Medium
+!subject Relax requirement for functions to have return statements
+!summary
+
+**TBD.
+
+!problem
+
+When a function is just a stub that raises an exception (as often happens
+during early development, as in "raise Not_Implemented_Error;"), it's annoying
+to have to write a dummy return statement. That can be especially annoying when
+a dummy value to return needs to be constructed (as in functions that return
+indefinite types).
+
+!proposal
+
+Add a specific exception to 6.5(5/3) to allow a function that only raises an
+exception.
+
+!wording
+
+Change the first sentence of 6.5(5/3) from
+
+    A function body shall contain at least one return statement that
+    applies to the function body, unless the function contains
+    code_statements.
+
+to
+
+    A function body shall contain at least one return statement that
+    applies to the function body, unless the function contains
+    code_statements, or unless the last statement of the
+    "sequence_of_statements" of the "handled_sequence_of_statements"
+    of the function's body is a "raise_statement" or a call to a
+    nonreturning procedure and the "sequence_of_statements" does
+    not end with a "label".
+
+!discussion
+
+This change is compatible with Ada 2012 in that it only removes errors (never
+adding them), so any legal program remains legal.
+
+One could imagine more complex rules that seek to reduce both false positives
+and false negatives for this check. However, any new false positives would
+represent a serious incompatibility (rendering currently legal programs
+illegal). (New compile-time detections of programs that actually raise
+Program_Error are also technically incompatible, but as that is just changing
+a run-time error into a compile-time one, we don't care).
+
+In addition, it is excessive false positives that make this rule so reviled.
+It much less clear that additional problem detections really are very
+important, especially if those result in additional false positives. The
+primary value of the rule, after all, is catching gross errors like forgetting
+to put in the return statement to return a calculated result.
+
+The simple proposed rule makes no changes other than to reduce false positives,
+which clearly is a good thing. More complex rules are not so clear.
+
+---
+
+We include calls to nonreturning procedures (which must raise an exception),
+mainly so that we can easily cover calls to the procedure Raise_Exception.
+But it also includes user-defined exception-raising procedures, which seems
+like a benefit.
+
+---
+
+It was suggested that we consider introducing a "soft error" concept into the
+language, which would allow errors that could be ignored with the use of an
+appropriate aspect. This would allow somewhat more aggressive rules as the
+error could be suppressed in a false positive case. This idea also could be
+used to improve the proposals in AI12-0024-1.
+
+[Editor's note: The following is my concept of Bob's idea. It's a bit "harder"
+than his original idea; but I'm strongly opposed to any sort of required
+warning in the standard, as such things are untestable and there is no evidence
+that implementers need encouragement in this area (every compiler has plenty
+of warnings). I find the following more acceptable because it emphasizes
+safety over ease-of-ignoring and that makes it testable in the same way
+that existing Legality Rules are.]
+
+Following is an outline of the "soft error" idea (it may need a different
+name):
+
+The language defines the concept of a "soft error". For each soft error that
+is defined, the language needs to specify to which program unit the soft error
+apply. (Regular Legality Rules only reject the entire compilation unit; while
+most compilers are far more specific, the language itself never talks about
+that. We need more precise location for "soft errors" so that they can be
+ignored reliably.)
+
+There is an aspect Ignore_Soft_Error. If this aspect is true for a program unit,
+then no soft errors are detected that apply to that unit. (An implementation
+might want to convert them to warnings or some other item.) This aspect is
+inherited from the containing unit if it is not specified, and it defaults to
+False.
+
+If Ignore_Soft_Error if False for a program unit, then if a soft error applies
+to the unit, the unit is illegal.
+
+---
+
+Some thoughts on this design:
+
+1) Ada tends to emphasize safety and correctness over ease-of-use. Moreover,
+many users run GNAT in warnings are errors mode. As such, I made that the
+default for "soft errors"; the program is rejected when a soft error occurs.
+It is likely that compilers would have a "soft error is a warning" mode; but
+the default should be to be safe (and reject anything questionable).
+
+2) Location of "soft errors" is defined to be the innermost enclosing program
+unit. The granularity of ignoring them is the same. This is pragmatic; the
+more locality that we give the errors, the harder they are to define, the
+harder it is to define when they are ignored, and the more likely it is that
+the errors would be difficult to implement in some existing implementation.
+
+3) It might make sense to have a more complex scheme for ignoring "soft errors",
+such as a scheme for ignoring specific errors, for turning soft errors back
+on, and the like. That would obscure the basic idea, so I didn't try to do
+anything beyond the basics.
+
+4) This scheme would not do much to improve compatibility. Needed to add
+"Ignore_Soft_Errors" somewhere in order to get the code to compile is still
+incompatible -- it just has a better workaround. Having the default be ignore
+would allow more much more aggressive rules (as by default they'd still be
+compatible), but as false positives would still be a problem (especially amongst
+those that insist on treating soft errors and hard errors the same), this gain
+does not really exist.
+
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+!topic Relax requirement for functions to have return statements
+!reference 6.5(5)
+!from Adam Beneschan 12-04-27
+!discussion
+
+I realize that it's been suggested before to remove the requirement for function
+bodies to contain return statements, but this was not done because the rule is
+useful for catching some errors.  Still, it's somewhat annoying to have to write
+a dummy return statement when a function is a stub that just raises an
+exception.  (Ada 2005 made this a little easier because one can usually write
+"return X : T;" where T is the return type, without having to provide a value.
+But, as discussed in a recent comp.lang.ada thread, this still doesn't work if T
+is an indefinite type.)
+
+I'd like to propose a compromise: Change the first sentence of 6.5(5) from
+
+    A function body shall contain at least one return statement that
+    applies to the function body, unless the function contains
+    code_statements.
+
+to
+
+    A function body shall contain at least one return statement that
+    applies to the function body, unless the function contains
+    code_statements, or unless the last statement of the
+    "sequence_of_statements" of the "handled_sequence_of_statements"
+    of the function's body is a "raise_statement" and the
+    "sequence_of_statements" does not end with a "label".
+
+This should be as good at preventing errors as the current rules, since of
+course a function that ends in a raise statement cannot "fall through".
+
+Note that I've tried to be careful to refer to the syntactic categories here.
+In this case:
+
+    function Factorial (X : Integer) return Integer is
+    begin
+        if X < 0 then
+            raise Constraint_Error with
+                "Factorial of negative number not defined";
+        end if;
+    end Factorial;
+
+this would still be illegal; the last statement of the function body is a raise
+statement, in an informal sense, but the last statement of the
+sequence_of_statements is an if_statement, not a raise_statement. Only the last
+statement of the actual sequence_of_statements in the syntax description of
+11.2(2) would matter.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, April 28, 2012  8:31 AM
+
+> !topic Relax requirement for functions to have return statements
+
+I agree that the current requirement is annoying.
+It is both too liberal and too conservative (doesn't catch all such errors, yet
+raises false alarms).
+
+If we're going to change it, the "right" rule is that every path through the
+function body should end with return or raise. It's not hard to implement.  GNAT
+already does, with a warning. And it catches all fall-off-end errors.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Monday, April 30, 2012  10:19 AM
+
+Perhaps.  But since this would be a Legality Rule, there would have to be a
+rigorous definition of "every path through the function body"..., and that could
+get complicated.  The current rule is simple--a bit too simple in my opinion,
+but I was trying to come up with something at approximately the same level of
+simplicity.
+
+A refinement would be to define an "ends-with-return-or-raise" (EWROR) property
+of a <sequence_of_statements> or a <handled_sequence_of_statements> defined as
+follows:
+
+A sequence_of_statements has the EWROR property if it has at least one
+statement, does not end with a <label>, and the last statement is one of
+-- a RETURN statement;
+-- a RAISE statement;
+-- an IF statement with an ELSE clause, such that each
+   sequence_of_statements in the if_statement has the EWROR property;
+-- a CASE statement such that the sequence_of_statements in each
+   case_statement_alternative has the EWROR property;
+-- a block_statement whose handled_sequence_of_statements has the
+   EWROR property;
+-- a select_statement that [someone will have to finish this];
+-- a loop_statement with no iteration_scheme [i.e. an infinite loop]
+   that does not contain any "exit" statement that exits the loop
+   [this includes both exit statements in the loop's
+   sequence_of_statements and in any nested sequence_of_statements].
+
+A handled_sequence_of_statement has the EWROR property if its
+sequence_of_statements, and the sequence_of_statements in any exception_handler,
+all have the EWROR property.
+
+Then we say that the handled_sequence_of_statements of a function body must have
+the EWROR property.
+
+(This probably isn't complete.  I haven't even thought about the SELECT or
+REQUEUE statements, because it's Monday morning and a good percentage of my
+brain cells are still in bed.)
+
+This is quite a bit more complex, but a rigorous rule that tries to enforce an
+"every path through the function body" concept would need to be at least this
+complex.  Even so, it still wouldn't be perfect:
+
+   type Employee_Action_Type is
+            (Get_Schedule, Make_Appointment, Fire_Mercilessly,
+             Schedule_Meeting, Unschedule_Meeting);
+
+
+   function Estimate_Cost_To (Action : Employee_Action) return Float is
+   begin
+       if Action.Initiated_By = Manager then
+           return ...;  -- some formula
+       elsif Action.Action_Type = Fire_Mercilessly then
+           raise Invalid_Action with
+              "Inappropriate (albeit understandable) attempt by employee " &
+              "to fire colleague";
+       else
+           ...
+           ...   -- perform some actions
+           ...
+           case Action.Action_Type is
+               when Get_Schedule =>
+                   return ...;  -- some formula
+               when Make_Appointment =>
+                   return ...;  -- some formula
+               when Schedule_Meeting =>
+                   return ...;  -- some formula
+               when Unschedule_Meeting =>
+                   return ...;  -- some formula
+               when Fire_Mercilessly =>
+                   null;        -- cannot occur due to above check
+           end case;
+       end if;
+   end Estimate_Cost_To;
+
+This would still be illegal using the refined rule, because one of the CASE
+choices is null, even though it's clear that that path can never be taken.  So
+is the above rule still the "right" rule?  And if it's not perfect (and still
+would require the programmer to insert meaningless "raise Program_Error"
+statements in the code to make the compiler happy), would it be worth adding a
+significantly more complex rule just to change the situation from "imperfect" to
+"still imperfect but less so"?  We'd have to decide what the gain would be and
+whether it would be worthwhile.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Monday, April 30, 2012  9:32 AM
+
+> If we're going to change it, the "right" rule is that every path
+> through the function body should end with return or raise.
+or call of a procedure with No_Return aspect.
+
+****************************************************************
+
+From: Stephen Leake
+Sent: Monday, April 30, 2012  9:41 AM
+
+> If we're going to change it, the "right" rule is that every path
+> through the function body should end with return or raise.
+> It's not hard to implement.  GNAT already does, with a warning.
+> And it catches all fall-off-end errors.
+
+Almost; there can be subprograms that always raise exceptions (for example, they
+write to a log file, then raise Fatal_Error). GNAT provides a pragma to identify
+those; I assume it uses that in the path analysis.
+
+The right rule is that every _execution_ of a function must end in return or
+raise exception or propagate exception.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, April 30, 2012  2:29 PM
+
+> ... The right rule is that every _execution_ of a function must end in
+> return or raise exception or propagate exception.
+
+This sounds suspiciously like solving the "halting" problem... ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, April 30, 2012  3:03 PM
+
+...
+> If we're going to change it, the "right" rule is that every path
+> through the function body should end with return or raise.
+> It's not hard to implement.  GNAT already does, with a warning.
+> And it catches all fall-off-end errors.
+
+Followed by various comments from others about problems with it.
+
+But I think most people missed that Bob is yanking your chain here. (The
+alternative is that he's lost his mind, which I doubt.)
+
+That's because Bob continually writes that he will tolerate only minor
+incompatibilities, and the rule he is proposing here is going to be quite
+incompatible no matter how fancy a definition is adopted. And presuming that the
+rule is simple enough that it is "not hard to implement", it is going to be
+*very* incompatible.
+
+Consider the following function, similar to many found in the Janus/Ada
+compiler:
+
+     function Is_Something (Symbol : in not null Symbol_Ptr) return Boolean is
+         Cursor : Symbol_Ptr := Symbol;
+     begin
+         while Cursor /= null loop
+             if Cursor.Something then
+                  return Cursor.Something_Else;
+             end if;
+             Cursor := Cursor.Child;
+             if Cursor = null then
+                  -- Can't get here.
+                  return False;
+             end if;
+         end loop;
+     end Is_Something;
+
+All possible paths through this subprogram end in a return statement. There are
+some *impossible* paths that do not end in a return statement, but that doesn't
+matter in practice. This is legal Ada 2005 code, but under the proposed rule
+(any sane version, anyway), this would be illegal (because failure of the
+"while" condiction would not be covered with a raise or return). I don't see how
+that could help.
+
+Moreover, the real code in Janus/Ada was probably Ada 83 code:
+
+     function Is_Something (Symbol : in Symbol_Ptr) return Boolean is
+         Cursor : Symbol_Ptr := Symbol;
+     begin
+         if Debugging then
+             if Cursor = null then
+                  Internal_Error ("Missing symbol in Is_Something!!");
+             end if;
+         end if;
+         while Cursor /= null loop
+             if Cursor.Something then
+                  return Cursor.Something_Else;
+             end if;
+             Cursor := Cursor.Child;
+             if Debugging and then Cursor = null then
+                  -- Can't get here.
+                  Internal_Error ("Can't find something in Is_Something!!");
+             end if;
+         end loop;
+     end Is_Something;
+
+And here, procedure Internal_Error does not return (but this is not marked with
+No_Return because this isn't an Ada 83 construct; I'm not sure that it *could*
+be a No_Return procedure without substantial restructuring of our error handling
+code - we have a mode where one can interact with the compiler during an
+internal error, including ignoring the error and continuing).
+
+Again, this function would be illegal by any version of Bob's rule, while it is
+perfectly legal in Ada 83. Moreover, the "correct" fix (putting a call of
+Internal_Error at the end) would not make it legal, either. I'd probably stick
+in "raise Program_Error;" at the end to make it legal, but how is this helping??
+
+So, I think that if we are to relax this rule at all, it has to allow every
+program that is already legal. Adam's original rule did that (it is a fairly
+minor change), and I could imagine more complex rules that did the same. But
+adopting any version of Bob's "right" rule is a non-starter because of the
+incompatibility.
+
+Aside: On top of the above, even if the rule is "not hard to implement", it
+would require moving flow analysis from the optimizer into the pass that does
+legality checking. (This aren't the same in most compilers.) Certainly, in
+Janus/Ada, there is no expectation of errors in the optimizer and code generator
+passes, and there is little support for error handling in those passes (there
+almost no source information preserved at that point). So that is a bad location
+to have any legality checking (especially as the errors would not even be looked
+for until all other errors were removed, which would be extremely annoying). So
+"not hard" here still probably translates into a lot of new mechanism (depending
+on the exact rule).
+
+
+****************************************************************
+
+From: Jeffrey R. Carter
+Sent: Monday, April 30, 2012  2:32 PM
+
+> ... would require the programmer to insert meaningless "raise
+> Program_Error" statements ...
+
+They're not meaningless; they catch compiler errors.
+
+****************************************************************
+
+From: Stephen Leake
+Sent: Monday, April 30, 2012  3:11 PM
+
+>> ... The right rule is that every _execution_ of a function must end
+>> in return or raise exception or propagate exception.
+>
+> This sounds suspiciously like solving the "halting" problem... ;-)
+
+Ada is partly about helping programmers find errors early, but I think this rule
+goes too far in that direction; compilers can do a better job with warning in
+many cases, but not all.
+
+I think the best legality rule would be to have no requirement for a return, but
+then add an implementation advice that the compiler should warn for 'easily
+detectable' bad cases.
+
+That way GNAT could keep the current warning code, and we could delete the
+unnecessary 'return' after 'raise'.
+
+And any compiler that only checks the currently legality rule could just keep
+their current error check, but change it to warning.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, April 30, 2012  3:14 PM
+
+> Perhaps.  But since this would be a Legality Rule, there would have to
+> be a rigorous definition of "every path through the function body"...,
+> and that could get complicated.
+
+I knew somebody would say that.  ;-)
+
+I was hoping we could get away with talking about paths, and if you don't know what a control-flow path is, go look it up in your favorite compiler textbook.
+Maybe I'm getting sloppy in my old age, but seriously, is anybody going to misunderstand what we mean?
+The fact that you started to flesh out the rule in the right way proves that YOU understood what I meant.
+
+Java has a rule that every path that reaches a read of a local variable must have initialized that variable.
+This rule takes about about 50 pages to state rigorously, which seems like a waste -- probably nobody reads it.
+(I'm not sure about 50, and I'm too lazy to look it up, but it's a lot.)
+
+> This is quite a bit more complex, but a rigorous rule that tries to
+> enforce an "every path through the function body" concept would need
+> to be at least this complex.
+
+I think I'd rather have a non-rigorous rule that people can understand just fine, as opposed to a rigorous one that is impenetrable, and therefore probably wrong.
+
+>...Even so, it still wouldn't be perfect:
+>
+>    type Employee_Action_Type is
+>             (Get_Schedule, Make_Appointment, Fire_Mercilessly,
+>              Schedule_Meeting, Unschedule_Meeting);
+>
+>
+>    function Estimate_Cost_To (Action : Employee_Action) return Float is
+>    begin
+>        if Action.Initiated_By = Manager then
+>            return ...;  -- some formula
+>        elsif Action.Action_Type = Fire_Mercilessly then
+>            raise Invalid_Action with
+>               "Inappropriate (albeit understandable) attempt by employee " &
+>               "to fire colleague";
+>        else
+>            ...
+>            ...   -- perform some actions
+>            ...
+>            case Action.Action_Type is
+>                when Get_Schedule =>
+>                    return ...;  -- some formula
+>                when Make_Appointment =>
+>                    return ...;  -- some formula
+>                when Schedule_Meeting =>
+>                    return ...;  -- some formula
+>                when Unschedule_Meeting =>
+>                    return ...;  -- some formula
+>                when Fire_Mercilessly =>
+>                    null;        -- cannot occur due to above check
+
+This is illegal by my rule, and that's as it should be.
+If you want to make it legal, you can write:
+
+    raise Program_Error with "can't get here";
+
+>            end case;
+>        end if;
+>    end Estimate_Cost_To;
+>
+> This would still be illegal using the refined rule, because one of the
+> CASE choices is null, even though it's clear that that path can never
+> be taken.  So is the above rule still the "right" rule?
+
+Yes.
+
+>...And if it's
+> not perfect (and still would require the programmer to insert
+>meaningless "raise Program_Error" statements in the code to make the
+>compiler happy), would it be worth adding a significantly more complex
+>rule just to change the situation from "imperfect" to "still imperfect
+>but less so"?
+
+No.  My rule has no false negatives.  Clearly we must then tolerate false
+positives (or figure out how to solve the halting problem). And we don't want a
+rule that requires complicated data-flow analysis.
+
+The current Ada rule has both false negatives and false positives.
+
+I don't think "raise Program_Error" statements are meaningless.
+They tell the reader that I don't think it's possible to reach this place.
+Presumably there'd be a comment explaining why, if it's not obvious.  And if I
+turn out to be wrong (it CAN get here, perhaps because somebody modified that
+'elsif' above), then regression testing is likely to notice the bug.  Much
+better than "null;".
+
+>...We'd have to decide what the gain would be and whether  it would be
+>worthwhile.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, April 30, 2012  3:30 PM
+
+> ...
+> > If we're going to change it, the "right" rule is that every path
+> > through the function body should end with return or raise.
+> > It's not hard to implement.  GNAT already does, with a warning.
+> > And it catches all fall-off-end errors.
+>
+> Followed by various comments from others about problems with it.
+>
+> But I think most people missed that Bob is yanking your chain here.
+
+Nope.
+
+>...(The
+> alternative is that he's lost his mind, which I doubt.)
+
+I don't think I've lost my mind, either.  Not entirely.
+I'll explain below.
+
+> That's because Bob continually writes that he will tolerate only minor
+> incompatibilities, and the rule he is proposing here is going to be
+> quite incompatible
+
+Yes, you're right.
+
+The truth is that I've been meaning to propose another change:
+Add to Ada the concept of "warning".  A warning would be a diagnostic message
+that the Ada RM requires, just like it already requires errors.  The difference
+would be that if you get a warning, you can still run the program.  (Presumably,
+compilers would provide switches for turning off warnings.  And other switches
+to treat warnings as errors.)
+
+Over the years, ARG has introduced quite a number of incompatibilities that
+would have been unnecessary if this "warning" idea existed. We know X is likely
+an error, so we outlaw X.  But that's incompatible. Instead we could require a
+warning for X, getting the best of both worlds.
+
+This case (falling off the end of a function) is a perfect example -- we want to
+make it illegal, because it's a nasty bug, but we can't, because that would be
+incompatible.  So we can make it a warning.
+
+My problem is that I sort of forgot that I hadn't told the world about my
+"warning" idea when I started blathering on about the "right" rule.  Does that
+constitute "losing mind"?
+
+>...But
+> adopting any version of Bob's "right" rule is a non-starter because of
+>the  incompatibility.
+
+I agree, without the "warning" idea, it's a nonstarter.
+
+> Aside: On top of the above, even if the rule is "not hard to
+> implement", it would require moving flow analysis from the optimizer
+> into the pass that does legality checking.
+
+In GNAT, the back end does a whole lot of fancy low analysis.
+But this check is implemented in the front end as a fairly simple tree walk.
+You're right that moving all that flow analysis to the front end would be a
+nightmare, but I don't think it's necessary.
+
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, April 30, 2012  3:41 PM
+
+> Almost; there can be subprograms that always raise exceptions (for
+> example, they write to a log file, then raise Fatal_Error). GNAT
+> provides a pragma to identify those; I assume it uses that in the path
+> analysis.
+
+That's No_Return, as pointed out by Geert.  I forgot that case, and it's an
+important case.  It's a language-defined pragma, not specific to GNAT.  (Maybe
+GNAT had it before the language did; I don't remember.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, April 30, 2012  3:45 PM
+
+> I think the best legality rule would be to have no requirement for a
+> return, but then add an implementation advice that the compiler should
+> warn for 'easily detectable' bad cases.
+
+I could live with that.  I could also live with _requiring_ such warnings (along
+with a general definition of what we mean by "warning" somewhere in chap 1).
+But only if I can get away without a rigorous 50-page description of what "path
+through a function" means.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, April 30, 2012  4:00 PM
+
+...
+> The truth is that I've been meaning to propose another change:
+> Add to Ada the concept of "warning".  A warning would be a diagnostic
+> message that the Ada RM requires, just like it already requires
+> errors.  The difference would be that if you get a warning, you can
+> still run the program.  (Presumably, compilers would provide switches
+> for turning off warnings.
+> And other switches to treat warnings as errors.)
+
+Humm, I lean toward the "lost your mind" diagnosis. ;-)
+
+The problem with "warnings" of this kind is that they're just as hard to define
+properly as a real legality rule, and they have to be defined that way (because
+a lot of people want to treat warnings as errors). Moreover, most compilers
+already have some sort of warnings, and they don't necessarily come close to
+this definition. (I think GNAT's warnings probably do, but for Janus/Ada, most
+of what we call warnings are more like what GNAT calls "information"; there is
+no good reason to try to remove them.) That means restructuring of compiler
+error handling and the user-level incompatibility that entails.
+
+(For instance, Janus/Ada would have to change the meaning of our 'w' switch
+[having the 'w' control "information" and having some other switch controlling
+"warnings" would be too confusing to contemplate]. That would break a lot of
+user scripts, IDE setups, and the like.)
+
+I find warnings to be the worst of both worlds: some users insist that you avoid
+all of them, including the badly defined ones, so you have to churn your code
+unnecessarily; yet sloppy programmers can just ignore them and then claim that
+Ada is no better than C at catching errors at compile-time. :-) So I think we
+should either define legality rules or simply realize that the supposed problem
+is not a problem at all.
+
+As such, I'd rather see a limited incompatibility and a Legality Rule rather
+than some warning, which people argue that we can leave brain-dead simply
+because "programmers can ignore it if needed". And if we can't stomach the
+incompatibility of a particular rule, I would argue that the "problem" is not a
+problem enough of the time that it probably shouldn't be detected at all. If a
+particular implementation can implement a fancy-enough rule in order to
+eliminate the vast majority of false positives, that's great but it's outside of
+anything the standard can specify.
+
+I recall someone (my recollection was that it was you, but I might be wrong)
+saying that if the Standard can describe the right rule, it should and there is
+no benefit to having that be some sort of option. And if it can't, then we
+should just leave it to implementations to do the right thing.
+
+> In GNAT, the back end does a whole lot of fancy low analysis.
+> But this check is implemented in the front end as a fairly simple tree walk.  You're
+> right that moving all that flow analysis to the front end would be a nightmare, but I don't
+> think it's necessary.
+
+The GNAT check definitely has a lot of false positive warnings (see the examples
+in my previous mail for some that I've seen). For me, I just ignore all warnings
+(which means they are of no value to me), but some customers are bothered by
+warnings, so I have to restructure my (correct) code to eliminate them -- that's
+actively harmful. I *really* do not want to move that madness into the Standard.
+
+I much prefer Adam's approach: weaken the rule such that it allows the useful
+things that are currently banned for no good reason, but otherwise leave it
+alone -- because there is nothing all that wrong about possibly falling off the
+end of a function. It's only doing so that is a problem, and that can only be
+determined dynamically. I wouldn't want to completely eliminate the rule,
+either, because the error does catch stupid mistakes (forgetting to write part
+of the body of the function, which happens to me often enough that I would not
+want to lose the error).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, April 30, 2012  4:04 PM
+
+>> Almost; there can be subprograms that always raise exceptions (for
+>> example, they write to a log file, then raise Fatal_Error). GNAT
+>> provides a pragma to identify those; I assume it uses that in the
+>> path analysis.
+>
+> That's No_Return, as pointed out by Geert.  I forgot that case, and
+> it's an important case.  It's a language-defined pragma, not specific
+> to GNAT.  (Maybe GNAT had it before the language did; I don't
+> remember.)
+
+No_Return is a language-defined pragma, but it is not something that is required
+to be used.  So basing a legality rule on the presence of that pragma seems
+unwise, and not upward compatible.  (BTW, "backward" compatible and "upward"
+compatible are synonyms as far as I am concerned.)
+
+I may be weird, but I will admit that the check for at least one return has
+helped me more than once.  The GNAT warning is admittedly more useful, but not
+everyone is using GNAT, and not everyone pays attention to warnings.
+
+I could see dropping the requirement for a "return" if the last statement of the
+outermost sequence of statements was a "raise."  Eliminating the requirement I
+fear might be making the language less safe, and trying to strengthen it might
+be incompatible.
+
+****************************************************************
+
+From: Stephen Leake
+Sent: Monday, April 30, 2012  4:23 PM
+
+> I could see dropping the requirement for a "return" if the last
+> statement of the outermost sequence of statements was a "raise."
+> Eliminating the requirement I fear might be making the language less
+> safe, and trying to strengthen it might be incompatible.
+
+That certainly covers the use case that started this thread.
+
+The only time this rule has bothered me is when I have a null-but-error
+function:
+
+overriding function Foo return Boolean
+is begin
+    raise Programmer_Error; -- this should never be called
+    return False; -- keep compiler happy end Foo;
+
+Not a big deal, but it would be nice to not have the 'return false'.
+
+****************************************************************
+
+From: Stephen Leake
+Sent: Monday, April 30, 2012  4:20 PM
+
+> I find warnings to be the worst of both worlds: some users insist that
+> you avoid all of them, including the badly defined ones, so you have
+> to churn your code unnecessarily;
+
+A better approach is to provide a way to suppress warnings, either for the
+entire compilation (if you feel lazy), or on partcular sections of code (similar
+to pragma Suppress).
+
+But that has nothing to do with the standard.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, April 30, 2012  4:29 PM
+
+It does have to do with the Standard if you make Warnings a first-class part of
+the language as Bob was advocating. It would seem that we would want warning
+suppression pragmas defined in the language in that case (much like we have
+assertion suppression pragmas defined in the language). That's especially true
+if we want fine-grained control (over a smaller area than a command-line switch
+could control).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, April 30, 2012  4:47 PM
+
+> Humm, I lean toward the "lost your mind" diagnosis. ;-)
+
+Could be.  ;-)
+
+> The problem with "warnings" of this kind is that they're just as hard
+> to define properly as a real legality rule, and they have to be
+> defined that way (because a lot of people want to treat warnings as errors).
+
+Probably it's a mistake to call this concept "warning", because compilers
+already have something called "warning", which is nonstandard and varies a lot.
+
+I not sure what the right word is, but I'm looking for something that's exactly
+like a Legality Rule -- defined in the RM, in a way that can't be misunderstood,
+requiring detection by a conforming Ada implementation.  Except you can still
+run the program.
+
+Maybe call it "non-fatal diagnostics"?
+
+I predict that on the road to Ada 2020, we will face the dilemma numerous times:
+X is bad, we want to outlaw it, but we don't want to outlaw it for compatibility
+reasons.
+
+We've faced this dilemma in the past, and sometimes we chose the "incompatible"
+route, and I really think that has stalled the adoption of Ada 2005 and Ada 2012
+for some folks.
+
+>...Moreover,
+> most compilers already have some sort of warnings, and they don't
+>necessarily come close to this definition. (I think GNAT's warnings
+>probably  do, but for Janus/Ada, most of what we call warnings are more
+>like what GNAT  calls "information"; there is no good reason to try to
+>remove them.) That  means restructuring of compiler error handling and
+>the user-level  incompatibility that entails.
+>
+> (For instance, Janus/Ada would have to change the meaning of our 'w'
+> switch [having the 'w' control "information" and having some other
+> switch controlling "warnings" would be too confusing to contemplate].
+> That would break a lot of user scripts, IDE setups, and the like.)
+
+Right, we don't want to break scripts and whatnot.  We want a totally new
+concept, that is different from "nonstandard warnings produced by some
+implementations, some of which produce plenty of false alarms" and slightly
+different from "illegal".
+
+> I recall someone (my recollection was that it was you, but I might be
+> wrong) saying that if the Standard can describe the right rule, it
+> should and there is no benefit to having that be some sort of option.
+> And if it can't, then we should just leave it to implementations to do the right thing.
+
+Sounds like something I might say, but I don't see how it applies to this
+"non-fatal diagnostics" idea.
+
+Maybe what you're thinking of is a recent comment from me that most
+Implementations Permissions are unnecessary. Implementations don't need
+Permission to do things -- they can do whatever they like under some switches,
+and still claim standard-conformance under other switches.  There's no police
+force enforcing standards conformance!
+
+> I much prefer Adam's approach: weaken the rule such that it allows the
+> useful things that are currently banned for no good reason,
+
+I could live with that.  I could also live with leaving the rule as is, or with
+Stephen Leake's approach.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, April 30, 2012  7:24 PM
+
+One quibble here...
+
+...
+> >...And if it's
+> > not perfect (and still would require the programmer to insert
+> >meaningless "raise Program_Error" statements in the code to make the
+> >compiler happy), would it be worth adding a significantly more
+> >complex rule just to change the situation from "imperfect" to "still
+> >imperfect but less so"?
+>
+> No.  My rule has no false negatives.  Clearly we must then tolerate
+> false positives (or figure out how to solve the halting problem).
+> And we don't want a rule that requires complicated data-flow analysis.
+>
+> The current Ada rule has both false negatives and false positives.
+>
+> I don't think "raise Program_Error" statements are meaningless.
+> They tell the reader that I don't think it's possible to reach this
+> place.  Presumably there'd be a comment explaining why, if it's not
+> obvious.  And if I turn out to be wrong (it CAN get here, perhaps
+> because somebody modified that 'elsif'
+> above), then regression testing is likely to notice the bug.
+> Much better than "null;".
+
+This is a bit bogus, because the language already includes the "raise
+Program_Error" at the bottom of the function. This isn't a "check", it can't be
+suppressed. So making people write it explicitly doesn't add anything for
+(regression) testing purposes (it might add a bit of readabilility).
+
+Indeed, in the similar example I showed in my earlier message today, the reason
+that I wrote the functions the way I showed was so that the function would still
+"fail safely" even if all checking and debugging was suppressed and there was no
+hardware protection (a state we had to use on CP/M and MS-DOS hosts, because it
+was the only way to get the compiler to fit in the memory available). The
+implicit "raise Program_Error" at the bottom of the function was cheaper than an
+explicit raise was (due to it having a dedicated runtime call), and using a
+procedure call in place of it also would have left the implicit "raise
+Program_Error" (because we didn't have anything like No_Return back then). So
+this was the cheapest way to deal with broken promises that didn't involve an
+infinite loop -- and we literally were counting bytes in that compiler, so
+adding an extra 5 bytes to a hundred functions would have been significant.
+(It's the same reason we don't use calls to elaborate library packages; an extra
+two hundred calls and returns was space we could not afford.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, April 30, 2012  7:34 PM
+
+> This is a bit bogus, because the language already includes the "raise
+> Program_Error" at the bottom of the function. This isn't a "check", it
+> can't be suppressed. So making people write it explicitly doesn't add
+> anything for
+> (regression) testing purposes (it might add a bit of readabilility).
+
+Yes, you're right.  What I said about testing was indeed bogus.
+I stand by the "readability" thing, though.
+
+****************************************************************
+
+From: Stephen Leake
+Sent: Tuesday, May 1, 2012  12:22 PM
+
+> I don't think "raise Program_Error" statements are meaningless.
+> They tell the reader that I don't think it's possible to reach this
+> place.  Presumably there'd be a comment explaining why, if it's not
+> obvious.  And if I turn out to be wrong (it CAN get here, perhaps
+> because somebody modified that 'elsif' above), then regression testing
+> is likely to notice the bug.  Much better than "null;".
+
++1
+
+My coding standard says a similar thing; 'raise Programmer_Error;'
+(distinct from Program_Error :) instead of 'null; -- can't get here'.
+
+Note that there is a similar situation in exception handlers in functions; they
+also must terminate in return or raise. I'm not sure if any of the rules
+suggested so far cover that case.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Tuesday, May 1, 2012  12:36 PM
+
+I think Bob's suggestion would, by default, because that would be a path out of
+the function.  When I later tried to come up with a rigorous definition of what
+this proposal would mean, my definition would have handled this case.
+
+On the other hand, my original post on this was aiming for a simple compromise
+to fix a particular situation (by not requiring a useless "return" statement),
+not a way to catch more errors at compile time. I actually considered adding
+something about the exception handlers in a function body's
+handled_sequence_of_statements, but later decided it wasn't necessary for my
+purpose.
+
+****************************************************************
+
+From: Stephen Leake
+Sent: Tuesday, May 1, 2012  12:44 PM
+
+> This is a bit bogus, because the language already includes the "raise
+> Program_Error" at the bottom of the function. This isn't a "check", it
+> can't be suppressed. So making people write it explicitly doesn't add
+> anything for
+> (regression) testing purposes (it might add a bit of readabilility).
+
+It locates the error more precisely, which is helpful (assuming you get an
+exception stack trace).
+
+> ... The implicit "raise Program_Error" at the bottom of the function
+> was cheaper than an explicit raise was (due to it having a dedicated
+> runtime call), and using a procedure call in place of it also would
+> have left the implicit "raise Program_Error" (because we didn't have
+> anything like No_Return back then). So this was the cheapest way to
+> deal with broken promises that didn't involve an infinite loop -- and
+> we literally were counting bytes in that compiler, so adding an extra
+> 5 bytes to a hundred functions would have been significant.
+
+This is a good point; people are advocating for making Ada available on smaller
+embedded processes, so we can't ignore the limited code space situation.
+
+So the choice of whether to put 'raise Programmer_Error' or 'null'
+should be a coding standard rule, not an ARM legality rule.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, May 1, 2012  1:18 PM
+
+> On the other hand, my original post on this was aiming for a simple
+> compromise to fix a particular situation (by not requiring a useless
+> "return" statement), not a way to catch more errors at compile time.
+
+Yeah, I'm beginning to think my scheme is too elaborate.
+We should be shy about changing Ada too much at this stage.
+Perhaps your simple fix is more appropriate.
+
+I still think my idea of "warnings" or "non-fatal illegalities"
+or whatever is a good one in general.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, May 2, 2012  6:33 AM
+
+Just discovered this thread after a long week-end... I think I didn't see
+anybody suggesting this:
+
+1) Allow the No_Return aspect on functions
+2) Keep the current rule, unless a No_Return aspect applies to the function.
+
+(since a return statement is not allowed anyway, the only possible outcome of
+the function is raising an exception - or infinite loop)
+
+****************************************************************
+
+From: Ramdy Brukardt
+Sent: Wednesday, May 2, 2012  2:25 PM
+
+Humm. That would force you to put that into the contract, which isn't likely to
+be what you want if you are just creating a stub for later implementation. And
+if you did actually mean that, it's very likely that we're going to define a
+first-class way to raise an exception in the middle of an expression (for Ada
+2020) -- so defining a function to do that seems only necessary if you need to
+be compatible with older Ada (say, Ada 95) -- in which case you couldn't assume
+the new aspect anyway (as Ada 95 doesn't have it).
+
+So that doesn't seem like it would help in very many circumstances. Adam's
+limited change seems more likely to help (especially in the stub case, which
+seems to me to be the important one to "fix").
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Friday, May 4, 2012  10:04 PM
+
+> 1) Allow the No_Return aspect on functions
+> 2) Keep the current rule, unless a No_Return aspect applies to the function.
+>
+> (since a return statement is not allowed anyway, the only possible
+> outcome of the function is raising an exception - or infinite loop)
+
+This doesn't seem to make any sense. Why would one have a function that never
+returns? If it never returns, it never returns a value and therefore is not a
+function, but a procedure.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Saturday, May 5, 2012  12:15 AM
+
+Well, this thread is about "Relax requirement for functions to have return
+statements"... And occasionnaly, it happens that you find functions that simply
+raise an exception
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, May 5, 2012  3:29 PM
+
+> I realize that it's been suggested before to remove the requirement
+> for function bodies to contain return statements, but this was not
+> done because the rule is useful for catching some errors.  Still, it's
+> somewhat annoying to have to write a dummy return statement when a
+> function is a stub that just raises an exception.  (Ada 2005 made this
+> a little easier because one can usually write "return X : T;" where T
+> is the return type, without having to provide a value.  But, as
+> discussed in a recent comp.lang.ada thread, this still doesn't work if
+> T is an indefinite type.)
+
+A trick that works for all types, in all language versions, is to put a
+recursive call after the raise:
+
+    function F(X: T) return String is
+    begin
+        raise Not_Yet_Implemented;
+        return F(X); -- can't get here
+    end F;
+
+> I'd like to propose a compromise: Change the first sentence of 6.5(5)
+> from
+>
+>     A function body shall contain at least one return statement that
+>     applies to the function body, unless the function contains
+>     code_statements.
+>
+> to
+>
+>     A function body shall contain at least one return statement that
+>     applies to the function body, unless the function contains
+>     code_statements, or unless the last statement of the
+>     "sequence_of_statements" of the "handled_sequence_of_statements"
+>     of the function's body is a "raise_statement" and the
+>     "sequence_of_statements" does not end with a "label".
+
+I now agree with the above, except I'd add "and the
+handled_sequence_of_statements has no exception handlers."
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Saturday, May 5, 2012  9:14 PM
+
+> Well, this thread is about "Relax requirement for functions to have
+> return statements"... And occasionnaly, it happens that you find
+> functions that simply raise an exception
+
+Pragma^WAspect No_Return is about the specification of a function.
+The caller of the function can rely on the fact that there will not be a normal
+return.
+
+While I can see that sometimes an implementation of a function will always raise
+an exception (this would be tantamount to a "not implemented" or "not
+applicable" case), it really doesn't make sense in a spec.
+
+If your spec says a function will never return, it should not be a function. A
+No_Return function is a contradictio in terminis. Something that isn't going to
+return, isn't going to yield a value and therefore can't be a function.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, May 6, 2012  1:56 AM
+
+Hmm...
+
+"is a raise statement or a call to a no_return procedure".
+
+This would cover calls to Raise_Exception
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, May 6, 2012  9:07 AM
+
+Yes.  I forgot about the No_Return case (again).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, May 6, 2012  5:01 PM
+
+>... If your spec says a function will never return, it should not  be a
+>function. A No_Return function is a contradictio in terminis.
+> Something that isn't going to return, isn't going to yield a value
+>and therefore can't be a function.
+
+About the only way it might be useful is if you wanted a way to force an
+exception to be raised in the middle of a declarative part, so you wrote
+something like:
+
+X : constant Boolean := Everything_OK or else Raise_Exception(...);
+
+In fact, didn't we concoct something like this to make up for the inability to
+specify which exception should be raised when a precondition failed?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, May 6, 2012  5:18 PM
+
+We did, but we're considering it a temporary hack rather than a permanent
+solution to that problem. (I mentioned something about that last week in this
+thread, I think.) If we decide *not* to adopt an expression raise, then this
+would certainly be an alternative. But I still don't like it in the context of
+this issue, because "stubs" (that is, not yet implemented routines) are much
+more likely than this case, you certainly don't want to have to change the
+specification when you implement the stub, and those are the ones for which the
+return is exceptionally annoying (if you knew what to return, you wouldn't have
+used the raise in the first place).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, May 7, 2012  9:26 AM
+
+> About the only way it might be useful is if you wanted a way to force
+> an exception to be raised in the middle of a declarative part, so you
+> wrote something like:
+>
+> X : constant Boolean := Everything_OK or else Raise_Exception(...);
+>
+> In fact, didn't we concoct something like this to make up for the
+> inability to specify which exception should be raised when a
+> precondition failed?
+
+I don't remember, but I've long thought that you should be allowed to ignore the
+expected type if the "expression" always raises, so the above can work.  That
+is, allow:
+
+    Everything_OK or else raise X
+
+And also allow what you wrote above, with Raise_Exception being a _procedure_,
+so long as it has No_Return. Currently, you have to pretend that Raise_Exception
+returns a Boolean, when in fact it doesn't return anything at all.
+
+It's important to use "or else" rather than "or".  ;-)
+
+Unlike Randy, I don't find this trick to be distasteful.
+I thought it was a kludge when I first thought of it, but now I'm used to the
+idea.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 7, 2012  4:07 PM
+
+> Unlike Randy, I don't find this trick to be distasteful.
+> I thought it was a kludge when I first thought of it, but now I'm used
+> to the idea.
+
+You were right the first time. :-)
+
+The "raise" expression is weird, but allowing procedure calls in expressions is
+*disgusting*. Procedures and functions have a very clear and easy-to-understand
+difference, and muddling that confuses the uses (and the implementation, if the
+implementation took advantage of this separation).
+
+Moreover, following your logic, you should allow any sequence_of_statements in
+an expression so long as it ends with a "raise" or No_Return procedure! I don't
+want to see:
+      Everything_OK or else
+        (if Error_Code = 0 then No_Return_Proc(Mode)
+         else
+             raise Use_Error;
+         end if;)
+or worse:
+      Everything_OK or else
+        (Error_Info := 15;
+         raise Use_Error;)
+or worse still:
+      Everything_OK or else
+        (for I in Data'Range loop -- Mark items bad.
+             Data(I).Bad := True;
+         end loop;
+         raise Use_Error;)
+
+Ada is not an expression language; we've already gone as far in that direction
+as we ought to.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Monday, May 7, 2012  10:13 AM
+
+> In fact, didn't we concoct something like this to make up for the
+> inability to specify which exception should be raised when a
+> precondition failed?
+
+Yes, but in that case we don't need any additional annotations. By enabling
+checking of postconditions, and specifying a postcondition of False, the
+compiler and tools can also know the function will not return.
+
+Anyway, this really was a trick to work around a language issue. If anything
+were to be fixed, it would be the original issue of not being able to write
+expressions that explicitly raise exceptions. The language requires many
+expressions to perform checks and generate exceptions if they fail. However, if
+users want functions to raise specific exceptions on certain conditions they
+have to hide that fact in the function body.
+
+We probably should eventually address this issue.
+
+Consider unsigned arithmetic with overflow checking:
+
+  type My_Unsigned is mod 2**32;
+  function "+" (Left, Right : My_Unsigned) return My_Unsigned
+    with Post => (if "+"'Result < Left then raise Constraint_Error);
+
+or math:
+
+  function Sqrt (X : Float) return Float
+    with Pre  => (if not X >= 0.0 then raise Argument_Error);
+
+or simple predicates without pre- and postconditions:
+
+  function Head (X : String) return Character is
+    (if X /= "" then X (X'First) else raise Constraint_Error);
+
+For conditional expressions the type would be determined by the alternative,
+similarly for case expressions.
+
+Within the current language, we could probably use an implementation specific
+attribute that would be of type boolean:
+
+  function Sqrt (X : Float) return Float
+    with Pre  => X >= 0.0 or else Argument_Error'Exception;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 7, 2012  4:29 PM
+
+...
+> We probably should eventually address this issue.
+
+We have an AI (AI12-0022-1) to address this issue that will be on the agenda in
+Stockholm. That was decided months ago; talking about it in the context of this
+thread just confuses the issue because the functions in question are just a
+temporary hack that hopefully will disappear as quickly as they appeared.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, June 5, 2012  4:40 PM
+
+I'm working on the AI for this thread, and one statement from Bob seems so wrong
+on the face of it that it needs a response on the record, even at the risk of
+rekindling this discussion:
+
+[To be fair, Bob pretty much abandoned this idea by the end of the discussion,
+but it seems important to put on the record the wrongness of this approach.]
+
+Bob Duff wrote (at the end of April):
+
+...
+> >...And if it's
+> > not perfect (and still would require the programmer to insert
+> >meaningless "raise Program_Error" statements in the code to make the
+> >compiler happy), would it be worth adding a significantly more
+> >complex rule just to change the situation from "imperfect" to "still
+> >imperfect but less so"?
+>
+> No.  My rule has no false negatives.  Clearly we must then tolerate
+> false positives (or figure out how to solve the halting problem).
+> And we don't want a rule that requires complicated data-flow analysis.
+
+This is completely backwards; if we're going to tolerate anything, it should be
+false negatives.
+
+> The current Ada rule has both false negatives and false positives.
+
+Yes, and that's bad. But it's the false positives that are bad (and drive people
+nuts); these are legal programs with no semantic problem with are rejected for
+no important reason. After all, the language has appropriate semantics to cover
+the false negatives (raise Program_Error at the end of the function). In
+addition, the real value of this rule is to detect gross errors -- such as
+writing the entire body of the function that calculates some result but
+forgetting to put in the return statement that returns that result. (I've done
+this more often than I want to admit.) The value of rules detecting more nuanced
+cases are much less obvious to me (the GNAT warning is almost always wrong when
+it appears in my code, for example, as it is just reporting unreachable code --
+maybe that means my code is too "tricky", but that's hardly the language's
+business).
+
+Finally, the compatibility problem is caused by allowing false negatives (if the
+rule is "improved" at all). I don't think anyone really cares if a program that
+is actually wrong (that is, always raises Program_Error in some instance) starts
+getting rejected. That's just the detection of additional bugs at compile-time,
+and that's usually considered a good thing. But rejecting any programs that are
+not wrong is simply unacceptable, especially given that some of these programs
+date back to Ada 83. It's decades too late for overly strong enforcement of this
+rule.
+
+Indeed, I think that is the case even if Bob's "hard warning" idea is used;
+requiring the modification of the source to suppress that warning is just as
+harmful as any other "workaround" for an incompatibility.
+
+So all of that taken, I think any changes to this rule ought to be in service of
+reducing false positives (that is, cases where the program is currently illegal
+but in fact has no problem and the implicit "raise Program_Error" can never be
+reached), and absolutely no increase in false negatives can be allowed. (I'd be
+OK with increasing detection of actual errors so long as no new false negatives
+are introduced.) This might mean tolerating more false negatives than is ideal,
+but we're not going to either solve the halting problem nor require full program
+analysis.
+
+I suspect that this allows only a very simply modification to the rules (such as
+the one Adam recommended), but I haven't tried very hard to discover
+alternatives.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, June 5, 2012  5:06 PM
+
+I see something went wrong with my last message, as I got my positives and
+negatives mixed up. Trying again...
+
+...
+> Yes, and that's bad. But it's the false positives that are bad (and
+> drive people nuts); these are legal programs with no semantic problem
+> with are rejected for no important reason.
+> After all, the language has appropriate semantics to cover the false
+> negatives (raise Program_Error at the end of the function). In
+> addition, the real value of this rule is to detect gross errors --
+> such as writing the entire body of the function that calculates some
+> result but forgetting to put in the return statement that returns that
+> result. (I've done this more often than I want to admit.) The value of
+> rules detecting more nuanced cases are much less obvious to me (the
+> GNAT warning is almost always wrong when it appears in my code, for
+> example, as it is just reporting unreachable code
+> -- maybe that means my code is too "tricky", but that's hardly the
+> language's business).
+
+This is right. But then I went off the rails; the following is what I meant:
+
+Finally, the compatibility problem is caused by allowing additional false
+POSITIVES (if the rule is "improved" at all). I don't think anyone really cares
+if a program that is actually wrong (that is, always raises Program_Error in
+some instance) starts getting rejected. That's just the detection of additional
+bugs at compile-time, and that's usually considered a good thing. But rejecting
+any programs that are not wrong is simply unacceptable, especially given that
+some of these programs date back to Ada 83. It's decades too late for overly
+strong enforcement of this rule.
+
+Indeed, I think that is the case even if Bob's "hard warning" idea is used;
+requiring the modification of the source to suppress that warning is just as
+harmful as any other "workaround" for an incompatibility.
+
+It is much less clear if additional "false negatives" would be a problem (any
+such program will raise Program_Error at run-time), but still it would be best
+if these are the same or reduced.
+
+So all of that taken, I think any changes to this rule ought to be in service of
+reducing false positives (that is, cases where the program is currently illegal
+but in fact has no problem and the implicit "raise Program_Error" can never be
+reached), and absolutely no increase in false POSITIVES can be allowed. (I'd be
+OK with increasing detection of actual errors so long as no new false POSITIVES
+are introduced.) This might mean tolerating more false negatives than is ideal,
+but we're not going to either solve the halting problem nor require full program
+analysis.
+
+I suspect that this allows only a very simply modification to the rules (such as
+the one Adam recommended), but I haven't tried very hard to discover
+alternatives.
+
+****************************************************************
