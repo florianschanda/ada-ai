@@ -1,4 +1,4 @@
-!standard  E.2.3(11/1)                           11-11-08    AI12-0002-1/01
+!standard  E.2.3(11/1)                           12-06-06    AI12-0002-1/02
 !standard  E.2.3(17)
 !class binding interpretation 11-06-16
 !status work item 11-06-16
@@ -807,6 +807,76 @@ of a remote call interface library unit.
 Standard boilerplate:
 In addition to the places where Legality Rules normally apply (see 12.3), this rule
 applies also in the private part of an instance of a generic unit.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Thursday, May 17, 2012  1:09 PM
+
+!topic Small language hole involving remote access-to-classwide types
+!reference E.2.2(16)
+!from Adam Beneschan 12-05-17
+!discussion
+
+What, if anything, makes this program illegal?
+
+    with Ada.Streams;
+    package Pack1 is
+        pragma Pure;
+        type Root is tagged limited private;
+        procedure Prim (N : Integer; X : Root);
+        package Inner is   -- needed to make Do_Write non-primitive
+            procedure Do_Write
+                        (Stream : access Ada.Streams.Root_Stream_Type'Class;
+                         X : Root);
+        end Inner;
+        for Root'Write use Inner.Do_Write;
+    private
+        type Root is tagged limited record
+            F1 : Integer;
+        end record;
+    end Pack1;
+
+    with Pack1;
+    package Pack2 is
+        pragma Remote_Types;
+        type Root_Acc is access all Pack1.Root'Class;
+    end Pack2;
+
+    with Pack2;
+    package Pack3 is
+        pragma Remote_Call_Interface;
+        procedure Test1 (A : Pack2.Root_Acc);
+    end Pack3;
+
+    with Pack1;
+    with Ada.Streams;
+    package body Pack3 is
+
+        procedure Do_Write (Stream : access Ada.Streams.Root_Stream_Type'Class;
+                            The_Obj : Pack2.Root_Acc) is
+        begin
+            Pack1.Prim (4, The_Obj.all);
+            Pack1.Root'Class'Write (Stream, The_Obj.all);  -- ILLEGAL?
+        end Do_Write;
+
+        procedure Test1 (A : Pack2.Root_Acc) is
+        begin
+            ...
+        end Test1;
+
+    end Pack3;
+
+The statement marked ILLEGAL shouldn't be allowed, since it involves an access
+parameter in a remote dispatching call.  GNAT rejects the statement saying
+"invalid dereference of a remote access-to-class-wide value", apparently
+referring to E.2.2(16).  However, the language of E.2.2(16) doesn't seem to make
+this illegal, since The_Obj.all is part of a dispatching call and its value is a
+controlling operand according to the definitions in 3.9.2.  [It would have been
+good enough when E.2.2(16) was written, but the rule that made stream attributes
+dispatching operations in 3.9.2 appeared later.]  If there's nothing else that
+makes this illegal, maybe something needs to be added to E.2.2(16).  (I realize
+this is an obscure, low priority issue.)
 
 ****************************************************************
 
