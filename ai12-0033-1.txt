@@ -1,0 +1,256 @@
+!standard D.16.1(7/3)                              12-06-06    AI12-0033-1/01
+!class ramification 12-06-06
+!status work item 12-06-06
+!status received 12-05-29
+!priority Low
+!difficulty Medium
+!subject Sets of CPUs when defining dispatching domains
+!summary
+
+The mapping of hardware CPUs to values of type CPU is implementation-defined.
+
+!question
+
+It seems limiting that dispatching domains can only be defined by ranges of
+CPUs.
+
+for example in our hardware Architecture, we have 4 CPU's with each 4 cores, but
+the numbering is not straight forward. The first CPU has the cores 0, 4, 8, 12,
+and the second 1,5,9,13. So here it will be better to have a higher flexibility in
+assigning Domains to ranges and single cores e.g a Domain (2,6,10,14) pointing
+the 2nd CPU or (2-3,6-7,10-11,14-15) defining a Domain of the 2nd and 3rd CPU.
+
+Should an additional Create routine be defined? (No.)
+
+!response
+
+The mapping of hardware CPUs to values of type CPU is implementation-defined,
+and does not necessarily correspond to anything on the target system. In
+particular, the mapping should put related processors together so that they
+can be simply defined by a range. Specifically, the mapping outlined in the
+question is not a good idea.
+
+!wording
+
+None needed.
+
+!discussion
+
+We considered adding a "set" Create, Set_CPU, and so on. But Ada doesn't have
+any satisfying representation for a small set of integers. Memberships only
+make sense for predicates (not here); aggregates of arrays of boolean indexed
+by CPU are clunky; aggregates of an array of CPU values might be better, but
+these are of unknown length. Both kinds of aggregates are also not portable,
+given that implementations have different ranges for type CPU.
+
+As such, we decided not to try to define a set version of Dispatching_Domains
+and just assume implementers be more careful with their CPU mapping than the
+questioner was.
+
+!ACATS test
+
+None needed.
+
+!appendix
+
+From: Ed Schonberg
+Sent: Thurssday, May 31, 2012  7:48 AM
+
+Worth discussing:
+
+I have now tried out the System.Multiprocessor package. I found a restriction in
+the Dispatching_Domain, where you can only assigne a range of CPUs to such a
+domain as I understand, going from First to Last CPU. But, for example in our
+hardware Architecture, we have 4 CPU's with each 4 cores, but the numbering is
+not straight forward. The first CPU has the cores 0, 4, 8, 12 the second
+1,5,9,13. So here it will be better to have a higher flexibility in Assigning
+Domains to ranges and single cores e.g a Domain (2,6,10,14) pointing the 2nd CPU
+or (2-3,6-7,10-11,14-15) defining a Domain of the 2nd and 3rd CPU.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thurssday, May 31, 2012  7:54 AM
+
+He has a real point here. We should fix this. I think if we don't fix it, GNAT
+will probably introduce another parallel feature to fix it, and that seems
+undesirable!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thurssday, May 31, 2012  8:36 AM
+
+An alternative approach would be to perform a mapping between the Ada notion of
+"CPU" and the hardware one. We already do that for priority, given that in some
+RTOS's the most urgent priority is the lowest numerically.
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Thurssday, May 31, 2012  8:55 AM
+
+That reads more natural to me.
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Thurssday, May 31, 2012  9:23 AM
+
+> An alternative approach would be to perform a mapping between the Ada
+> notion of "CPU" and the hardware one.
+> We already do that for priority, given that in some RTOS's the most
+> urgent priority is the lowest numerically.
+
+One more application of the principle that everything can be solved with one
+additional level of indirection. Does the user do the mapping, or the run-time?
+Given the novelty of the feature, the easiest we can make its use, the better.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thurssday, May 31, 2012  9:28 AM
+
+The mapping could work, but is junky and unnecessarily implementation dependent.
+We have always had trouble with people understanding the priority mapping.
+
+I would at least like to consider a fix?
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thurssday, May 31, 2012  10:01 AM
+
+> One more application of the principle that everything can be solved
+> with one additional level of indirection. Does the user do the mapping, or the
+> run-time?  Given the novelty of the feature, the easiest we can make its use,
+> the better.
+
+I just reread the chapter (sorry, clause) and realized that a dispatching domain
+is defined as a range of CPUs, while it should have been defined as a set of
+CPUs.
+
+Of course, since a range defines a set, it should be easy to fix it compatibly
+by just adding a couple of procedures.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thurssday, May 31, 2012  10:51 AM
+
+> I have now tried out the System.Multiprocessor package. I found a
+> restriction in the Dispatching_Domain, where you can only assigne a
+> range of CPUs to such a domain as I understand, going from First to
+> Last CPU. But, for example in our hardware Architecture, we have 4
+> CPU's with each 4 cores, but the numbering is not straight forward.
+> The first CPU has the cores 0, 4, 8, 12 the second 1,5,9,13.
+> So here it will be better to have a higher flexibility in Assigning
+> Domains to ranges and single cores e.g a Domain
+> (2,6,10,14) pointing the 2nd CPU or (2-3,6-7,10-11,14-15) defining a
+> Domain of the 2nd and 3rd CPU.
+
+There is nothing that states that the CPU numbering has to match some hardware
+or OS numbering. Note that the whole concept of CPU is very loose to start with.
+A CPU might refer to a hyperthread, core, die, socket or even node on a NUMA
+system. Also, the number of "online" CPUs and their assignment may even change
+dynamically as CPUs are suspended due to errors or, more commonly nowadays, to
+save power. Similarly, OS commands or even hypervisors may be used to
+dynamically change the set of processors available to a certain Ada program.
+
+That said, I agree that it makes sense for an implementation to provide an
+ordering that takes topology into account.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June  4, 2012  8:25 PM
+
+...
+> Of course, since a range defines a set, it should be easy to fix it
+> compatibly by just adding a couple of procedures.
+
+But what would they look like? Ada doesn't have a convenient general notation
+for sets (I can't imagine quite how to use the membership notation as a
+parameter to one of these procedures). The closest thing is an array aggregate,
+but these aren't going to be portable since the range of CPU is
+implementation-defined, and in any case they are a very clunky representation.
+
+If someone is advocating a change here, I think they ought to suggest a specific
+change as opposed to simply calling for a "fix" or  "adding a couple of
+procedures". Things always seem more reasonable in the abstract!
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, June  5, 2012  4:47 AM
+
+> If someone is advocating a change here, I think they ought to suggest
+> a specific change as opposed to simply calling for a "fix" or  "adding
+> a couple of procedures". Things always seem more reasonable in the abstract!
+
+There is currently only one "create" function. I was thinking of adding
+variants:
+
+type CPU_Set is array (CPU) of Boolean;
+function Create (Set : CPU_Set) return Dispatching_Domain;
+-- DD := Create ((1, 3, 5 => True, Others => False));
+
+and/or:
+
+type CPU_List is array (Positive range <>) of CPU;
+function Create (List : CPU_List) return Dispatching_Domain;
+-- Reads better:
+-- DD := Create ((1, 3, 5));
+
+It would presumably be useful to have "Add" procedures too (with the same
+run-tim constraints as Create):
+
+procedure Add (To: in out Dispatching_Domain; First, Last : CPU);
+procedure Add (To: in out Dispatching_Domain; Set         : CPU_Set);
+procedure Add (To: in out Dispatching_Domain; List        : CPU_List);
+
+Get_First_CPU and Get_Last_CPU would have to be defined as the lower and upper
+bounds of assigned CPUs, /with possible holes/, maybe declared obsolescent, and
+replaced with: function Get_CPU_Set (Domain : Dispatching_Domain) return
+CPU_Set;
+
+(it would be possible to define an iterator to retrieve all CPUs, but I don't
+think it's worth the trouble - I doubt we have enough CPUS to make arrays of
+booleans impractical before 2020).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, June  5, 2012  7:23 AM
+
+> If someone is advocating a change here, I think they ought to suggest
+> a specific change as opposed to simply calling for a "fix" or  "adding
+> a couple of procedures". Things always seem more reasonable in the abstract!
+
+I agree with Randy, I don't see a nice solution, and I think having a mapping
+for specific implementations that makes sense is good enough!
+
+****************************************************************
+
+From: Cousins, Jeff
+Sent: Wednesday, June  6, 2012  4:03 AM
+
+Sorry for joining in late on this - I'd started out on holiday walking in Spain
+then had to come back due to my mother suffering a stroke.
+
+Anyway, I thought I'd already brought this up (Edinburgh??) and been told not to
+worry, there'd be a mapping if need be.
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Wednesday, June  6, 2012  4:04 PM
+
+yes, "there will be a mapping!". The issue is whether the language itself has to
+say something about this, or whether it is all up to the implementation.  My
+feeling is that it is the latter, and at most some implementation advice needs
+to be added to the RM.  The mapping will have to be hardware- and OS-dependent,
+and we can trust the implementors to provide something usable, without guessing
+what that might be in any specific case.
+
+****************************************************************
