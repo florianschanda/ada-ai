@@ -1,0 +1,512 @@
+!standard E.4(8)                               12-06-06    AI12-0034-1/01
+!class binding interpretation 12-06-06
+!status work item 12-06-06
+!status received 12-05-11
+!priority Low
+!difficulty Medium
+!subject Remote stream attribute calls
+!summary
+
+Remote stream attribute calls are illegal.
+
+!question
+
+It should not be possible to make a remote stream attribute call (because
+such a stream attribute by definition could not be used in marshalling and
+unmarshalling), and because all stream attributes contain an anonymous
+access type that does not support external streaming.
+
+However, it is certainly possible to do this with a remote access-to-classwide
+type. For instance:
+
+    with Ada.Streams;
+    package Pack1 is
+        pragma Pure;
+        type Root is tagged limited private;
+        procedure Prim (N : Integer; X : Root);
+        package Inner is   -- needed to make Do_Write non-primitive
+            procedure Do_Write
+                        (Stream : access Ada.Streams.Root_Stream_Type'Class;
+                         X : Root);
+        end Inner;
+        for Root'Write use Inner.Do_Write;
+    private
+        type Root is tagged limited record
+            F1 : Integer;
+        end record;
+    end Pack1;
+
+    with Pack1;
+    package Pack2 is
+        pragma Remote_Types;
+        type Root_Acc is access all Pack1.Root'Class;
+    end Pack2;
+
+    with Pack1, Pack2, Ada.Streams;
+    procedure Test1 (A : Pack2.Root_Acc) is
+    begin
+        Pack1.Root'Class'Write (Stream, The_Obj.all);  -- Legal? (No.)
+        Pack1.Inner.Do_Write (Stream, The_Obj.all); -- Illegal.
+        Pack1.Prim (4, The_Obj.all); -- OK.
+    end Test1;
+
+Should this be fixed? (Yes.)
+
+!recommendation
+
+(See wording.)
+
+!wording
+
+Add after E.4(8):
+
+A remote subprogram call shall not be a call on a stream attribute.
+
+AARM Reason: Stream attributes exist for all types, and they always have
+an access parameter that doesn't support external streaming, so such a
+remote call cannot be supported.
+
+!discussion
+
+We could modify E.2.2(16) to prevent this specific problem, but that just
+fixes one possible way to cause the problem and leaves open the door for
+other ways to be found. Moreover, that would complicate the model (there is
+nothing wrong with the dereference, given that it is used in a dispatching
+call); the problem is that the call has a profile that shouldn't be allowed.
+Blaming that on the access type usage seems wrong.
+
+We can't ban the declarations of the subprograms like we do for other
+subprograms with access parameters, because that would make it impossible to
+define marshalling and unmarshalling for these types. Which also would make
+remote calls impossible, defeating the entire purpose.
+
+So we simply ban the calls themselves.
+
+[Bairdian question: Is it possible to rename a stream attribute and dispatch
+through the rename? Is that covered by the wording? (If it isn't, modifying
+E.2.2(16) would not work any better.)]
+
+Note that there is another issue brought up by this example that we're
+not fixing. [We could, see below - Editor.]
+
+Specifically, note that the calls are defined to be remote, even though there is
+no RCI packages in this partition (and no other partitions). That means that
+marshalling and unmarshalling and PCS use is required, even though the call has
+to be ultimately local. Even in programs that have multiple partitions, types
+declared in Pure and Remote_Types packages will be replicated into each
+partition, meaning that the associated calls on primitives are going to be
+local.
+
+Moreover, it is necessary to dispatch in order to do marshalling (that's the
+only way to know how to marshall the specific type of the designated object),
+and it silly to dispatch multiple times when once would do. Thus, it's likely
+that the implementation will marshall in stubs that are dispatched to, one for
+each specific type; with that implementation there is no need for remote calls
+(specifically marshalling and unmarshalling) if the specific subprogram is
+local. As such, there should be a permission to make local calls to local
+routines (and perhaps an aspect "All_Calls_Remote" on the remote
+access-to-classwide to revoke that permission if that is actually useful).
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Adam Beneschan
+Sent: Thursday, May 17, 2012  1:09 PM
+
+!topic Small language hole involving remote access-to-classwide types
+!reference E.2.2(16)
+!from Adam Beneschan 12-05-17
+!discussion
+
+What, if anything, makes this program illegal?
+
+    with Ada.Streams;
+    package Pack1 is
+        pragma Pure;
+        type Root is tagged limited private;
+        procedure Prim (N : Integer; X : Root);
+        package Inner is   -- needed to make Do_Write non-primitive
+            procedure Do_Write
+                        (Stream : access Ada.Streams.Root_Stream_Type'Class;
+                         X : Root);
+        end Inner;
+        for Root'Write use Inner.Do_Write;
+    private
+        type Root is tagged limited record
+            F1 : Integer;
+        end record;
+    end Pack1;
+
+    with Pack1;
+    package Pack2 is
+        pragma Remote_Types;
+        type Root_Acc is access all Pack1.Root'Class;
+    end Pack2;
+
+    with Pack2;
+    package Pack3 is
+        pragma Remote_Call_Interface;
+        procedure Test1 (A : Pack2.Root_Acc);
+    end Pack3;
+
+    with Pack1;
+    with Ada.Streams;
+    package body Pack3 is
+
+        procedure Do_Write (Stream : access Ada.Streams.Root_Stream_Type'Class;
+                            The_Obj : Pack2.Root_Acc) is
+        begin
+            Pack1.Prim (4, The_Obj.all);
+            Pack1.Root'Class'Write (Stream, The_Obj.all);  -- ILLEGAL?
+        end Do_Write;
+
+        procedure Test1 (A : Pack2.Root_Acc) is
+        begin
+            ...
+        end Test1;
+
+    end Pack3;
+
+The statement marked ILLEGAL shouldn't be allowed, since it involves an access
+parameter in a remote dispatching call.  GNAT rejects the statement saying
+"invalid dereference of a remote access-to-class-wide value", apparently
+referring to E.2.2(16).  However, the language of E.2.2(16) doesn't seem to make
+this illegal, since The_Obj.all is part of a dispatching call and its value is a
+controlling operand according to the definitions in 3.9.2.  [It would have been
+good enough when E.2.2(16) was written, but the rule that made stream attributes
+dispatching operations in 3.9.2 appeared later.]  If there's nothing else that
+makes this illegal, maybe something needs to be added to E.2.2(16).  (I realize
+this is an obscure, low priority issue.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, June  6, 2012  9:20 PM
+
+> The statement marked ILLEGAL shouldn't be allowed, since it involves
+> an access parameter in a remote dispatching call.
+
+I don't understand. I *thought* I did, but now I don't. I don't see any rule
+that makes this illegal for *any* call; so that implies that there is a *large*
+hole, or none.
+
+If there is anything wrong here, it's the idea that a stream attribute can ever
+be a remote call (if we allow that, then we can't use stream attributes for
+marshalling, which is the route to madness since everything in Annex E depends
+on that). AI12-0002-1 covers *that* issue.
+
+I also don't understand the significance of making Do_Write a non-primitive
+operation. There isn't anything in 10.2.1 or E.2.2 that would make this work
+differently if Do_Write was a primitive operation, so why the extra
+complication??
+
+> GNAT rejects the statement saying "invalid dereference of a remote
+> access-to-class-wide value", apparently referring to E.2.2(16).
+> However, the language of
+> E.2.2(16) doesn't seem to make this illegal, since The_Obj.all is part
+> of a dispatching call and its value is a controlling operand according
+> to the definitions in 3.9.2.
+> [It would have been good enough when
+> E.2.2(16) was written, but the rule that made stream attributes
+> dispatching operations in 3.9.2 appeared later.] If there's nothing
+> else that makes this illegal, maybe something needs to be added to
+> E.2.2(16).  (I realize this is an obscure, low priority issue.)
+
+This seems like a GNAT bug (at least in the error message) to me. There is
+nothing wrong with the dereference of the remote access-to-class-wide value. If
+Do_Write had been primitive, I don't see any reason that the following
+dispatching call would not have worked:
+
+    Do_Write (Stream, The_Obj.all);  -- ???
+
+and if there is any reason that the above call would not be allowed, then that
+reason would automatically apply to the call to the stream attribute.
+
+(Specifically, if the access type doesn't have an appropriate stream attribute,
+I think remote calls are always illegal. That surely applies here.)
+
+I suspect that the GNAT error message is a complete red herring; the message
+most likely should simply say that a remote stream attribute call is not
+allowed.
+
+Anyway, please explain what you think the problem here is (and please do so by
+Friday morning, so I can put this on the Stockholm agenda).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, June  6, 2012  9:53 PM
+
+...
+> >     with Pack2;
+> >     package Pack3 is
+> >         pragma Remote_Call_Interface;
+> >         procedure Test1 (A : Pack2.Root_Acc);
+> >     end Pack3;
+> >
+> >     with Pack1;
+> >     with Ada.Streams;
+> >     package body Pack3 is
+> >
+> >         procedure Do_Write (Stream : access Ada.Streams.Root_Stream_Type'Class;
+> >                             The_Obj : Pack2.Root_Acc) is
+> >         begin
+> >             Pack1.Prim (4, The_Obj.all);
+> >             Pack1.Root'Class'Write (Stream, The_Obj.all);  -- ILLEGAL?
+> >         end Do_Write;
+> >
+> >         procedure Test1 (A : Pack2.Root_Acc) is
+> >         begin
+> >             ...
+> >         end Test1;
+> >
+> >     end Pack3;
+
+I don't understand the significance of this package. There is no remote call
+here (Do_Write is not a remote call interface because it is solely in the body).
+So far as I can tell, any remote call on a stream attribute here would be
+illegal (presuming we plug the hole noted in AI12-0002-1). So while this is a
+dispatching call through a remote-access-to-classwide type, the actual call
+executed cannot be remote.
+
+It's also true that you'd want the Do_Write routine to be non-primitive if it
+could appear in the spec of a Remote_Call_Interface (because inheriting such a
+routine would be illegal), but since you didn't derive any such type, there is
+no illegality from having it be primitive.
+
+So, let's simplify the example removing stuff that ought to be irrelevant:
+
+    with Ada.Streams;
+    package Pack1 is
+        pragma Pure;
+        type Root is tagged limited private;
+        procedure Do_Write (Stream : access Ada.Streams.Root_Stream_Type'Class;
+                            X : Root);
+        for Root'Write use Do_Write;
+    private
+        type Root is tagged limited record
+            F1 : Integer;
+        end record;
+    end Pack1;
+
+    with Pack1;
+    package Pack2 is
+        pragma Remote_Types;
+        type Root_Acc is access all Pack1.Root'Class;
+    end Pack2;
+
+    with Pack1, Pack2, Ada.Streams;
+    procedure Test1 (A : Pack2.Root_Acc) is
+    begin
+        Pack1.Root'Class'Write (Stream, The_Obj.all);  -- OK? I think so.
+        Pack1.Do_Write (Stream, The_Obj.all); -- OK? I think so.
+    end Test1;
+
+The calls marked "OK?" are both dispatching calls through a remote
+access-to-classwide type, but none of the actual calls are remote (how could
+they be?; there are no RCI units in this program!) and there is no restriction
+on having anonymous access parameters for such routines. (I surely couldn't find
+any rules in E.2.2 or 10.2.1 that would make any of this illegal.) Therefore, I
+conclude that both calls are legal as written.
+
+Moving the calls into a RCI body doesn't have any effect on this: there still
+are not any remote calls here. So I cannot find any reason for either of these
+calls to be illegal, even in your original program.
+
+As I previously noted, there is a known issue with stream attributes of types
+declared in an RCI unit, which we were not confident of the solution (when we
+discussed it in Edinburgh) and thus didn't put a fix into Ada 2012. Surely no
+remote calls of stream attributes can ever be allowed - both because there is no
+marshalling for the access-to-stream parameter, and because they couldn't be
+used to implement marshalling if they in fact were remote themselves. But none
+of this seems to have anything whatsoever to do with your original report. I
+think you were just confused by a GNAT bug (more accurately, an unimplemented
+feature).
+
+I realize that Annex E issues are amazingly hard to understand, so I might very
+well have made a mistake somewhere. Please tell me (preferably by Friday) if you
+see any such thing.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Wednesday, June  6, 2012  10:09 PM
+
+> I also don't understand the significance of making Do_Write a
+> non-primitive operation. There isn't anything in 10.2.1 or E.2.2 that
+> would make this work differently if Do_Write was a primitive
+> operation, so why the extra complication??
+
+E.2.2(14) says that for a remote access-to-class-wide type, "The primitive
+subprograms of the corresponding specific type shall only have access parameters
+if they are controlling formal parameters". Do_Write in Pack1 has an access
+parameter (Stream) that is not a controlling formal parameter, so the
+declaration of Root_Acc would be illegal if Do_Write were primitive.
+
+Making Do_Write non-primitive makes Root_Acc legal.  However, since Do_Write is
+non-primitive, a direct call to it would not be a dispatching call.  Thus, if
+
+         Pack1.Root'Class'Write (Stream, The_Obj.all);
+
+were replaced by
+
+         Pack1.Inner.Do_Write (Stream, The_Obj.all);  --(A)
+
+then E.2.2(16) would clearly be violated.
+
+So if I recall correctly (I'm trying to reconstruct what I was thinking a month
+ago), the language normally works to prevent calls like (A) because
+-- if it involves a primitive subprogram, the remote
+   access-to-classwide type can't be declared (E.2.2(14)), and
+-- if it involves a non-primitive subprogram, the call isn't a
+   dispatching call and the dereference is invalid by E.2.2(16).
+
+This seems to be a case that fell through the cracks, in which a non-primitive
+subprogram can be called through a dispatching call using classwide stream
+attributes.
+
+I don't see how AI12-0002 would help, at least with the current
+!wording:
+
+    Specification of a stream-oriented attribute is illegal in the
+    specification of a remote call interface library unit. In addition to
+    the places where Legality Rules normally apply (see 12.3), this rule
+    applies also in the private part of an instance of a generic unit.
+
+because there's only one RCI library unit in my example and there aren't any
+stream attribute specifications there.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Wednesday, June  6, 2012  10:21 PM
+
+...
+> I don't understand the significance of this package. There is no
+> remote call here (Do_Write is not a remote call interface because it
+> is solely in the body). So far as I can tell, any remote call on a
+> stream attribute here would be illegal (presuming we plug the hole
+> noted in AI12-0002-1). So while this is a dispatching call through a
+> remote-access-to-classwide type, the actual call executed cannot be remote.
+
+It shouldn't be, but I don't see where the language says so.  3.9.2 says the
+call is dispatching, and E.4(5) says that a dispatching call with a controlling
+operand designated by a value of a remote access-to-class-wide type is a remote
+call.  So I think the language says this is a remote call and there's nothing
+anywhere that says it isn't.  This is probably the hole that needs to be
+plugged.
+
+My thinking is that if E.2.2(16) were changed to
+
+A value of a remote access-to-class-wide type shall be dereferenced (or
+implicitly converted to an anonymous access type) only as part of a dispatching
+call {that is not a call to a stream attribute subprogram} where the value
+designates a controlling operand of the call.
+
+it would solve the problem.  I'm not sure I have the wording right.
+
+> It's also true that you'd want the Do_Write routine to be
+> non-primitive if it could appear in the spec of a
+> Remote_Call_Interface (because inheriting such a routine would be
+> illegal), but since you didn't derive any such type, there is no illegality
+> from having it be primitive.
+
+As I noted before, E.2.2(14) makes it illegal.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June  7, 2012  12:29 AM
+
+...
+> > I don't understand the significance of this package. There is no
+> > remote call here (Do_Write is not a remote call interface because it
+> > is solely in the body). So far as I can tell, any remote call on a
+> > stream attribute here would be illegal (presuming we plug the hole
+> > noted in AI12-0002-1). So while this is a dispatching call through a
+> > remote-access-to-classwide type, the actual call executed cannot be remote.
+>
+> It shouldn't be, but I don't see where the language says so.
+> 3.9.2 says the call is dispatching, and E.4(5) says that a dispatching
+> call with a controlling operand designated by a value of a remote
+> access-to-class-wide type is a remote call.
+>  So I think the language says this is a remote call and there's
+> nothing anywhere that says it isn't.  This is probably the hole that
+> needs to be plugged.
+
+Yes, I see what you mean. I never even noticed E.4 in reading about this. It
+seems insane to require a remote call (with all of that marshalling and
+unmarshalling) when the call is necessarily to the same partition (as in your
+Pure package). You don't even know how to marshall the parameters until you've
+determined the tag of the designated object, so I don't see any implementation
+value to marshalling first -- you have to do the marshalling/unmarshalling in
+the routine (stub) that you dispatch to -- so there is no need to make an actual
+remote call if the type belongs to the same partition (as it must if it is
+declared in a Pure or Remote Types package).
+
+OTOH, one could argue that this is insufficiently broken, in that it doesn't
+have any visible semantic effects (presuming no junk in the [user-defined]
+stream attributes - something that no one ought to be depending on).
+Implementers probably can and should ignore it.
+
+OT3H, this ties into your complaint about All_Calls_Remote, which apparently is
+really Most_Calls_Remote. It seems silly to force any local call into the PCS,
+and since it can't even be done as explained in the ImpReq, I don't see the
+point. I'd just get rid of both things and allow the implementation to use a
+local call anytime that makes sense. (And if an implementation knows of a real
+need for forcing all calls through a PCS, they can define how that should work
+in a way that actually covers all of the cases that their customers care about;
+we can't do that, we have to cover everything.)
+
+> My thinking is that if E.2.2(16) were changed to
+>
+> A value of a remote access-to-class-wide type shall be dereferenced
+> (or implicitly converted to an anonymous access
+> type) only as part of a dispatching call {that is not a call to a
+> stream attribute subprogram} where the value designates a controlling
+> operand of the call.
+>
+> it would solve the problem.  I'm not sure I have the wording right.
+
+That would fix this problem, I suppose, but it seems silly. There should never
+be any sort of remote stream attribute call, and I really see no reason for
+blaming the problem on a dereference of an access type for which there is no
+implementation problem at all (presuming that the implementation doesn't try to
+marshall parameters for a local call, which is already idiotic, as noted above).
+
+I'd probably just stick
+
+"A remote subprogram call shall not be a call on a stream attribute." into E.4,
+because we don't want anyone finding a way to do that anywhere.
+
+> > It's also true that you'd want the Do_Write routine to be
+> > non-primitive if it could appear in the spec of a
+> > Remote_Call_Interface (because inheriting such a routine would be
+> > illegal), but since you didn't derive any such type, there
+> is no illegality from having it be primitive.
+>
+> As I noted before, E.2.2(14) makes it illegal.
+
+I looked an hour at E.2.2 and 10.2.1 without seeing that rule. Which just means
+that it's impossible to wade through this Annex  and understand it, so probably
+everything I know is wrong.
+
+So I think I'll just make an AI saying that there are a boatload of problems
+with Annex E (actually, we already have one, AI12-0002-1 -- you looked at it and
+mistakenly thought that it was complete in some way, but actually we had
+discarded that version and never have worked on it since, so the existing AI is
+worthless junk except for the problem descriptions and mail).
+
+I've suggested before that Annex E simply be dropped from the Standard since it
+is a mess, thus sucks up a lot of time yet we never get it any better, doesn't
+come close to matching the one and only implementation (which is not going to
+change whether or not we confirm the Annex), and has almost no demand (I don't
+think anyone ever asked RRS for an implementation). I haven't got much traction
+with such a position, but perhaps wasting many more hours on this junk again
+will change some views.
+
+****************************************************************
+
