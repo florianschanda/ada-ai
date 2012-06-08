@@ -1,0 +1,413 @@
+!standard A.18.18(47/3)                              12-06-08    AI12-0035-1/01
+!class binding interpretation 12-06-08
+!status work item 12-06-08
+!status received 12-06-07
+!priority Medium
+!difficulty Medium
+!subject Accessibility checks for indefinite elements
+!summary
+
+**TBD.
+
+!question
+
+There appears to be a hole in the indefinite container semantics. Consider
+the following case: The Indefinite_Holders container is instantiated with a
+class-wide type, and a value of an object of a more deeply nested
+tagged type is saved in a container of the outer-level instance via a call to
+Replace_Element. If this procedure is implemented in Ada, using an allocator,
+the allocator would fail a run-time accessibility check, thus raising
+Program_Error. This appears to be the behavior we want, as otherwise it would
+be possible to store a value of a type whose scope has exited within a
+longer-lived container, and that surely shouldn't be permitted. (Such an object
+within a container could be referred to as "dangling", in that its tag refers to
+a type that no longer exists.)
+
+Should this be fixed? (Yes.)
+
+!recommendation
+
+** TBD.
+
+!wording
+
+** TBD.
+
+!discussion
+
+We want to be able to write the implementation of containers packages in
+Ada, and we expect the implementation to use allocators. As such, it would
+be odd if some of the reasons that those allocators could fail were not
+relected in the specification.
+
+A grocery list of considerations for this solution.
+
+(1) The problem occurs for any indefinite container, and occurs anytime an
+    element is created in a container. That is not just Replace_Element but also
+    Insert_Element and Append_Element (and possibly others, I didn't check
+    carefully). That means that there are a number of places that we need new
+    rules.
+
+(2) Indefinite containers are just a "simple" modification of the definite ones.
+    Not sure if we have to modify the definite containers to deal with this or
+    not (most of the complex rules are designed to apply to all of the container
+    forms). In particular, I cannot be sure that it is impossible to cause the
+    access discriminant check to fail for a definite subtype, as it applies to
+    parts and constrained subtypes. Therefore, it would be safer to cover
+    all containers, even though the check is unlikely to fail in a definite
+    container.
+
+(3) The idea of repeating the rules for accessibility for an allocator gives me
+    uncontrollable shakes. We'd never get the right; they'd always be a version
+    behind the allocator rules. We have to find some way to explain this in
+    terms of a hypothetical allocator.
+
+    The best I can do would be something like: "Program_Error is propagated by
+    Replace_Element if an initialized allocator for the element value
+    where the access type designates the element type and is declared at the
+    point of the instantiation of the container package would fail an
+    accessibility check." This is too hard to parse, I fear.
+
+(4) We probably don't need any static rules for this problem. For an allocator
+    of a generic formal type used in a generic body, these rules are checked
+    only dynamically. The implementation of the container can (and ought to)
+    avoid putting any allocators into the specification.
+
+(5) This check might be very expensive to implement. But the implementability
+    should be no easier or harder than the checks for any allocator given
+    in a generic body. Whether *any* of these checks are really implementable
+    is the subject of AI12-0016-1, and if we make changes based on that
+    AI, they should apply here, too.
+
+(6) It would be nice to have some sort of blanket rule that covers all container
+    types and operations, but we rarely do that for the containers and it is not
+    at all clear how it could be written in order to ensure that the right
+    routines are covered and not any others.
+
+!example
+
+Here's an example of how such violations can occur for instantiations of
+indefinite containers with class-wide element types:
+
+with Ada.Containers.Indefinite_Holders;
+with Ada.Text_IO;  use Ada.Text_IO;
+
+procedure Dangling_Container is
+
+   package Pkg is
+
+      type Abst is abstract tagged null record;
+
+      procedure Print_Obj (Obj : Abst) is abstract;
+
+   end Pkg;
+
+   use Pkg;
+
+   package Holder is
+     new Ada.Containers.Indefinite_Holders (Element_Type => Abst'Class);
+
+   Factory : Holder.Holder := Holder.Empty_Holder;
+
+   procedure Set_Factory is
+
+      type Deeper_Type is new Pkg.Abst with record
+         C : Integer;
+      end record;
+
+      procedure Print_Obj (Obj : Deeper_Type);
+
+      A : Deeper_Type := (C => 123);
+
+      procedure Print_Obj (Obj : Deeper_Type) is
+      begin
+         Put_Line
+           ("In Print_Obj for Deeper_Type, Obj.C =" & Integer'Image (Obj.C));
+
+         A := Obj;  -- Assign to possibly nonexistent object; may damage stack
+      end Print_Obj;
+
+   begin
+      Factory.Replace_Element (A);  -- This call should presumably fail
+   end Set_Factory;
+
+begin
+   Set_Factory;
+
+   Print_Obj (Factory.Element);  -- The program should never get this far!
+
+   Put_Line ("Returned from call to out of scope primitive, ending program");
+end Dangling_Container;
+
+
+and here's a program illustrating the access discriminant case:
+
+with Ada.Containers.Indefinite_Holders;
+with Ada.Text_IO;  use Ada.Text_IO;
+
+procedure Dangling_Acc_Discrim is
+
+   type Acc_Discrim_Rec (D : access Integer) is record
+      C : Integer;
+   end record;
+
+   package Holder is
+     new Ada.Containers.Indefinite_Holders (Element_Type => Acc_Discrim_Rec);
+
+   Factory : Holder.Holder := Holder.Empty_Holder;
+
+   procedure Set_Factory is
+
+      Aliased_Int : aliased Integer := 123;
+
+      Nested_Obj : Acc_Discrim_Rec (D => Aliased_Int'access);
+
+   begin
+      Nested_Obj.C := 456;
+
+      Factory.Replace_Element (Nested_Obj); -- This call should presumably fail
+   end Set_Factory;
+
+   procedure Print_Obj (Obj : Acc_Discrim_Rec) is
+   begin
+      Put_Line ("In Print_Obj, Obj.D.all =" & Integer'Image (Obj.D.all)
+                          & ", Obj.C =" & Integer'Image (Obj.C));
+
+      Obj.D.all := Obj.D.all + Obj.C;
+        -- Assignment to nonexistent object might damage stack
+   end Print_Obj;
+
+begin
+   Set_Factory;
+
+   Print_Obj (Factory.Element);
+
+   Put_Line ("After first call to Print_Obj");
+
+   Print_Obj (Factory.Element);
+
+   Put_Line ("After second call to Print_Obj");
+
+end Dangling_Acc_Discrim;
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Gary Dismukes
+Sent: Thursday, June 7, 2012  1:15 AM
+
+A recent problem report from an AdaCore customer caused me to notice what seems
+to be a hole in the indefinite container semantics.  The customer was using the
+Indefinite_Holders container, instantiating it with a class-wide type, and
+saving the value of an object of a more deeply nested tagged type in a container
+of the outer-level instance (via a call to Replace_Element).  They ran into an
+accessibility violation in one of their own functions that returned a call to
+the holder's Element function.  Although this failed check appears to be correct
+behavior, it occurred to me that the accessibility error should have been
+detected earlier, at the call to Replace_Element.
+
+The GNAT implementation of Replace_Element uses an allocator (not too
+surprisingly), and that allocator should have resulted in an accessibility
+violation, per the first rule in 4.8(10.1/3).  That is arguably just a bug that
+needs to be fixed, however there doesn't appear to be anything in the RM that
+actually specifies that a call to an operation such as Replace_Element should
+raise an exception if passed an object of a too-deep type.  In whatever way that
+operation is implemented, whether in Ada using an allocator, or in some other
+language by some other means, such calls should fail, because otherwise it would
+be possible to store a value of a type whose scope has exited within a
+longer-lived container, and that surely shouldn't be permitted.  (Such an object
+within a container could be referred to as "dangling", in that its tag refers to
+a type that no longer exists.)
+
+So, it seems that this is a real vulnerability that the language should address.
+A related case can arise for types with access discriminants (a case raised by
+Steve), where violations of the second rule of 4.8(10.1/3) could occur, but
+again there's nothing in the semantics of indefinite containers that would
+appear to prevent such a violation.
+
+Assuming it's agreed that this is a real RM gap, then an AI should be created,
+and it's perhaps a candidate for the agenda for the upcoming meeting (if you're
+short on agenda items:-).
+
+Here's an example of how such violations can occur for instantiations of
+indefinite containers with class-wide element types:
+
+with Ada.Containers.Indefinite_Holders;
+with Ada.Text_IO;  use Ada.Text_IO;
+
+procedure Dangling_Container is
+
+   package Pkg is
+
+      type Abst is abstract tagged null record;
+
+      procedure Print_Obj (Obj : Abst) is abstract;
+
+   end Pkg;
+
+   use Pkg;
+
+   package Holder is
+     new Ada.Containers.Indefinite_Holders (Element_Type => Abst'Class);
+
+   Factory : Holder.Holder := Holder.Empty_Holder;
+
+   procedure Set_Factory is
+
+      type Deeper_Type is new Pkg.Abst with record
+         C : Integer;
+      end record;
+
+      procedure Print_Obj (Obj : Deeper_Type);
+
+      A : Deeper_Type := (C => 123);
+
+      procedure Print_Obj (Obj : Deeper_Type) is
+      begin
+         Put_Line
+           ("In Print_Obj for Deeper_Type, Obj.C =" & Integer'Image (Obj.C));
+
+         A := Obj;  -- Assign to possibly nonexistent object; may damage stack
+      end Print_Obj;
+
+   begin
+      Factory.Replace_Element (A);  -- This call should presumably fail
+   end Set_Factory;
+
+begin
+   Set_Factory;
+
+   Print_Obj (Factory.Element);  -- The program should never get this far!
+
+   Put_Line ("Returned from call to out of scope primitive, ending program");
+end Dangling_Container;
+
+
+and here's a program illustrating the access discriminant case:
+
+with Ada.Containers.Indefinite_Holders;
+with Ada.Text_IO;  use Ada.Text_IO;
+
+procedure Dangling_Acc_Discrim is
+
+   type Acc_Discrim_Rec (D : access Integer) is record
+      C : Integer;
+   end record;
+
+   package Holder is
+     new Ada.Containers.Indefinite_Holders (Element_Type => Acc_Discrim_Rec);
+
+   Factory : Holder.Holder := Holder.Empty_Holder;
+
+   procedure Set_Factory is
+
+      Aliased_Int : aliased Integer := 123;
+
+      Nested_Obj : Acc_Discrim_Rec (D => Aliased_Int'access);
+
+   begin
+      Nested_Obj.C := 456;
+
+      Factory.Replace_Element (Nested_Obj); -- This call should presumably fail
+   end Set_Factory;
+
+   procedure Print_Obj (Obj : Acc_Discrim_Rec) is
+   begin
+      Put_Line ("In Print_Obj, Obj.D.all =" & Integer'Image (Obj.D.all)
+                          & ", Obj.C =" & Integer'Image (Obj.C));
+
+      Obj.D.all := Obj.D.all + Obj.C;
+        -- Assignment to nonexistent object might damage stack
+   end Print_Obj;
+
+begin
+   Set_Factory;
+
+   Print_Obj (Factory.Element);
+
+   Put_Line ("After first call to Print_Obj");
+
+   Print_Obj (Factory.Element);
+
+   Put_Line ("After second call to Print_Obj");
+
+end Dangling_Acc_Discrim;
+
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June 7, 2012  11:05 AM
+
+> A recent problem report from an AdaCore customer caused me to notice
+> what seems to be a hole in the indefinite container semantics.  The
+> customer was using the Indefinite_Holders container, instantiating it
+> with a class-wide type, and saving the value of an object of a more
+> deeply nested tagged type in a container of the outer-level instance
+> (via a call to Replace_Element).  They ran into an accessibility
+> violation in one of their own functions that returned a call to the
+> holder's Element function.  Although this failed check appears to be
+> correct behavior, it occurred to me that the accessibility error
+> should have been detected earlier, at the call to Replace_Element. ...
+
+I agree we should say something.  The idea is that a container is roughly
+equivalent to the collection associated with an access type declared at the same
+level as the container type, and inserting an object in a container is analogous
+to an allocator, and the same kinds of accessibility checks should apply.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 7, 2012  11:39 PM
+
+> > A recent problem report from an AdaCore customer caused me to notice
+> > what seems to be a hole in the indefinite container semantics.  The
+> > customer was using the Indefinite_Holders container, instantiating
+> > it with a class-wide type, and saving the value of an object of a
+> > more deeply nested tagged type in a container of the outer-level
+> > instance (via a call to Replace_Element).
+
+Good to see someone using the Indefinite containers as they were intended, even
+if they managed to misuse them a bit.
+
+> > ...  They ran into an accessibility violation in one of their own
+> > functions that returned a call to the holder's Element function.
+> > Although this failed check appears to be correct behavior, it
+> > occurred to me that the accessibility error should have been
+> > detected earlier, at the call to Replace_Element. ...
+>
+> I agree we should say something.  The idea is that a container is
+> roughly equivalent to the collection associated with an access type
+> declared at the same level as the container type, and inserting an
+> object in a container is analogous to an allocator, and the same kinds
+> of accessibility checks should apply.
+
+I agree as well, although exactly *what* we need to say is not that obvious.
+Several points:
+
+(1) The problem occurs anytime an element is created in the container. That is
+not just Replace_Element but also Insert_Element and Append_Element (and
+possibly others, I didn't check carefully). That means that there are a number
+of places that we need new rules.
+
+(2) Indefinite containers are just a "simple" modification of the definite ones.
+Not sure if we have to modify the definite containers to deal with this or not
+(most of the complex rules are designed to apply to all of the container forms).
+
+(3) The idea of repeating the rules for accessibility for an allocator gives me
+uncontrollable shakes. We'd never get the right; they'd always be a version
+behind the allocator rules. We have to find some way to explain this in terms of
+a hypothetical allocator.
+
+Obviously, the easiest way to deal with this is some sort of blanket rule that
+covers all container types, but we rarely do that for the containers and it is
+not at all clear how it could be written in order to ensure that the right
+routines are covered.
+
+So this looks difficult but necessary (and I'm not going to try to come up with
+wording before the meeting).
+
+****************************************************************
