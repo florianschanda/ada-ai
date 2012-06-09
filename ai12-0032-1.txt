@@ -1,4 +1,4 @@
-!standard 6.1.1(26/3)                              12-06-06    AI12-0032-1/01
+!standard 6.1.1(26/3)                              12-06-08    AI12-0032-1/02
 !standard 6.1.1(27/3)
 !class ramification 12-06-06
 !status work item 12-06-06
@@ -13,6 +13,8 @@ declaration.
 
 (2) If X has an anonymous access type, the implied constant associated with
 X'Old has an anonymous access type with the same designated type or profile.
+
+Others ** TBD.
 
 !question
 
@@ -40,6 +42,43 @@ X'Old has an anonymous access type with the same designated type or profile.
    Should we define the type of the constant to be an anonymous access
    with the same designated type? (Yes.)
 
+3) Should the nominal subtype of X'Old be defined. It currently isn't, meaning
+   we fall back to 4.1.4(9/3), which says it is the base subtype of the type.
+
+   That means that the following is illegal:
+
+   procedure Old_Test is
+
+     procedure Foo (X : in out Natural)
+       with Post => X = (case X'Old is when 0 => 0,
+                                       when Positive => X'Old - 1);
+
+     procedure Foo (X : in out Natural) is
+      begin if X > 0 then X := X - 1; end if; end;
+
+   begin null; end;
+
+   because the case expression doesn't cover all values of the subtype of the
+   case expression.
+
+4) What should happen if X'Old has an abstract type? A direct application of
+   the model would imply that it should be illegal, because we'd be declaring
+   a constant of an abstract type. But it seems odd that X'Old should be
+   illegal even if X is legal.
+
+5) If T is a specific tagged type, the runtime tags of X and X'Old may
+   not match, which can affect (among other things) the body
+   executed by a dispatching call. That's because the implicit constant
+   declaration of:
+         X'Old : constant T := X;
+   always has the tag of T, while X may have some other tag because of
+   type conversions. This affects (re)dispatching and equality, among other
+   things. Should this be fixed somehow?
+
+6) What is the meaning of Named_Number'Old? This is something that can't
+   easily be declared (there are no objects of a universal type), and it's
+   useless as a named number has to be constant anyway.
+
 !response
 
 Neither of these problems are worth complicating the wording. For (1), we
@@ -53,6 +92,8 @@ will think about the ramifications of having the type be "the same" rather
 than a new anonymous access type. Users will expect to work as if they had
 written it by hand, and it will. So we simply add a To Be Honest note to
 clarify that there is a special case here not implied by the formal wording.
+
+Others ** TBD.
 
 !wording
 
@@ -72,6 +113,12 @@ rules for whatever X is (it might be an access parameter or access discriminant)
 Thus the type is not exactly the same, rather it would be what would be
 written if you declared X_Old explicitly. It didn't seem worth the complications
 to explain this in the normative wording; no one would expect anything else."
+
+Others ** TBD.
+
+For 3 and 4, we could do the same as above, but for 5, we either do nothing
+and ignore the problem, or we give up on this approach and rewrite the wording
+completely to clarify all of these issues.
 
 !discussion
 
@@ -266,6 +313,1674 @@ You're right. But your last sentence is way too broad. It should read:
 
 "No one other than Steve Baird (and maybe Adam Beneschan) could even imagine
 there is a problem." ;-)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, June  7, 2012  2:45 PM
+
+Is the following example legal?
+I think it should be, but I also think it isn't.
+
+   procedure Old_Test is
+
+     procedure Foo (X : in out Natural)
+       with Post => X = (case X'Old is when 0 => 0,
+                                       when Positive => X'Old - 1);
+
+     procedure Foo (X : in out Natural) is
+      begin if X > 0 then X := X - 1; end if; end;
+
+   begin null; end;
+
+6.1.1 says nothing about the nominal subtype of X'Old, which leaves us with only
+4.1.4(9/3):
+
+   For an attribute_reference that denotes a value or an object, if its
+   type is scalar, then its nominal subtype is the base subtype of
+   the type;
+
+I'd like to consider defining the nominal subtype of X'Old to be that of X.
+Presumably wording for this would go in 6.1.1, not 4.1.4, but that's a detail.
+
+The strongest argument I can see against doing this is an assertion that this is
+"insufficiently broken"; it just doesn't matter, so no change is needed.
+
+Opinions?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June  7, 2012  2:52 PM
+
+> .. I'd like to consider defining the nominal subtype of X'Old to be
+> that of X.
+
+That makes sense.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, June  7, 2012  3:13 PM
+
+> Is the following example legal?
+> I think it should be, but I also think it isn't.
+
+I agree with both.
+
+> I'd like to consider defining the nominal subtype of X'Old to be that
+> of X.
+
+Yes.
+
+>... Presumably wording for this would go in 6.1.1, not 4.1.4,  but
+>that's a detail.
+
+Agreed.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, June  7, 2012  12:08 PM
+
+6.1.1(26/3) says:
+   the type of X'Old is the type of X
+
+This means that, for example, for a formal parameter X of type T, the implicitly
+declared constant referenced by a use of X'Old behaves as though it were
+declared by
+     <anonymous> : constant T := X;
+
+There are two problems with this in the case where T is a specific tagged type:
+    1) If T is abstract, we are declaring an object of an abstract type.
+    2) Even if T is not abstract, the runtime tags of X and X'Old may
+       not match, which can affect (among other things) the body
+       executed by a dispatching call.
+
+Given
+     procedure P (X : in out Some_Specific_Tagged_Type)
+       with Post => Some_Func_That_Does_Redispatching (X, X'Old);
+
+     subtype Sstt is Some_Specific_Tagged_Type;
+
+, I'm arguing that the implicit declaration that X'Old denotes should behave as
+though it were declared via something like
+
+     <anonymous_1> : constant Sstt'Class := Sstt'Class (X);
+     <anonymous_2> : Sstt renames Sstt (<anonymous_1>);
+       -- rename of a view conversion
+
+where the use of X'Old should refer to the rename, <anonymous_2>.
+
+This is only a change in dynamic semantics. The static semantics of X'Old (e.g.,
+anything involving type or name resolution) would be unaffected by this change.
+Dynamically, however, this means that X'Tag = X'Old'Tag (speaking loosely here -
+more precisely, Sstt'Class (X)'Tag = Sstt'Class (X'Old)'Tag).
+
+Note that problem #1 is  "must fix" hole in the language, but it could be solved
+more simply by a rule that the prefix of an Old attribute shall not be of an
+abstract type. This would  not help with problem #2 and would take away arguably
+useful functionality.
+
+Problem #2 is more of usability issue. The language is well-defined int hsi
+case, but this definition is not what users want and expect. If we view that
+problem #2 is an unimportant corner case that nobody cares about, then the
+simpler solution that solves only problem #1 might make sense.
+
+I think the "fix the dynamic semantics" solution that I am proposing would not
+require adding a lot of complexity to the RM. Perhaps just a note saying X'Old
+has the same runtime tag as X and an AARM note showing the view conversion given
+above.
+
+Do folks prefer
+   a) the legality rule that addresses only the abstract type problem
+   b) the dynamic semantics change that addresses the full problem
+   c) none of the above
+?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June  7, 2012  12:23 PM
+
+> 6.1.1(26/3) says:
+> the type of X'Old is the type of X
+> ...
+> I think the "fix the dynamic semantics" solution that I am proposing
+> would not require adding a lot of complexity to the RM.
+> Perhaps just a note saying X'Old has the same runtime tag as X and an
+> AARM note showing the view conversion given above.
+
+I agree with this approach.  No need to make <abstract>'Old illegal if we fix
+the dynamic semantics.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Thursday, June  7, 2012  12:54 PM
+
+> Do folks prefer
+>  a) the legality rule that addresses only the abstract type problem
+>  b) the dynamic semantics change that addresses the full problem
+>  c) none of the above
+> ?
+
+Strongly prefer b).
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Thursday, June  7, 2012  1:01 PM
+
+> I agree with this approach.  No need to make <abstract>'Old illegal if
+> we fix the dynamic semantics.
+
+I agree as well (with choice b), since it seems easy enough to handle these
+cases right in both the RM and implementations.
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Thursday, June  7, 2012  1:23 PM
+
+> Do folks prefer
+>  a) the legality rule that addresses only the abstract type problem
+>  b) the dynamic semantics change that addresses the full problem
+>  c) none of the above
+> ?
+
+b) for me.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, June  7, 2012  4:54 PM
+
+> I agree with this approach.  No need to make<abstract>'Old illegal if
+> we fix the dynamic semantics.
+
+I agree, this does make the best sense
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  1:04 AM
+
+> 6.1.1(26/3) says:
+>    the type of X'Old is the type of X
+>
+> This means that, for example, for a formal parameter X of type T, the
+> implicitly declared constant referenced by a use of X'Old behaves as
+> though it were declared by
+>      <anonymous> : constant T := X;
+
+Right. Indeed, I prefer to say that it *is* declared by
+
+       X'Old : constant T := X;
+
+which is an implicit declaration given at the start of the subprogram.
+
+At the risk of stepping in front of what appears to be a speeding freight train,
+I'm going to disagree with everyone else's conclusions of Steve's various
+issues.
+
+The above is the model of X'Old, and we've been very careful to follow this
+model exactly.
+
+We chose this for two reasons:
+(1) To have a very simple model in which we did not have to explain all of the
+semantic ramifications. Indeed, we've explained the consequences in AARM notes,
+and not in normative wording (which might conflict with the way that this model
+works).
+
+(2) To match what users would have written had this feature not existed. That
+is, if they needed the effect of X'Old in an Assertion, they almost certainly
+would have written something like:
+
+      X_Old : constant T := X;
+
+      ...
+
+      pragma Assert (X = X_Old + 1);
+
+We ought to be *very* careful about deviating from this model.
+
+> There are two problems with this in the case where T is a specific
+> tagged type:
+>     1) If T is abstract, we are declaring an object of an abstract type.
+
+Well, given that we're following the model exactly, the constant declaration is
+clearly illegal (because writing it explicitly would be illegal). QED.
+
+More specifically, the current wording says that "a constant is declared"
+and that it is "of the type of X". Such a declaration is illegal if the type of
+X is abstract. This is the same sort of conclusion that we've reached for many
+other questions on X'Old, and documented them in AARM notes, so I don't see why
+you think this one is different.
+
+Moreover, I think this should be true irregardless of how any other issues are
+decided. For one thing, it's virtually impossible to write such an object in a
+useful way. The only way to give such a type to an object is via a type
+conversion. While Abstr(Obj)'Old may be syntactically allowed, it's a pretty
+silly thing to write.
+
+There are no (specific) abstract components or objects. So that pretty much
+leaves parameters. If the parameter is a controlling operand, the rules banning
+Post for abstract and null routines mean that the postconditions have to be
+Post'Class. In which case Param (and thus Param'Old) have type Abstr'Class.
+
+If the parameter is not a controlling parameter, it's next to useless and should
+have been illegal from the beginning (the only way to pass something as a
+specific abstract type is via a type conversion -- which is nasty to the users
+and almost always represents a bug -- such parameters should be Abstr'Class).
+Since the parameter should never have been written in this case, I cannot care
+about Param'Old.
+
+Thus I don't see any cases in which anyone *should* care about Param'Old where
+Param has a specific abstract type. So why corrupt the model to make it legal??
+
+>     2) Even if T is not abstract, the runtime tags of X and X'Old may
+>        not match, which can affect (among other things) the body
+>        executed by a dispatching call.
+
+Are you sure? I believe that you are saying that given:
+
+         X_Old : constant Sstt := X;
+
+X_Old and X might have different tags. I don't see how you come to that
+conclusion based on the Standard.
+
+3.3.1(17) says "If the object_declaration includes an initialization expression,
+the (explicit) initial value is obtained by evaluating the expression and
+converting it to the nominal subtype (which might raise Constraint_Error - see
+4.6)." That subtype conversion is a view conversion, so the tag is preserved as
+it is for parameter passing. I vaguely remember something like what you
+describe, but I can't find anything in the standard that says that this
+declaration gets some specific tag. Maybe it should, but I don't see anything
+that says that.
+
+> Given
+>      procedure P (X : in out Some_Specific_Tagged_Type)
+>        with Post => Some_Func_That_Does_Redispatching (X, X'Old);
+>
+>      subtype Sstt is Some_Specific_Tagged_Type;
+>
+> , I'm arguing that the implicit declaration that X'Old denotes should
+> behave as though it were declared via something like
+>
+>      <anonymous_1> : constant Sstt'Class := Sstt'Class (X);
+>      <anonymous_2> : Sstt renames Sstt (<anonymous_1>);
+>        -- rename of a view conversion
+>
+> where the use of X'Old should refer to the rename, <anonymous_2>.
+
+This is insane. You are completely dumping the "simple model", as this violates
+both of the principles which guided it: (1) is dead because the semantics is no
+longer implicit in a simple declaration; it will have to be explained in detail.
+(And then we will have to explain *all* of the semantics in detail, for all
+types, because it would be very confusing to have a detail explanation in one
+case and handwaving in all other cases -- on top of which, we could no longer
+justify the "TBH" for anonymous access types and would have explain that case in
+detail as well.
+
+And (2) is violated because absolutely *no* programmer would ever write the
+above! They'd almost always just write
+         X_Old : constant Sstt := X;
+as they probably don't care about redispatching. (In many cases, redispatching
+is evil and causes significant trouble with program logic.) And if they *do*
+care about redispatching, they probably would have written
+         X_Old : constant Sstt'Class := Sstt'Class(X);
+
+> This is only a change in dynamic semantics. The static semantics of
+> X'Old (e.g., anything involving type or name
+> resolution) would be unaffected by this change. Dynamically, however,
+> this means that X'Tag = X'Old'Tag (speaking loosely here - more
+> precisely, Sstt'Class (X)'Tag = Sstt'Class (X'Old)'Tag).
+
+This is madness. You now are saying the static semantics and dynamic semantics
+are different than for any other object in the Ada standard. This almost
+certainly going to cause other anomolies by having the nominal subtype differing
+in this way. I can't wait for Adam (normally I'd say Steve, but since you're
+Steve, that probably won't work) to show us all of the problems.
+
+> Note that problem #1 is  "must fix" hole in the language, but it could
+> be solved more simply by a rule that the prefix of an Old attribute
+> shall not be of an abstract type.
+
+There is no fix needed for #1; it already follows from the existing model.
+Maybe we need another TBH, but that's all that's necessary to fix this.
+
+> This would
+>  not help with problem #2 and would take away arguably useful
+> functionality.
+
+I'm still dubious that there is any real problem here. Since redispatching is
+usually evil, it's unlikely that anyone will care what the tag of X'Old is.
+
+> Problem #2 is more of usability issue. The language is well-defined
+> int hsi case, but this definition is not what users want and expect.
+
+I doubt that users will care in the vast majority of cases. The only time they
+ought to care is in a Post'Class, but in that case Param'Old has a class-wide
+type and the tag will be preserved for that reason. Redispatching in a Post
+expression is almost certainly going to be evil; it would certainly prevent most
+static analysis and could cause all sorts of logic problems. About the only time
+it would make sense is if the procedure itself was evil and used redispatching.
+
+> If we view that problem #2 is an unimportant corner case that nobody
+> cares about, then the simpler solution that solves only problem #1
+> might make sense.
+
+Which is to do nothing at all (my suggestion).
+
+> I think the "fix the dynamic semantics" solution that I am proposing
+> would not require adding a lot of complexity to the RM.
+> Perhaps just a note saying X'Old has the same runtime tag as X and an
+> AARM note showing the view conversion given above.
+
+I *strongly* disagree with this. This is totally abandoning the "simple model"
+of a standard constant declaration, because currently we expect *everything*
+(finalization, accessibility, checking, etc.) to be implied by that model. As
+soon as you start modifying parts of that model ("it's everything but X and Y
+and Z") you have lost the ability to ignore the details. And then we have to
+define all of the details we've been trying to ignore.
+
+I especially disagree with the notion that "a note" could be used to describe
+such a major deviation from the simple model (presuming your original premise is
+correct, which I cannot verify). This will require detailed normative wording.
+And once you add that for this case, we have to do the same for anonymous
+access.
+
+Finally, to accomplish what you are recommending for abstract types, you need to
+add another violation of the simple model to *allow* abstract constants. I
+cannot see any way to justify that within the current wording, at least without
+losing all of the existing ramifications. (That is, if we declare that this
+"declaration" is not an "object_declaration", then we no longer have defined
+semantics for checking, finalization, and the like, because it is now some new
+kind of declaration not covered by the current wording.)
+
+> Do folks prefer
+>    a) the legality rule that addresses only the abstract type problem
+>    b) the dynamic semantics change that addresses the full problem
+>    c) none of the above
+> ?
+
+I prefer doing nothing at all, because the "legality rule" is implied by the
+simple model (I suppose an AARM note pointing out the Ramification would be a
+good idea). I'm dubious that anyone will care about either of these "problems"
+in practice. Do we have any evidence that either of these "problems" matters in
+real applications? (Steve, like Adam and the ACATS, is good at causing "priority
+inversion", causing unimportant problems to be worked on.)
+
+The other reason that I would prefer doing nothing is that Steve has been
+finding a problem a week in X'Old for the last month or so. I don't see any
+reason to think that this is the *last* problem that he or anyone else is going
+to find. Perhaps one of those new problems will require more radical solutions,
+and if so, I'd hate to spend a lot of effort writing wording to fix this
+particular problem. (AARM notes are *not* sufficient if you want to change the
+object's tag or make abstract objects legal.) I've already spent two hours
+writing an AI to address the previous issues; that is completely wasted time if
+we junk our dependence on the "simple model" and I'm not looking forward to
+spending an hour tomorrow throwing that work away to replace it with TBDs.
+
+I can easily believe that in a couple of years that we may want to revisit how
+X'Old is defined, but I'm dubious that now is the time. Let's figure out what's
+important before we decide to turn two sentences into two pages of RM wording.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, June  8, 2012  5:07 AM
+
+I must say that reading Randy's note on this subject, I have changed my mind,
+and 100% agree with him.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, June  8, 2012  12:21 PM
+
+I understand your point Randy, but I believe the user view is that "X'Old" is a
+way to refer to the value of "X" on entry.  It should look and feel as much as
+possible like "X" rather than an imperfect copy of X.  Yes, there are
+limitations to how perfect can be the copy of X, but the requirement that the
+redispatching properties be the same seems reasonable and is clearly
+implementable.
+
+All we are saying is that both the compile-time type and the run-time tag should
+match between X and X'Old. That doesn't seem very radical.
+
+Unfortunately, a simple-minded
+
+    X_Old : constant T := X;
+
+does not accomplish that, if X is a "view" of an actual object whose type is
+some descendant of T.
+
+Note that any time you inherit a dispatching operation, the controlling
+parameter ends up being such a view when that inherited operation's body is
+invoked. This happens for abstract types as well, when the abstract type has any
+"default" implementations of its operations.  Since postconditions generally
+involve parameters, any postcondition on a dispatching operation, if inherited,
+will introduce this issue.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  1:19 PM
+
+> Indeed, I prefer to say that it *is* declared by
+>
+>        X'Old : constant T := X;
+>
+
+I agree. I don't like the existing wording:
+
+   The value of X'Old in the postcondition expression is the value of
+   this constant; the type of X'Old is the type of X.
+
+I'd rather say that the name X'Old denotes this constant. Then, once we have
+precisely described the implicit constant declaration, we wouldn't have to talk
+about properties of the attribute (e.g., accessibility level).
+
+> At the risk of stepping in front of what appears to be a speeding
+> freight train, I'm going to disagree with everyone else's conclusions
+> of Steve's various issues.
+>
+> The above is the model of X'Old, and we've been very careful to follow
+> this model exactly.
+
+Generally true, although wouldn't you agree that we need to deviate from this
+model in the case of an anonymous access type?
+
+> We chose this for two reasons:
+> (1) To have a very simple model in which we did not have to explain
+> all of the semantic ramifications. Indeed, we've explained the
+> consequences in AARM notes, and not in normative wording (which might
+> conflict with the way that this model works).
+
+I agree with respect to dynamic semantics. With respect to legality rules, I
+disagree. If we decide, for example, to disallow X'Old in the case where X is of
+an abstract type, then I think we should say so. Leaving this as an implicit
+consequence of the constant declaration rules seems confusing at best; I don't
+think it is obvious what legality rules apply to such an implicit declaration.
+
+> (2) To match what users would have written had this feature not existed.
+> That is, if they needed the effect of X'Old in an Assertion, they
+> almost certainly would have written something like:
+>
+>       X_Old : constant T := X;
+>
+>       ...
+>
+>       pragma Assert (X = X_Old + 1);
+
+I think that here you are assuming the conclusion that you are trying to prove.
+If a user wants X_Old to be of the same type as X but also wants X_Old to behave
+the same way as X when used as a controlling operand in a dispatching call, then
+the user would "almost certainly" not declare X_Old in the way you describe.
+
+> We ought to be *very* careful about deviating from this model.
+
+I think the model we need to be very careful about deviating from is that X'Old
+*completely* captures the value of X at the point of the subprogram declaration
+(tag and all).
+
+>> There are two problems with this in the case where T is a specific
+>> tagged type:
+>>     1) If T is abstract, we are declaring an object of an abstract type.
+>
+> Well, given that we're following the model exactly, the constant
+> declaration is clearly illegal (because writing it explicitly would be
+> illegal). QED.
+
+As noted above, I think this is bogus. If we want to reject this, we should say
+so explicitly.
+
+> Moreover, I think this should be true irregardless of how any other
+> issues are decided. For one thing, it's virtually impossible to write
+> such an object in a useful way. The only way to give such a type to an
+> object is via a type conversion. While Abstr(Obj)'Old may be
+> syntactically allowed, it's a pretty silly thing to write.
+>
+> There are no (specific) abstract components or objects. So that pretty
+> much leaves parameters. If the parameter is a controlling operand, the
+> rules banning Post for abstract and null routines mean that the
+> postconditions have to be Post'Class. In which case Param (and thus
+> Param'Old) have type Abstr'Class.
+>
+> If the parameter is not a controlling parameter, it's next to useless
+> and should have been illegal from the beginning (the only way to pass
+> something as a specific abstract type is via a type conversion --
+> which is nasty to the users and almost always represents a bug -- such
+> parameters should be Abstr'Class). Since the parameter should never
+> have been written in this case, I cannot care about Param'Old.
+>
+> Thus I don't see any cases in which anyone *should* care about
+> Param'Old where Param has a specific abstract type. So why corrupt the
+> model to make it legal??
+
+What about
+
+    package Pkg is
+       type T is abstract tagged null record;
+       function Count (X : T) return Natural is abstract;
+    end Pkg;
+    use Pkg;
+
+    procedure P (X : in out T) with Post =>
+      Count (T'Class (X)) <= Count (T'Class (X'Old));
+
+?
+
+Do you view this as a pathological corner case because the parameter type is T,
+not T'Class? I don't.
+
+>>     2) Even if T is not abstract, the runtime tags of X and X'Old may
+>>        not match, which can affect (among other things) the body
+>>        executed by a dispatching call.
+>
+> Are you sure? I believe that you are saying that given:
+>
+>          X_Old : constant Sstt := X;
+>
+> X_Old and X might have different tags. I don't see how you come to
+> that conclusion based on the Standard.
+
+Yes, certainly X_Old and X might have different tags. I think you are confused
+here. If an object is declared to be of a specific tagged type, then its tag
+does not come from its initial value.
+
+> 3.3.1(17) says "If the object_declaration includes an initialization
+> expression, the (explicit) initial value is obtained by evaluating the
+> expression and converting it to the nominal subtype (which might raise
+> Constraint_Error - see 4.6)." That subtype conversion is a view
+> conversion, so the tag is preserved as it is for parameter passing. I
+> vaguely remember something like what you describe, but I can't find
+> anything in the standard that says that this declaration gets some
+> specific tag. Maybe it should, but I don't see anything that says that.
+
+Let me get back to you with RM justification, but the Gnat compiler (which I
+believe is correct here) generates code for this example
+
+     with Text_IO;
+     use Text_IO;
+     procedure old_test is
+
+        package Pkg is
+           type T1 is tagged null record;
+           procedure Foo (X : T1);
+           type T2 is new T1 with record F1, F2 : Integer; end record;
+           Overriding procedure Foo (X : T2);
+        end Pkg;
+
+        package body Pkg is
+           procedure Foo (X : T1) is begin
+             Put_Line ("called T1's Foo"); end;
+           procedure Foo (X : T2) is begin
+             Put_Line ("called T2's Foo"); end;
+        end Pkg;
+
+        use PKg;
+
+        procedure P (X : T1) is
+           X_Copy : constant T1 := X;
+        begin
+           Foo (T1'Class (X));
+           Foo (T1'Class (X_Copy));
+        end P;
+
+         Y : T2;
+     begin
+         P (T1 (Y));
+     end;
+
+which produces the following output
+
+called T2's Foo
+called T1's Foo
+
+I udnerstand that this is not the same as providing RM chapter and verse to
+justify my position, but I don't think it is very likely that Gnat would be
+wrong on such a fundamental point.
+
+>> Given
+>>      procedure P (X : in out Some_Specific_Tagged_Type)
+>>        with Post => Some_Func_That_Does_Redispatching (X, X'Old);
+>>
+>>      subtype Sstt is Some_Specific_Tagged_Type;
+>>
+>> , I'm arguing that the implicit declaration that X'Old denotes should
+>> behave as though it were declared via something like
+>>
+>>      <anonymous_1> : constant Sstt'Class := Sstt'Class (X);
+>>      <anonymous_2> : Sstt renames Sstt (<anonymous_1>);
+>>        -- rename of a view conversion
+>>
+>> where the use of X'Old should refer to the rename, <anonymous_2>.
+>
+> This is insane. You are completely dumping the "simple model",
+
+Not at all. The "simple model" that matters, I believe, is that X'Old captures
+the *complete* value of X. That's what users expect.
+
+> as this
+> violates both of the principles which guided it: (1) is dead because
+> the semantics is no longer implicit in a simple declaration; it will
+> have to be explained in detail. (And then we will have to explain
+> *all* of the semantics in detail, for all types, because it would be
+> very confusing to have a detail explanation in one case and handwaving
+> in all other cases -- on top of which, we could no longer justify the
+> "TBH" for anonymous access types and would have explain that case in detail as
+> well.
+>
+> And (2) is violated because absolutely *no* programmer would ever
+> write the above! They'd almost always just write
+>          X_Old : constant Sstt := X;
+> as they probably don't care about redispatching. (In many cases,
+> redispatching is evil and causes significant trouble with program
+> logic.)
+
+Again, you are assuming what you are trying to prove.
+
+> And if they *do* care about redispatching, they probably would have written
+>          X_Old : constant Sstt'Class := Sstt'Class(X);
+>
+
+That's a stronger argument, but I don't think we want to change the rule that X
+and X'Old have the same type. My proposal reconciles the two requirements. I
+agree that a simpler solution would be possible if we were willing to give up on
+either
+   - X and X'Old must statically have the same type
+   - X'Old must dynamically capture the complete value of X at
+     the point where the implicit constant is declared
+
+>> This is only a change in dynamic semantics. The static semantics of
+>> X'Old (e.g., anything involving type or name
+>> resolution) would be unaffected by this change. Dynamically, however,
+>> this means that X'Tag = X'Old'Tag (speaking loosely here - more
+>> precisely, Sstt'Class (X)'Tag = Sstt'Class (X'Old)'Tag).
+>
+> This is madness. You now are saying the static semantics and dynamic
+> semantics are different than for any other object in the Ada standard.
+> This almost certainly going to cause other anomolies by having the
+> nominal subtype differing in this way. I can't wait for Adam (normally
+> I'd say Steve, but since you're Steve, that probably won't work) to
+> show us all of the problems.
+>
+
+As noted above, I think you are confused about where an object gets its tag from
+in the case of an object declaration of a specific tagged type.
+
+Unless I misunderstand you (which is actually fairly likely), I think this is
+what leads you to conclude that I am suggesting semantics "different than for
+any other object in the Ada standard".
+
+I agree that a rename of a view conversion isn't a common construct, but it is
+"in the Ada standard". Furthermore, it is very similar to a much more common
+construct, parameter passing  where the actual's runtime tag differs from that
+of the type of the formal (see the call to P in the example above).
+
+>> Note that problem #1 is  "must fix" hole in the language, but it
+>> could be solved more simply by a rule that the prefix of an Old
+>> attribute shall not be of an abstract type.
+>
+> There is no fix needed for #1; it already follows from the existing model.
+> Maybe we need another TBH, but that's all that's necessary to fix this.
+>
+
+I would prefer more than a TBH, but I could live with just a TBH if we decide to
+ban this construct. As I have stated, I think this construct should be allowed
+but, if it is to be rejected, I strongly think the RM should mention this
+explicitly.
+
+>> ...
+
+>> I think the "fix the dynamic semantics" solution that I am proposing
+>> would not require adding a lot of complexity to the RM.
+>> Perhaps just a note saying X'Old has the same runtime tag as X and an
+>> AARM note showing the view conversion given above.
+>
+> I *strongly* disagree with this. This is totally abandoning the
+> "simple model" of a standard constant declaration, because currently
+> we expect
+> *everything* (finalization, accessibility, checking, etc.) to be
+> implied by that model. As soon as you start modifying parts of that
+> model ("it's everything but X and Y and Z") you have lost the ability
+> to ignore the details. And then we have to define all of the details
+> we've been trying to ignore.
+
+Put up or shut up?
+I guess the ball is in my court to come up with wording that doesn't seem
+excessively complicated (at least to me).
+
+> The other reason that I would prefer doing nothing is that Steve has
+> been finding a problem a week in X'Old for the last month or so. I
+> don't see any reason to think that this is the *last* problem that he
+> or anyone else is going to find. Perhaps one of those new problems
+> will require more radical solutions, and if so, I'd hate to spend a
+> lot of effort writing wording to fix this particular problem. (AARM
+> notes are *not* sufficient if you want to change the object's tag or
+> make abstract objects legal.) I've already spent two hours writing an
+> AI to address the previous issues; that is completely wasted time if
+> we junk our dependence on the "simple model" and I'm not looking
+> forward to spending an hour tomorrow throwing that work away to replace it with TBDs.
+
+FUD.
+
+> I can easily believe that in a couple of years that we may want to
+> revisit how X'Old is defined, but I'm dubious that now is the time.
+> Let's figure out what's important before we decide to turn two
+> sentences into two pages of RM wording.
+
+I'd like to get confirmation from the group that there is a general consensus
+from the group that the approach I'm suggesting is at least worth investigating.
+I don't want to spend effort on the details without that much encouragement.
+Assuming that, it sounds like the ball is in my court as noted above.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, June  8, 2012  1:43 AM
+
+> As noted above, I think this is bogus. If we want to reject this, we
+> should say so explicitly.
+
+Yes, and whoever wrote the existing wording took that approach
+-- in particular, it explicitly forbids limited types, as opposed to just
+letting people deduce that from the fact that the declaration would be illegal
+if limited.
+
+I wouldn't mind if the RM said (explicitly), "If that declaration would be
+illegal, then the attribute_reference is illegal." (and then in the AARM list
+the consequences -- can't be limited, can't be abstract, ...).
+
+But anyway, I prefer the approach you outlined, which doesn't make the abstract
+case illegal.
+
+> I'd like to get confirmation from the group that there is a general
+> consensus from the group that the approach I'm suggesting is at least
+> worth investigating.
+
+I think it's worth investigating.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, June  8, 2012  1:51 PM
+
+> I'd like to get confirmation from the group that there is a general
+> consensus from the group that the approach I'm suggesting is at least
+> worth investigating. I don't want to spend effort on the details
+> without that much encouragement. Assuming that, it sounds like the
+> ball is in my court as noted above.
+
+As is implied by my earlier response, I agree with you that the run-time tag of
+X'Old should match that of X.  My main justification is:
+
+   ... Since postconditions generally involve
+   parameters, any postcondition on a dispatching operation,
+   if inherited, will introduce this issue.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Friday, June  8, 2012  2:15 PM
+
+...
+which produces the following output
+
+called T2's Foo
+called T1's Foo
+
+I udnerstand that this is not the same as providing
+RM chapter and verse to justify my position, but I don't
+think it is very likely that Gnat would be wrong on
+such a fundamental point.
+
+Possible verses:
+ 3.3.1 (17) says that the initialization expression is converted to the nominal
+  subtype;
+
+
+ 4.6 5/1) says that if both target and operand types are tagged then a
+  conversion is a view conversion
+
+ 4.6 (52) describes the properties of the view.
+
+so X_Copy has type T1 and its viewable components are those in the T1 part of X.
+X_Copy will dispatch to a primitive of T1.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  2:21 PM
+
+> I think the model we need to be very careful about deviating from is
+> that X'Old *completely* captures the value of X at the point of the
+> subprogram declaration (tag and all).
+
+Typo: "subprogram declaration" => "constant declaration".
+
+> If an object is declared to be of a specific tagged type, then its tag
+> does not come from its initial value.
+> ...
+> Let me get back to you with RM justification
+
+3.9(19-20).
+
+Bob Duff wrote:
+> I wouldn't mind if the RM said (explicitly), "If that declaration
+> would be illegal, then the attribute_reference is illegal." (and then
+> in the AARM list the consequences -- can't be limited, can't be abstract,
+> ...).
+
+Interestingly, that approach would allow limited prefixes which meet the
+conditions of 7.5(2.1/3): aggreggates, function calls, etc.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  2:41 PM
+
+...
+> > Thus I don't see any cases in which anyone *should* care about
+> > Param'Old where Param has a specific abstract type. So why corrupt
+> > the model to make it legal??
+> >
+>
+> What about
+>
+>     package Pkg is
+>        type T is abstract tagged null record;
+>        function Count (X : T) return Natural is abstract;
+>     end Pkg;
+>     use Pkg;
+>
+>     procedure P (X : in out T) with Post =>
+>       Count (T'Class (X)) <= Count (T'Class (X'Old));
+>
+> ?
+>
+> Do you view this as a pathological corner case because the parameter
+> type is T, not T'Class? I don't.
+
+Yes, it is almost always wrong to declare a non-primitive subprogram with a
+specific parameter of some tagged type. It means that the subprogram breaks in
+the face of extension, which is the entire point of using tagged types in the
+first place. It's not quite wrong enough to have made it illegal, but it's
+close. (Our style guide requires justification documentation for any such
+subprogram.)
+
+It's even worse for an abstract tagged type, because there cannot be any objects
+of that type and thus it's necessary (somewhere) to have a type conversion to
+even call the subprogram. Moreover, the primary legitimate reason to use such a
+subprogram (because you have some operation that only makes sense on a specific
+type) does not apply here, as there can be no objects of this type. Thus the
+subprogram has a usability problem *and* always is unnecessarily restrictive. If
+it wasn't too late, I would have suggested that any such parameter be illegal.
+Thus I cannot care about the semantics of X'Old on a procedure that should never
+have been written in the first place.
+
+...
+> I udnerstand that this is not the same as providing RM chapter and
+> verse to justify my position, but I don't think it is very likely that
+> Gnat would be wrong on such a fundamental point.
+
+I believe you, I just wanted to find out what the actual requirement was and I
+couldn't find any reason for this behavior that we all assume.
+
+...
+> > This is insane. You are completely dumping the "simple model",
+>
+> Not at all. The "simple model" that matters, I believe, is that X'Old
+> captures the *complete* value of X. That's what users expect.
+
+Maybe, but that's *not* the "simple model" that we've been using to justify not
+changing the current wording and presuming that everything falls out. If you
+really want to make this change, then we need to be explicit about it, and that
+means completely rewording this part of the definition of X'Old.
+
+(Aside: This currently is all inside the definition of the attribute. I think
+expanding this wording much more means that we need to find some way to separate
+it from the attribute definition, which otherwise will become unwieldy - in part
+because of the heavily indented formatting that is required.)
+
+...
+> > And (2) is violated because absolutely *no* programmer would ever
+> > write the above! They'd almost always just write
+> >          X_Old : constant Sstt := X; as they probably don't care
+> > about redispatching. (In many cases, redispatching is evil and
+> > causes significant trouble with program
+> > logic.)
+>
+> Again, you are assuming what you are trying to prove.
+
+Huh? Absolutely *no* programmer is going to write two declarations for this
+case. What they would do is determine which of the two possibilities makes sense
+for their application and use that. I'd be surprised if anyone *ever* has
+written the rename you gave, in any context.
+
+...
+> Unless I misunderstand you (which is actually fairly likely), I think
+> this is what leads you to conclude that I am suggesting semantics
+> "different than for any other object in the Ada standard".
+>
+> I agree that a rename of a view conversion isn't a common construct,
+> but it is "in the Ada standard".
+> Furthermore, it is very similar to a much more common construct,
+> parameter passing  where the actual's runtime tag differs from that of
+> the type of the formal (see the call to P in the example above).
+
+You cannot write an object_declaration which has the semantics that you want. I
+suppose we could formally define the specific tagged case with the two
+declaration model that you gave above, but that is wildly more complex.
+
+> >> ...
+> >> I think the "fix the dynamic semantics" solution that I am
+> >> proposing would not require adding a lot of complexity to the RM.
+> >> Perhaps just a note saying X'Old has the same runtime tag as X and
+> >> an AARM note showing the view conversion given above.
+> >
+> > I *strongly* disagree with this. This is totally abandoning the
+> > "simple model" of a standard constant declaration, because currently
+> > we expect *everything* (finalization, accessibility, checking, etc.)
+> > to be
+> > implied by that model. As soon as you start modifying parts of that
+> > model ("it's everything but X and Y and Z") you have lost the
+> > ability to ignore the details. And then we have to define all of the
+> > details we've been trying to ignore.
+>
+> Put up or shut up?
+> I guess the ball is in my court to come up with wording that doesn't
+> seem excessively complicated (at least to me).
+
+Right now it doesn't matter, because the deadline for adding things to the
+Stockholm AIs is right now. (I'm finalizing the agenda and AIs this afternoon.)
+I suppose it is OK to bring something to the meeting proper, but it isn't going
+to be in the filed AIs.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  3:30 PM
+
+>> Do you view this as a pathological corner case because the parameter
+>> type is T, not T'Class? I don't.
+>
+> Yes,
+
+Ok, we agree to disagree.
+
+>>> This is insane. You are completely dumping the "simple model",
+>> Not at all. The "simple model" that matters, I believe, is that X'Old
+>> captures the *complete* value of X. That's what users expect.
+>
+> Maybe, but that's *not* the "simple model" that we've been using to
+> justify not changing the current wording and presuming that everything falls
+> out.
+
+Yes, you are right.
+
+> If you really want to make this change, then we need to be explicit
+> about it, and that means completely rewording this part of the definition of
+> X'Old.
+
+
+I'm working on it.
+
+> (Aside: This currently is all inside the definition of the attribute.
+> I think expanding this wording much more means that we need to find
+> some way to separate it from the attribute definition, which otherwise
+> will become unwieldy - in part because of the heavily indented
+> formatting that is
+> required.)
+
+We'll see. Attribute definitions in general are a case where the RM's usual
+distinctions between static semantics, legality rules, and dynamic semantics
+break down, so there is precedent for lumping everything together. I already
+hear you saying "If Johnny jumped off a cliff, would you jump too because now
+there is precedent?".
+
+> Huh? Absolutely *no* programmer is going to write two declarations for
+> this case. What they would do is determine which of the two
+> possibilities makes sense for their application and use that. I'd be
+> surprised if anyone *ever* has written the rename you gave, in any context.
+
+But they certainly have done the same sort of thing (implicitly, possibly
+without even thinking about it) via parameter passing. If we really wanted to
+(and believe me, I'm not advocating this), we could get rid of the rename and
+instead introduce a post-condition checking procedure which has a formal
+parameter of the specific type; the constant is then declared to be of the
+class-wide type and is passed as an actual parameter to the procedure. The
+desired semantics can be expressed in terms of "familiar" constructs; I just
+thought the rename of a view conversion was cleaner.
+
+> ...
+>
+> You cannot write an object_declaration which has the semantics that
+> you want. I suppose we could formally define the specific tagged case
+> with the two declaration model that you gave above, but that is wildly more complex.
+
+You may be right that I need to mention the two declarations, and that this
+isn't as tidy as always using one. We'll see how bad it gets.
+
+>  I suppose it is OK to bring something to the meeting proper, but it
+> isn't going to be in the filed AIs.
+
+That's fine.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  4:11 PM
+
+> >> Do you view this as a pathological corner case because the parameter
+> >> type is T, not T'Class? I don't.
+> >
+> > Yes,
+>
+> Ok, we agree to disagree.
+
+I should point out that that I don't consider it "pathological" because it's
+easy to write and everyone has done so, but rather that writing it is wrong in
+virtually every case. Thus I don't care what happens. The fact that Ada allows
+it at all is a bug in Ada.
+
+...
+> > (Aside: This currently is all inside the definition of the attribute.
+> > I think expanding this wording much more means that we need to find
+> > some way to separate it from the attribute definition, which
+> > otherwise will become unwieldy - in part because of the heavily
+> > indented formatting that is
+> > required.)
+> >
+>
+> We'll see. Attribute definitions in general are a case where the RM's
+> usual distinctions between static semantics, legality rules, and
+> dynamic semantics break down, so there is precedent for lumping
+> everything together. I already hear you saying "If Johnny jumped off a
+> cliff, would you jump too because now there is precedent?".
+
+My objection here isn't the mixing so much as the large size of the definition. Attributes should never take more than a couple of paragraphs to define, anything longer than that should be split out somehow.
+
+You're going turn two sentences into 5 paragraphs (or maybe more):
+
+    If the type of X'Old is:
+         * a specific tagged type, then ... <the funny model with the renames>. X'Old designates this renames.
+         * an anonymous access type, then ... <some wording about declaring a new access type with the same designated type or profile). X'Old designates this constant declaration.
+         * any other type, then ... <the simple model>. X'Old designates this constant declaration.
+
+    <Paragraph containing the shared rules about the X'Old>.
+
+I think this is too long to put inside an attribute declaration, especially if
+the <> text turns out to require multiple paragraphs.
+
+In particular, note how the stream attributes are defined. I think this one will
+need some similar organization if we do a significant rewrite.
+
+> > Huh? Absolutely *no* programmer is going to write two declarations
+> > for this case. What they would do is determine which of the two
+> > possibilities makes sense for their application and use that. I'd be
+> > surprised if anyone *ever* has written the rename you gave, in any
+> > context.
+
+>
+> But they certainly have done the same sort of thing (implicitly,
+> possibly without even thinking about it) via parameter passing.
+
+What in heavens name does that have to do with declaring by hand X_Old for use
+in an Assert pragma? That's what part (2) is about; how you would write this by
+hand in Ada 95 (or even Ada 2012 if you didn't have X'Old). I don't see any way
+to get parameter passing involved in that case.
+
+> If we really wanted to (and believe me, I'm not advocating this), we
+> could get rid of the rename and instead introduce a post-condition
+> checking procedure which has a formal parameter of the specific type;
+> the constant is then declared to be of the class-wide type and is
+> passed as an actual parameter to the procedure. The desired semantics
+> can be expressed in terms of "familiar" constructs; I just thought the
+> rename of a view conversion was cleaner.
+
+I agree the rename is cleaner, all I'm saying is that no one would ever write
+that if they were writing an Ada 95 block to emulate the effect of X'Old. And
+that's what the "simple model" is about: X'Old works the same as what you would
+have written by hand.
+
+Now it's probably true that you *can't* write by hand what you really want if
+you thought about it at the language-lawyer level. But that seems like a general
+problem with Ada rather than anything having to do with this particular problem.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  4:13 PM
+
+Here is a first attempt.
+
+====
+
+Replace 6.1.1(26/3) with
+
+   X'Old
+     Each X'Old in a postcondition expression that is enabled denotes
+     a constant that is implicitly declared at the beginning of the
+     subprogram or entry. The constant has the same type and subtype
+     as X, except in the case where X is of an anonymous access type;
+     in that case, the constant is a stand-alone object of an anonymous
+     access type having the designated subtype or profile of the type
+     of X. The constant is initialized to the result of evaluating X
+     (as an expression) at the point of the constant declaration. If X
+     is tagged, then the tag associated with the constant is that of X.
+
+   AARM:
+     If X is of a specific tagged type T, then the implicit declaration
+     for an occurrence of X'Old is equivalent to the following:
+          <anonymous> : constant T'Class := T'Class (X);
+          <X'Old> : T renames T (<anonymous>);
+     , where the name X'Old denotes the rename, not the constant.
+     This means that statically X'Old has the same type as X and
+     dynamically X'Old has the same tag as X (which might not be T'Tag
+     if, for example, X is a formal parameter).
+
+Prepend (append?) to 27.d(3):
+     The implicit constant declaration defines the nominal subtype and
+     accessibility level of X'Old.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  4:28 PM
+
+> Replace 6.1.1(26/3) with
+>
+>    X'Old
+>      Each X'Old in a postcondition expression that is enabled denotes
+>      a constant that is implicitly declared at the beginning of the
+>      subprogram or entry. The constant has the same type and subtype
+>      as X, except in the case where X is of an anonymous access type;
+>      in that case, the constant is a stand-alone object of an anonymous
+>      access type having the designated subtype or profile of the type
+>      of X. The constant is initialized to the result of evaluating X
+>      (as an expression) at the point of the constant declaration. If X
+>      is tagged, then the tag associated with the constant is that of X.
+
+I don't buy this last sentence, since it contradicts the notion that this is a
+normal constant declared with the normal rules. Especially when you then follow
+it with an AARM note that says that it is all a lie.
+
+As I suggested in the mail that crossed with this one, I think you need to treat
+these three cases separately (hopefully the rest of it can be shared).
+
+>    AARM:
+>      If X is of a specific tagged type T, then the implicit declaration
+>      for an occurrence of X'Old is equivalent to the following:
+>           <anonymous> : constant T'Class := T'Class (X);
+>           <X'Old> : T renames T (<anonymous>);
+>      , where the name X'Old denotes the rename, not the constant.
+>      This means that statically X'Old has the same type as X and
+>      dynamically X'Old has the same tag as X (which might not be T'Tag
+>      if, for example, X is a formal parameter).
+>
+> Prepend (append?) to 27.d(3):
+>      The implicit constant declaration defines the nominal subtype and
+>      accessibility level of X'Old.
+
+If we're rewriting this anyway, I think it would be better that we normatively
+say that the nominal subtype is defined this way, simply so that it shows up in
+the index and thus no one would think that 4.1.4(9/3) applies. It's only one
+more sentence.
+
+(I *don't* think this for accessibility, as there is no "default" that needs
+clear overriding as there is with "nominal subtype". Indeed, the "default" is
+probably what we want for accessibility, so only people with devious minds ;-)
+could be confused.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, June  8, 2012  4:33 PM
+
+>>     X'Old
+>>       Each X'Old in a postcondition expression that is enabled denotes
+>>       a constant that is implicitly declared at the beginning of the
+>>       subprogram or entry. The constant has the same type and subtype
+>>       as X, except in the case where X is of an anonymous access type;
+>>       in that case, the constant is a stand-alone object of an anonymous
+>>       access type having the designated subtype or profile of the type
+>>       of X. The constant is initialized to the result of evaluating X
+>>       (as an expression) at the point of the constant declaration. If X
+>>       is tagged, then the tag associated with the constant is that of X.
+>
+> I don't buy this last sentence, since it contradicts the notion that
+> this is a normal constant declared with the normal rules. Especially
+> when you then follow it with an AARM note that says that it is all a lie.
+
+I think that Randy is being too pedantic here, and that the above paragraph is
+just fine as it is from a users point of view, which is all I really care about.
+You can add a TBH to the AARM which has all the unnecessary detail below :-)
+
+To quote Randy from later on in the message, I think only language lawyers with
+devious minds would be confused by the above. After all informally an assignment
+just copies bits from the RHS to the LHS, but we know that it doesn't work this
+way with tagged stuff.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  4:50 PM
+
+> I think that Randy is being too pedantic here, and that the above
+> paragraph is just fine as it is from a users point of view, which is
+> all I really care about. You can add a TBH to the AARM which has all
+> the unnecessary detail below :-)
+
+Perhaps, but I must say that I am not a fan of TBHs, in particular when the
+topic that they address is important. (And I'm presuming from the amount of
+discussion on this that this is important.) I'd prefer to see an attempt at real
+normative wording here, rather than just more hand-waving. (After all, the RM is
+written for language-lawyers first, any value to users is clearly secondary.) If
+that's too lengthy or confusing, then perhaps a simpler version is better. But
+giving up without trying seems wrong, especially as we have about 7 years to get
+this wording right.
+
+> To quote Randy from later on in the message, I think only language
+> lawyers with devious minds would be confused by the above. After all
+> informally an assignment just copies bits from the RHS to the LHS, but
+> we know that it doesn't work this way with tagged stuff.
+
+You mean language-lawyers (sometimes) know. Ordinary users are often surprised
+that for a parameter
+      Param : T
+Param'Tag doesn't have to equal T'Tag.
+
+I'm getting convinced that we need to make a change here (mainly because X'Old
+/= X when X is not changed by the procedure is annoying), but I would like to
+make it right. I don't want to get into the habit of the Baird message of the
+month on 'Old.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, June  8, 2012  4:44 PM
+
+>> What about
+>>
+>>      package Pkg is
+>>         type T is abstract tagged null record;
+>>         function Count (X : T) return Natural is abstract;
+>>      end Pkg;
+>>      use Pkg;
+>>
+>>      procedure P (X : in out T) with Post =>
+>>        Count (T'Class (X))<= Count (T'Class (X'Old));
+>>
+>> ?
+>>
+>> Do you view this as a pathological corner case because the parameter
+>> type is T, not T'Class? I don't.
+>
+> Yes, it is almost always wrong to declare a non-primitive subprogram
+> with a specific parameter of some tagged type....
+
+I might have missed your response, but for me, the more important case is
+inheriting a dispatching operation:
+
+    package P0 is
+        type T0 is abstract tagged private;
+        function Count (X : T0) return Natural;
+          -- The default implementation merely returns X.Count
+
+        procedure P(X : in out T0)
+          with Post =>
+            Count (T0'Class(X)) <= Count (T0'Class (X'Old));
+          -- Note that P is not abstract, even though T0 is.
+          -- Apparently there is a reasonable default for what P does.
+          -- "P" might use redispatching internally if there are
+          -- other operations of T0.
+        ...
+    private
+        type T0 is abstract tagged record
+            Count : Natural := 0;
+        end record;
+    end P0;
+
+    package P1 is
+        type T1 is new P0.T0 with ...
+        -- Default implementation of P is inherited
+        -- along with its postcondition
+
+        function Count (X : T1) return Natural;
+        -- Count is overridden
+        ...
+    end P1;
+
+It seems clear we want to call the "same" Count on X and X'Old. Here the
+redispatching is directly in the postcondition. Alternatively, the redispatching
+might be buried in a function called from the postcondition.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  5:08 PM
+
+>> Replace 6.1.1(26/3) with
+>>
+>>     X'Old
+>>       Each X'Old in a postcondition expression that is enabled denotes
+>>       a constant that is implicitly declared at the beginning of the
+>>       subprogram or entry.
+
+BTW, I think that we ought to somehow say here that this is an implicit
+object_declaration. That's because without the "object_declaration" term, there
+are many rules that don't apply, and we don't need to get into a morass because
+something is not defined. We had to do something like this for formal parameters
+of mode in; I see they say that they are a "full constant declaration", perhaps
+that would be better for this purpose.
+
+Note that once you do that, you'd have to treat the renames separately in the
+specific tagged case, which is one of many reasons why I expected we'd have to
+separate the three cases.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, June  8, 2012  5:07 PM
+
+> (After all,
+> the RM is written for language-lawyers first, any value to users is
+> clearly secondary.
+
+Well you know I disagree pretty fundamentally with that point of view.
+I thought it a wonderful achievment that for the first time since Algol-60,
+Ada-83 was a language where programmers used the standard as a standard
+reference source :-) :-) Later versions of Ada not so much so, though I think
+most Ada programmers at least try to read at least some sections of the RM
+(which is not true for other languages today, so we are still ahead).
+
+So I am always trying to achieve a balance :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  5:38 PM
+
+I don't necessarily disagree with this point of view - we always should be
+striving to improve the clarity of the RM text. But clarity cannot be at the
+expense of correctness or completeness (as in the case at hand). That's
+especially true for those users that only read the RM; it can't be the case that
+we write text that only makes sense when interpreted by the AARM or AIs. (And of
+course, nothing in those other documents is normative, so people are free to
+come up with any other wild interpretations that they want.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  5:08 PM
+
+>> Replace 6.1.1(26/3) with
+>>
+>>     X'Old
+>>       Each X'Old in a postcondition expression that is enabled denotes
+>>       a constant that is implicitly declared at the beginning of the
+>>       subprogram or entry.
+
+BTW, I think that we ought to somehow say here that this is an implicit
+object_declaration. That's because without the "object_declaration" term, there
+are many rules that don't apply, and we don't need to get into a morass because
+something is not defined. We had to do something like this for formal parameters
+of mode in; I see they say that they are a "full constant declaration", perhaps
+that would be better for this purpose.
+
+Note that once you do that, you'd have to treat the renames separately in the
+specific tagged case, which is one of many reasons why I expected we'd have to
+separate the three cases.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  5:17 PM
+
+> If we're rewriting this anyway, I think it would be better that we
+> normatively say that the nominal subtype is defined this way, simply
+> so that it shows up in the index and thus no one would think that
+> 4.1.4(9/3) applies. It's only one more sentence.
+>
+
+Good point. I agree.
+
+> (I *don't* think this for accessibility, as there is no "default" that
+> needs clear overriding as there is with "nominal subtype".
+
+Agreed.
+
+Robert Dewar wrote:
+> I think that Randy is being too pedantic here, and that the above
+> paragraph is just fine as it is from a users point of view, which is
+> all I really care about.
+
+Obviously, I agree. I agree with Randy that we are playing slightly fast and
+loose here, saying that X'Old denotes a constant and then "clarifying" this to
+say that it denotes a rename (more precisely, it is "equivalent to" denoting a
+rename). But I agree with Robert that this is ok in this case. This is a
+judgment call and I can certainly see merit in Randy's position.
+
+Here is version #2, incorporating the portion of Randy's comments that I agree
+with.
+
+The 4.1.4 change described below grammatically reminds me of playing Blockhead
+(for those unfamiliar with the game, it is like Jenga except that new items are
+added to the tower instead of repositioning existing items).
+
+====
+
+Replace 6.1.1(26/3) with
+
+   X'Old
+     Each X'Old in a postcondition expression that is enabled denotes
+     a constant that is implicitly declared at the beginning of the
+     subprogram or entry. The constant has the same type and subtype
+     as X, except in the case where X is of an anonymous access type;
+     in that case, the constant is a stand-alone object of an anonymous
+     access type having the designated subtype or profile of the type
+     of X. The constant is initialized to the result of evaluating X
+     (as an expression) at the point of the constant declaration. If X
+     is tagged, then the tag associated with the constant is that of X.
+     The nominal subtype of X'Old is that of X.
+
+   AARM:
+     If X is of a specific tagged type T, then the implicit declaration
+     for an occurrence of X'Old is equivalent to the following:
+          <anonymous> : constant T'Class := T'Class (X);
+          <X'Old> : T renames T (<anonymous>);
+     , where the name X'Old denotes the rename, not the constant.
+     This means that statically X'Old has the same type as X and
+     dynamically X'Old has the same tag as X (which might not be T'Tag
+     if, for example, X is a formal parameter).
+
+
+Prepend (append?) to 27.d(3):
+     The implicit constant declaration defines the accessibility level
+     of X'Old.
+
+
+In 4.1.4(9/3), prepend to the second sentence:
+   "Unless explicitly specified otherwise, "
+   and lower-case the "For" that formerly began the sentence.
+
+   Note that this follows the existing wording for the third sentence.
+   If a more explicit "Unless explicitly specified otherwise for a
+   particular attribute" is preferred, should we change the third
+   sentence too?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  5:36 PM
+
+> > If we're rewriting this anyway, I think it would be better that we
+> > normatively say that the nominal subtype is defined this way, simply
+> > so that it shows up in the index and thus no one would think that
+> > 4.1.4(9/3) applies. It's only one more sentence.
+>
+> Good point. I agree.
+
+But I don't see the term "nominal subtype" in your proposed wording. You
+mentioned "subtype", but that's not quite the same thing.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  5:46 PM
+
+Randy Brukardt wrote:
+> But I don't see the term "nominal subtype" in your proposed wording.
+
+Steve Baird wrote:
+> The nominal subtype of X'Old is that of X.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  5:54 PM
+
+I missed that sentence completely. I was confused by the "same type and subtype"
+wording, which seems to say the same thing in a different way. I wonder if those
+can be consolidated somehow.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, June  8, 2012  5:20 PM
+
+> BTW, I think that we ought to somehow say here that this is an
+> implicit object_declaration.
+
+Perhaps we can just say it's equivalent to that object declaration (in the RM
+equivalent is a technical term, meaning "similar to, but not identical to" :-)
+:-))
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, June  8, 2012  5:44 PM
+
+BTW, I actually think Steve's original paragraph was clearer to most users than
+Randy's replacement, which requires more technical understanding to realize what
+the import of the renames is!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  5:56 PM
+
+...
+> BTW, I actually think Steve's original paragraph was clearer to most
+> users than Randy's replacement, which requires more technical
+> understanding to realize what the import of the renames is!
+
+Given that I never suggested a replacement, it's hard to say how you can say
+this with certainity. :-)
+
+I asked Steve to try to remove the contradictions in the text, and he refused to
+do so, so no one has attempted to write text in this way. It's possible that
+such text would be clearer than the original proposal.
+
+In any case, this wording should be left for the meeting or after. The constant
+chatter is preventing me from closing up the book for the current meeting and I
+have other things I need to do before I leave.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  6:13 PM
+
+> BTW, I think that we ought to somehow say here that this is an
+> implicit object_declaration. That's because without the
+> "object_declaration" term, there are many rules that don't apply, and
+> we don't need to get into a morass because something is not defined.
+
+Could you give an example where this makes a difference?
+
+> We had to do something like this
+> for formal parameters of mode in; I see they say that they are a "full
+> constant declaration", perhaps that would be better for this purpose.
+
+I assume you are talking about AI95-00269.
+
+This was all about staticness, so it doesn't help provide relevant examples.
+
+I wouldn't mind a requirement that the prefix of an Old attribute must not be a
+static expression; that would spare us from having to contemplate
+Named_Number'Old .
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June  8, 2012  6:31 PM
+
+> > BTW, I think that we ought to somehow say here that this is an
+> > implicit object_declaration. That's because without the
+> > "object_declaration" term, there are many rules that don't
+> apply, and
+> > we don't need to get into a morass because something is not defined.
+>
+> Could you give an example where this makes a difference?
+
+That depends on how much handwaving you're willing to tolerate. For instance, we
+need to know how this implicit constant is initialized. That's defined in 3.3.1
+for object_declarations (evaluate, convert, assign); for other things it
+wouldn't be defined.
+
+I thought masters might have this problem, but I see the "Heart of Darkness"
+only talks about declarations, so that's OK.
+
+I think there were some other cases where I saw that, but I can't remember them
+at this moment and I don't want to spend an hour tracking them down (there are
+33 clauses that contain "object_declaration" in the Standard). We can revisit
+during the meeting or afterwards.
+
+> > We had to do something like this
+> > for formal parameters of mode in; I see they say that they
+> are a "full
+> > constant declaration", perhaps that would be better for
+> this purpose.
+>
+> I assume you are talking about AI95-00269.
+>
+> This was all about staticness, so it doesn't help provide relevant
+> examples.
+
+I suppose that could matter, but only in pathological cases.
+
+> I wouldn't mind a requirement that the prefix of an Old attribute must
+> not be a static expression; that would spare us from having to
+> contemplate Named_Number'Old .
+
+Perhaps a good idea, but a bit weird.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June  8, 2012  6:40 PM
+
+> That depends on how much handwaving you're willing to tolerate. For
+> instance, we need to know how this implicit constant is initialized.
+> That's defined in 3.3.1 for object_declarations (evaluate, convert,
+> assign); for other things it wouldn't be defined.
+>
+
+That one example is enough to give me something to think about.
+Thanks.
+
+>> I wouldn't mind a requirement that the prefix of an Old attribute
+>> must not be a static expression; that would spare us from having to
+>> contemplate Named_Number'Old .
+>
+> Perhaps a good idea, but a bit weird.
+
+Probably a bad idea, but it would spare us from having to deal with silly
+questions like whether Static_Constant'Old is static.
 
 ****************************************************************
 
