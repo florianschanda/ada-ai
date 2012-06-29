@@ -1,4 +1,4 @@
-!standard E.4(8)                               12-06-06    AI12-0034-1/01
+!standard E.4(8)                               12-06-28    AI12-0034-1/02
 !class binding interpretation 12-06-06
 !status work item 12-06-06
 !status received 12-05-11
@@ -7,7 +7,8 @@
 !subject Remote stream attribute calls
 !summary
 
-Remote stream attribute calls are illegal.
+The specific type corresponding to the designated type of a remote access-to-class-wide
+type cannot have user-defined stream attributes.
 
 !question
 
@@ -39,13 +40,13 @@ type. For instance:
     with Pack1;
     package Pack2 is
         pragma Remote_Types;
-        type Root_Acc is access all Pack1.Root'Class;
+        type Root_Acc is access all Pack1.Root'Class; -- [1]
     end Pack2;
 
     with Pack1, Pack2, Ada.Streams;
     procedure Test1 (A : Pack2.Root_Acc) is
     begin
-        Pack1.Root'Class'Write (Stream, The_Obj.all);  -- Legal? (No.)
+        Pack1.Root'Class'Write (Stream, The_Obj.all);  -- Legal? ([1] is illegal.)
         Pack1.Inner.Do_Write (Stream, The_Obj.all); -- Illegal.
         Pack1.Prim (4, The_Obj.all); -- OK.
     end Test1;
@@ -58,13 +59,13 @@ Should this be fixed? (Yes.)
 
 !wording
 
-Add after E.4(8):
+Add after E.2.3(14.1/3):
 
-A remote subprogram call shall not be a call on a stream attribute.
+* The corresponding specific type shall not have available stream attributes (see 13.13.2);
 
-AARM Reason: Stream attributes exist for all types, and they always have
-an access parameter that doesn't support external streaming, so such a
-remote call cannot be supported.
+AARM Note: This prevents dispatching calls to stream attributes of the designated type of
+the remote access-to-class-wide type. Such calls would have to be remote, but that would
+be impossible as the stream access type does not support external streaming.
 
 !discussion
 
@@ -80,14 +81,33 @@ subprograms with access parameters, because that would make it impossible to
 define marshalling and unmarshalling for these types. Which also would make
 remote calls impossible, defeating the entire purpose.
 
-So we simply ban the calls themselves.
+We could directly ban calls on such attributes, but that is messy because of
+need to handle renames.
 
-[Bairdian question: Is it possible to rename a stream attribute and dispatch
-through the rename? Is that covered by the wording? (If it isn't, modifying
-E.2.2(16) would not work any better.)]
+So we require the basic type to not have not have available stream attributes.
+
+This solution is incompatible, but it should not be a major problem in practice,
+as most such base types should be abstract and thus not have concrete implementations
+anyway.
+
+[Editor's note: I wrote this up as I was directed to, but I don't believe the
+conclusion that we came to about the incompatibility. The specific types that
+make up the class most likely will need overridden stream attributes in order
+to be able to marshall/unmarshall the objects for these remote dispatching calls.
+(They might not if there are no extension components, but otherwise there will
+need to be overridden stream attributes somewhere.) It's easiest to define these
+attributes on the root type, as Ada will automatically create stream attributes
+for extensions so long as the extension components support external streaming.
+So I would expect many programs using remote access-to-class-wide types to
+have defined attributes on the root tagged type. Thus the compatibility
+impact would be severe -- assuming that anyone actually uses remote
+access-to-class-wide types in the first place (not a certainty itself).
+I believe that my previously proposed solution, or the idea described below,
+are both better solutions (as they are not incompatible - other than the case
+that does not work).]
 
 Note that there is another issue brought up by this example that we're
-not fixing. [We could, see below - Editor.]
+not fixing.
 
 Specifically, note that the calls are defined to be remote, even though there is
 no RCI packages in this partition (and no other partitions). That means that
@@ -109,7 +129,7 @@ access-to-classwide to revoke that permission if that is actually useful).
 
 !ACATS test
 
-** TBD.
+Create an ACATS B-Test to test this issue.
 
 !appendix
 
