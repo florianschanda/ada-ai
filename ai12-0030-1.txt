@@ -1,5 +1,5 @@
-!standard 12.5.1(20/3)                               12-06-28    AI12-0030-1/02
-!class binding interpretation 12-06-06
+!standard 12.5.1(20/3)                               12-07-15    AI12-0030-1/03
+!class binding interpretation 12-07-15
 !status work item 12-06-06
 !status received 12-05-11
 !priority Low
@@ -55,7 +55,7 @@ case, the case where a generic formal type promises a primitive operation that
 the corresponding actual type lacks. Do we need to add some analogous wording
 to handle this case? (No.).
 
-!reponse
+!recommendation
 
 Stream attributes act like predefined primitive operations in most contexts,
 so they should act that way in this example as well.
@@ -65,13 +65,29 @@ so they should act that way in this example as well.
 Add after AARM 12.5.1(21.a/3):
 
 AARM To Be Honest: The availability of stream attributes is not formally a
-characteristic of a type; but it is still determined by the
-ancestor type for a formal derived type in the same way as the the
-characteristics are. Similarly, while stream attributes are not formally
-primitive operations of a type, the implementation of a stream attribute that
-is executed for a call of an attribute of a formal derived type is determined in
-the same way as the subprogram body that is executed for a primitive subprogram
-of a formal derived type.
+characteristic of a type, but it is still determined by the
+ancestor type for a formal derived type in the same way as the
+characteristics are. Availability is rechecked in the instance specification.
+
+Append to the end of 13.13.2(49/2):
+
+In addition to the places where Legality Rules normally apply (see 12.3), this rule
+applies also in the private part of an instance of a generic unit.
+
+For an untagged nonderived type having a task, protected, or explicitly limited record
+part, the default implementation of each of the Read, Write, Input, and Output attributes
+raises Program_Error and performs no other action.
+
+   AARM note: It might seem that there is no need to specify the
+   behavior of the default implementation of a streaming attribute of,
+   for example, a task type because there is no way that it can be
+   invoked. It is possible, however, to construct an example where such a
+   stream attribute can be invoked. This involves using a formal untagged
+   limited derived type for which some streaming attribute is
+   available (because it was explicitly specified for the ancestor type)
+   and a corresponding actual type for which the attribute is unspecified
+   (because the derivation occurred before the aspect was specified for
+   the ancestor type and the specification was therefore not inherited).
 
 !discussion
 
@@ -100,6 +116,24 @@ derived untagged types -- which is very limiting, especially given that untagged
 derivations themselves aren't that common (it's usually better to declare a new
 type). As such, it's not critical to have the Standard wording perfect in this
 area. So we simply add a To Be Honest note so there is no doubt of the intent.
+
+However, that leaves the dynamic semantics. It's clear from 13.1(11/3) that the
+stream attributes (which are operational aspects) used in the instance are those
+of the actual type. But in this case, the actual type has no stream attributes
+defined. Thus we have to define what the attributes do in this case.
+
+We've chosen to have them raise Program_Error. This means that the example given
+in the question compiles successfully and raises Program_Error at runtime. Raising
+Program_Error fine - we just want the construct to be well defined and reasonably
+easy to implement. For an implemention which macro-expands instantiations, the
+Program_Error case is identifiable at compile-time.
+
+The "In addition" boilerplate isn't really necessary, but consider modifying the
+example so that the generic is a generic package, not a generic procedure, and the
+problematic call to Flim'Read is replaced with a call to Flim'Input in the private
+part of the generic. Without the boilerplate (and with the rest of the change) this
+raises Program_Error. With the boilerplate, this gets caught at compile time, which
+is preferable.
 
 !ACATS test
 
@@ -287,5 +321,478 @@ From: Steve Baird
 Sent: Monday, May 14, 2012  1:24 PM
 
 Sounds good to me.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, June 29, 2012  6:51 PM
+
+Randy Brukardt wrote (in private communication):
+> The model Tucker gave for untagged derived types is crystal-clear: all
+> non-representation properties come from the ancestor, period, and
+> nothing comes from the actual. That includes the routines that are
+> called at runtime.
+
+Randy sent me a proposed writeup for this AI which captured the above idea.
+
+Recall that the example that led to this AI involves a formal untagged derived
+type whose ancestor type has streaming attributes available and a corresponding
+actual type which does not have streaming attributes available. In the generic
+body, we perform streaming operations. At runtime, what is supposed to happen?
+
+The model Randy wrote up answers this question by saying that we use the
+streaming attributes of the ancestor type unconditionally, and the streaming
+attributes of the actual are ignored.
+
+Tuck described this model in a mail message of May 14, to which my reply was
+"Sounds good to me".
+
+Now I'm not so sure. Consider the following:
+
+       type T1 is record ... ; -- untagged
+
+       type T2 is new T;
+       for T2'Read use ...;
+       for T2'Write use ...;
+
+       generic
+          type Formal_Private is private;
+       package G1 is
+          ...;
+       end;
+       package body G1 is
+       begin
+           -- do some Formal_Private streaming stuff
+       end;
+
+       generic
+          type Formal_Derived is new T1;
+       package G2 is
+          ...;
+       end;
+
+       package body G2 is
+       begin
+           -- do some Formal_Derived streaming stuff
+       end;
+
+       package I1 is new G1 (T2);
+       package I2 is new G2 (T2);
+
+Do the two instances execute the same streaming ops?
+It would seem odd to me if they didn't.
+What streaming ops do we get if G2 instantiates G1 with
+    Formal_Private => Formal_Derived
+?
+
+I don't remember the details of the discussion in Stockholm, but neither Randy
+nor I remember any discussion of this aspect of the question.
+
+Other alternatives for resolving the original question that led to this AI
+include:
+
+   1) A legality rule - if streaming attributes are available for a
+      formal derived type, then they must be available for the actual.
+
+   2) A conditional rule - use the streaming attributes of the actual,
+      unless they don't exist in which case use the streaming
+      attributes of the ancestor type (or perhaps raise P_E).
+
+I'm leaning towards a "use the streaming attributes of the actual" model
+combined with rule #1, which guarantees that those streaming attributes exist.
+
+The best argument for the model Tuck proposed, I think, is that this is a
+completely unimportant corner case and therefore any choice is ok as long as it
+is well-defined and we should go with whatever is simplest. I could continue to
+support Tuck's model on these grounds.
+
+Opinions?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, June 30, 2012  6:19 AM
+
+> package I1 is new G1 (T2);
+> package I2 is new G2 (T2);
+>
+> Do the two instances execute the same streaming ops?
+
+G1 uses the predefined streaming attributes.
+Predefined operations reemerge in generics for untagged (non-derived) formal
+types (except for record equality as of Ada 2012).
+
+G2 uses T1's streaming attributes.  The ancestor type's operations reemerge in
+generics for untagged formal derived types (again, except for record equality,
+as of Ada 2012).
+
+So long as T1's streaming attributes are predefined, then G1 and G2 use the same
+attributes.
+
+> It would seem odd to me if they didn't.
+
+I agree, presuming T1's streaming attributes are predefined.
+
+> What streaming ops do we get if G2 instantiates G1 with Formal_Private
+> => Formal_Derived
+
+The predefined attributes, so if T1 has user-defined streaming attributes, these
+are not used inside the nested instantiation of G1.
+
+> ?
+>
+> I don't remember the details of the discussion in Stockholm, but
+> neither Randy nor I remember any discussion of this aspect of the
+> question.
+
+Formal private is essentially equivalent to formal derived where the ancestor is
+a type with only predefined operations (again, modulo user-defined equality on
+records).
+
+I also think you need to consider this same question for all untagged formal
+generic types (formal integer, formal array, etc.). I believe in all these cases
+the predefined streaming attributes should reemerge, just like the predefined
+"+", etc.
+
+>
+> Other alternatives for resolving the original question that led to
+> this AI include:
+>
+> 1) A legality rule - if streaming attributes are available for a
+> formal derived type, then they must be available for the actual.
+>
+> 2) A conditional rule - use the streaming attributes of the actual,
+> unless they don't exist in which case use the streaming attributes of
+> the ancestor type (or perhaps raise P_E).
+>
+> I'm leaning towards a "use the streaming attributes of the actual"
+> model combined with rule #1, which guarantees that those streaming
+> attributes exist.
+
+It seems odd to me that predefined "+" reemerges on a formal integer type but
+predefined streaming does *not* reemerge.
+
+> The best argument for the model Tuck proposed, I think, is that this
+> is a completely unimportant corner case and therefore any choice is ok
+> as long as it is well-defined and we should go with whatever is
+> simplest. I could continue to support Tuck's model on these grounds.
+
+I don't believe it is a "corner case" argument.  I believe it is for consistency
+with all of the other predefined operations, which *do* reemerge in a generic
+unless the formal type is tagged.
+
+> Opinions?
+
+See above.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, June 30, 2012  7:08 AM
+
+I can also construct a counter-argument (here comes TT-2):
+
+Because streaming attributes "compose" even for untagged types, that is, the
+"predefined" streaming attribute for a record or array type is produced by
+composing the user-defined streaming attributes of its component types, the
+user-defined streaming attributes should be carried through into generics.
+
+This seems pretty clear if the generic spec declares a record type whose
+components are formal types.  One would certainly expect that outside the
+generic, this newly constructed record type's streaming attribute would be
+composed out of the user-defined streaming attributes of its component types. It
+would be pretty weird if this record type had different behavior than an
+otherwise identical record type declared outside of the generic instance.
+
+Given this automatic composability, it seems that we need to carry streaming
+attributes into generics.
+
+So now we are back to needing rules to deal with formal limited derived types.
+Groan...
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, July  2, 2012  12:51 PM
+
+> I don't believe it is a "corner case" argument.  I believe it is for
+> consistency with all of the other predefined operations, which
+> *do* reemerge in a generic unless the formal type is tagged.
+
+I agree with you here (and with TT-2 later).
+
+> I can also construct a counter-argument (here comes TT-2):
+
+As you point out, if  we are going to be consistent then this affects more than
+just the formal untagged derived case.
+
+I think this leads to a fairly strong
+compatibility-with-existing-practice argument for TT-2's position.
+
+For at least the GNAT implementation (and, I believe, the IBM/Rational
+compiler), predefined streaming attributes do not currently reemerge. My guess
+is that this is the case for most any implementation which does not use generic
+code sharing, since this is what naturally falls out of the macro-expansion
+model.
+
+The xample below, compiled with the Gnat compiler, prints
+   User-defined stream attrs were invoked
+
+IMO, this is a good thing and we want a language definition that allows/requires
+this behavior (which the proposed model does not).
+
+Incidentally, package Simple_Streams is just a simpler alternative to
+Ada.Streams.Stream_IO that I tend to use when investigating streaming issues.
+Nothing special about it.
+
+with Text_IO;
+with Ada.Streams;
+with Simple_Streams;
+procedure formal_type_streaming is
+    type Vector is array (Positive range <>) of Integer;
+
+    procedure Output
+     (S : not null access Ada.Streams.Root_Stream_Type'Class;
+      V : Vector);
+    function Input
+      (S : not null access Ada.Streams.Root_Stream_Type'Class)
+      return Vector;
+
+    for Vector'Output use Output;
+    for Vector'Input use Input;
+
+    procedure Output
+      (S : not null access Ada.Streams.Root_Stream_Type'Class;
+       V : Vector) is
+    begin
+       -- only write out length, not both bounds
+       Integer'Output (S, V'Length);
+       for I in V'Range loop
+          Integer'Output (S, V(I));
+       end loop;
+    end;
+
+    function Input
+       (S : not null access Ada.Streams.Root_Stream_Type'Class)
+       return Vector is
+        -- low bound of result is always 1
+        Result : Vector (1 .. Integer'Input (S));
+    begin
+       Vector'Read (S, Result);
+       return Result;
+    end;
+
+    generic
+       type Formal_Vector is array (Positive range <>) of Integer;
+    function Ident (V : Formal_Vector) return Formal_Vector;
+    function Ident (V : Formal_Vector) return Formal_Vector is
+       S: aliased Simple_Streams.Stream_Type;
+    begin
+       Formal_Vector'Output (S'access, V);
+       return  Formal_Vector'Input (S'access);
+    end;
+
+    function Ident_Inst is new Ident (Formal_Vector => Vector);
+
+    X : constant Vector (2 .. 4) := (2, 3, 4);
+    Y : constant Vector := Ident_Inst (X); begin
+    pragma Assert (X = Y);
+    if Y'First = 1 then
+       Text_IO.Put_Line ("User-defined stream attrs were invoked");
+    else
+       Text_IO.Put_Line ("Predefined stream attrs were invoked");
+    end if;
+end;
+
+
+with Ada.Streams;
+use Ada.Streams;
+package Simple_Streams is
+    type Stream_Type is new Root_Stream_Type with private; private
+    subtype Buffer_Index is
+      Stream_Element_Offset range 1 .. 1024;
+    subtype Buffer_Length is
+      Stream_Element_Count range 0 .. Buffer_Index'Last;
+
+    type Stream_Type is new Root_Stream_Type with
+       record
+         Buffer : Stream_Element_Array (Buffer_Index);
+         Length : Buffer_Length := 0;
+       end record;
+
+    overriding
+    procedure Read(
+      Stream : in out Stream_Type;
+      Item   : out Stream_Element_Array;
+      Last   : out Stream_Element_Offset);
+
+    overriding
+    procedure Write(
+      Stream : in out Stream_Type;
+      Item   : in Stream_Element_Array);
+
+end Simple_Streams;
+
+package body Simple_Streams is
+
+    procedure Read(
+      Stream : in out Stream_Type;
+      Item   : out Stream_Element_Array;
+      Last   : out Stream_Element_Offset) is
+    begin
+      if Item'Length <= Stream.Length then
+          Item := Stream.Buffer (1 .. Item'Length);
+          Last := Item'Last;
+          Stream.Length := Stream.Length - Item'Length;
+          Stream.Buffer (1 .. Stream.Length)
+            := Stream.Buffer
+                 (1 + Item'Length .. Stream.Length + Item'Length);
+      else
+          Item (Item'First .. Item'First + Stream.Length - 1) :=
+            Stream.Buffer (1 .. Stream.Length);
+          Last := Item'First + Stream.Length - 1;
+          Stream.Length := 0;
+      end if;
+    end Read;
+
+    procedure Write(
+      Stream : in out Stream_Type;
+      Item   : in Stream_Element_Array) is
+    begin
+      Stream.Length := Stream.Length + Item'Length;
+      Stream.Buffer
+        (Stream.Length + 1 - Item'Length .. Stream.Length) := Item;
+    end Write;
+
+end Simple_Streams;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July  2, 2012  3:19 PM
+
+...
+> I think this leads to a fairly strong
+> compatibility-with-existing-practice argument for TT-2's position.
+>
+> For at least the GNAT implementation (and, I believe, the IBM/Rational
+> compiler), predefined streaming attributes do not currently reemerge.
+> My guess is that this is the case for most any implementation which
+> does not use generic code sharing, since this is what naturally falls
+> out of the macro-expansion model.
+
+I haven't encountered any compilers for which stream attributes did not
+dynamically call the user-defined attributes. I certainly thought that was the
+model for Ada.
+
+It's also a usability issue. You wouldn't be able to usefully stream anything
+from inside a generic unit if the predefined attributes reemerged. (You'd get
+useless results if any access types are involved.)
+
+More generally, reemergence is almost always a problem (given that it means that
+a generic unit works differently than the same unit created by hand using
+textual substitution). We ought to use it only where it is necessary for
+compatibility, and nowhere else.
+
+In any case, the fact that Tucker is even willing to make an argument for
+reemergence suggests that the entire model of stream attributes in generics is
+ill-defined. So just using a Ramification to solve this is a bad idea - we need
+to correct the wording so it is crystal-clear as to what happens.
+
+...
+> Incidentally, package Simple_Streams is just a simpler alternative to
+> Ada.Streams.Stream_IO that I tend to use when investigating streaming
+> issues.
+> Nothing special about it.
+
+Actually, this looks very similar to Claw.Marshalling (which we use to allow
+items to be streamed into and out of the Windows clipboard and registry). It's
+something that is often needed and probably ought to be language-defined. (The
+topic has informally come up before, I believe, but never formally.)
+
+[The only significant difference here (other than naming) is that
+Claw.Marshalling uses a discriminant to specify the buffer size, since this is
+definitely a case where one size does not fit all. Well, and Claw.Marshalling
+also has Length and Clear operations. The implementation also uses buffer chunks
+to allow the buffer to grow beyond the initial size, but that's probably
+overkill.]
+
+...
+> with Ada.Streams;
+> use Ada.Streams;
+> package Simple_Streams is
+>     type Stream_Type is new Root_Stream_Type with private; private
+>     subtype Buffer_Index is
+>       Stream_Element_Offset range 1 .. 1024;
+>     subtype Buffer_Length is
+>       Stream_Element_Count range 0 .. Buffer_Index'Last;
+>
+>     type Stream_Type is new Root_Stream_Type with
+>        record
+>          Buffer : Stream_Element_Array (Buffer_Index);
+>          Length : Buffer_Length := 0;
+>        end record;
+>
+>     overriding
+>     procedure Read(
+>       Stream : in out Stream_Type;
+>       Item   : out Stream_Element_Array;
+>       Last   : out Stream_Element_Offset);
+>
+>     overriding
+>     procedure Write(
+>       Stream : in out Stream_Type;
+>       Item   : in Stream_Element_Array);
+>
+> end Simple_Streams;
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, July  4, 2012  6:24 AM
+
+Wearing my user's hat, re-emergence is abhorrent and breaks the language design
+principle of "no surprises".
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 17, 2012  6:17 PM
+
+FYI:
+
+> I can also construct a counter-argument (here comes TT-2):
+>
+> Because streaming attributes "compose" even for untagged types, that
+> is, the "predefined" streaming attribute for a record or array type is
+> produced by composing the user-defined streaming attributes of its
+> component types, the user-defined streaming attributes should be
+> carried through into generics.
+>
+> This seems pretty clear if the generic spec declares a record type
+> whose components are formal types.  One would certainly expect that
+> outside the generic, this newly constructed record type's streaming
+> attribute would be composed out of the user-defined streaming
+> attributes of its component types.
+> It would be pretty weird if this record type had different behavior
+> than an otherwise identical record type declared outside of the
+> generic instance.
+>
+> Given this automatic composability, it seems that we need to carry
+> streaming attributes into generics.
+
+Steve privately pointed out that we all had missed the first sentence of
+13.1(11/3):
+
+Operational and representation aspects of a generic formal parameter are the
+same as those of the actual.
+
+Stream attributes are operational aspects, thus the actual's values are always
+used. QED.
+
+This matches with existing practice, as well.
+
+Steve has already written this AI up, so we don't need to discuss it further, I
+just wanted to put on the record that TT-1 was not supported by the Standard.
 
 ****************************************************************
