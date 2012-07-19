@@ -1984,3 +1984,401 @@ questions like whether Static_Constant'Old is static.
 
 ****************************************************************
 
+From: Steve Baird
+Sent: Friday, July  6, 2012  4:44 PM
+
+As part of my Stockholm homework I am looking at AI12-0032, the 'Old AI.
+
+The current wording about the point of the implicit constant declaration for a
+use of 'Old doesn't handle task entries clearly:
+    "... a constant is implicitly declared at the beginning of
+     the subprogram or entry."
+
+I don't think anybody even thought about what "the beginning of the ... entry"
+means in the case of a task entry.
+
+Intuitively, one might assume that it means "the beginning of the rendezvous".
+The problem with that model is that postcondition checks are performed after the
+rendezvous is over and the called task has gone on to other things. At least
+that is how I interpret the words "Upon successful return" in 6.1.1(35/3). Since
+the postcondition checks are where this constant is referenced, the constant has
+to outlive the rendezvous. And with interface types and 'Post'Class, you pretty
+much have to do things this way since there may be 'Old constants whose
+existence the called task is unaware of.
+
+Am I right in thinking that we therefore want a 'Old constant elaborated
+immediately after precondition checking (which occurs immediately after
+parameter evaluation)? For example, for a conditional entry call which is never
+accepted, the constant will still be declared; right?
+
+I'd like to be clear on what intent I am trying to capture before attempting
+wording.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, July  8, 2012  10:54 AM
+
+...
+> Intuitively, one might assume that it means "the beginning of the
+> rendezvous". The problem with that model is that postcondition checks
+> are performed after the rendezvous is over and the called task has
+> gone on to other things. At least that is how I interpret the words
+> "Upon successful return"
+> in 6.1.1(35/3). Since the postcondition checks are where this constant
+> is referenced, the constant has to outlive the rendezvous.
+> And with interface types and 'Post'Class, you pretty much have to do
+> things this way since there may be 'Old constants whose existence the
+> called task is unaware of.
+
+I certainly didn't have that model in my mind, though I'll admit I hadn't really
+thought about it deeply.  It seems that protected entries face the same problem.
+Are postconditions checked as part of the protected action, after finalizing but
+before leaving the entry body, or are they checked at the place where the call
+is.  I would have expected postconditions to be enforced just before leaving the
+entry body, and I would expect accept statements to work the same way.
+
+I would interpret "upon successful return" to mean "only if the entry
+body/accept statement/subprogram body is completing normally."  I would not
+interpret it to mean that it happens at the call site, potentially long after
+the entry body or rendezvous finish.
+
+> Am I right in thinking that we therefore want a 'Old constant
+> elaborated immediately after precondition checking (which occurs
+> immediately after parameter evaluation)? For example, for a
+> conditional entry call which is never accepted, the constant will
+> still be declared; right?
+
+No, I don't have this model.  I think it should be inside the entry body/accept
+statement.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Sunday, July  8, 2012  2:29 PM
+
+I fully agree, and find Tuck's response reassuring. I found Steve's reading of
+the semantics of 'Old somewhere between "ingenious" and "perverse".  I have
+always thought that the entry body is treated like a subprogram, and the
+postcondition is evaluated just before returning from that subprogram, i.e.
+immediately before completing the rendez-vous.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, July  8, 2012  6:20 PM
+
+...
+> > And with interface types and 'Post'Class, you pretty much have to do
+> > things this way since there may be 'Old constants whose existence
+> > the called task is unaware of.
+
+This can't happen, because you can't derive a from (concrete) task or protected
+type. So there is no way to "add" an interface to an existing task or protected
+type.
+
+OTOH, Brad keeps complaining about that restriction (it really causes problems
+in his task-safe reusable types), so I wouldn't be surprised if we at least
+consider lifting it. In which case depending on it might be less appealing.
+
+> I certainly didn't have that model in my mind, though I'll admit I
+> hadn't really thought about it deeply.  It seems that protected
+> entries face the same problem.  Are postconditions checked as part of
+> the protected action, after finalizing but before leaving the entry
+> body, or are they checked at the place where the call is.  I would
+> have expected postconditions to be enforced just before leaving the
+> entry body, and I would expect accept statements to work the same way.
+
+Keep in mind that the "official" model is that preconditions and postconditions
+are checked at the call site, not in the body. We then have a variety of
+permissions that allow implementing them (especially postconditions) in the
+body. Steve seems to have identified a problem with that "official" model, and I
+think we need to be careful with dismissing this out-of-hand.
+
+> I would interpret "upon successful return" to mean "only if the entry
+> body/accept statement/subprogram body is completing normally."  I
+> would not interpret it to mean that it happens at the call site,
+> potentially long after the entry body or rendezvous finish.
+
+Well, I would! Specifically, when we wrote this wording, we meant that
+everything was canonically checked at the call site. And we then tried to make
+it possible to implement it inside the body. But that seems backwards for 'Old.
+(EVERYTHING seems wrong about 'Old; it's unfortunate, because it *seems* so
+obvious.)
+
+> > Am I right in thinking that we therefore want a 'Old constant
+> > elaborated immediately after precondition checking (which occurs
+> > immediately after parameter evaluation)? For example, for a
+> > conditional entry call which is never accepted, the constant will
+> > still be declared; right?
+>
+> No, I don't have this model.  I think it should be inside the entry
+> body/accept statement.
+
+I agree that's the model we have for 'Old. But the model for postconditions is
+that they are logically evaluated at the call site. So those models inherently
+conflict. I now think that there is *nothing* right about the model for 'Old
+(the evaluation happens inside the subprogram, which no longer exists when the
+postcondition check is evaluated).
+
+I'm beginning to feel that 'Old is yet another coextension - a language feature
+that seems easy but is next to impossible to get right (and thus isn't worth the
+trouble).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, July  8, 2012  6:40 PM
+
+> Keep in mind that the "official" model is that preconditions and
+> postconditions are checked at the call site, ...
+
+I think the right model is that preconditions are checked at the call site, but
+postconditions are checked in the body.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, July  8, 2012  6:52 PM
+
+Maybe, but that's not what we wrote, and I'm not thrilled about starting over
+with this wording. And in any case, we wanted implementations to be able to do
+the evaluations in either place -- I'd definitely be against changing the model
+such that we're required to evaluate postconditions in the body.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, July  9, 2012  10:19 AM
+
+I think you can allow it to be done either place when there is no
+synchronization involved.  But for synchronizing operations, I believe we will
+have to choose one, and I think the metarule Bob described is the correct one,
+namely that preconditions are conceptually checked before you "wait" for an
+entry barrier, and postconditions are checked before you give up control on
+completion of the entry body/rendezvous.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, July  9, 2012  10:38 AM
+
+> I think you can allow it to be done either place when there is no
+> synchronization involved.  But for synchronizing operations, I believe
+> we will have to choose one, and I think the metarule Bob described is
+> the correct one, namely that preconditions are conceptually checked
+> before you "wait" for an entry barrier,
+
+So the check is not synchronous with the execution of the synchronized
+operation, but rather with the evaluation of the barrier?
+
+> and postconditions
+> are checked before you give up control on completion of the entry
+> body/rendezvous.
+
+Does it mean that Tasking_Error is raised in the caller if the postcondition
+fails, or is the failure happening outside of the task body  in some way?
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, July  9, 2012  10:57 AM
+
+> ...
+>>> And with interface types and 'Post'Class, you pretty much have to do
+>>> things this way since there may be 'Old constants whose existence
+>>> the called task is unaware of.
+>
+> This can't happen, because you can't derive from a (concrete) task or
+> protected type. So there is no way to "add" an interface to an existing
+> task or protected type.
+
+Thank you. This misconception is what led me to think the cleaner, simpler, more
+intuitive model didn't work.
+
+I now think that you are right and that the "do everything within the
+rendezvous" model can work.
+
+> And in any case, we wanted implementations to be able to do the
+> evaluations in either place -- I'd definitely be against changing the
+> model such that we're required to evaluate postconditions in the body.
+
+In the particular case of task entries (which were not previously given much
+thought) there is a very big portability issue between the two approaches which
+is not present for other callable entities: does the callee also see the
+exception in the event of a pre/post-condition failure or not?
+
+I really dislike the idea of leaving this implementation-dependent in the case
+of a task entry.
+
+I prefer the easy-to-implement idea of wrapping an implementation-generated
+block around the handled sequence of statements for an accept and then
+performing ppc checks and 'Old constant elaborations in this block, as in
+
+      accept E do
+                  Precondition_Checks;
+                  declare
+                      ... 'Old constants ...
+                  begin
+                       begin
+                           Source_Stmts;
+                       exception
+                           Source_Handlers;
+                       end;
+                       Postcondition_Checks;
+                   end;
+      end;
+
+This also nails down the question about when the precondition checks are
+performed (and, for example, whether they are performed at all in the case of a
+conditional entry call that is never accepted).
+
+I agree that te current wording doesn't nail this stuff down; I just think it
+should and that the current state of affairs was not the result of a conscious
+decision - nobody thought about tasks.
+
+If we go with this model, it would be more consistent for protected actions to
+require that precondition checks (and 'Old constant elaborations) not be
+performed until after the protected action has begun, but that's a separate
+question. Again, there are portability issues here in the case of a precondition
+expression which performs a potentially blocking operation (and, in particular,
+an external call to the same protected record object).
+
+Suppose you have a belt-and-suspenders programmer who calls a protected entry
+and has a precondition which duplicates the barrier expression. For example, he
+wants to pop an element off of a protected stack and has a precondition that the
+stack isn't empty as well as a similar barrier expression for the Pop entry.
+
+Is this supposed to fail if the stack is empty at the time of the call, or is it
+supposed to block and then perform the precondition check after the barrier
+condition has been satisfied? And what if the precondition involves external
+calls to the protected object - do we have 9.5.1(15) bounded errors? Allowing
+internal calls from within the pre/postcondition expressions of a protected
+operation would be a bigger change.
+
+I don't like the idea that all this is left up to the implementation; it seems
+like a real portability issue.
+
+Note that we have explicit wording that says
+    It is not specified whether in a call on a protected operation, the
+    checks are performed before or after starting the protected action.
+
+I think this may have been written with only protected procedures and functions
+in mind, as opposed to entries. Even in that restricted case, it seems like this
+introduces portability issues.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, July  9, 2012  11:00 AM
+
+> I think you can allow it to be done either place when there is no
+> synchronization involved.  But for synchronizing operations, I believe
+> we will have to choose one, and I think the metarule Bob described is
+> the correct one, namely that preconditions are conceptually checked
+> before you "wait" for an entry barrier, and postconditions are checked
+> before you give up control on completion of the entry body/rendezvous.
+
+That would be fine with me.
+
+My main point is that it should be specified one way or the other.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, July  9, 2012  11:25 AM
+
+> I think you can allow it to be done either place when there is no
+> synchronization involved.  But for synchronizing operations, I believe
+> we will have to choose one, and I think the metarule Bob described is
+> the correct one, namely that preconditions are conceptually checked
+> before you "wait" for an entry barrier, and postconditions are checked
+> before you give up control on completion of the entry body/rendezvous.
+
+Agreed. If a condition does not hold, the exception is raised in the context of
+the one who is doing bad things.
+
+In the case of a rendezvous, this means that Assertion_Error is propagated to
+both - which seems logical: the caller has to know that the postcondition does
+not hold, and the task has to be punished for bad behaviour.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, July  9, 2012  11:31 AM
+
+> I prefer the easy-to-implement idea of wrapping an
+> implementation-generated block around the handled sequence of
+> statements for an accept and then performing ppc checks and 'Old
+> constant elaborations in this block, as in
+>
+>      accept E do
+>                  Precondition_Checks;
+>                  declare
+>                      ... 'Old constants ...
+>                  begin
+>                       begin
+>                           Source_Stmts;
+>                       exception
+>                           Source_Handlers;
+>                       end;
+>                       Postcondition_Checks;
+>                   end;
+>      end;
+
+But with this model, if a precondition fails, the exception is propagated to the
+callee - violating the principle that a server should no be disturbed by any
+misbehaviour of the client.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, July  9, 2012  11:45 AM
+
+> But with this model, if a precondition fails, the exception is
+> propagated to the callee - violating the principle that a server
+> should no be disturbed by any misbehaviour of the client.
+
+I sent a second message two minutes after the message that you replied to. For
+reasons unknown, it hasn't shown up yet.
+
+Tuck outlined the model where pre=condition checks are performed at the time of
+the call (so that, for example, they are performed in the case of a conditional
+call which is never accepted).
+
+I'll repeat my reply:
+   > That would be fine with me.
+   >
+   > My main point is that it should be specified one way
+   > or the other.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, July  9, 2012  12:20 PM
+
+Fine with me too.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July  9, 2012  1:10 PM
+
+It's necessary for precondition checks to be at point of call else dispatching
+preconditions don't work right.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, July  9, 2012  1:37 PM
+
+Good point.
+Sounds like everyone is in agreement then.
+Thanks.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, July  9, 2012  10:19 AM
+
+****************************************************************
