@@ -254,3 +254,902 @@ and we can trust the implementors to provide something usable, without guessing
 what that might be in any specific case.
 
 ****************************************************************
+
+From: Alan Burns
+Sent: Thursday, May 31, 2012  8:01 AM [But not actually posted until June 22nd.]
+
+The thinking here was, if I recall, that there is no way of knowing how the
+underlying platform will refer to its cores; and hence a mapping would always be
+needed. So contiguous numbers in the program seems to make sense
+
+> I have now tried out the System.Multiprocessor package. I found a
+> restriction in the Dispatching_Domain, where you can only assigne a
+> range of CPUs to such a domain as I understand, going from First to
+> Last CPU. But, for example in our hardware Architecture, we have 4
+> CPU's with each 4 cores, but the numbering is not straight forward.
+> The first CPU has the cores 0, 4, 8, 12 the second 1,5,9,13.
+> So here it will be better to have a higher flexibility in Assigning
+> Domains to ranges and single cores e.g a Domain
+> (2,6,10,14) pointing the 2nd CPU or (2-3,6-7,10-11,14-15) defining a
+> Domain of the 2nd and 3rd CPU.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June 22, 2012  4:33 PM
+
+Apologies to Alan: I just found this [the above - Editor] in my inbox, waiting
+to be approved. It came while I was on vacation, and I must have missed it when
+I checked the inbox after I got back.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Saturday, June 23, 2012  3:16 PM
+
+I don't really understand the mapping idea.
+
+However you map Ada numbers to the actual threads, you may want to specify a
+non-contiguous sequence of the mapped numbers.
+
+> But, for example in our hardware Architecture, we have 4 CPU's with
+> each 4 cores, but the numbering is not straight forward.
+> The first CPU has the cores 0, 4, 8, 12 the second 1,5,9,13.
+
+And you might want to specify all the cores on one processor or one core from
+each of the 4 separate CPU's (the latter quite likely if you want to be able to
+avoid multi-core usage completely, as is often the case in certified programs).
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Saturday, June 23, 2012  9:33 PM
+
+> And you might want to specify all the cores on one processor or one
+> core from each of the 4 separate CPU's (the latter quite likely if you
+> want to be able to avoid multi-core usage completely, as is often the
+> case in certified programs).
+
+This last situation seems strange to me, as you surely don't want to mix
+unrelated tasks on different cores of the same CPU.
+
+I can understand situations where you want 4 separate tasks pinned to 4 separate
+CPUs, but for that you'd would  either assign a specific one to each task, which
+is of course always possible. Alternatively, you'd assign each of the tasks to
+an arbitrary core of a specific CPU, for which you'd use ranges.
+
+What situation would you have in mind where you don't care which CPU your task
+runs on, but you want to know the task runs on core1 of that CPU? This seems
+really uncommon.
+
+Anyway, CPU sets are really troublesome, as systems can have many CPUs.
+Typically we don't want to set a maximum number of CPUs in advance for our
+programs, but maintaining large sets is too costly in many situations.
+
+Also, when distributing binary versions of compiled Ada programs, as is common,
+you can't really know what the number of CPUs or topology will be of the system
+the program will run on. Using ranges will be more portable. For example, if you
+run one set of tasks on the first half of the processors and the other one on
+the second, would make sense on virtually any multiprocessor.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, June 27, 2012 11:50 PM
+
+...
+> Also, when distributing binary versions of compiled Ada programs, as
+> is common, you can't really know what the number of CPUs or topology
+> will be of the system the program will run on. Using ranges will be
+> more portable. For example, if you run one set of tasks on the first
+> half of the processors and the other one on the second, would make
+> sense on virtually any multiprocessor.
+
+Certainly we're going to continue to allow using ranges to specify dispatching
+domains. But we realized that ranges are insufficient to characterize the
+System_Dispatching_Domain even with the current definition of the package, so we
+really have to have an option to use sets.(*)
+
+Moreover, as you say, there is no way for the implementation to really know the
+number of CPUs or topology -- so that makes it impossible for the implementation
+to map the CPUs into a contiguous range (expecially in a binary compiled Ada
+program). Thus, there has to be a way for a program to use discontiguous CPU
+numbering if that is what the program determines to make sense for the
+particular topology in use.
+
+So we think we *have* to have some mechanism for defining and retrieving sets of
+CPUs. (Tucker volunteered to create a solution, so don't expect to see anything
+soon. ;-) Interesting that you reach the exact opposite conclusion from the same
+facts.
+
+(*) Consider a program is running on a system with 8 CPUs. If a domain is
+Created containing CPUs 3 through 6, the System_Dispatching_Domain holds the
+remaining CPUs -- in this case, CPUs 1, 2, 7, and 8.
+Get_First_CPU(System_Dispatching_Domain) = 1 and
+Get_First_CPU(System_Dispatching_Domain) = 8. but this surely does not
+completely characterize the values in the System_Dispatching_Domain. This is
+only using the existing operations in package Dispatching_Domains.
+
+I can believe that you would say that it doesn't make sense to Create such a
+domain, but the problem is that it is legal to do so and the operations in the
+package need to make sense in that case. (And the alternative of restricting
+Create even further makes little sense; we don't want to be guessing what future
+topologies will look like!)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June 28, 2012  5:09 AM
+
+>... So we think we *have* to have some mechanism for defining and
+>retrieving  sets of CPUs. (Tucker volunteered to create a solution, so
+>don't expect to see anything soon. ;-) Interesting that you reach the
+>exact opposite conclusion from the same facts.
+
+If you will send me whatever rough minutes you have on this particular topic, I
+will send out a draft proposal sooner rather than later.  As I mentioned in the
+meeting, I was confused by J.P. Rosen's proposal to think the problem was more
+complex than it really is.  I now believe a very simple addition to the package
+will provide all of the functionality we need.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, June 28, 2012  7:12 AM
+
+> So we think we *have* to have some mechanism for defining and
+> retrieving sets of CPUs. (Tucker volunteered to create a solution, so
+> don't expect to see anything soon. ;-) Interesting that you reach the
+> exact opposite conclusion from the same facts.
+
+I definitely agree with Randy (and Tucker)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 28, 2012  6:35 PM
+
+...
+> If you will send me whatever rough minutes you have on this particular
+> topic, I will send out a draft proposal sooner rather than later.
+
+I presume that means on December 1st rather than the 7th. ;-) [Your reputation
+is pretty well solidified in this area!]
+
+> As I mentioned in the meeting, I was
+> confused by J.P. Rosen's proposal to think the problem was more
+> complex than it really is.  I now believe a very simple addition to
+> the package will provide all of the functionality we need.
+
+I think J-P was trying to show two alternative ways of specifying the mapping,
+and that made the suggestions more complex than had he picked something and
+going with it.
+
+Anyway, I've already completed the preliminary draft minutes for this AI (that's
+why I was possessed to write about it last night). That means that these haven't
+been reviewed by anyone, but they are what I have recorded for the meeting. See
+them below.
+
+------------
+
+AI12-0033-1/01 Sets of CPUs when defining dispatching
+
+How the defined numbering corresponds to the underlying system is
+implementation-defined. It's not necessarily a direct mapping.
+
+Randy notes that an implementation has no practical way to find out the best
+numbering for a particular user, when it might be controlled by a particular
+implementation of Linux. The number and organization of CPUs is likely to be
+determined at run-time; it's likely that programs are compiled to run on any
+appropriate target, anything from a single core processor to sets of
+multithreaded multicore processors. The appropriate CPU mappings may vary
+wildly.
+
+The set implementation is looking more interesting. Randy notes that a lot of
+operations would need to be changed.
+
+Tucker wonders if it makes more sense to support a function to let the users
+update the mapping between the target's underlying numbering and the numbers
+that the CPU functions use.
+
+Steve notes that if a task is running then, things would be weird. This
+remapping operation could only be executed when no other tasks (other than the
+environment task) are running.
+
+What happens if you refer to CPUs beyond Number_of_CPUs? It seems like such
+values shouldn't be allowed here (its not possible to run a task using a CPU
+over that value - D.16(14/3)).
+
+After a break, Tucker says that he notes that there is already a problem in that
+the System_Dispatching_Domain might have holes. For example, if the program is
+running on a system with 8 CPUs, and a domain is Created containing CPUs 3
+through 6, the System_Dispatching_Domain holds the remaining CPUs, which in this
+case are CPUs 1, 2, 7, and 8. Then Get_First_CPU(System_Dispatching_Domain) = 1
+and Get_First_CPU(System_Dispatching_Domain) = 8. but this surely does not
+completely characterize the values in the System_Dispatching_Domain. Moreover,
+you can create many holes in the System_Dispatching_Domain this way.
+
+So he thinks that it makes more sense to add set operations here in order to
+properly represent any of these items. And that fixes the problem that was the
+original question.
+
+Tucker volunteers to write up a solution on this basis.
+
+Steve notes that Assign_Task does not work on a child task that inherits a
+non-system domain from its parent. The aspect can be specified (even to System
+Dispatching Domain), but not Assign_Task. That seems weird.
+
+Keep AI alive: 9-0-0.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, June 28, 2012  6:53 PM
+
+This discussion makes me think it was a mistake to have this feature in the
+standard in the first place.  It's just too platform specific.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 28, 2012  8:02 PM
+
+I agree. Not to mention that its useful to only a very small percentage of
+applications. (Almost all applications are better off letting the scheduler -
+controlled via priorities or deadlines - decide what cores to use. They'll get
+better utilization and be much more portable to other architectures.)
+
+But I would argue that goes for a lot of what's found in Annex D -- and I can
+easily imagine that the real-time folks feel the same way about the various
+containers and the features added to enhance them. Gotta give every constituency
+some bones.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June 28, 2012  9:03 PM
+
+Current package starts:
+
+  package System.Multiprocessors.Dispatching_Domains is
+
+    Dispatching_Domain_Error : exception;
+
+    type Dispatching_Domain (<>) is limited private;
+
+    System_Dispatching_Domain : constant Dispatching_Domain;
+
+    function Create (First, Last : CPU) return Dispatching_Domain;
+
+    function Get_First_CPU (Domain : Dispatching_Domain) return CPU;
+
+    function Get_Last_CPU  (Domain : Dispatching_Domain) return CPU;
+
+    ...
+
+I would suggest we add:
+
+    type CPU_Set is array(CPU range <>) of Boolean;
+     [This might be declared in the System.Multiprocessors package]
+
+    function Create (Set : CPU_Set) return Dispatching_Domain;
+
+    function Get_CPU_Set (Domain : Dispatching_Domain) return CPU_Set;
+
+Comments?
+
+I'll do a full AI writeup if this is what we like.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 28, 2012  9:26 PM
+
+One hopes that the CPU_Set is packed.
+
+CPU_Set could get pretty big if we start seeing machines with 10K cores -- but I
+suppose we'll all be using Parasail by then. ;-)
+
+****************************************************************
+
+From: Alan Burns
+Sent: Friday, June 29, 2012  7:23 AM
+
+I think what Tuck suggests is sufficient, but I think it is worth noting why we
+have what we have.
+
+Multiprocessor platforms come in many different forms of course.
+The standard simplest architecture is a pure SMP (Symmetric Multiprocessor).
+Here all CPUs are identical and all memory accesses are uniform. All devices are
+accessible from all CPUs.
+
+Next class in CC-NUMA (cache coherent non-uniform multiprocessor architecture).
+Here CPUS are identical but 'time to main memory' is not uniform.
+
+After that there are many forms of heterogeneous platforms with/without cache
+coherence.
+
+What I'm not sure about is an architecture SMP where there are level
+2 caches shared between only some of the cores. So, for example a 16 core
+machine in which there are four banks of four that share a cache. I would prefer
+to put these in the CC-NUMA class.
+
+The dispatching domain proposal was designed for pure SMP.
+Here you only really need to know how many CPUs are in the domain. It is useful
+to have numbered CPUs so that a program can designate a semi-partitioned
+approach within a domain. The current package definition is sufficient for this
+usage, it was always assumed there would be an implementation defined mapping
+between whatever numbers/names the hardware uses and the CPU numbers in the
+program. But for SMPs this is sufficient.
+
+If we want the language to give some support to CC-NUMA architectures then some
+knowledge of the platform needs to be available. This could concern which cores
+share a cache; and these numbers may not be contiguous - so the use of sets is a
+useful extension.
+
+But we did decide before that, at this time, Ada should not support a broader
+set of facilities - for example a dynamic number of available CPUs, moving CPUs
+between domains etc.
+
+If you are still reading this - perhaps a use case for dispatching domains is
+useful. Consider a 16 core chip. One could map all tasks to just one CPU (a
+fully partitioned systems). Or one could allow all tasks to run on all CPUs (one
+dispatching domain, a fully global system). Alternatively one could use four
+domains of four CPUs each. An implementation COULD provide distinct ready queues
+for each domain which would probably be more efficient that the fully global
+scheme. Note for a pure SMP it does not matter which 4 CPUs are in each domain -
+but for CC-NUMA it might if, for  example numbers 1, 5, 9 and 13 share some
+resource.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, June 29, 2012  7:50 AM
+
+> ... What I'm not sure about is an architecture SMP where there are
+> level
+> 2 caches shared between only some of the cores. So, for example a 16
+> core machine in which there are four banks of four that share a cache.
+> I would prefer to put these in the CC-NUMA class.
+>
+> The dispatching domain proposal was designed for pure SMP. ...
+
+Unfortunately, I don't think there really will be many such machines.  CC-NUMA
+seems much more likely, and providing support which only makes sense for "pure
+SMP" will simply be frustrating.  Yes, perhaps we would need to provide some
+kind of query about cache structure or other NUMA-related information, but that
+seems more naturally to be something that could be in some other package, or
+provided outside the language completely.
+
+But the basic partitioning into dispatching domains will ultimately need to be
+more flexible, and I think we know this today.  On the other hand, I would be
+surprised if we knew today how best to provide the other information about
+cache/NUMA structure.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, June 29, 2012  3:33 PM
+
+> But the basic partitioning into dispatching domains will ultimately
+> need to be more flexible, and I think we know this today.  On the
+> other hand, I would be surprised if we knew today how best to provide
+> the other information about cache/NUMA structure.
+
+Moreover, I don't see any harm in providing that facility. Maybe, with an
+implementation permission not to support sets for implementations where it
+doesn't make sense (there is always the blank permission, but an explicit one
+may have some value to avoid questions)
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Tuesday, July  3, 2012  11:02 AM
+
+> Unfortunately, I don't think there really will be many such machines.
+> CC-NUMA seems much more likely, and providing support which only makes
+> sense for "pure SMP" will simply be frustrating.  Yes, perhaps we
+> would need to provide some kind of query about cache structure or
+> other NUMA-related information, but that seems more naturally to be
+> something that could be in some other package, or provided outside the
+> language completely.
+
+IMO, it should be completely outside the language. There surely is nothing to
+standardize at this point.
+
+> But the basic partitioning into dispatching domains will ultimately
+> need to be more flexible, and I think we know this today.  On the
+> other hand, I would be surprised if we knew today how best to provide
+> the other information about cache/NUMA structure.
+
+We right now have machines with N sockets, each with P dies, Q cores per die,
+and R simultaneous (hyper) threads per core. At any point in time, any of these
+may be on-line or off-line, especially for power-saving purposes. Add to this
+the prevalence of hypervisors, commonly on large machines, and even increasingly
+on embedded systems for partitioning purposes, and it becomes clear that even
+the notion of Number_Of_CPUs is not straightforward.
+
+A facility that may make sense for one system, may not make sense on another.
+So, I think there should first be more experience with actual implementations.
+Only when some approach turns out to be generally useful, should we consider
+standardizing it.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July  3, 2012  1:23 PM
+
+...
+> A facility that may make sense for one system, may not make sense on
+> another. So, I think there should first be more experience with actual
+> implementations. Only when some approach turns out to be generally
+> useful, should we consider standardizing it.
+
+I totally agree with this. And that means that the entire dispatching domain
+mechanism should not be part of the language (there is no evidence that it is
+"generally useful" at this point). (Raw CPU affinity -- that is package
+System.Multiprocessing -- is much more obviously useful -- and even it is
+marginal. I think we ought to have let people build on that before offering any
+other facilities, and waited for more experience to determine what is *really*
+needed.)
+
+Be that as it may, dispatching domains *are* part of the language. And it's
+plenty obvious that they are too hard to use for their intended purpose. And on
+top of that, that you can't reliably find out the contents of the
+System_Dispatching_Domain. So it should be obvious that the facility is
+inadequate for any use in its current form.
+
+The claim that dispatching domains are only for homogeneous machines is
+laughable. Dispatching domains could only be useful for machines with many CPUs,
+yet are there are almost no homogeneous machines with more than 4 CPUs.
+Dispatching domains are complete overkill for a quadcore system like my desktop;
+basic CPU affinity is sufficient (if any CPU mapping is required at all, which
+is itself a dubious proposition). So if this feature is useful at all (and one
+has to presume it is, else it would not be part of the standard), it has to work
+on non-homogeneous systems.
+
+It's surely premature to go beyond that fix at this point. And no one has
+seriously suggested doing so. But it doesn't matter anyway; we get these Annex D
+features almost full grown from IRTAW and we (the ARG) have almost always
+deferred to those experts as to whether to add them. The ARG just gets to clean
+up the mess afterwards. I very much doubt that the ARG would create any Annex D
+feature from air -- it's never happened the entire time I've been on the ARG.
+
+In any case, it's not clear what you're arguing for anymore -- are you arguing
+that we shouldn't even fix Dispatching_Domains so that they work for their
+intended purpose, or are you arguing against the straw man of additional
+operations?
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Tuesday, July  3, 2012  10:42 PM
+
+> In any case, it's not clear what you're arguing for anymore -- are you
+> arguing that we shouldn't even fix Dispatching_Domains so that they
+> work for their intended purpose, or are you arguing against the straw
+> man of additional operations?
+
+Clearly, what is currently in the standard is there to stay.
+With an appropriate implementation-defined mapping between the Ada notion of CPU
+and the system on which the program executes, the Dispatching Domains can be
+used as intended.
+
+Such a mapping provides the extra level of indirection that can be used to allow
+dispatching domains to map on arbitrary sets of physical processors.
+
+Further requests for standardization should wait until there is more experience
+with implementing and using the current standard. So yes, we shouldn't even
+"fix" Dispatching_Domains, as it is not clear what needs fixing and what the
+proper fix is.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, July  4, 2012  12:08 AM
+
+> Further requests for standardization should wait until there is more
+> experience with implementing and using the current standard.
+> So yes, we shouldn't even "fix" Dispatching_Domains, as it is not
+> clear what needs fixing and what the proper fix is.
+
+In general, I would agree with such a position, but for the case at hand, it's
+just fixing an obvious omission. Let's face it: dispatching domains /are/ sets
+of processors, it's just that currently we can specify only sets made of
+consecutive CPU numbers (but we can indirectly create a set of non-consecutive
+CPU numbers).
+
+The proposal is just about adding trivial subprograms that don't change the
+notion of dispatching domains in any way.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, July  4, 2012  9:38 AM
+
+>... So if this feature is useful at
+> all (and one has to presume it is, else it would not be part of the
+>standard), ...
+
+Please do not make such presumptions!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, July  4, 2012  10:03 AM
+
+From a formal point of view, it's a reasonable presumption :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, July  4, 2012  11:08 AM
+
+By which I mean, by including a feature the ARG has made a presumptive
+assumption that the feature is useful. Now it may turn out that it's not as
+useful as initially thought, but then the cure is to make it useful, not
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July  5, 2012   9:04 AM
+
+> Clearly, what is currently in the standard is there to stay.
+> With an appropriate implementation-defined mapping between the Ada
+> notion of CPU and the system on which the program executes, the
+> Dispatching Domains can be used as intended.
+
+For me, the convincing argument for adding the more general set notion was that
+the System dispatching domain can end up with "holes" in it.  Therefore, we
+either need to somehow prevent that from happening, or provide some way to
+represent a non-contiguous sequence of CPU ids.  Since it is difficult for
+implementations to guess what sort of "level of indirection" would be ideal for
+all applications, it seemed simplest to just augment the basic capability, so it
+is possible to talk about "holey" sets.
+
+It really isn't that big a deal to add these two interfaces, and without it, or
+some other set of restrictions on how the system domain can be "carved up," the
+current capability is broken, in my view.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July  5, 2012  9:26 AM
+
+> For me, the convincing argument for adding the more general set notion
+> was that the System dispatching domain can end up with "holes" in it.
+> Therefore, we either need to somehow prevent that from happening, or
+> provide some way to represent a non-contiguous sequence of CPU ids.
+> Since it is difficult for implementations to guess what sort of "level
+> of indirection" would be ideal for all applications, it seemed
+> simplest to just augment the basic capability, so it is possible to
+> talk about "holey" sets.
+
+I agree with Tuck on this
+
+> It really isn't that big a deal to add these two interfaces, and
+> without it, or some other set of restrictions on how the system domain
+> can be "carved up," the current capability is broken, in my view.
+
+Indeed
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July  5, 2012  9:42 AM
+
+> In general, I would agree with such a position, but for the case at
+> hand, it's just fixing an obvious omission. Let's face it: dispatching
+> domains /are/ sets of processors, it's just that currently we can
+> specify only sets made of consecutive CPU numbers (but we can
+> indirectly create a set of non-consecutive CPU numbers).
+
+How is that? A Dispatching_Domain is created as range and cannot change.
+Despite the fact that Assign_Task has the domain as "in out", one cannot use it
+to change the set of CPUs, see D.16.1(26). As far as I see from the standard,
+each CPU belongs to exactly one dispatching domain. So, by renumbering CPUs, one
+can always get each dispatching domain to be represented by a range which would
+make it pointless to use sets anyway.
+
+> The proposal is just about adding trivial subprograms that don't
+> change the notion of dispatching domains in any way.
+
+I don't quite see the notion in the Ada RM that dispatching domains are sets.
+For our compiler, we support 65536 processors. If we'd be required to implement
+Dispatching_Domain as set, each variable of the type would require 8 kB. On the
+other hand, if Dispatching_Domain is a range, it just requires 4 bytes and is
+far more efficient to deal with.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July  5, 2012  9:49 AM
+
+...
+> How is that? A Dispatching_Domain is created as range and cannot change.
+> Despite the fact that Assign_Task has the domain as "in out", one
+> cannot use it to change the set of CPUs, see D.16.1(26). As far as I
+> see from the standard, each CPU belongs to exactly one dispatching domain.
+> So, by renumbering CPUs, one can always get each dispatching domain to
+> be represented by a range which would make it pointless to use sets
+> anyway.
+
+But who would do the renumbering? I really don't understand the point Geert is
+trying to make here.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Thursday, July  5, 2012  10:12 AM
+
+...
+> I don't quite see the notion in the Ada RM that dispatching domains are sets.
+> For our compiler, we support 65536 processors. If we'd be required to
+> implement Dispatching_Domain as set, each variable of the type would require 8 kB.
+> On the other hand, if Dispatching_Domain is a range, it just requires
+> 4 bytes and is far more efficient to deal with.
+
+The problem is the System_Dispatching_Domain, which originally includes all
+processors. If you carve out of it  a specific domain with a range, the
+System_Dispatching_Domain becomes disjoint.   so right away you need to notion
+of a set. You might as well allow it for all domains.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July  5, 2012  10:15 AM
+
+>> How is that? A Dispatching_Domain is created as range and cannot change.
+>> Despite the fact that Assign_Task has the domain as "in out", one
+>> cannot use it to change the set of CPUs, see D.16.1(26). As far as I
+>> see from the standard, each CPU belongs to exactly one dispatching domain.
+>> So, by renumbering CPUs, one can always get each dispatching domain
+>> to be represented by a range which would make it pointless to use
+>> sets anyway.
+>
+> But who would do the renumbering? I really don't understand the point
+> Geert is trying to make here.
+
+It has been asserted that a Dispatching_Domain refers to a set.
+In my reading of the language a Dispatching_Domain always refers to a contiguous
+range of CPUs.
+
+I only used the renumbering argument to show that it doesn't make sense to talk
+about sets if every CPU is contained in exactly one domain. Forget about that,
+if you wish. The current RM does not allow one to create a "holey"
+Dispatching_Domain. I don't want to add extra subprograms that suddenly enable
+that capability.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Thursday, July  5, 2012  10:22 AM
+
+> For our compiler, we support 65536 processors. If we'd be required to
+> implement Dispatching_Domain as set, each variable of the type would require 8
+> kB. On the other hand, if Dispatching_Domain is a range, it just requires 4
+> bytes and is far more efficient to deal with.
+
+How often would people be creating variables of the type?  I would have thought
+that assigning tasks to domains would be controlled from the main procedure
+(running under the environment task) during start-up, rather than all over the
+place.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July  5, 2012  10:59 AM
+
+> I only used the renumbering argument to show that it doesn't make
+> sense to talk about sets if every CPU is contained in exactly one domain.
+> Forget about that, if you wish. The current RM does not allow one to
+> create a "holey" Dispatching_Domain. I don't want to add extra
+> subprograms that suddenly enable that capability.
+
+OK, so that's the focus of disagreement, I do want to add such subprograms,
+because it seems easy to do and useful.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July  5, 2012  11:06 AM
+
+> The problem is the System_Dispatching_Domain, which originally includes all processors. If you carve out of it  a specific domain with a range, the System_Dispatching_Domain becomes disjoint.   so right away you need to notion of a set. You might as well allow it for
+> all domains.
+
+Ah, the "you might as well" argument :-)
+
+So, while I see now how one could leave the System_Dispatching_Domain with
+holes, an implementation does not need to support this. The simplest one is for
+an implementation to only support a domain that leaves the
+System_Dispatching_Domain contiguous. I believe the text in D.16.1(23) allows
+this.
+
+The other obvious option is to only allow a small number of dispatching domains
+(say 4), and just check each in order to check if the CPU is in that domain.
+This is still very efficient at run time and doesn't require a lot of space,
+even for large numbers of CPUs.
+
+Given that each processor belongs to exactly one dispatching domain, I honestly
+don't see what using sets would accomplish.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, July  5, 2012  11:08 AM
+
+> I only used the renumbering argument to show that it doesn't make
+> sense to talk about sets if every CPU is contained in exactly one domain.
+> Forget about that, if you wish. The current RM does not allow one to
+> create a "holey" Dispatching_Domain. I don't want to add extra
+> subprograms that suddenly enable that capability.
+
+But that's the wrong hypothesis. The current RM DOES allow "holey"
+Dispatching_Domain.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July  5, 2012  11:31 AM
+
+Note that the proposed interface allows the set to be specified by an array that
+is no larger than necessary.  That is, the bounds of the boolean array can be
+something other than 1..Num_CPUs. For example:
+
+     My_Holey_Domain : Dispatching_Domain :=
+       Create((1|5|9|13 => True, 2..4|6..8|10..12 => False));
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July  5, 2012  12:28 PM
+
+> > I only used the renumbering argument to show that it doesn't make
+> > sense to talk about sets if every CPU is contained in
+> exactly one domain.
+> > Forget about that, if you wish. The current RM does not
+> allow one to
+> > create a "holey" Dispatching_Domain. I don't want to add extra
+> > subprograms that suddenly enable that capability.
+>
+> But that's the wrong hypothesis. The current RM DOES allow "holey"
+> Dispatching_Domain.
+
+He's technically right. The definition of Create includes:
+
+"A call of Create will raise Dispatching_Domain_Error if... the system cannot
+support a distinct domain over the processors identified..."
+
+That allows the implementation to reject any call on Create that it likes
+(certainly including the holey System_Dispatching_Domain). The problem is that
+this permission opens a truck-sized hole in the definition; it essentially means
+that supporting this package is optional (the system never *has* to support
+creating a dispatching domain).
+
+I don't think the intent was that this package was optional -- if that was the
+intent, it should have been made explicit. As such, I think this sentence should
+be removed and replaced by something specific in order to explain what is and is
+not allowed. Because the entire reason to standardize on a facility is to
+provide portability between implementations. If the implementations aren't even
+required to support basic functionality, then using this facility is just
+another way to force vendor-lock-in. (Especially as using the facility is very
+unlikely, almost no programs have any reason to use it -- especially as it
+destroys all of the scheduling guarantees given elsewhere in the Standard.)
+
+Indeed, the permission of D.16.1(33/3) seems to be all that is required. So
+perhaps we don't need the sentence at all??
+
+In any case, if basic use of this package isn't portable at all, then I don't
+think it even belongs in the language. What could possibly be the point? The
+Standard isn't about defining facilities that might be interesting to have
+sometimes!!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July  5, 2012  12:49 PM
+
+...
+> So, by renumbering CPUs, one can always get each dispatching domain to
+> be represented by a range which would make it pointless to use sets
+> anyway.
+
+The problem with that is who does the renumbering? You convinced us that it is
+impossible for the implementation to do such a renumbering -- it probably
+doesn't even know the architecture involved.
+
+Which leaves it to the user. If the user has to use some implementation-defined
+mechanism to do such a remapping, all portability is lost. So if such a facility
+is required, it has to be within the language. Indeed, we considered adding such
+a facility to the existing packages, but it seemed complex and it didn't seem
+any better than allowing sets in the first place.
+
+> > The proposal is just about adding trivial subprograms that don't
+> > change the notion of dispatching domains in any way.
+>
+> I don't quite see the notion in the Ada RM that dispatching domains are
+> sets. For our compiler, we support 65536 processors.
+
+Oh, the old "it hurts when I do this argument".
+
+> If we'd be required to implement Dispatching_Domain as set, each
+> variable of the type would require 8 kB.
+
+Not at all; you can represent the set anyway you want. We don't have a problem
+with Wide_Character_Set, even though it is logically the same time (64K bits),
+because we use more compact representations than that. And we even have
+Wide_Wide_Character_Set, which would be practically impossible to represent as
+an array of bits.
+
+> On the other hand, if Dispatching_Domain is a range, it just requires
+> 4 bytes and is far more efficient to deal with.
+
+Well, unless we remove the permission to reject from D.16.1(23) [which I think
+we should do, but I can believe that won't happen], I don't think there will be
+a real requirement to support a set. (I would expect that the set Create would
+have the same permissions.) OTOH, given that Robert and Ed both support adding
+these interfaces, as does the majority of the remainder of the ARG, I suspect
+you will be directed to implement it. So you need to figure out how to do it
+efficiently. :-)
+
+[Also note, so long as the permission to reject exists, you can easily represent
+this set as a fixed number of ranges; if someone tries to use a more complex
+set, you can just reject. Also, as these are limited types with no assignment, a
+small amount of dynamic allocation is unlikely to be a problem, since you don't
+have to support assignment nor streaming nor any changes after initialization
+(and thus not even deallocation is needed). And this can be "faked" with a
+permanent "pool" of ranges to "allocate" from (just like you would do in SPARC
+or Fortran 66).]
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, July  5, 2012  12:42 PM
+
+> > I don't think the intent was that this package was optional
+
+I can't too excited about that.  Everything in every standard is optional, despite all the "shall"s.  The police won't arrest you if you disobey the Ada RM.  ;-)
+
+We trust implementations not to abuse their right to disobey.
+
+>... (Especially as using the facility is
+> > very unlikely, almost no programs have any reason to use it
+
+Another reason not to be excited about this issue.
+
+> In any case, if basic use of this package isn't portable at all, then I
+> don't think it even belongs in the language.
+
+It probably doesn't belong.
+
+>... What could possibly be the
+> point? The Standard isn't about defining facilities that might be
+> interesting to have sometimes!!
+
+You mean like the _optional_ annex in which this facility lives?  ;-)
+
+Having said all that, Tucker's proposal seems pretty simple and
+harmless, and trivial to implement, so I don't object to including
+it.
+
+Alternatively, we could consider removing this facility as a
+binding interpretation.  A few years from now, that would be
+an unacceptable incompatibility, but at this point, with Ada
+2012 not yet approved, and nobody using this package...
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July  5, 2012  1:22 PM
+
+> In any case, if basic use of this package isn't portable at all, then
+> I don't think it even belongs in the language. What could possibly be
+> the point? The Standard isn't about defining facilities that might be
+> interesting to have sometimes!!
+
+Well one hopes that implementations try to be consistent, and the requirement
+means that *something* has to be provided. We have plenty of cases of things
+that aren't portable at all. package Machine_Code is the most oobvious case.
+
+****************************************************************
+
