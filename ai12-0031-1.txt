@@ -1,5 +1,5 @@
-!standard E.2.3(19/3)                              12-06-06    AI12-0031-1/01
-!class ramification 12-06-06
+!standard E.2.3(19/3)                              12-11-17    AI12-0031-1/02
+!class binding interpretation 12-11-17
 !status work item 12-06-06
 !status received 12-05-17
 !priority Low
@@ -7,58 +7,215 @@
 !subject All_Calls_Remote and indirect calls
 !summary
 
-**TBD.
+All_Calls_Remote only applies to direct calls.
 
 !question
 
 Does E.2.3(19/3) apply to indirect calls (that is those through
-access-to-subprogram values)? (???***???)
+access-to-subprogram values)? (No.)
 
 There are unnecessary complications if the clause applies to calls through
-access-to-subprogram objects.  For example, if the program calls through a
-remote-access-to-subprogram object, the access object will probably contain a
-partition_ID, and it makes sense for the caller to check to see if the
-partition_ID refers to the current partition and make a local call if so. But if
-the rules require that it be a PCS call if the subprogram is in an
-All_Calls_Remote package, the code would have to somehow determine whether the
-subprogram address were in such a package.
+access-to-subprogram objects.
 
-Similarly, in the case of a normal access-to-subprogram object: the access
-object is probably just the address of a subroutine, and it would be the same
-subroutine that would be called for a direct call, which, for a remote
-subprogram in an All_Calls_Remote package, would be the address of a subroutine
-that uses the PCS to call the target routine. If such an access-to-subprogram
-object were then passed to a routine in a child package of the RCI unit, and the
-second sentence of E.2.3(19) applied to indirect calls, the child package code
-would have to somehow check the address in the access-to-subprogram object to
-see if it refers to a remote subprogram in the parent unit, so that it could
-make a local call instead of going through the PCS.
+For example, if the program calls through a remote-access-to-subprogram
+object, the access object will probably contain a partition_ID, and it
+makes sense for the caller to check to see if the partition_ID refers to
+the current partition and make a local call if so. But if the rules
+require that it be a PCS call if the subprogram is in an
+All_Calls_Remote package, the code would have to somehow determine
+whether the subprogram address were in such a package.
 
-!response
+Similarly, in the case of a normal access-to-subprogram object: the
+access object is probably just the address of a subroutine, and it would
+be the same subroutine that would be called for a direct call, which,
+for a remote subprogram in an All_Calls_Remote package, would be the
+address of a subroutine that uses the PCS to call the target routine. If
+such an access-to-subprogram object were then passed to a routine in a
+child package of the RCI unit, and the second sentence of E.2.3(19)
+applied to indirect calls, the child package code would have to somehow
+check the address in the access-to-subprogram object to see if it refers
+to a remote subprogram in the parent unit, so that it could make a local
+call instead of going through the PCS.
 
-** TBD.
+!recommendation
+
+The wording is changed so that the All_Calls_Remote aspect only applies
+to direct calls to an RCI unit package. Indirect calls are always
+considered as being outside of the declarative region and it is up to
+the implementation to decide whether such calls to the same partition
+are routed through the PCS.
 
 !wording
 
-** TBD.
+Modify AARM E.2.3(16.a/3):
+   Aspect Description for All_Calls_Remote: All {direct} remote procedure
+   calls {from outside the declarative region of the RCI unit} should use
+   the Partition Communication Subsystem[, even if they  are local].
+
+Modify E.2.3(19/3):
+   If aspect All_Calls_Remote is True for a given RCI library unit, then
+   the implementation shall route any {direct} call to a subprogram of
+   the RCI unit from outside the declarative region of the unit through
+   the Partition Communication Subsystem (PCS); see E.5. {Direct calls}
+   [Calls] to such subprograms from within the declarative region of the
+   unit are defined to be local and shall not go through the PCS.
+
+Modify AARM E.2.3(19.a/3):
+   When this aspect is False (or not used), it is presumed that most
+   implementations will {not involve the PCS}[make direct calls] if the
+   call originates in the same partition as that of the RCI unit. When
+   this aspect is True, all {direct} calls from outside the subsystem
+   rooted at the RCI unit package are treated like calls from outside the
+   partition, ensuring that the PCS is involved in all such calls (for
+   debugging, redundancy, etc.).
+
+Add to AARM E.2.3(19.b):
+  This aspect does not apply to indirect calls because the overhead
+  in determining whether an actual subprogram parameter is declared in
+  an All_Calls_Remote RCI unit or within the declarative region of
+  such a unit was deemed not to be worthwhile.
 
 !discussion
 
-Note that ignoring the rule for "indirect" calls would seem to have the effect
-of eliminating the value of the "All_Calls_Remote" setting, because it would
-actually be "Most_Calls_Remote" :-).
+Consider:
 
-OTOH, the implementation issues mentioned are real. So we probably have no
-choice but to exclude indirect calls from these rules.
+package Server_RCI_Package is
 
-Personally, I think this eliminates any value to this setting, and I'd probably
-suggest just dropping All_Calls_Remote completely from the standard. (Obviously,
-implementations could continue to support it with whatever meaning that they
-want.) I just cannot see what value "Most_Calls_Remote" could possibly have.
+   pragma Remote_Call_Interface;
 
-This AI is initially classified as a Ramification as we were hoping that we
-could restrict any changes to a TBH note. But I'm now thinking that was too
-optimistic.
+   type Callback is access procedure;
+
+   procedure P (Call : Callback);
+
+end Server_RCI_Package;
+
+package body Server_RCI_Package is
+
+   procedure P (Call : Callback) is
+   begin
+      Call.all;
+      --  How can we tell if All_Calls_Remote applies to this call?
+   end P;
+
+end Server_RCI_Package;
+
+package Normal_RCI_Package is
+
+   pragma Remote_Call_Interface;
+
+   procedure Biff;
+
+end Normal_RCI_Package;
+
+package body Normal_RCI_Package is
+
+   procedure Biff is
+   begin
+      -- Do something
+      ...
+   end Biff;
+
+end Normal_RCI_Package;
+
+package All_Calls_Remote_Package is
+
+   pragma Remote_Call_Interface;
+   pragma All_Calls_Remote;
+
+   procedure Bam;
+
+end All_Calls_Remote_Package;
+
+package body All_Calls_Remote_Package is
+
+   procedure Bam is
+   begin
+      ...  -- Do something useful
+   end Bam;
+
+end All_Calls_Remote_Package;
+
+package All_Calls_Remote_Package.Child is
+
+   pragma Remote_Call_Interface;
+
+   type Callback is access procedure;
+
+   procedure Pow (Cb : Callback);
+
+end All_Calls_Remote_Package.Child;
+
+package body All_Calls_Remote.Child is
+
+   procedure Pow (Cb : Callback) is
+   begin
+      Cb;
+      -- How can we tell if Cb is an All_Calls_Remote from within the
+      -- declarative region so that the call can be a local call?
+   end Pow;
+end All_Calls_Remote_Package.Child;
+
+with Server_RCI_Package;
+with All_Calls_Remote_Package.Child;
+with Normal_RCI_Package;
+
+procedure Distributed is
+begin
+   -- A => Call to All_Calls_Remote subprogam
+   Server_RCI_Package.P
+      (Call => All_Calls_Remote_Package.Bam'Access);
+
+   -- B => Call to Normal RCI subprogram
+   Server_RCI_Package.P
+      (Call => Normal_RCI_Package.Biff'Access);
+
+   -- C => Call to Child of All_Calls_Remote pkg with Parents subp
+   All_Calls_Remote_Package.Child.Pow
+      (Cb => All_Calls_Remote_Package.Bam'Access);
+
+   -- D => Call to Child of All_Calls_Remote pkg with subprogram
+   --      outside the declarative region of the parent package
+   All_Calls_Remote_Package.Child.Pow
+       (Cb => Normal_RCI_Package.Biff'Access);
+
+end Distributed;
+
+According to E.2.1 (19/3), the call at A => should be routed through
+the PCS, since the Bam subprogram is declared in an All_Calls_Remote
+package. However the call at B => presumably wouldn't go through the PCS
+if the Normal_RCI_Package and the Server_RCI_Package belonged to the
+same partition.
+
+In order for the body of Server_RCI.P to make this distinction,
+it would require a mechanism to determine whether the actual parameter
+was declared in an All_Call_Remotes RCI unit.
+
+Conversely, according to the latter part of E.2.1 (19/3), the call at
+C => should not be routed through the PCS, since the call is being made
+within the declarative region of the All_Calls_Remote RCI unit. However,
+the call at D=> would go through the PCS if Normal_RCI_Package belonged
+to a different partition than All_Calls_Remote_Package.
+
+The body of All_Calls_Remote_Package.Child.Pow would need to have a
+mechanism to determine whether the actual parameter is declared within
+the same declarative region, and if so, have a means to convert the
+remote subprogram address to the local direct subprogram address.
+
+Addressing these complications would involve introducing overhead for
+the calls and are not worth solving for a pragma that may be typically
+used only for debugging purposes.
+
+Instead, these complications can be avoided if the All_Calls_Remote
+pragma is clarified to only apply to direct calls to RCI units. It is
+up to the implementation to decide whether indirect calls to an RCI unit
+through a remote access-to-subprogram object in the same partition needs
+to be routed through the PCS.
+
+It was considered whether the pragma should be dropped from the standard
+altogether, since All_Calls_Remote is not entirely true if certain calls
+can be local. It was decided that it was worthwhile keeping the pragma
+because it is useful for debugging and testing a PCS, and because
+calls to an RCI unit are more typically direct calls.
 
 !ACATS test
 
