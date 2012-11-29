@@ -1,5 +1,5 @@
-!standard D.16.1(7/3)                              12-06-06    AI12-0033-1/01
-!class ramification 12-06-06
+!standard D.16.1(7/3)                              12-11-28    AI12-0033-1/02
+!class binding interpretation 12-11-28
 !status work item 12-06-06
 !status received 12-05-29
 !priority Low
@@ -7,49 +7,84 @@
 !subject Sets of CPUs when defining dispatching domains
 !summary
 
-The mapping of hardware CPUs to values of type CPU is implementation-defined.
+Discontiguous sets of CPU numbers may be used when specifying a dispatching
+domain.
 
 !question
 
 It seems limiting that dispatching domains can only be defined by ranges of
 CPUs.
 
-for example in our hardware Architecture, we have 4 CPU's with each 4 cores, but
+For example in our hardware Architecture, we have 4 CPU's with each 4 cores, but
 the numbering is not straight forward. The first CPU has the cores 0, 4, 8, 12,
 and the second 1,5,9,13. So here it will be better to have a higher flexibility in
 assigning Domains to ranges and single cores e.g a Domain (2,6,10,14) pointing
 the 2nd CPU or (2-3,6-7,10-11,14-15) defining a Domain of the 2nd and 3rd CPU.
 
-Should an additional Create routine be defined? (No.)
+Should an additional Create routine be defined? (Yes.)
 
-!response
+!recommendation
 
-The mapping of hardware CPUs to values of type CPU is implementation-defined,
-and does not necessarily correspond to anything on the target system. In
-particular, the mapping should put related processors together so that they
-can be simply defined by a range. Specifically, the mapping outlined in the
-question is not a good idea.
+A more flexible specification is proposed allowing sets of CPUs to be specified.
+This may in any case be necessary to describe the set of CPUs that remain in the
+System dispatching domain, after the other domains have been "carved" out of it.
 
 !wording
 
-None needed.
+After 9/3:
+    type CPU_Set is array(CPU range <>) of Boolean;
+
+    function Create (Set : CPU_Set) return Dispatching_Domain;
+
+    function Get_CPU_Set  (Domain : Dispatching_Domain) return CPU_Set;
+
+Modify 23/3:
+
+    The function Create {with First and Last parameters} creates and returns a
+    Dispatching_Domain containing all the processors in the range First .. Last.
+    {The function create with a Set parameter creates and returns a
+    Dispatching_Domain containing the processors for which Set(I) is True.} These
+    processors are removed from System_Dispatching_Domain. A call of Create will
+    raise Dispatching_Domain_Error if any designated processor is not currently
+    in System_Dispatching_Domain, or if the system cannot support a distinct
+    domain over the processors identified, or if a processor has a task assigned
+    to it, or if the allocation would leave System_Dispatching_Domain empty. A
+    call of Create will raise Dispatching_Domain_Error if the calling task is not
+    the environment task, or if Create is called after the call to the main
+    subprogram.
+
+Modify 24/3:
+
+    The function Get_First_CPU returns the first CPU in Domain; Get_Last_CPU
+    returns the last one.  {The function Get_CPU_Set(D) returns an array whose
+    low bound is Get_First_CPU(D), whose high bound is Get_Last_CPU(D), with True
+    values in the Set corresponding to the CPUs that are in the given Domain.}
 
 !discussion
 
-We considered adding a "set" Create, Set_CPU, and so on. But Ada doesn't have
-any satisfying representation for a small set of integers. Memberships only
-make sense for predicates (not here); aggregates of arrays of boolean indexed
-by CPU are clunky; aggregates of an array of CPU values might be better, but
-these are of unknown length. Both kinds of aggregates are also not portable,
-given that implementations have different ranges for type CPU.
+There is already a problem with the current mechanism for specifying dispatching
+domains, in that the System_Dispatching_Domain might have holes. For example, if
+the program is running on a system with 8 CPUs, and a domain is Created
+containing CPUs 3 through 6, the System_Dispatching_Domain holds the remaining
+CPUs, which in this case are CPUs 1, 2, 7, and 8. Then
+Get_First_CPU(System_Dispatching_Domain) = 1 and
+Get_First_CPU(System_Dispatching_Domain) = 8. but this surely does not
+completely characterize the values in the System_Dispatching_Domain. Moreover,
+you can create many holes in the System_Dispatching_Domain this way.
 
-As such, we decided not to try to define a set version of Dispatching_Domains
-and just assume implementers be more careful with their CPU mapping than the
-questioner was.
+So we propose to add set operations here in order to properly represent any of
+these items.
+
+We have chosen a straightforward bit-vector representation of the CPU set. A
+more sophisticated approach is possible, but seems to be overkill.  The CPU_Set
+array type is unconstrained, so the overall length may be kept to the minimum
+necessary to include all of the "True" values. Aspect Pack might be applied to
+CPU_Set in the private part of this package, if the implementation so chooses.
 
 !ACATS test
 
-None needed.
+An ACATS C-Test should be created (or modified) to test these additional
+subprograms.
 
 !appendix
 
@@ -1150,6 +1185,68 @@ Sent: Thursday, July  5, 2012  1:22 PM
 Well one hopes that implementations try to be consistent, and the requirement
 means that *something* has to be provided. We have plenty of cases of things
 that aren't portable at all. package Machine_Code is the most oobvious case.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, November 28, 2012  7:34 PM
+
+Here is a rewrite of AI12-0033 to propose a set representation.
+It is just a simple boolean array indexed by CPU.  It is unconstrained so the
+array can be as short as possible so as to only include the True values.  It
+could of course also be packed if the implementation so chose.  I considered a
+more complex representation but it seemed to be overkill.  Even if there were
+thousands of CPUs, the number of dispatching domains is likely to be pretty
+small, so the total amount of space devoted to these bit-vectors would never
+amount to much.
+
+[This is version /02 of the AI - Editor.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 28, 2012  9:55 PM
+
+...
+> !question
+>
+...
+> Should an additional Create routine be defined? (No.)
+
+And then...
+
+> !wording
+>
+> After 9/3:
+>     type CPU_Set is array(CPU range <>) of Boolean;
+>
+>     function Create (Set : CPU_Set) return Dispatching_Domain;
+
+Humm -- this looks like an additional Create routine. ;-) It appears that the
+answer to the question should have been changed.
+
+It also would have helped if you had converted this to the form of a Binding
+Interpretation -- it surely isn't a Ramification any more.
+
+I've made these corrections in the version I filed. (And sent this message to
+make it clear that I made these changes to the version you sent.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 28, 2012  10:05 PM
+
+...
+> Presumably a pragma Pack(CPU_Set) might be in the private part of this
+> package, if the implementation so chooses.
+
+pragma Pack is obsolescent, it's better to talk about aspect Pack if possible.
+
+"Aspect Pack might be applied to CPU_Set in the private part of this package, if
+the implementation so chooses."
+
+(I dropped the "Presumably" as we don't need both "might" and "presumably" in
+the same sentence.)
 
 ****************************************************************
 
