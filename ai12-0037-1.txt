@@ -1,0 +1,112 @@
+!standard A.19(4/3)                                   12-11-29    AI12-0037-1/01
+!class binding interpretation 12-11-29
+!status work item 12-11-29
+!status received 12-08-06
+!priority Low
+!difficulty Medium
+!subject  New types in Ada.Locales can't be converted to/from strings
+!summary
+
+Types Ada.Locales.Language_Code and Ada.Locales.Country_Code should be derived
+from type String.
+
+!question
+
+It is difficult to output objects of type Ada.Locales.Language_Code
+or Ada.Locales.Country_Code; you can't give them to Text_IO.Put
+because their type isn't String, but you also
+can't convert them to String because they run afoul of 4.6(24.5/2)
+which requires that component subtypes must statically match.
+
+Should some change be made in order to make this easier? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+Replace A.19(4/3) with:
+
+   type Language_Code is new String(1 .. 3)
+      with Dynamic_Predicate => (for all E of Language_Code =>
+         (if E not in 'a' .. 'z' then raise Constraint_Error);
+   type Country_Code is new String(1 .. 2)
+      with Dynamic_Predicate => (for all E of Country_Code =>
+         (if E not in 'a' .. 'z' then raise Constraint_Error);
+
+[Did I manage use the maximum new features here? :-) - RLB]
+
+!discussion
+
+This change is compatible with the original Ada 2012 definition; the only difference
+is that conversions to and from type String are now allowed.
+
+The predicate could have been written in a number of other ways; this one doesn't
+depend explicitly on the bounds of the subtypes, so it is preferred. Of course, an
+implementation can replace this by anything equivalent if that will provide better
+performance.
+
+Note that this predicate uses a raise expression as described in AI12-0022-1. We
+could avoid this by defining a function Raise_Constraint_Error (which would do what
+its name implies), but that would involve some name pollution when use clauses
+are used. [The AI12-0022-1 capability is so important that we ought to consider
+reclassifying it a "binding interpretation" so we can use it here - Editor.]
+
+!ACATS test
+
+An ACATS C-Test should be created to test that Language_Codes and Country_Codes can be
+converted to type String for output via Put_Line.
+
+!appendix
+
+!topic New types in Ada.Locales can't be converted to/from strings
+!reference A.19
+!from Adam Beneschan 12-08-06
+!discussion
+
+It was just pointed out on comp.lang.ada that it is difficult to
+output objects of type Language_Code or Country_Code; you can't give
+them to Text_IO.Put because their type isn't String, but you also
+can't convert them to String because they run afoul of 4.6(24.5/2)
+which requires that component subtypes must statically match.
+
+Assuming that it's desirable to keep the range constraint on the
+component subtype, I'd suggest adding To_String and From_String
+functions to Ada.Locales:
+
+   function To_String (C : Language_Code) return String;
+   function To_String (C : Country_Code) return String;
+
+   function From_String (S : String) return Language_Code;
+   function From_String (S : String) return Country_Code;
+
+with From_String raising Constraint_Error if S has the wrong length or
+any character in S is out of range.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, August 9, 2012  6:08 PM
+
+That's the "easy" solution, but it seems very, very strange that you
+can't do these conversions directly (surely you would expect to be able
+to do so).
+
+I'd suggest changing to a rule where the component types still have to
+be the same, but the constraints get rechecked (possibly requiring a
+loop). That would not require making a copy of the array (other than
+in cases where it is already required to do so, that is, when the component
+sizes are different), but would give more flexibility for cases like this.
+
+Alternatively, we could only require convertability for elementary types
+(I'd be dubious of expanding that for composite types), and let copies be
+required sometimes. (Compilers probably already can make such copies,
+because of the component size difference cases.)
+
+****************************************************************
+
+Editor's note: This solution was suggested by Bob Duff in private mail.
+He deserves credit (or blame!) for this clever idea.
+
+****************************************************************
