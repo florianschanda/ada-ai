@@ -1,0 +1,419 @@
+!standard 13.11(18)                                  12-11-29    AI12-0043-1/01
+!class binding interpretation 12-11-29
+!status work item 12-11-29
+!status received 12-07-05
+!priority Low
+!difficulty Medium
+!subject Details of the storage pool used when Storage_Size is specified
+!summary
+
+The storage pool used by an access type that has Storage_Size specified
+must must not allocate additional storage when the initial amount is
+exhausted, and the memory must not be shared with other types unless
+that is explicitly requested by attaching the pool to another type.
+
+!question
+
+The ACAA received a test dispute that claims that language in 13.11(18) allows
+pretty much anything the implementor wants, as none of the properties of the
+implementation-defined pool are specified, other than that the memory is
+reclaimed when the scope is left.
+
+The intent was that implementations would continue to implement this as it
+was defined in Ada 83, with the difference that reasonable rounding up is
+allowed, but this surely shouldn't be left to the imagination.
+
+Should this wording be tightened up? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+Modify 13.11(18):
+
+If Storage_Size is specified for an access type T, {an
+implementation-defined pool P is used for the type. The}[then the]
+Storage_Size of [this pool]{P} is at least that requested, and the
+storage for [the pool]{P} is reclaimed when the master containing the
+declaration of the access type is left. If the implementation cannot
+satisfy the request, Storage_Error is raised at the point of the
+attribute_definition_clause {or aspect_clause}. {The storage pool P
+is used only for allocators returning type T, or other access types
+specified to use T'Storage_Pool. Storage_Error is raised by an allocator
+returning such a type if the storage space of P is exhausted
+(additional memory is not allocated).}
+
+If neither Storage_Pool nor Storage_Size are specified, then the meaning of
+Storage_Size is implementation defined.
+
+[Note that the last sentence was split into its own paragraph; it doesn't
+belong with the semantics of a specified Storage_Size.]
+
+!discussion
+
+We could also mention that a call to Deallocate (via an instance of
+Unchecked_Deallocation) for such may, but is not required to,
+return the memory to the pool for further use. We didn't mention
+that because it seems like overspecification; we mainly care that
+the expected number of allocations (with reasonable rounding) work
+and then Storage_Error is raised.
+
+Finally, note that while the definition of Storage_Pools talks about
+what the operations are "intended" to do, this wording exists only because
+a user-defined pool can do anything it wants to, whether or not that makes
+any sense compared to the intent. For implementation-defined pools, it
+is expected that they follow the intent - there is no reason for them to
+deviate. We could try to add some normative wording to that effect, but it's
+hard to word and it only seems necessary to someone that is trying to cheat.
+(What else could the Standard reasonably intend??)
+
+!ACATS test
+
+ACATS tests already exist for these rules; the point of this AI is to
+verify that these tests are correct.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Thursday, July 5, 2012  3:55 PM
+
+I'm not sure what to do with the two ACATS tests CD2B11A and CD2B15C. I have a
+ACAA petition that points out an obvious flaw and then goes on to make a rather
+extreme claim.
+
+First, a bit of background. These two tests are "legacy" tests, meaning they
+were originally created for Ada 83. They both were slightly modified for Ada 95.
+They both check that Storage_Error is raised when the space for a "collection"
+is exhausted (that is, an access type with a specified Storage_Size). CD2B11A
+also does some other checks, CD2B15C is all about the Storage_Error.
+
+Both tests assume that allocating even a single item beyond that implied by the
+limit should raise Storage_Error.
+
+The petitioner reasonably points out that the wording in 13.11(18) is "the
+Storage_Size of this pool is at least as that requested". The AARM notes (which
+themselves are a bit weird, 13.11(18.b) effectively points at 13.3(66.a), which
+has the wording about "rounding up") make it clear that the actual Storage_Size
+can be larger than the specified one. So presuming that the 129th allocation
+must fail, without even checking the resulting Storage_Size (as CD2B11A does),
+is clearly wrong.
+
+One might think that the tests therefore should be fixed so that they uses the
+actual reported Storage_Size to determine when Storage_Error must be raised.
+
+However, here is where the petitioner makes the fantastic claim. He argues:
+
+   I think the use of a Storage_Size clause (with a positive value)
+   was envisioned as meaning that the program would "reserve" that
+   many units of memory that couldn't be used for anything else.
+   However, I believe that the language of the RM is vague enough so
+   that this behavior isn't actually required.
+
+He then argues that the behavior of Storage_Size is only defined in terms of the
+equivalent Storage_Pool. And Storage_Pools are defined by saying what the
+operations are "intended" to do. Ergo, there is no *requirement* to do anything.
+
+The petitioner goes on to describe an implementation in terms of malloc/free
+(because the "C library doesn't provide its own memory management routines to
+allocate within a reserved block of memory". He describes using a linked list to
+ensure that the allocated blocks are freed at scope exit. He argues that this
+implementation meets all of the requirements of the language, but of course
+Storage_Size is meaningless in such an implementation. (He does not say if his
+implementation actually works this way or whether this is a thought experiment.)
+
+Putting my ARG hat on, I find this argument ridiculous. Just because some target
+system doesn't provide some Ada-defined facility does not give a license to
+ignore it. In this case, building an implementation-defined pool manager to
+support reserved blocks of memory is not hard at all (it's trivial when the
+designated type is fixed in size, it's not that hard if the designated type
+supports multiple sizes -- and the latter is never required by Ada anyway). So I
+cannot imagine that the "impossible or impractical" exception would apply here.
+
+Moreover, storage pools are defined in terms of "intended behavior" because they
+are user-provided, and there is no possible way for the language to ensure that
+the user writes something that makes sense. Thus the "intended" wording. There
+is no such need for implementation-defined pools; there is no need for
+"intended" to apply to them.
+
+I don't think it is a good idea to make Storage_Size completely meaningless.
+That would mean that users would have to construct user-defined pools if they
+want even simple memory management, as the implementation would be required to
+do essentially nothing useful. Reasonable rounding up is one thing; rounding up
+to near infinity is another thing altogether.
+
+So, I think the ARG should at least consider rejecting this argument.
+
+Putting my ACAA hat back on, I need to have some idea what the ARG thinks about
+this argument before deciding how the fix the tests. If the ARG considers his
+argument to be valid, then the tests are not fixable, and the subtest needs to
+be removed from both tests (in the case of CD2B15C, that would leave nothing, so
+the test would simply be withdrawn forever).
+
+OTOH, if the argument is considered invalid, we should issue a ramification and
+I should fix the two subtests to use the actual reported Storage_Size to
+determine when Storage_Error should be raised. (In the period before the
+ramification is issued, I'd allow a grading modification to allow his supposed
+implementation, but the tests would remain to support the intent.)
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, July 6, 2012  3:11 AM
+
+> However, here is where the petitioner makes the fantastic claim. He argues:
+>
+>    I think the use of a Storage_Size clause (with a positive value)
+>    was envisioned as meaning that the program would "reserve" that
+>    many units of memory that couldn't be used for anything else.
+
+That always was my understanding
+
+>    However, I believe that the language of the RM is vague enough so
+>    that this behavior isn't actually required.
+
+And I agree that this would ruin the intent.
+
+However, I can't find any wording that would limit the effect of "rounding up"
+(on purpose?). One can imagine that rounding up happens up to the next page
+boundary - so why not up to the whole available memory ?
+
+I am not in favor of making the feature useles, but I don't see how it could be
+specified otherwise.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, July 6, 2012  5:47 AM
+
+> Putting my ARG hat on, I find this argument ridiculous. Just because
+> some target system doesn't provide some Ada-defined facility does not
+> give a license to ignore it. In this case, building an
+> implementation-defined pool manager to support reserved blocks of
+> memory is not hard at all (it's trivial when the designated type is
+> fixed in size, it's not that hard if the designated type supports
+> multiple sizes -- and the latter is never required by Ada anyway). So I
+> cannot imagine that the "impossible or impractical"
+> exception would apply here.
+>
+> Moreover, storage pools are defined in terms of "intended behavior"
+> because they are user-provided, and there is no possible way for the
+> language to ensure that the user writes something that makes sense. Thus the "intended"
+> wording. There is no such need for implementation-defined pools; there
+> is no need for "intended" to apply to them.
+
+> So, I think the ARG should at least consider rejecting this argument.
+
+I thnk the argument is bogus and agree with Randy that it should be rejected.
+
+> OTOH, if the argument is considered invalid, we should issue a
+> ramification and I should fix the two subtests to use the actual
+> reported Storage_Size to determine when Storage_Error should be
+> raised. (In the period before the ramification is issued, I'd allow a
+> grading modification to allow his supposed implementation, but the
+> tests would remain to support the intent.)
+
+I don't think you even have to wait, it's obviously the right thing to do!
+
+Now I will find out that it is someone in AdaCore making this argument
+:-) Well if I do, it won't change my opinion on this one :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, July 6, 2012  5:48 AM
+
+>>     However, I believe that the language of the RM is vague enough so
+>>     that this behavior isn't actually required.
+> And I agree that this would ruin the intent.
+>
+> However, I can't find any wording that would limit the effect of
+> "rounding up" (on purpose?). One can imagine that rounding up happens
+> up to the next page boundary - so why not up to the whole available memory ?
+
+Because we are not in the business of allowing absurd interpretations. There is
+nothing in the RM to forbid using a recursive implementation of "*" that raises
+storage error for large arguments.
+
+The ACATS is much more than a test for formal compliance with the standard, it
+is (and always has been) also a test that an implementation implements the
+standard in a reasonable manner without unreasonable limitations.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, July 6, 2012  7:36 AM
+
+I believe we should preserve the tests, but perhaps require that the implementor
+provide a constant which represents the maximum additional space that might be
+made available over and above the specified Storage_Size.  This might be 4096,
+1024, or whatever.  I would provide a default value of something like 4096, as
+that seems adequate for most implementations. If the implementor wants to make
+their "adjustment" 1Meg, I guess that would be their right.  The test might take
+quite a bit longer to run!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 6, 2012  1:55 PM
+
+Not a bad idea, but clearly more work (especially as the tests would have to be
+converted from "legacy" to "modern" format in order to use a constant in
+Impdef). Still, this looks like the way to go. Thanks.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Saturday, July 7, 2012  5:36 AM
+
+(1) Reject the argument. Even for the implementation described, it is trivial to
+check that Storage_Size (+Epsilon) is not exceeded. I consider some
+predetermined Epsilon mandatory, since the user intent might well have been that
+the memory requirements for the access type stay within this bound (as opposed
+to helping the implementation allocate a fixed-size collection area). In the
+malloc case, the Epsilon may be on the large side, because many implementations
+of malloc grab heap in big chunks for subsequent carving, which then determine
+the max Epsilon to be very close to the size of these chunks. It makes no sense
+to force the implementation to bypass malloc merely to get smaller chunks
+matching Storage_Size.
+
+(2) Fix the test in any of the following ways:
+- Parameterized by the implementer-provided Epsilon (as Tuck already suggested).
+- Running up to above the actually reported Storage_Size and reporting
+  informationally the difference between the specified Storage_Size and the
+  actual bound encountered.
+
+(3) RM-work: add specification of the Epsilon as a documentation requirement.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, July 16, 2012  9:41 AM
+
+> (1) Reject the argument. Even for the implementation described, it is
+> trivial to check that Storage_Size (+Epsilon) is not exceeded. I
+> consider some predetermined Epsilon mandatory, since the user intent
+> might well have been that the memory requirements for the access type
+> stay within this bound (as opposed to helping the implementation
+> allocate a fixed-size collection area). In the malloc case, the
+> Epsilon may be on the large side, because many implementations of
+> malloc grab heap in big chunks for subsequent carving, which then
+> determine the max Epsilon to be very close to the size of these
+> chunks. It makes no sense to force the implementation to bypass malloc
+> merely to get smaller chunks matching Storage_Size.
+
+I don't really care about this, seems a bit tempest-teapotty to me, but I can
+live with this
+
+> (2) Fix the test in any of the following ways:
+> - Parameterized by the implementer-provided Epsilon (as Tuck already
+> suggested).
+> - Running up to above the actually reported Storage_Size and reporting
+> informationally the difference between the specified Storage_Size and
+> the actual bound encountered.
+
+I would do the first
+
+> (3) RM-work: add specification of the Epsilon as a documentation
+> requirement.
+
+Just say it's implementation defined, that's good enough, let's not add any more
+explicit junk documentation *requirements*. You are supposed to document
+implementation defined stuff.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 20, 2012  10:56 PM
+
+I think we agree about the proper course of action for these tests.
+
+That leaves the question of the proper course of action for the Standard.
+
+Recall that the original argument went:
+
+>    I think the use of a Storage_Size clause (with a positive value)
+>    was envisioned as meaning that the program would "reserve" that
+>    many units of memory that couldn't be used for anything else.
+>    However, I believe that the language of the RM is vague enough so
+>    that this behavior isn't actually required.
+>
+> He then argues that the behavior of Storage_Size is only defined in
+> terms of the equivalent Storage_Pool. And Storage_Pools are defined by
+> saying what the operations are "intended" to do. Ergo, there is no
+> *requirement* to do anything.
+
+The petitioner's argument boils down to that there is no defined behavior for
+the (predefined) pool used when Storage_Size is specified.
+
+It's clear that the Ada 83 intent of "reserving" memory for this particular
+access type was what was intended (there is no inconsistency with Ada 83
+documented here). I think we need to say something about that in order that the
+intended implementation is not left to the imagination. (And it's obvious that
+this implementer has a good imagination!)
+
+Probably, all we need to do is to add a couple of sentences to 13.11(18):
+
+If Storage_Size is specified for an access type T, {an implementation-defined
+pool P is used for the type. The}[then the] Storage_Size of [this pool][P] is at
+least that requested, and the storage for [the pool]{P} is reclaimed when the
+master containing the declaration of the access type is left. If the
+implementation cannot satisfy the request, Storage_Error is raised at the point
+of the attribute_definition_clause. {The storage for P is used only for
+allocators returning type T (it is not shared with any other access type).
+Storage_Error is raised by an allocator returning type T if the storage is
+exhausted (additional memory is not allocated).}
+
+If neither Storage_Pool nor Storage_Size are specified, then the meaning of
+Storage_Size is implementation defined.
+
+[Note that I split the last sentence into it's own paragraph; it doesn't belong
+with the semantics of a specified Storage_Size.]
+
+Note that the semantics described here is what is required by the ACATS tests
+that we're discussing, so I'm pretty sure that there will not be any
+implementation impact from adding this text. I avoided using the word
+"reserved", since it's not defined here, but perhaps that wasn't necessary. One
+could imagine trying to tie the "storage" I talked about in the last two
+sentences to the reported Storage_Size, but I would hope that we don't have to
+spell out every nuance here. (Something like "The storage of P has the size
+reported by T'Storage_Size." would work.)
+
+Thoughts and suggestions welcome.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, July 21, 2012  8:49 AM
+
+> Probably, all we need to do is to add a couple of sentences to 13.11(18):
+>
+> If Storage_Size is specified for an access type T, {an
+> implementation-defined pool P is used for the type. The}[then the]
+> Storage_Size of [this pool][P] is at least that requested, and the
+> storage for [the pool]{P} is reclaimed when the master containing the
+> declaration of the access type is left. If the implementation cannot
+> satisfy the request, Storage_Error is raised at the point of the attribute_definition_clause.
+> {The storage for P is used only for allocators returning type T (it is
+> not shared with any other access type). Storage_Error is raised by an
+> allocator returning type T if the storage is exhausted (additional
+> memory is not allocated).}
+
+These last two sentences seem misleading since you can associate the storage
+pool with other access types using "for B'Storage_Pool use T'Storage_Pool;".
+Something like:
+
+     The storage pool P is used only for allocators returning type T,
+     or other access types specified to use T'Storage_Pool.
+     Storage_Error is raised by an allocator returning such a type
+     if the storage space of P is exhausted (additional memory is
+     not allocated).
+
+Do we want to specify whether Unchecked_Deallocation is allowed to return the
+storage back to P?  I presume we don't want to require Unchecked_Deallocation to
+reclaim the storage, as that would be a significant change for some
+implementations.
+
+****************************************************************
+
