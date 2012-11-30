@@ -1,0 +1,215 @@
+!standard 4.4(3/3)                                   12-11-29    AI12-0039-1/01
+!standard 4.4(3.2/3)
+!class binding interpretation 12-11-29
+!status work item 12-11-29
+!status received 12-10-09
+!priority High
+!difficulty Easy
+!subject Syntax for membership expressions is ambiguous
+!summary 
+
+The choices of a membership are syntactically simple_expressions, not
+choice_expressions.
+
+!question
+
+It appears that the Ada 2012 syntax for membership expressions introduces
+ambiguities.
+
+Assume A, B, C, and D are all objects of type Boolean. 
+
+Consider
+   A in B and C
+This could be interpreted as equivalent to either of these valid Ada
+expressions:
+   (A in B) and C      --or as
+   A in (B and C)
+
+Similarly:
+
+A in B in C | D  can be interpreted as
+   A in (B in C) | D   --or as
+   A in (B in C | D)
+
+And:
+
+A in B | C and D can be interpreted as
+   (A in B | C) and D  --or as
+   A in B | (C and D)
+
+Should the syntax be corrected to eliminate these ambiguities? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+Replace the last line of 4.4(3) with:
+
+  | *tested_*simple_expression [not] in membership_choice_list
+
+Replace 4.4(3.2/3) with:
+
+  membership_choice ::= *choice_*simple_expression | range | subtype_mark
+
+[Note: The change here is to replace "choice_expression" with
+"simple_expression"; it would be ambiguous to use the usual insertion
+and deletion marks in syntax, so this was not done here.]
+
+In 4.5.2, paragraphs 3.1/3 [only the first use], 3.b/2, 4, 27/3, 27.1/3, 28.1/3,
+28.2/3, 29/3, 30/3, 30.a, 30.1/2, 30.2/2, 30.3/2, and 32.a/3, in 4.9(11/3),
+ in 3.2.4(17/3), and in 8.6(27.1/3):
+replace "simple_expression" with "*tested_*simple_expression".
+
+In 4.5.2, paragraphs 3.1/3, 4.1/3, 28.1/3, in 4.9(11/3), and in 4.9(32.6/3):
+replace "choice_expression" with "*choice_*simple_expression".
+
+[Editor's note: There are a few cases where we don't have use the new prefixes,
+especially for the latter cases (where we often say "of a membership_choice")
+but it's going to be clearer to just them globally.]
+
+In AARM 3.9.2(9.a/2), "expression" probably should be "*tested_*simple_expression",
+although this isn't absolutely required.
+
+[Editor's note: I searched for "membership", "choice_expression", and "simple_expression"
+everywhere in the Standard (and AARM), and above are the changes that I found. There
+seem to be enough. :-)]
+
+!discussion
+
+The basic intent was that the choice of a membership was syntactically
+equivalent to the other uses of a choice (such as in a case statement).
+Choice_expression was introduced to minimize the incompatibility with
+existing choices in case statements. Unfortunately, we failed to notice
+that doing so made the grammar ambiguous.
+
+Clearly, the constituents of a membership choice either have to have higher
+precedence than a membership or have to be enclosed in parentheses. If
+a membership or logical operator is used in a membership choice, it has
+to be parenthesized.
+
+This is most easily accomplished by making a membership choice a
+simple expression; this gives the proper precedence.
+
+It is annoying that choices for memberships and case statements are subtly
+different. Had this been a concern in 1994, probably choices would never
+have been changed from simple_expression (in Ada 83) to expression (in Ada 95)
+to choice_expression (in Ada 2012). But today, minimizing compatibility issues
+with Ada 95 has to be more important than having everything exactly the same.
+
+Note that this change has no effect the interpretation of on any syntax or
+construct that existed in Ada 2005 or before; it only could change the
+interpretation of new Ada 2012 expressions (of which there are hopefully
+very few taking advantage of this ambiguity).
+
+Unfortunately, changing the syntax this way makes all of the rules that
+talk about "the simple_expression" and "a choice_expression" in 4.5.2 ambiguous.
+As such, we have to give these syntax items prefixes to eliminate any confusion.
+Thus we talk about "tested_simple_expression" and "choice_simple_expression".
+
+!ACATS test
+
+An ACATS B-Test could be created to test these rules, but we generally don't
+test syntax rules (and the rules given in the Ada 2012 cannot be usefully
+implemented).
+
+!appendix
+
+!topic Ambiguous grammar related to new membership test
+!reference 4.4(2-3.2/3)
+!from Adam Beneschan 12-10-09
+!discussion
+
+It appears to me that the new syntax for membership choice lists
+(AI05-158) has introduced some ambiguities into the grammar.  I found
+this out while looking into a comp.lang.ada post from Maxim Reznik
+(https://groups.google.com/forum/?hl=en&fromgroups=#!topic/comp.lang.ada/UYjxb612B_s).
+
+Assume A, B, C, and D are all objects of type Boolean.  Here are some
+cases that I believe are ambiguous:
+
+A in B and C [Maxim's original example] can be interpreted as
+equivalent to either of these valid Ada expressions:
+   (A in B) and C      --or as
+   A in (B and C)
+
+The problem is that in the second interpretation, the
+membership_choice_list can be one or more membership_choices, and a
+membership_choice can be a choice_expression, and a choice_expression
+can be two choice_relations connected by a logical operator ("and").
+
+A couple other examples:
+
+A in B in C | D  can be interpreted as
+   A in (B in C) | D   --or as
+   A in (B in C | D)
+
+A in B | C and D can be interpreted as
+   (A in B | C) and D  --or as
+   A in B | (C and D)
+
+(Note: Although I cannot imagine ever writing a membership test with a
+Boolean as the left-hand value, except in a simple case such as A in
+Arr'Range where Arr is an array (Boolean range <>) of something, I
+think it needs to be fixed since it's not good to have an ambiguous
+grammar.)
+
+I think the solution is probably to change
+
+  membership_choice ::= choice_expression | range | subtype_mark
+
+to
+
+  membership_choice ::= simple_expression | range | subtype_mark
+
+which means that in the new multiple-choice membership test, the
+choices on the right side could not use logical or relational
+operators except in parentheses.  This wouldn't introduce any
+incompatibilities except with the new form of membership test; in
+particular, since discrete_choice_lists would still use
+choice_expressions, rather than simple_expressions, CASE statements,
+variant parts, and array aggregates wouldn't be affected.  
+
+If this change is made, then it might no longer make sense for
+choice_expression and choice_relation to be defined in 4.4 since they
+wouldn't be used in an expression; maybe it could be moved to 3.8.1.
+But that's a less important issue.  Also, if this change is made,
+some wording changes would be needed in 4.5.2, and maybe elsewhere (I
+haven't checked).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 10, 2012  7:47 AM
+
+...
+> I think the solution is probably to change
+>
+>    membership_choice ::= choice_expression | range | subtype_mark
+>
+> to
+>
+>    membership_choice ::= simple_expression | range | subtype_mark
+
+I agree with your analysis.
+
+> which means that in the new multiple-choice membership test, the 
+> choices on the right side could not use logical or relational 
+> operators except in parentheses.  This wouldn't introduce any 
+> incompatibilities except with the new form of membership test; in 
+> particular, since discrete_choice_lists would still use 
+> choice_expressions, rather than simple_expressions, CASE statements, 
+> variant parts, and array aggregates wouldn't be affected.
+>
+> If this change is made, then it might no longer make sense for 
+> choice_expression and choice_relation to be defined in 4.4 since they 
+> wouldn't be used in an expression; maybe it could be moved to 3.8.1.
+> But that's a less important issue.  Also, if this change is made, some 
+> wording changes would be needed in 4.5.2, and maybe elsewhere (I 
+> haven't checked).
+
+Yes, I agree it might make sense to move choice_expression, but that is a bigger
+change which at this stage is probably not worth it.
+
+****************************************************************
