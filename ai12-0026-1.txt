@@ -1,78 +1,225 @@
-!standard C.8(0)                                   12-06-04    AI12-0026-1/01
+!standard C.8(0)                                   12-11-30    AI12-0026-1/02
 !class Amendment 12-06-04
 !status work item 12-06-04
 !status received 12-02-28
 !priority Low
 !difficulty Medium
-!subject Reentrant categorization
+!subject Task_Safe aspect
 !summary
 
-**TBD.
+The Task_Safe aspect indicates the programmer's intent that a subprogram
+can safely be called from multiple tasks.
 
 !problem
 
-There is a need to have a way to specify that the operations of a package
-are intended to be task-safe.
+There is a need to have a way to specify that a subprogram is task-safe.
 
 !proposal
 
-Ada should supply a Reenterant package categorization. Operations in packages
-with this categorization are intended to be called from multiple tasks without
-interference. The language would as much as possible enforce rules to prevent
-problems (particularly of maintenance inadvertantly eliminating the property,
-creating hard-to-find-bugs).
+Ada should supply a Task_Safe aspect that can be applied to a
+non-protected subprogram declaration. Task_Safe subprograms are intended
+to be callable from multiple tasks. The language would as much as
+possible enforce rules to prevent problems (particularly of maintenance
+inadvertantly eliminating the property, creating hard-to-find-bugs).
 
-The rules of the categorization would be:
+In particular, the aspect would restrict the associated subprogram to
+disallow:
 
-(1) Semantic dependence only on Pure and Reentrant packages. (Same wording
-of rules as for Pure).
+(1) Calls on other non-protected subprograms that are not Pure or
+    Task_Safe;
 
-(2) No declaration of library-level variables, unless the variable has a task
-or protected type, or is an atomic variable.
+(2) Dependence on global variables that are neither atomic nor task nor
+    protected.
+
+Since all language defined subprograms already have an implementation
+requirement to be reentrant according to the Annex A definition of the
+term, we also say that all language defined subprograms have the
+Task_Safe aspect, and thus may be called by any subprogram that has the
+Task_Safe aspect.
+
+Similarly, all protected subprograms have the Task_Safe aspect.
+
+Protected entries and task entries are not subprograms and therefore
+do not have the aspect, however since they are not subprograms, they
+are not excluded from being called from a Task_Safe subprogram by these
+rules.
+
+The Task_Safe aspect is not inherited.
+
+The Task_Safe aspect is a boolean aspect that must be specified by a
+static boolean expression.
+
+A Task_Safe'Class aspect is also defined that can be applied to a
+subprogram of a tagged type that applies to any overrides of the
+subprogram in any derived types.
+
+Task_Safe'Class is also a static boolean aspect.
 
 !wording
 
-** TBD.
+C.8(0) - Task Safety
+
+Static Semantics
+
+For a non-protected subprogram, the following language-defined aspects
+may be specified with an aspect_specification:
+
+  Task_Safe         The type of aspect Task_Safe is Boolean. This aspect
+                    specifies that the subprogram specification does not
+                    mention variables that are not atomic, protected, or
+                    task variables, nor does it call subprograms for
+                    which the Task_Safe aspect evaluates to False.
+                    If directly specified, the aspect_definition shall
+                    be a static expression. If not specified, the
+                    Task_Safe aspect is False.
+
+  Task_Safe'Class   The type of aspect Task_Safe'Class is Boolean. This
+                    aspect specifies that an operation of a tagged type
+                    and its descendants does not mention variables
+                    that are not atomic, protected, or task variables,
+                    nor does it call subprograms for which the Task_Safe
+                    aspect evaluates to False. If directly specified,
+                    the aspect_definition shall be a static expression.
+                    If not specified (including by inheritance), the
+                    Task_Safe'Class aspect is False.
+
+The Task_Safe aspect for all language defined subprograms, all
+subprograms declared in declared pure library units, and all protected
+subprograms evaluates to True.
+
+Legality Rules
+
+The Task_Safe and Task_Safe'Class aspect shall not be specified if the
+corresponding subprogram specification mentions variables that are not
+atomic, protected, or task variables, or if it calls subprograms for
+which the aspect evaluates to False.
+
+The Task_Safe aspect shall not be specified for an abstract subprogram
+or a null procedure. Only the Task_Safe'Class aspect may be specified
+for such a subprogram.
+
+If a type T has an implicitly declared subprogram P inherited from a
+parent type T1 and a homograph (see 8.3) of P from a progenitor type T2,
+and
+     - the corresponding primitive subprogram P1 of type T1 is neither
+       null nor abstract; and
+     - the Task_Safe'Class aspect only applies to either P1 or to the
+       corresponding primitive subprogram P2 of T2
+then:
+     - If the type T is abstract, the implicitly declared subprogram P
+       is abstract.
+     - Otherwise, the subprogram P requires overriding and shall be
+       overridden with a nonabstract subprogram.
+
+If a renaming of a subprogram S1 overrides an inherited subprogram S2,
+then the overriding is illegal unless the value of the Task_Safe'Class
+aspect that applies to S1 is the same as the value of the
+Task_Safe'Class aspect that applies to S2.
+
+Static Semantics
+
+If a Task_Safe'Class aspect is specified for a primitive subprogram of
+a tagged type T, then the associated expression also applies to the
+corresponding primitive subprogram of each descendant of T.
 
 !discussion
 
-Note that this pragma also would facilitate programming in a functional style.
+Note that this aspect also would facilitate programming in a functional
+style, although is not sufficient for functional programming. Functional
+programming is a different need which would require a different aspect
+as no global variables of any kind should be allowed. Pragma Pure is
+fairly close to the required semantics for that (it's a bit too
+restrictive), and it's probably a bad idea to define another
+categorization that is too similar to an existing one. It may make sense
+however to define another subprogram aspect such as Reentrant that could
+be more restrictive than Task_Safe and not allow dependence on any
+global variables. If such an aspect is needed, it should be covered
+under a separate AI.
 
-The rules given are not enough to make a package completely task-safe. For
-instance, protected objects or atomic variables could be used in such a way as
-to cause "live-lock" or similar problems. The presence of the categorization
-provides additional documentation of the intent, which is useful by itself.
+The rules given are not enough to make a subprogram completely
+task-safe. For instance, protected objects or atomic variables could be
+used in such a way as to cause "live-lock" or similar problems.
+Similarly, problems could result if multiple tasks pass the same objects
+by reference to Task_Safe subprograms, or if overlapping objects are
+passed by reference to a Task_Safe subprogram.
 
-A bunch of additional points [from the editor's fertile imagination]:
+The presence of the aspect provides additional documentation of the
+intent however, which is useful by itself.
 
-(1) The original e-mail also discussed "functional programming". That's a
-different need which would require a different pragma as no global variables
-of any kind should be allowed. Pragma Pure is fairly close to the required
-semantics here (it's a bit too restrictive), and it's probably a bad idea
-to define another categorization that is too similar to an existing one.
+RM A(3/2) states the implementation requirement that all language
+defined subprograms are reentrant in the sense that concurrent calls
+on the same subprogram perform as specified so long as all parameters
+that could be passed by reference denote non-overlapping objects.
+We would want these subprograms to be callable from a subprogram that
+has the Task_Safe aspect, and the definition in A(3/2) satisfies the
+qualities of the Task_Safe aspect, so we say that all language defined
+subprograms implicitly have the Reentrant aspect.
 
-(2) There might be value to having finer-grained use of such a pragma.
-Specifically, one could imagine having a pragma (really an aspect) for
-an individual subprogram that enforced similar requirements on the subprogram.
-The exact rules would need to be very different, however (no calls on
-subprograms that are not Pure or Reentrant; no dependence on global
-variables that are neither atomic nor task nor protected). This might actually
-be the better idea.
+The original idea was to have a package categoration for this, instead
+of a subprogram aspect. The rules would have been similar in that there
+would be:
+(1) Semantic dependence only on Pure and Task_Safe packages. (Same
+    wording of rules as for Pure).
+(2) No declaration of library-level variables, unless the variable has a
+    task or protected type, or is an atomic variable.
 
-(3) Some amazingly complex schemes were proposed in the e-mail. For this to
-be in the language, it needs to be simple and obviously useful; Ada programs
-and programmers have done without this aid for decades and it's hard to
-imagine why a complex mechanism is needed now.
+Such a scheme might also involve having an aspect for private types
+which declared that they are implemented in a task-safe fashion (thus
+allowing them to be used to declare a global variable in a Task_Safe
+package) -- this would work much like Preelaborable_Initialization.
 
-(4) Well, there is one reason for a complex mechanism: if it could actually
-guarantee task-safe behavior. Such a mechanism would have to limit access to
-globals in order to prevent live-lock and other race conditions. That seems
-beyond the state of the art.
+The subprogram aspect idea however seems simpler, more flexible, and
+would eliminate the need for a special aspect for private type packages,
+while allowing for the withing of packages that are neither pure
+nor reentrant. The only restriction is that any calls involving such
+types from the body of a Task_Safe subprogram must also be Task_Safe or
+calls to pure subprograms.
 
-(5) One also could imagine having an aspect for private types which declared
-that they are implemented in a task-safe fashion (thus allowing them to be
-used to declare a global variable in a Reentrant package) -- this would work
-much like Preelaborable_Initialization.
+We considered other names for the aspect, such as Reentrant, and
+Monitored.
+
+There is a concern however that such a name usage should match the
+common usage of the terminology.
+
+In computer literature, the related terms are reentrant, thread-safety,
+and monitored.
+
+Reentrant doesn't quite work however, according to the definition in
+Wikipedia;
+
+"In computing, a computer program or subroutine is called reentrant if
+ it can be interrupted in the middle of its execution and then safely
+ called again ("re-entered") before its previous invocations complete
+ execution. The interruption could be caused by an internal action such
+ as a jump or call, or by an external action such as a hardware
+ interrupt or signal. Once the reentered invocation completes, the
+ previous invocations will resume correct execution."
+
+Any call to a protected subprogram doesn't work this way, as a call to
+a protected operation will interfere with a second caller into the same
+protected operation. The second caller will need to wait until the first
+caller completes the protected operation.
+
+Thread-safe isn't useful here either, since Ada does not requires
+implementors to map tasks to threads.
+
+The term "Monitored" doesn't quite work either, as that definition also
+seemed too restrictive.
+
+From Wikipedia, the definition of Monitor is;
+
+"In concurrent programming, a monitor is an object or module intended to
+ be used safely by more than one thread. The defining characteristic of
+ a monitor is that its methods are executed with mutual exclusion. That
+ is, at each point in time, at most one thread may be executing any of
+ its methods."
+
+We want to allow a normal reentrant subprogram, which can allow multiple
+threads of execution, assuming it does not access global variables.
+
+Task_Safe is the closest description to capture the semantics of the
+aspect, since it is a term specific to Ada and does not conflict with
+common terminology.
 
 !ACATS test
 
@@ -470,5 +617,108 @@ has much to do with the reason for pragma Pure; and even if it did, it is
 stronger than the requirements for reentrancy, so it is essentially the same
 thing. The Ada 95 Rationale only mentions "no state" as the meaning of Pure,
 and that it has an important effect on elaboration (along with Preelaborate).]
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, November 30, 2012  4:25 PM
+
+Here is my part 2 of my homework assignment.
+
+I started out by trying to define a Reentrant package categorization, but was
+influenced by Randy's suggestion that a subprogram aspect might work better. I
+came to that same conclusion, and went in that direction, and defined both a
+Task_Safe aspect, and a Task_Safe'Class aspect.
+
+The original idea was to call this new feature, Reentrant, but at the last ARG
+meeting, it was suggested that Monitored might be a better alternative.
+
+After looking at definitions for the common usage of these terms, I found
+neither matched very well to describe the feature. Reentrant is more of a single
+processor concept and implies no interference, allowing an ISR for example to
+execute the code after interrupting the subprogram. A protected operation
+doesn't satisfy this definition, since the locking on the protected operation
+interferes on the second caller, which has to wait for the first caller to leave
+the protected operation. Monitored has the opposite connotation, that at most
+one thread can execute the code at a time, but we want this new feature to also
+allow simple calls such as pure functions that require no locking.
+
+I took the liberty of calling this new feature Task_Safe, subject to the ARG's
+approval of course, and took a stab at the wording, though I suspect this AI
+will need another goround at least if it is approved for intent.
+
+[This is version /02 of the AI - Editor.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 30, 2012  9:21 PM
+
+...
+> I took the liberty of calling this new feature Task_Safe, subject to
+> the ARG's approval of course, and took a stab at the wording, though I
+> suspect this AI will need another goround at least if it is approved
+> for intent.
+
+I took the liberty of reading this as I filed it, and here are a few nitpicks:
+
+---
+
+Since all language defined subprograms already have an implementation
+requirement to be reentrant according to the Annex A definition of the term, we
+also say that all language defined subprograms have the Task_Safe aspect, and
+thus may be called by any subprogram that has the Task_Safe aspect.
+
+That might be a compatibility problem if the language-defined subprograms are
+written in Ada. In particular, it would appear to be impossible to write Text_IO
+without reference to global Standard_In and Standard_Out objects of some sort.
+(There is another AI to patch up the wording of the Standard to say something
+about these, to treat uses of them as overlapping even though they don't
+explicitly appear in calls.) One could invent a non-Ada mode to deal with these
+sort of things, but it doesn't bode well for the restrictions if the runtime has
+to be compiled that way.
+
+---
+
+  Task_Safe         The type of aspect Task_Safe is Boolean. This aspect
+                    specifies that the subprogram specification does not
+                    mention variables that are not atomic, protected, or
+                    task variables, nor does it call subprograms for
+                    which the Task_Safe aspect evaluates to False. ...
+
+I don't think you mean "subprogram specification" here, as that is just the
+declaration and profile. I'm sure you meant to include the body, and really the
+restriction only needs to apply to the body.
+
+---
+
+The Task_Safe aspect for all language defined subprograms, all subprograms
+declared in declared pure library units, and all protected subprograms evaluates
+to True.
+
+This *definitely* would be a compatibility problem if the restrictions are
+enforced in a protected subprogram. (And while a generic subprogram is not a
+subprogram, a protected subprogram *is* a subprogram. One use of protected
+objects is to provide a "lock" for a global object, that can't be eliminated
+here.
+
+---
+
+I definitely support what you're trying to do. I had a similar idea some years
+ago and explored it some on comp.lang.ada (and some in my head). I never could
+get it to usefully work out; I thought that we needed "task-safe" user-defined
+types (objects of such a type would also be allowed) but I couldn't come up with
+any useful definition that encapsulated the correct usage for those. You've
+skipped those, but that (for instance) prevents using queue containers (although
+a tweak to your wording probably would allow them,  you'd have to also allow
+references to objects of (class-wide) synchronized interfaces).
+
+But compatibility can't be sacrificed here, and surely it can't be illegal to
+compile Text_IO!
+
+P.S. We're not going to approve any Amendments until we formally start Ada's
+next revision -- which probably won't be for another couple of years at least --
+so you have plenty of time to work this out (unless some wants to implement this
+immediately, can't say about that).
 
 ****************************************************************
