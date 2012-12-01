@@ -1,4 +1,4 @@
-!standard 3.10.2(22)                             11-12-30    AI12-0016-1/00
+!standard 3.10.2(22)                             12-11-30    AI12-0016-1/01
 !class binding interpretation 11-12-30
 !status work item 11-11-13
 !status received 11-07-28
@@ -31,7 +31,313 @@ a realistic model.
 
 !discussion
 
-** TBD.
+Problems with the the "small integer" model for representing accessibility
+levels and performing run-time accessibility checking have been identified (see
+mail message of July 28, 2011, previously filed in this AI). This is a
+description of a more general implementation approach which addresses these
+problems without introducing unacceptable costs in space, time, or complexity.
+This is only intended to demonstrate that at least one viable implementation
+model exists and to make this available to language implementors as an option.
+It is not intended to introduce any language changes, but rather to offer one
+way of meeting the requirements that are already implicit in the language
+definition.
+
+It may be that language changes in this area are needed. "Master-based"
+accessibility checking (see the accept_statement example and the discussion of
+incomparable accessibility levels in AI05-0024) may require wording changes to
+address scenarios involving incomparable accessibility levels (i.e., unequal
+levels, neither of which is "deeper" than the other). For example, the check
+associated with an access type conversion is defined by
+   "For an access-to-object type, a check is made that the accessibility
+    level of the operand type is not deeper than that of the target
+    type, ...".
+If it is somehow possible that the two accessibility levels mentioned above
+might be incomparable then we would want the run-time check to fail in this
+case; with the current wording, the check would pass. Such RM wording changes
+are outside the scope of this discussion, except that it is intended that the
+implementation model described herein would be compatible with such changes.
+
+We describe the proposal in the "software present tense", as a fait accompli.
+
+The accessibility level of a master is represented at run-time by a pointer to
+an object whose lifetime is that of the master. For example, if the master is an
+execution of a subprogram body, then the object would be declared (implicitly,
+by the compiler) within the subprogram.
+
+For the following example
+
+     procedure P1 (X : access Integer) is ... ;
+     procedure P2 is
+        Local : aliased Integer;
+     begin
+        P1 (Local'Access);
+
+the implicit parameter passed to P1 to describe X's accessibility level might be
+implemented by something like
+
+     procedure P2 is
+        P2_Level : aliased constant Level_Object := ... ;
+        Local : aliased Integer;
+     begin
+        P1 (..., P2_Level'Unchecked_Access);
+
+So what does this type Level_Object look like?
+
+Given two accessibility levels A and B, the fundamental operation that must be
+supported is answering the question "might an entity whose accessibility level
+is A outlive one whose level is B?". Fortunately, it is not necessary to support
+this query for an arbitrary pair of accessibility levels; an implementation can
+take advantage of knowledge about the domain of this query. A query at some
+point in the execution of a program can only involve levels that are directly
+visible or somehow indirectly reachable at that point.
+
+To illustrate this point, let's first consider an implementation which would
+suffice to implement Ada 95 (but not, as it turns out, Ada 2005 or Ada 2012).
+Note that the small integer model also suffices for implementing Ada 95, so this
+initial implementation is really only useful as an expository stepping stone
+towards a more expressive implementation which does support Ada 2005 and Ada
+2012.
+
+The Ada-95-only implementation:
+    For each master whose level needs to be represented at run-time
+    (e.g., because a reference to a local variable is passed as an
+    actual parameter where the corresponding formal is of an anonymous
+    access type, as in procedure P2 in the example above), a local
+    aliased constant of type Level_Object_95 is declared. The type is
+    declared as
+
+       type Level_Object_95;
+       type Level_95 is access constant Level_Object_95;
+       type Level_Object_95 is
+         record
+           Static_Link : Level_95;
+         end record;
+
+A single constant of type Level_Object_95 is declared at library level:
+    Library_Level_Object_95 : aliased constant Level_Object_95
+      := (Static_Link => null);
+    Library_Level_95 : constant Level_95
+      := Library_Level_Object_95'Access;
+
+All other objects of type Level_Object_95 are aliased constants declared in more
+nested scopes and containing pointers to the level object for the corresponding
+elaboration of the nearest (statically) enclosing scope which has a level
+object. This corresponds roughly to the "static link" mechanism traditionally
+used for implementing up-level references. To determine whether level A is
+deeper than level B, one traverses links starting at A until either B or null is
+encountered (the former indicating A is deeper than B, the latter indicating
+otherwise; a level is, by definition, not deeper than itself so the A = B case
+must also be handled correctly).
+
+The following example (which involves an anonymous access-to-subprogram type,
+not an Ada 95 feature) demonstrates that this approach, at least as described so
+far, doesn't handle some Ada 2012 constructs:
+
+   procedure Accessibility_Test is
+     procedure Call_Proc
+       (Proc : not null access procedure (X, Y : access Integer);
+        X, Y : access Integer) is
+         Local : aliased Integer;
+     begin
+         if X = null then
+            Proc.all (Local'Access, Y);
+         else
+            Proc.all (X, Local'Access);
+         end if;
+     end;
+
+     procedure P1 is
+         procedure P2 (X, Y : access Integer) is
+             type Ref is access all Integer;
+             for Ref'Storage_Size use 0;
+             Ptr : Ref;
+
+             procedure P3 (X, Y : access Integer) is
+             begin
+                 Ptr := Ref (X); -- OK (1)
+                 begin
+                     Ptr := Ref (Y); -- raises Program_Error (2)
+                 exception
+                     when Program_Error =>
+                         null;
+                 end;
+                 pragma Assert (Ptr /= Y);
+             end;
+         begin
+            Call_Proc (P3'Access, X, null);
+         end;
+     begin
+        Call_Proc (P2'Access, null, null);
+     end;
+   begin
+     P1;
+   end;
+
+Let's look at how this model breaks down in the case of this example.
+When P3 is called, the call stack is
+    P3
+    Call_Proc
+    P2
+    Call_Proc
+    P1
+    Accessibility_Test
+
+The two accessibility levels passed into P3 correspond to the two calls to
+Call_Proc. One of these two levels is longer lived than the level of the call to
+P2 (which is also the level of Ref, the target type of the access type
+conversions) and one of them is shorter-lived, but this essential distinction is
+lost. The first access type conversion should succeed and the second should
+fail, but there is insufficient information to make this distinction.
+
+So now we take the view that the "static link" is just one example (albeit, the
+most important one) of a level whose lifetime is known to be longer than that of
+a given level for which we are declaring the level object. In the case of a
+subprogram which has an anonymous access-to-object parameter, for example, the
+level of the parameter (which is passed in) is also known to have this property.
+For a class-wide parameter, the level of the underlying specific type of the
+parameter is another such "known to outlive me" level. For a build-in-place
+function or a function with an anonymous access result type, the level
+determined at the point of call is another.  The point is that a set of such
+"predecessor" levels can be determined by combining the static-link with other
+levels extracted (extraction details TBD) from the parameters. The idea is that
+at the time of a subprogram call, the only existing levels that the callee will
+need to refer to are those that are reachable via an uplevel reference to an
+enclosing scope combined with those that are somehow passed in as parameters
+(this includes things like the accessibility level of the underlying specific
+type of a tagged parameter, not just simple cases like anonymous
+access-to-object typed parameters; note that for most implementations this
+particular example probably means that the descriptor for specific tagged type
+will contain the pointer value representing its accessibility level).
+
+This suggests something like
+
+       type Level_Object;
+       type Level is access constant Level_Object with Storage_Size => 0;
+       type Level_Vector is array (Positive range <>) of Level;
+       type Level_Object (Predecessor_Count : Natural) is
+         record
+           Predecessors : Level_Vector (1 .. Predecessor_Count);
+         end record;
+
+       Library_Level_Object : aliased constant Level_Object
+         := (Predecessor_Count => 0);
+       Library_Level : constant Level := Library_Level_Object'Access;
+
+In our example above, the two level objects declared locally to the two
+invocations of Call_Proc would now capture the needed distinction by
+incorporating the levels of their parameters. See the "gory details" section
+below for a detailed explanation of how this is accomplished. It would also be
+instructive (I imagine) to look at the examples given in the initial AI
+discussion (in particular, procedures Ada05_Example and Access_Result_Test)
+which illustrate cases that the small integer model cannot handle and to work
+through how these cases work with the proposed model (Note: I have not actually
+had time to do this yet, but that doesn't stop me from recommending this action
+to others).
+
+This raises performance questions. To decide whether level A is at least as
+long-lived as level B, we need to traverse B's known predecessors, just as
+before, but now this involves traversing a DAG instead of a linked list. Can
+this be done cheaply enough?
+
+One answer to that is to store the "static link" in the first element of the
+Predecessors array and to optimize for the case where the Ada-95-style
+representation described above would have sufficed to determine that the check
+would pass. We certainly don't care about performance in the case where the
+check will fail; it might be that we also don't care very much about performance
+in the corner cases where this richer data structure (i.e., multiple
+predecessors) is needed to get the right answer.
+
+Is it worthwhile to try to avoid adding redundant predecessors to a
+Level_Vector? Consider the case of a subprogram which takes an access parameter
+when the parameter happens to be null (or a pointer to an object declared at
+library level). If redundant predecessors are always filtered out, then we are
+talking about traversing a tree instead of a DAG.
+
+We still have the important optimization that no level object is declared for a
+master that doesn't need one. In particular, wrappers don't declare level
+objects.
+
+The details of how we extract predecessor information from a routine's
+parameters when building a level object have been glossed over here. Some
+thought is needed here (e.g., are there cases where a parameter of a specific
+tagged type requires extracting the accessibility level of the underlying type
+of the actual and incorporating that into the predecessor set of the callee?).
+Note, however, that the rest of the model is not particularly sensitive to these
+details.
+
+====
+
+Gory details (as promised above):
+
+When P3 is called, the call stack is
+    P3
+    Call_Proc - second call
+    P2
+    Call_Proc - first call
+    P1
+    Accessibility_Test
+
+The only masters in this example (besides the library_level master) are
+subprogram body executions, so there are at most 7 accessibility level objects
+to worry about. In fact, the procedures Accessibility_Test, P1, and P3 do not
+require level objects, so there are only 4.
+
+When P1 calls Call_Proc, it has to pass in two accessibility levels for the
+parameters X and Y. Because it is passing in "null" values, it passes in the
+library level.
+
+Inside this (i.e., the first) call to Call_Proc, Call_Proc builds its local
+level object. Let's ignore the access-to-subprogram parameter for now and also
+assume that we are not going to perform any filtering at this point to weed out
+predecessors which contribute no new information. So the object declaration
+might be implemented as something like
+
+    Level : aliased constant Level_Object :=
+      (Predecessor_Count => 3,
+       Predecessors =>
+         (Library_Level, X'Accessibility_Level, Y'Accessibility_Level));
+
+In this case, X'Accessibility_Level and Y'Accessibility_Level both yield
+Library_Level, so we get three copies of the same dependency. To recap:
+
+    Call_Proc_Call_1.Level_Object = (3, (1..3 => Library_Level))
+
+Call Proc then calls P2, passing in Call_Proc_Call_1.Level_Object'Access as the
+accessibility level for X and passing along Library_Level as the accessibility
+level for Y.
+
+P2, upon being called, builds its local level object in much the same way that
+Call_Proc did, ending up with
+
+    P2.Level_Object = (3, (Library_Level,
+                           Call_Proc_Call_1.Level_Object'Access,
+                           Library_Level));
+
+P2 then calls Call_Proc, passing along Call_Proc_Call_1.Level_Object'Access as
+the accessibility level for X and passing in Library_Level as the level for Y.
+
+Call_Proc, upon being called again, builds its local level object, ending up
+with
+    Call_Proc_Call_2.Level_Object = (3, (Library_Level,
+                                         Call_Proc_Call_1.Level_Object'Access,
+                                         Library_Level));
+
+Call Proc then calls P3, passing along Call_Proc_Call_1.Level_Object'Access as
+the accessibility level for X and passing in
+Call_Proc_Call_2.Level_Object'Access as the accessibility level for Y.
+
+P3 now performs two accessibility checks. For the first access type conversion,
+it compares the accessibility level for X (which is
+Call_Proc_Call_1.Level_Object'Access) to that of the access type Ref (which is
+P2.Level_Object'Access) so see if X is sufficiently long-lived. The answer is
+yes, because X's level is a predecessor of Ref's, and the check passes as
+desired.
+
+For the second access type conversion, the accessibility level of Y is used in
+place of X's. The accessibility level of Y is
+Call_Proc_Call_2.Level_Object'Access, which is nowhere to be found in a
+predecessor traversal starting from Ref's level. Thus, the check fails as
+desired.
 
 !ACATS test
 
@@ -974,22 +1280,77 @@ bit of overhead.)
 
 ****************************************************************
 
-From: Randy Brukardt
-Sent: Friday, July 29, 2011  7:58 PM
+From: Steve Baird
+Sent: Friday, November 30, 2012  7:07 PM
+
+Thanks to Gary, Bob, and Tuck for much useful discussion and review on this one.
+
+[Followed by the !discussion of version /01 of this AI.]
 
 ****************************************************************
 
 From: Randy Brukardt
-Sent: Friday, July 29, 2011  7:58 PM
+Sent: Friday, November 30, 2012  11:20 PM
+
+> Problems with the the "small integer" model for representing
+> accessibility levels and performing run-time accessibility checking
+> have been identified (see
+> mail message of July 28, 2011, previously filed in this AI).
+
+At some point, these problems will have to be put into the body of the AI. An AI
+is intended to be readable without referring to the e-mail section (it's
+customary for some users to strip that off).
+
+> This is only intended to demonstrate that at least one viable
+> implementation model exists and to make this available to language
+> implementors as an option. It is not intended to introduce any
+> language changes, but rather to offer one way of meeting the
+> requirements that are already implicit in the language definition.
+
+But we at least need to rewrite the AARM notes to not suggest a model that
+doesn't work. Someone is going to have to take that short stick.
+
+...
+> We describe the proposal in the "software present tense", as a fait
+> accompli.
+
+I presume this means you haven't actually implemented this to see if it works.
+:-)
+
+...
+> Let's look at how this model breaks down in the case of this example.
+> When P3 is called, the call stack is
+>     P3
+>     Call_Proc
+>     P2
+>     Call_Proc
+>     P1
+>     Accessibility_Test
+>
+> The two accessibility levels passed into P3 correspond to the two
+> calls to Call_Proc. One of these two levels is longer lived than the
+> level of the call to P2 (which is also the level of Ref, the target
+> type of the access type conversions) and one of them is shorter-lived,
+> but this essential distinction is lost. The first access type
+> conversion should succeed and the second should fail, but there is
+> insufficient information to make this distinction.
+
+I admit, I lost you completely at this point. I don't have time to work this
+example through on a whiteboard (which might be the only way to understand it --
+but I would have expected the two parameters to point at different frames (frame
+objects) if they have a different lifetime. How could it be otherwise here?
+
+Perhaps this has something to do with the "normalization" step of the
+small-integer model, which never made sense to me, either. (I know it's been
+explained to me, but it is so nonsensical that it doesn't stick. (Of course, I
+can't seem to understand how one could make static links work, either [and
+despite repeated attempts to explain it to me], so I'm the wrong person to
+understand such a discussion. Plus I always think about these problems mentally
+using displays, which might give different results in some of these examples, so
+I might be missing the problem because there isn't one...)
+
+Anyway, I read the rest of this, but I don't understand the problem very well so
+I can't give any reasonable thoughts on the answer.
 
 ****************************************************************
 
-From: Randy Brukardt
-Sent: Friday, July 29, 2011  7:58 PM
-
-****************************************************************
-
-From: Randy Brukardt
-Sent: Friday, July 29, 2011  7:58 PM
-
-****************************************************************
