@@ -1,4 +1,4 @@
-!standard 6.1.1(26/3)                              12-06-08    AI12-0032-1/02
+!standard 6.1.1(26/3)                              12-11-30    AI12-0032-1/03
 !standard 6.1.1(27/3)
 !class ramification 12-06-06
 !status work item 12-06-06
@@ -97,28 +97,120 @@ Others ** TBD.
 
 !wording
 
-Add to AARM 6.1.1(27.d/3):
+Replace 6.1.1(26/3) with
 
-"If the accessibility of X'Old is needed (for example, if 'Access of an aliased
-component of X'Old is taken), the accessibility is determined as implied by
-the implicit constant declaration."
+    X'Old
+      Each X'Old in a postcondition expression that is enabled denotes
+      a constant that is implicitly declared at the beginning of the
+      subprogram body, entry body, or accept statement. The implicitly
+      declared entity denoted by an occurrence of X'Old is declared as
+      follows:
 
-Add after AARM 6.1.1(27.f/3):
+         - If X is of an anonymous access type with designated
+           subtype T then
+               <X'Old> : access T := X;
 
-"AARM To Be Honest: If the type of X is an anonymous access type, the type
-of the implicit constant declaration is anonymous access type with the same
-designated type or profile as X. This is necessary as the constant needs to
-follow the rules for an object of an anonymous access type and not the
-rules for whatever X is (it might be an access parameter or access discriminant).
-Thus the type is not exactly the same, rather it would be what would be
-written if you declared X_Old explicitly. It didn't seem worth the complications
-to explain this in the normative wording; no one would expect anything else."
+         - If X is of a specific tagged type T then
+               <anonymous> : constant T'Class := T'Class (X);
+               <X'Old> : T renames T (<anonymous>);
+           where the name X'Old denotes the object renaming.
 
-Others ** TBD.
+           AARM: This means that the underlying tag associated with
+                 X'Old is that of X.
 
-For 3 and 4, we could do the same as above, but for 5, we either do nothing
-and ignore the problem, or we give up on this approach and rewrite the wording
-completely to clarify all of these issues.
+Discussion: I think this formulation works even in the case where the
+             subtype of X is subject to a discriminant constraint, but
+             this case should be reviewed. We lose the constraint, but
+             is there any way that this makes a difference? We want to
+             avoid any use of Constrained_Subtype'Class (this would
+             introduce an unwanted dependency on AI05-0057).
+
+         - If X is of a universal type and then either the expected type
+           of the attribute_reference is a non-universal type T or
+           the attribute_reference occurs in a context [(e.g., as a
+           operand of a qualified conversion)] which imposes a requirement
+           that the attribute_reference shall resolve to be of a non-universal
+           type T then
+               <X'Old> : constant T := X;
+
+         - Otherwise, if X is of a subtype S (including
+           the case where the type of S is an anonymous array type), then
+               <X'Old> : constant S := X;
+           In this case, the type of S shall not be universal.
+
+      The nominal subtype of X'Old is that of X. The expected type of the
+      prefix of an Old attribute is that of the attribute. Similarly,
+      if an Old attribute shall resolve to be of some type, then
+      the prefix of the attribute shall resolve to be of that type.
+
+AARM:
+     One case where the above "shall not be universal" rule makes a
+     difference is:
+           Post => (case Some_Prefix'Length'Old is ... end case) -- illegal
+
+AARM:
+    An accept statement for a task entry with enabled postconditions
+    such as
+      accept E do
+         <statements>
+      exception
+         <handlers>
+      end;
+    behaves (at runtime) as follows:
+      accept E do
+         declare
+            <declarations, if any, of 'Old constants>
+         begin
+            begin
+               <statements>
+            exception
+               <handlers>
+            end;
+            <postcondition checks>
+         end;
+      end;
+    Preconditions are checked by the caller before the rendezvous begins
+    Postcondition expressions may, of course, reference 'Old constants.
+
+    In the case of a protected operation with enabled postconditions,
+    'Old constant declarations (if any) are elaborated after the start
+    of the protected action. Postcondition checks (which may reference
+    these constants) are performed before the end of the protected action
+    as described below.
+
+<end AARM>
+
+Prepend (append?) to 6.1.1(27.d(3)):
+      The implicit constant declaration defines the accessibility level
+      of X'Old.
+
+Append to 6.1.1(35/3):
+    For a call to a task entry, the postcondition check is
+    performed before the end of the rendezvous; for a call to a protected
+    operation, the postcondition check is performed before the end of the
+    protected action of the call. For a call to a subprogram or protected
+    entry, the postcondition check is performed before the
+    finalization of any implicitly-declared constants associated (as
+    described above) with Old attribute_references but after the
+    finalization of any other entities whose accessibility level is
+    the that of the execution of the body of the callable entity.
+
+AARM:
+    If a postcondition references the implicitly-declared constant
+    associated with an Old attribute, the postcondition must be
+    evaluated before the constant is finalized. One way to think of
+    this is to imagine declaring a controlled object between any
+    implicit "'Old" constant declarations and any explicit
+    declarations, and then performing postcondition checks during
+    the finalization of this object.
+
+In 4.1.4(9/3), prepend to the second sentence:
+    "Unless explicitly specified otherwise, "
+    and lower-case the "For" that formerly began the sentence.
+
+Note that this follows the existing wording for the third sentence. If a more
+explicit "Unless explicitly specified otherwise for a particular attribute" is
+preferred, should we change the third sentence too?
 
 !discussion
 
@@ -2378,7 +2470,117 @@ Thanks.
 
 ****************************************************************
 
+From: Steve Baird
+Sent: Wednesday, November 28, 2012  6:11 PM
+
+The current wording in 6.1.1:
+    Upon successful return from a call of the subprogram or entry, prior
+    to copying back any by-copy in out or out parameters, the
+    postcondition check is performed.
+
+Consider a call to
+
+     procedure Foo with
+       Post => Some_Predicate (Controlled_Object'Old, ...) is
+       Local_Var : Some_Controlled_Type;
+     begin ... end;
+
+Should postcondition checking take place after Local_Var has been finalized but
+before the implicitly-declared 'Old constant has been finalized? I think so.
+
+Note that (at least things stand currently) Local_Var and the 'Old constant have
+the same master.
+
+This means that postcondition checking needs to be performed in the middle of
+finalizing that master.
+
+I think a rule along these lines would be OK, but I want to be sure that there
+is consensus on this point before working further on formulating such a rule.
+
+Opinions?
+
+****************************************************************
+
 From: Tucker Taft
-Sent: Monday, July  9, 2012  10:19 AM
+Sent: Wednesday, November 28, 2012  7:02 PM
+
+> Note that (at least things stand currently) Local_Var and the 'Old
+> constant have the same master.
+
+I think we have always allowed implementations to introduce extra levels of
+masters for temporary variables. I see 'Old as a temp, and so we should not be
+too concerned with exactly where it is finalized, so long as it gets finalized
+after its last use, and before we start the next statement at the call point.
+
+> This means that postcondition checking needs to be performed in the
+> middle of finalizing that master.
+
+Or you create another level.  It is conceivable that the finalization of a local
+variable will have some side-effect (e.g., free some resource), and I believe
+the postcondition should be evaluated *after* that side-effect has occurred
+(e.g. after the resource has been freed).
+
+> I think a rule along these lines would be OK, but I want to be sure
+> that there is consensus on this point before working further on
+> formulating such a rule.
+>
+> Opinions?
+
+I can't imagine any other rule that would make as much sense as the one you have
+suggested.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 30, 2012  9:40 PM
+
+...
+> > Note that (at least things stand currently) Local_Var and the 'Old
+> > constant have the same master.
+>
+> I think we have always allowed implementations to introduce extra
+> levels of masters for temporary variables.
+
+For the record (I don't think it affects anything), I don't believe this. There
+is some wiggle room as to exactly where temporaries are finalized in some cases,
+but I don't think anything so significant as extra masters is allowed. (Of
+course, if no sane program can tell the difference, it's OK by the normal
+equivalence rules -- but remember that it is really easy to depend on
+finalization at a specific point, and we've generally agreed that this is not
+unreasonable in most of the examples we've had.)
+
+...
+> I see 'Old as a temp, and so we should be too concerned with exactly
+> where it is finalized, so long as it gets finalized after its last
+> use, and before we start the next statement at the call point.
+
+I do agree with this, of course. I do think we ought to be slightly more liberal
+with all objects (allowing early finalization if they are sufficiently dead),
+but I've never successfully gotten that into the RM. (There are a lot of objects
+that are required to live long after they have no possible use, and it's easy to
+build abstractions that break if they are finalized early.)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, November 30, 2012  7:07 PM
+
+Thanks to Randy for much useful discussion on this one.
+
+[Following was the !wording section for version /03 of the AI.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 30, 2012  9:57 PM
+
+> Thanks to Randy for much useful discussion on this one.
+
+It would have been nice, ahem, to have gotten updates to the !question (I think
+you added some questions, specifically the question about the finalization
+order) and !summary and possibly !discussion as well.
+
+I didn't detect any problems with the wording you submitted, but probably I
+didn't read carefully enough. :-)
 
 ****************************************************************
