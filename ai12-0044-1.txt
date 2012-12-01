@@ -1,0 +1,530 @@
+!standard 7.3.2(19/3)                               12-12-01    AI12-0044-1/01
+!class binding interpretation 12-12-01
+!status work item 12-12-01
+!status received 12-09-10
+!priority High
+!difficulty Medium
+!subject Calling visible functions from type invariant expressions
+!summary
+
+** TBD.
+
+!question
+
+AI05-0289-1 extends invariant checking to "in" parameters. However, this makes
+it impossible to call a public function of the type from an invariant
+expression, as that public function will attempt to check the invariant,
+resulting in infinite recursion.
+
+For Type_Invariant'Class, which is required to be visible, it is almost
+impossible to write a useful invariant without calling a public function.
+
+Is it intended that invariants be useless? (No.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+The easiest fix to this problem is to revert to not checking "in" parameters
+(that is, to repeal AI05-0289-1). However, this is not appealing for two
+reasons:
+  (1) The holes that AI05-0289-1 was intended to plug would be reopened.
+      These were considered important enough to make a last-minute change
+      to the Standard, it's hard to imagine how they would have gotten less
+      important in 9 months.
+  (2) The final Ada 2012 Standard (and presumably the printed editions that
+      will be coming out soon) say that "in" parameters are checked. To
+      change this via an AI would cause an endless line of "bug" reports to
+      implementers about their "incorrect" implementation. The visibility
+      of AIs is quite low within the Ada community and it is unlikely that
+      most users would be aware of such a major change.
+
+A better solution is to somehow mark public subprograms that do not need or
+want invariant checks, combined with a rule that any direct calls from an
+invariant expression must be so marked.
+
+A number of possible ways to mark routines have been suggested:
+  (A) A aspect on the subprogram specification that specifies that no invariant
+      checks will be made for any type for which the subprogram is primitive.
+      This includes all kinds of parameters. A suggested name is
+      Do_Not_Check_Invariant.
+  (B) A aspect on the subprogram specification that specifies that no invariant
+      checks are needed for any type for which the subprogram is primitive.
+      This includes all kinds of parameters. A suggested name is
+      Unmodified_Parameters.
+      [Note that this is subtly different than (A); this aspect asserts that
+      the parameters of the primitive types are not modified, actually or
+      logically. Compilers could warn if the parameters appear to be modified.
+      By "logically" here, we mean that if the parameters are handles or
+      contain handles, the target(s) of those handles are not modified either.]
+      This aspect would be most useful on query and predicate functions,
+      which are the most likely kinds to be used in invariant expression.
+  (C) A aspect on the subprogram specification that specifies that no invariant
+      checks are needed for "in" parameters of any type for which the
+      subprogram is primitive. This is the same as (B), except that it only
+      applies to "in" parameters. A suggested name: Unmodified_In_Parameters.
+      [The original suggestion was to mark subprograms that need such checks,
+      but that's backwards for Ada: "safe"/"checked" should be the default. I've
+      turned it around here.]
+  (D) Invariant checks are not made on functions that are completed with
+      expression functions in the same package specification. (Such functions
+      have almost no way to modify their parameters that would not already
+      check the invariant.)
+  (E) Invariant checks are not performed on parameters that are declared
+      with a special subtype. Extending 'Base for this situation is one
+      suggestion.
+  (F) Add a marker to types which do not contain handles or access values
+      that are expected to be modified. This is really a property of the
+      invariant expression more than of the type. A suggested name would
+      be Simple_Invariant.
+      [The original suggestion was to mark types that need such checks, but
+      that's backwards for Ada: "safe"/"checked" should be the default. I've
+      turned it around here. Either way, it is not a complete solution; one
+      of the other ideas would be needed as well.]
+
+Note that the legality rule only applies directly within the invariant
+expression; we make no attempt to prove that any calls made from within the
+marked functions are OK (that is, don't make invariant checks themselves).
+That's especially important if the marking mechanism is automatic somehow,
+[ideas (D) and (F) in particular] as it is likely that routines that are not
+going to be used in an invariant expression will be involved.
+
+[Editor's musing: The root problem here, IMHO, is that Ada doesn't have any
+way to tell between a parameter that is intended to be read-only vs. a
+parameter that is going to be modified somehow ("modified" here means a
+deep modification of anything that is logically part of the object). For
+instance, type File_Type in Text_IO is an "in" parameter to Put, but Put
+changes the line/column counters in the object, and probably has other effects
+on the object. The object has mode "in", but it still is being modified.
+OTOH, function Name also has an "in" parameter, but it is just a query function
+and it is very unlikely that the associated object is modified in any way.
+The "best" solution to this problem is to have a way to mark the difference
+between these situations, in which case only routines that don't modify their
+parameters can be used in invariant expressions. (This also would help the
+performance of invariants markedly.)
+
+Note that I don't like the 'Base solution (E), or the aspect (A) (I know it was
+my idea, bear with me!) because they put the emphasis on the wrong property:
+the presence of the check. I think the emphasis should be placed on describing
+when the invariant check cannot be needed -- this is safer because it only
+introduces a hole when the programmer is claiming the check isn't needed --
+rather than just suppressing the check.]
+
+!ACATS test
+
+An ACATS x-Test should be created to test these rules.
+
+!appendix
+
+From: Tucker Taft
+Sent: Monday, September 10, 2012  11:07 AM
+
+Here is another ARG issue identified by Yannick Moy.
+The problem is that we decided to check Type_Invariants on "in" parameters, to
+handle cases where a private type involves a level of indirection, as with
+Text_IO's File_Type.  But checking "in" parameters creates a problem when the
+Type_Invariant itself calls a visible function with an "in" parameter, which it
+almost certainly will.
+
+Totally non-obvious to me how to deal with this, other than to go back to only checking IN-OUT and OUT parameters, and leaving a hole for IN parameters.  Trying to "suspend"
+type-invariant checks while evaluating a type invariant is very difficult to implement in its full generality, I suspect.
+
+>>> I think that RM 7.3.2.19/3 is missing a restriction to OUT and IN
+>>> OUT parameters. ...
+>> See AI05-0289.
+>>
+>> The !summary section consists of only:
+>> Invariants are checked on all parameters of the type after a call,
+>> including "in" parameters.
+>>
+>> So, for better or for worse, the present wording was a deliberate
+>> choice and not an oversight.
+>
+> We'd better think about a modification of the RM right now then,
+> because there is no way to create an interesting type invariant that is
+> not recursive:
+>
+> type T is private with Type_Invariant => Public_Function (T);
+>
+> function Public_Function (X : T) return Boolean;
+>
+> If the type invariant is checked when returning from Public_Function,
+> we've got a problem...
+>
+> Plus I'm sure I raised this issue on the ARG mailing list and we
+> agreed during the discussion the invariant would only be checked for OUT and
+> IN OUT parameters.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, September 10, 2012  11:20 AM
+
+Perhaps we can work out something less than full generality which would
+represent a best compromise here.
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Monday, September 10, 2012  11:23 AM
+
+> Here is another ARG issue identified by Yannick Moy.
+> The problem is that we decided to check Type_Invariants on "in"
+> parameters, to handle cases where a private type involves a level of
+> indirection, as with Text_IO's File_Type.
+
+I don't understand how this applies to File_Type, which is typically implemented
+as an access. This is already taken care of explicitly in the RM.
+
+> But checking "in" parameters creates a problem when the Type_Invariant
+> itself calls a visible function with an "in"
+> parameter, which it almost certainly will.
+>
+> Totally non-obvious to me how to deal with this, other than to go back
+> to only checking IN-OUT and OUT parameters, and leaving a hole for IN
+> parameters.
+
+You could have the check for IN parameters of access type, is it the case you
+had in mind when changing the RM? Or is it something more subtle having to do
+with access discriminants (the Rosen trick)?
+
+>  Trying to "suspend"
+> type-invariant checks while evaluating a type invariant is very
+> difficult to implement in its full generality, I suspect.
+
+Plus we want something easy to understand and explain. Not something which is
+enabled/disabled depending on the dynamic calling context.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, September 10, 2012  11:37 AM
+
+>> Here is another ARG issue identified by Yannick Moy.
+>> The problem is that we decided to check Type_Invariants on "in"
+>> parameters, to handle cases where a private type involves a level of
+>> indirection, as with Text_IO's File_Type.
+>
+> I don't understand how this applies to File_Type, which is typically
+> implemented as an access. This is already taken care of explicitly in the RM.
+
+Not sure what you mean by this.  File_Type might be a record type, but with a
+component which is of an access type.
+
+> You could have the check for IN parameters of access type, is it the
+> case you had in mind when changing the RM? Or is it something more
+> subtle having to do with access discriminants (the Rosen trick)?
+
+The private type might be completed with a record type, with one or more
+subcomponents which were of an access type. Or the private type might be an
+index into a global table. If the type-invariant looks "through" that index,
+then clearly it might be violated by a function that takes an IN parameter, if
+the function updates the table.
+
+But we know there are holes, so it is probably better to revert to the
+IN-OUT/OUT parameter check only, than create some complex mechanism to deal with
+IN parameters.
+
+>> Trying to "suspend"
+>> type-invariant checks while evaluating a type invariant is very
+>> difficult to implement in its full generality, I suspect.
+>
+> Plus we want something easy to understand and explain. Not something
+> which is enabled/disabled depending on the dynamic calling context.
+
+Agreed.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, September 10, 2012  1:35 PM
+
+How complex would it be to just exempt calls to functions with in parameters
+where the call appears within a contract expression?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, September 10, 2012  1:49 PM
+
+That doesn't really work since the function you call directly might call another
+public function indirectly, and that would result in recursion.  I think better
+is to make the "standard" policy check IN-OUT and OUT parameters only, and then
+allow implementations to provide a "stricter" policy which might do more
+(hopefully somewhat intelligently).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, September 10, 2012  2:00 PM
+
+Well you could just avoid this by avoiding such calls to public functions. But
+you can't avoid the outer level call, since it has to be visible.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, September 11, 2012  9:11 AM
+
+I would have assumed that calls on primitive functions inside a type-invariant
+are "inner calls" where the type-invariant is not checked at all. (As far as a
+model goes, the type-invariant is like a primitive routine invoked from the
+outside; its contents are/can be inner calls.) If this is not so, it should be.
+
+to which Tuck says implicitly:
+> That doesn't really work since the function you call directly might
+> call another public function indirectly, and that would result in
+> recursion.
+
+As would a type_invariant on an OUT parameter that calls a primitive function
+that calls a public procedure with an OUT parameter of the same type. Is that so
+much different?
+
+Actually, anytime you call "publically" inside a type-invariant, directly or
+indirectly, you are probably in trouble (and not just because of possible
+infinite recursions).
+
+I pushed hard for type-invariant checks on "in"-parameters, because the
+Rosen-Trick as well as the modifying of indirectly addressed data can destroy
+the type-invariant for an "in"-parameter, very much like for an out parameter.
+
+I really objected to anything called a type-invariant, if it can be falsified in
+full accordance to language rules. That is not just a small hole, it's a barn
+door.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, September 11, 2012  2:23 PM
+
+> I would have assumed that calls on primitive functions inside a
+> type-invariant are "inner calls" where the type-invariant is not
+> checked at all. (As far as a model goes, the type-invariant is like a
+> primitive routine invoked from the outside; its contents are/can be
+> inner calls.) If this is not so, it should be.
+
+What do you mean by "inside" here?
+
+Do you mean statically inside? If so, your assumption corresponds to the
+suggestion I made
+
+Or do you mean dynamically inside? That's the intepretation that worries Tuck
+(and me) as being very hard to implement.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, September 11, 2012  2:45 PM
+
+I meant statically inside. (But there is a visibility issue here, isn't there,
+to have direct calls on primitive functions of the type itself.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, September 11, 2012  3:00 PM
+
+I see no visibility issue? Can you explain, remember that preconditions etc can
+have forward referencs.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September 11, 2012  3:38 PM
+
+And we dropped the notion of "inner calls."  An invariant must be preserved by
+any function that *can* be called from outside, and is checked even when called
+from "inside." The exception to this is view conversions, which only involve a
+check if occurring outside the scope of the full type.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, September 11, 2012  4:01 PM
+
+Shucks. That makes it a rock and a hard place, right?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, September 18, 2012  1:56 PM
+
+It's not that bad. At least three solutions come to mind that don't involve
+giving up on "in" parameter checks. But they need more explanation than I can
+give on a cell phone, so that will have to wait until I get home.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 2, 2012  6:39 PM
+
+I wrote from on top of a mountain in Sequoia National Park:
+
+> It's not that bad. At least three solutions come to mind that don't involve
+> giving up on in parameter checks. But they need more explanation than I can
+> give on a cell phone, so that will have to wait until I get home.
+
+In response to Erhard's:
+
+>> And we dropped the notion of "inner calls."  An invariant must be
+>> preserved by any function that *can* be called from outside, and is
+>> checked even when called from "inside."
+>
+>Shucks. That makes it a rock and a hard place, right?
+
+As far as I know, we never had the notion of "inner calls", so we couldn't drop
+it. The model has always been that each subprogram operated identically no
+matter where it is called, because otherwise no one could ever figure out what
+ought to happen (the visibility rules in Ada being beyond the ability of mere
+mortals to understand - would we really want invariant checks to be a
+"characteristic" and appear and disappear in hard-to-explain ways? I think not).
+
+I should note that I was never really convinced of the need for "in"
+parameter checks in the first place; I dropped my opposition mainly because it
+was obvious that enough others were convinced and I wanted to move on to more
+important problems. I'm writing the following possible rules in order to have
+solutions to consider, but I would personally prefer just dropping the checks on
+"in" parameters and making it clear that if you don't declare you side-effects
+to the outside world, no one is going to help.
+
+So, clearly one choice is simply:
+
+(0) Revert to the original rule of checking "in out" and "out" parameters only.
+
+But let's look at other alternatives.
+
+Let's narrow the problem somewhat. I will postulate that the only place that we
+need to avoid invariant checks is in the actual invariant expression. If that
+expression calls functions that in their bodies make calls that do invariant
+checks, there will be a problem, but it seems impossible to prevent such
+problems (given that the bodies can be arbitrarily complex), and such
+expressions could never be used in static analysis anyway, so hopefully most
+users will avoid these. In any case, if we want to allow some "in" parameter
+checks, we're going to have cases of deep inner calls that could end up
+recursive (and it probably can happen even if only "in out" parameters are
+checks), so it doesn't pay to worry about these cases.
+
+Having done that, what can we say about the invariant expression?
+
+First, we can easily note that any subprogram used directly in an invariant must
+be a function. One can call procedures from function bodies, but we've already
+decided (above) that we're not going to worry about such cases.
+
+So another choice is:
+
+(1) Check all parameters for procedures, but check only "in out" and "out"
+parameters for functions.
+
+One can make an argument that while procedures might modify their arguments (as
+the only way to return results), functions doing so without advertising it is
+evil. Functions ought to use "in out" parameters when they are going to modify
+the parameters. (Yes, this means that I think the random number generator in Ada
+is evil. It would be much better written with an "in out" parameter.)
+
+We can find another solution by looking at the "generic" form of this problem.
+
+     type Priv is private
+        with Type_Invariant => Invariant(Priv);
+
+     function Invariant (P : in Priv) return Boolean;
+
+The problem in a nutshell is that it is impossible to write this function such
+that it is not primitive and visible. (But also see below). Thus, if the
+parameter is checked, infinite recursion is sure to result.
+
+We can see that this function always will have to return some boolean type.
+So another possible rule immediately appears:
+
+(2) Check only "in out" and "out" parameters for (visible) functions returning a
+    boolean type; check all parameters otherwise.
+
+Another option is to have an aspect specifically to suppress in parameter
+invariant checks:
+
+(3) Check all parameters unless aspect "Part_of_Invariant_Expression" is used
+    (only allowed on boolean functions?), thus:
+
+    function Invariant (P : in Priv) return Boolean
+       with Part_of_Invariant_Expression;
+
+Note that in both of these cases, an arbitrary invariant expression can be
+handled reorganizing to use an expression function:
+
+That is, replace:
+     type Priv is private
+        with Type_Invariant => <<expression>>;
+
+with
+
+     type Priv is private
+        with Type_Invariant => Invariant(Priv);
+
+     function Invariant (P : in Priv) return Boolean is
+        (<<expression>>);
+
+Note that if <<expression>> contains a function call Foo, more rearrangement
+will avoid the recursion problem. That is:
+
+     type Priv is private
+         with Type_Invariant => ... Foo (Priv) ...;
+
+     function Foo (P : in Priv) return <<something>>;
+
+can be replaced by:
+
+     type Priv is private
+        with Type_Invariant => Invariant(Priv);
+
+     function Foo (P : in Priv) return <<something>>;
+
+     function Invariant (P : in Priv) return Boolean;
+  private
+
+     function Priv_Foo (P : in Priv) return <<something>>;
+
+     function Foo (P : in Priv) return <<something>> is (Priv_Foo(P));
+
+     function Invariant (P : in Priv) return Boolean is
+        (... Priv_Foo (P) ...);
+
+Here, Priv_Foo does not have invariants checked. We then use that in the
+Invariant function to avoid recursion.
+
+The fact that this rearrangement is possible provides the last solution:
+
+(4) Make no change to the language. Public invariants are essentially impossible
+(but not necessary anyway).
+
+Putting the invariant on the full declaration allows the use of private routines
+for which the invariant is not checked.
+
+The problem with (4) is that it doesn't work very will for class-wide invariants
+(which we do not allow supplying privately because all extensions of the type
+ought to know about the invariant (as it will apply to them, and they cannot
+cancel it)).
+
+Which leads to:
+(4a) Allow class-wide invariants in the private part.
+
+The reason above is methodological rather than required; but it does mean that
+extension writers would always have to peek into the private part to find out
+about invariants that might apply.
+
+----
+
+I think that (2) or (3) is the best solution if we think checking "in"
+parameters is very important, and (0) is the best solution if we think checking
+them isn't that important.
+
+****************************************************************
+
+[Editor's note: There are 70 more messages on this topic (and a few
+that are off-topic) that remain to be filed.]
+
+****************************************************************
