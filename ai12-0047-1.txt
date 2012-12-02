@@ -1,0 +1,332 @@
+!standard 4.6(8/2)                                   12-12-01    AI12-0047-1/01
+!standard 4.6(24.8/2)
+!class binding interpretation 12-12-01
+!status work item 12-12-01
+!status received 12-11-12
+!priority Medium
+!difficulty Medium
+!subject Generalized iterators and finalization of the associated object
+!summary
+
+** TBD.
+
+!question
+
+1) Consider:
+
+    subtype Index is Integer range 0 .. 100;
+
+    type Rec (Last : Index := 50) is
+       record F : String (1 .. Last); end record;
+
+    X : Rec;
+   begin
+    for Char of X.F loop
+       X := (0, "");
+       Char := '?';
+    end loop;
+
+In this case, the assignment to X makes the array object disappear. This
+has to be either erroneous or illegal, right? (Yes.)
+
+2) The following is defined to be a master (7.6.1(3/2)):
+
+    ... the evaluation of an expression, function_call, or range that is
+    not part of an enclosing expression, function_call, range, or
+    simple_statement other than a simple_return_statement
+
+Consider:
+
+    For I of Func_Returning_Array_With_Controlled_Elements loop
+
+The rule above means that the function call result object gets
+finalized before beginning the first iteration of the loop.
+This is not good (especially as the tampering mechanism assumes that
+this finalization happens when the loop is exited).
+
+Should something be changed? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+The easiest way to fix problem #1 is to follow the lead of renaming. Either
+define this to directly be a renaming (and then enforce the Legality Rules
+appropriately), or just add the important rule into 5.5.2:
+
+The iterator_name or iterable_name of a iterator_specification shall not be a
+subcomponent that depends on discriminants of an object a variable whose nominal
+subtype is unconstrained, unless the object is known to be constrained.
+
+The solution to problem #2 should not cause the finalization of Function_Call
+in
+      for I in 1 .. Function_Call.Scalar_Field loop
+to be deferred to the end of the loop.
+
+A suggestion has been made to define the object to be a renaming of the
+iterator_name or iterable_name. However, that implies that the object can be
+clobbered inside the loop (with unpredictable results for a container iterator):
+
+    for E of X loop
+       ...
+       X := <something>;
+       ...
+    end loop;
+
+Ada.Containers has tampering checks to prevent this situation (the assignment
+would raise Program_Error), but user-defined packages may not.
+
+!ACATS test
+
+ACATS B-Tests should be created to test these rules.
+
+!appendix
+
+From: Steve Baird
+Sent: Monday, November 12, 2012 12:35 PM
+
+Two issues with generalized iterators.
+
+1) We need to deal with the following example, either by making it illegal
+   (following the example of 8.5.1(5/3)) or by defining its execution to be
+   erroneous (following the example of 6.4.1(18/3)):
+
+    subtype Index is Integer range 0 .. 100;
+
+    type Rec (Last : Index := 50) is
+       record F : String (1 .. Last); end record;
+
+    X : Rec;
+   begin
+    for Char of X.F loop
+       X := (0, "");
+       Char := '?';
+    end loop;
+
+I think we want tn array component iterator to behave (statically and
+dynamically - see next item) as though a rename of the array object were
+introduced. If such a rename would be illegal, then the iterator should also be
+illegal. We don't want new constructs to introduce new forms of erroneous
+behavior (and hence new ways of writing unreliable software) if we can avoid it.
+
+I haven't thought about whether analogous problems exist for the other
+generalized loop iteration forms.
+
+Opinions?
+
+2) The following is defined to be a master (7.6.1(3/2)):
+
+    ... the evaluation of an expression, function_call, or range that is
+    not part of an enclosing expression, function_call, range, or
+    simple_statement other than a simple_return_statement
+
+This is generally a good thing. In a case like
+
+    if Function_With_Controlled_Components.Flag then
+      P;
+    else
+      Q;
+
+, it means that the function call object is finalized before P or Q is called.
+
+This is good.
+
+In the example
+
+      for I in 1 .. Function_Call.Scalar_Field loop
+
+we will finalize the function result object before beginning the first iteration
+of the loop (but after storing away the pre-finalization value of the
+Scalar_Field component).
+
+Again, this is good.
+
+However, generationed loop iteration introduces (for the first time, I think)
+the possibility that a non-scalar expression can be a master.
+
+Consider:
+
+    For I of Func_Returning_Array_With_Controlled_Elements loop
+
+As the rules stand today, I believe the function call result object gets
+finalized before beginning the first iteration of the loop (just like the
+previous example).
+
+This is not good.
+
+I think this could be solved by adding the word "elementary"
+(or perhaps "scalar"?) to the 7.6.1 wording cited above, so that it reads
+
+   .... the evaluation of an elementary expression, function_call,
+  or range that is not part of an enclosing ...
+
+With that rule, the nearest enclosing master for the function call would be the
+loop statement itself, so the function result object would be finalized after
+the loop is completed (which is what we want).
+
+Opinions?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, November 12, 2012  1:21 PM
+
+> 1) ... I think we want the array
+> component iterator to behave (statically and dynamically - see next
+> item) as though a rename of the array object were introduced.
+> If such a rename would be illegal, then the iterator should also be
+> illegal. We don't want new constructs to introduce new forms of
+> erroneous behavior (and hence new ways of writing unreliable
+> software) if we can avoid it.
+>
+> I haven't thought about whether analogous problems exist for the other
+> generalized loop iteration forms.
+>
+> Opinions?
+
+Agreed.
+
+> 2) The following is defined to be a master (7.6.1(3/2)):
+>
+>     ... the evaluation of an expression, function_call, or range that is
+>     not part of an enclosing expression, function_call, range, or
+>     simple_statement other than a simple_return_statement
+>
+> This is generally a good thing. In a case like
+>
+>     if Function_With_Controlled_Components.Flag then
+>       P;
+>     else
+>       Q;
+>
+> , it means that the function call object is finalized before P or Q is
+> called.
+>
+> This is good.
+>
+> In the example
+>
+>       for I in 1 .. Function_Call.Scalar_Field loop
+>
+> we will finalize the function result object before beginning the first
+> iteration of the loop (but after storing away the pre-finalization
+> value of the Scalar_Field component).
+>
+> Again, this is good.
+>
+> However, generationed loop iteration introduces (for the first time, I
+> think) the possibility that a non-scalar expression can be a master.
+>
+> Consider:
+>
+>     For I of Func_Returning_Array_With_Controlled_Elements loop
+>
+> As the rules stand today, I believe the function call result object
+> gets finalized before beginning the first iteration of the loop (just
+> like the previous example).
+>
+> This is not good.
+>
+> I think this could be solved by adding the word "elementary"
+> (or perhaps "scalar"?) to the 7.6.1 wording cited above, so that it
+> reads
+>
+>    .... the evaluation of an elementary expression, function_call,
+>   or range that is not part of an enclosing ...
+>
+> With that rule, the nearest enclosing master for the function call
+> would be the loop statement itself, so the function result object
+> would be finalized after the loop is completed (which is what we
+> want).
+>
+> Opinions?
+
+This makes me somewhat nervous, as it seems like a big change.
+But perhaps it is OK.  There are very few places where non-elementary
+expressions occur where they are not part of a larger expression, and those may
+mostly be cases where some kind of implicit rename is taking place.
+
+The other solution would be to treat these generalized iterators as implicit
+renames, since you have already suggested that in part (1).
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, November 12, 2012 12:35 PM
+
+> The other solution would be to treat these generalized iterators as
+> implicit renames, since you have already suggested that in part (1).
+
+Just fleshing out your suggestion, this approach would also include implicitly defining an enclosing block statement, right?
+The implicit rename declaration has to live somewhere.
+
+...
+> I haven't thought about whether analogous problems exist for the other
+> generalized loop iteration forms.
+
+I think we may need to look more closely at this question before deciding
+between the two approaches (i.e., change the definition of master vs. implicit
+renames in implicit blocks).
+
+Incidentally, typos in previous message:
+    "generationed loop iteration" => "generalized loop iteration"
+     "we want tn array" => "we want an array"
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 12, 2012  6:06 PM
+
+Implicit renames might cause issues with user-defined iterators. In particular,
+your example of:
+
+    for E of X loop
+       ...
+       X := <something>;
+       ...
+    end loop;
+
+looks like it could be trouble if X is considered a rename. The iteration could
+end up screwed up. The language-defined containers "solve" this problem with the
+tampering mechanism, and I think the only problem for arrays would be the
+example you originally showed (which would be illegal if a rename), so it mostly
+would be a problem with user-defined iterators.
+
+OTOH, if you fixed the problem with masters and implicit temporaries, then the
+problem (1) would not need to be illegal (Constraint_Error might be raised,
+though, not sure which is worse).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 12, 2012  6:53 PM
+
+> I haven't thought about whether analogous problems exist for the other
+> generalized loop iteration forms.
+
+Don't they have to? Just wrap the container or iterator object in a variant
+record, and change the discriminant of the variant within the loop to make the
+object disappear. Of course this is a pathology (especially for the iterator
+object case, it's hard to imagine any good reason to put those into a record),
+but it seems dangerous enough to detect (the only alternative being erroneous
+execution, which we want to avoid if possible).
+
+We can fix this problem easily by adapting 8.5.1(5/3) directly:
+
+The iterator_name or iterable_name of a iterator_specification shall not be a
+subcomponent that depends on discriminants of an object a variable whose nominal
+subtype is unconstrained, unless the object is known to be constrained.
+
+This is simpler than trying to drag in the entire mechanism of renaming
+(presuming we don't need it anyway for the master problem).
+
+I'm not going to waste time now considering the master issue...(no sensible
+solution jumps out at me).
+
+****************************************************************
