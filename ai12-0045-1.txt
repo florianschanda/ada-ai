@@ -454,7 +454,1445 @@ instance.
 
 ****************************************************************
 
-[Editor's note: There are 47 more messages on this topic (and a few
-that are off-topic) that remain to be filed.]
+From: Erhard Ploedereder
+Sent: Thursday, October  4, 2012  6:58 PM
+
+Is this now settled as:
+- allow in either place
+- but not in both
+?
+
+Makes sense to me.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October  4, 2012  8:39 PM
+
+I think so, pending, of course, a vote at our next meeting.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October  4, 2012  9:54 PM
+
+Why is this example not convincing (for allowing them in both places), seems a
+reasnable example to me!
+
+["This" being Yannick's example of September 24th.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October  5, 2012  12:19 AM
+
+We've essentially agreed to allow them in both places, but only one or the other
+can appear (can't give a precondition on both, because we don't want any
+combining of specific preconditions). That's certainly the case in this example,
+the generic subprogram doesn't have a precondition. So I don't see that this
+example changes anything.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, October  5, 2012  9:03 AM
+
+But you do have a postcondition on both!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October  5, 2012  1:23 PM
+
+It does? I missed that, probably because I don't speak SPARK.
+
+Anyway, that caused me to take another look at the example, and I now think it
+is bogus.
+
+The idea in this case is the change the postcondition to reflect an added
+precondition. But the postcondition on a generic unit (or anything else, for
+that matter) shouldn't be changed simply because the body can't be changed to
+reflect that. One presumes it depends on the properties of the formal type, and
+the actual type ought to accurately reflect the appropriate properties.
+
+In this case, we have the generic (written in Ada!):
+
+generic
+    type T1 is range <>;
+    type T2 is range <>;
+function Square (X : in T1) return T2
+   with Post => Square'Result = T2 (X * X);
+
+And the instance was:
+
+type Actual_T1 is range 0 .. 10;
+type Actual_T2 is range 0 .. Actual_T1'Last * Actual_T1'Last;
+
+function My_Square is new Square (T1 => Actual_T1, T2 => Actual_T2)
+   with Pre => X > 1; Post => Square'Result = T2 (X * X) and Square'Result >= 4;
+
+But this is silly -- if there is an extra part to the postcondition, it should
+have been part of the original postcondition depending on the formals. In this
+case, it should be something like:
+
+generic
+    type T1 is range <>;
+    type T2 is range <>;
+function Square (X : in T1) return T2
+   with Post => Square'Result = T2 (X * X) and
+        (if T1'First >= 0 then Square'Result >= T2 (T1'First*T1'First);
+
+In addition, the above instantiation has the wrong range for the Actual_T1
+(sub)type; it uses a precondition rather than a subtype to provide the range.
+That essentially causes the problem in this example. Ada ranges should always be
+used rather than preconditions when possible, for the obvious reason that that
+will work in all versions of Ada, not just Ada 2012. (Ada compilers have lots of
+specialized code for handling ranges, as well, so the code quality of the result
+is likely to be better, too, especially if checks are not suppressed.)
+
+Once a range is used, the original postcondition adjusts to take it into
+account. Doing so gives an instance of:
+
+type Actual_T1 is range 0 .. 10;
+subtype Restricted_Actual_T1 is Actual_T1 range 2 .. 10;
+type Actual_T2 is range 0 .. Actual_T1'Last * Actual_T1'Last;
+
+function My_Square is new Square (T1 => Restricted_Actual_T1, T2 => Actual_T2);
+
+which needs no new pre or postconditions, and has the same postcondition as the
+original example.
+
+People probably use constructions like the example because of the limitations of
+SPARK. That's no reason for them to use such silly constructions in full Ada.
+
+There might be a compelling example of the use of pre or postconditions on an
+instance, but this isn't it.
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Monday, October  8, 2012  2:46 AM
+
+> There might be a compelling example of the use of pre or
+> postconditions on an instance, but this isn't it.
+
+I think this might happen whenever a property is too complex to express on the
+generic function, or is a consequence of the contract of the generic function,
+that we would like to express more simply. For example, take a generic in-place
+sorting function:
+
+   generic
+     type Collection is new Some_List_Type;
+   procedure Sort (C : in out Collection) with
+     Post => (for all E of C => C'Old.Contains (E))
+                and then
+             (for all E of C'Old => C.Contains (E));
+
+If you instantiate with the type No_Duplicates defined as:
+
+   type No_Duplicates is new Some_List_Type;
+
+then you may want to add to the contract of the instance of Sort for
+No_Duplicates that there are indeed no duplicates in the input collection and
+likewise in the output collection:
+
+   procedure Sort_No_Duplicates (C : in out Collection) is
+     new Sort (No_Duplicates)
+   with
+     Pre  => No_Duplicates_In (C),
+     Post => No_Duplicates_In (C);
+
+I don't know if this is compelling, but I see this being used.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October  8, 2012  12:32 PM
+
+Me too, it is a natural thing to do, and I don't see sufficient justification
+for making it difficult!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October  8, 2012  12:40 PM
+
+>    type No_Duplicates is new Some_List_Type;
+
+I'd put a Predicate on No_Duplicates.
+
+In fact, I've found that it is often (usually?) better to use Predicate than Pre and Post.
+
+> then you may want to add to the contract of the instance of Sort for
+> No_Duplicates that there are indeed no duplicates in the input
+> collection and likewise in the output collection:
+>
+>    procedure Sort_No_Duplicates (C : in out Collection) is
+                                  ^^^^^^^^^^^^^^^^^^^^^^^ That's illegal syntax,
+				  by the way.  And anyway, C is of type
+				  No_Duplicates.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October  8, 2012  1:05 PM
+
+> I'd put a Predicate on No_Duplicates.
+
+How do you know you can?
+Software people so often assume that arbitrary code can be modified!
+Or perhaps No_Duplicates has associated routines that mess around and
+temporarily have duplicates (yes, it might be better to make it private, but
+sometimes we don't like to make things private, because they would be too
+private!)
+
+What if No_Duplicates is defined in an Ada 95 module that does not permit Ada
+2012 stuff?
+
+Why ask someone to write things in a different way than they see the problem at
+first glance?
+
+I know that you (Bob) find the use of predicates convincing, but I think a lot
+of people will prefer to use Pre/Post because
+
+a) they are used to it
+
+b) they have a clearer idea of where the checks are made
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  8, 2012  5:45 PM
+
+If they need to know where the checks are made, they're doing something wrong.
+That's because these checks should never fail in a correct program, and in
+particular, a predicate is (logically) always true for the object to which it
+applies. If someone is trying to sneak in something that "temporarily" is
+violating a predicate, that's just plain wrong; otherwise, it doesn't matter
+where the checks are made.
+
+Predicates are easier to understand than pre/post because predicates work (more
+or less) like constraints -- something every Ada programmer should be familiar
+with. Pre/post are different and have subtlies (like caring about when they are
+checked) that make them less obvious. (Yes, there are things that can't be
+checked with a predicate, but those aren't that common and certainly shouldn't
+be where someone starts using these things.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October  8, 2012  6:07 PM
+
+> If they need to know where the checks are made, they're doing
+> something wrong. That's because these checks should never fail in a
+> correct program, and in particular, a predicate is (logically) always
+> true for the object to which it applies. If someone is trying to sneak
+> in something that "temporarily" is violating a predicate, that's just
+> plain wrong; otherwise, it doesn't matter where the checks are made.
+
+It seems to me that for a complex data structure, it will be normal for routines
+working on that complex data structure to violate invariants that normally hold
+outside. yes, we like to make things private and use invariants, but that's not
+always practical (for many reasons), and in such cases, predicates may not be a
+satisfactory substitute for pre and post conditions
+
+> Predicates are easier to understand than pre/post because predicates
+> work (more or less) like constraints -- something every Ada programmer
+> should be familiar with. Pre/post are different and have subtlies
+> (like caring about when they are checked) that make them less obvious.
+> (Yes, there are things that can't be checked with a predicate, but
+> those aren't that common and certainly shouldn't be where someone
+> starts using these things.)
+
+Yes, when predicates work they are great, but they cannot always replace pre and
+post conditions!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  8, 2012  6:39 PM
+
+> It seems to me that for a complex data structure, it will be normal
+> for routines working on that complex data structure to violate
+> invariants that normally hold outside. yes, we like to make things
+> private and use invariants, but that's not always practical (for many
+> reasons), and in such cases, predicates may not be a satisfactory
+> substitute for pre and post conditions
+
+Perhaps. I mostly envision predicates being used on parameters whose value isn't
+going to change in the subprogram. (That's most parameters.) And I mostly see
+preconditions being used to check the values of incoming parameters -- but
+that's usually better done using predicates.
+
+> > Predicates are easier to understand than pre/post because predicates
+> > work (more or less) like constraints -- something every Ada
+> > programmer should be familiar with. Pre/post are different and have
+> > subtlies (like caring about when they are checked) that make them less obvious.
+> > (Yes, there are things that can't be checked with a predicate, but
+> > those aren't that common and certainly shouldn't be where someone
+> > starts using these things.)
+>
+> Yes, when predicates work they are great, but they cannot always
+> replace pre and post conditions!
+
+And I don't think anyone ever claimed that they could always replace
+preconditions. (They can replace postconditions only rarely: just those that are
+on "in out" and "out" parameters.)
+
+Predicates and preconditions have a wide overlap in things that they can check,
+as do invariants and postconditions. (This makes sense, given that these pairs
+are implemented similarly; the other pairs may be implemented quite differently
+[call-site vs. in body, for instance].) Invariants do not overlap at all with
+preconditions, and predicates have a very small overlap with postconditions.
+
+All things being equal, I prefer predicates to preconditions, for reasons I gave
+previously, when either can be used. Of course, if only one or the other will
+solve your problem, surely use the one that solves your problem, as opposed to
+trying to make a square peg fit in a hexagonal hole.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October  9, 2012  9:06 AM
+
+> >>     type No_Duplicates is new Some_List_Type;
+> >
+> > I'd put a Predicate on No_Duplicates.
+>
+> How do you know you can?
+> Software people so often assume that arbitrary code can be modified!
+
+I'm sure ARG members are well aware of the fact that some people don't want to
+modify their code.  And we don't need yet another lecture on that point.
+Anyway, that fact is largely irrelevant to language design, because if they're
+not modifying their code, they're not using all the fancy new features.
+
+Obviously, when I say "I'd put a Predicate...", I mean that when I declare type
+No_Duplicates, I'd put a Predicate on it. That's good advice, and I don't know
+why you object to it, other than for rhetorical reasons.
+
+> Or perhaps No_Duplicates has associated routines that mess around and
+> temporarily have duplicates...
+
+One of the strengths of Predicates is that they support exactly that usage.
+
+>...(yes, it
+> might be better to make it private, but sometimes we  don't like to
+>make things private, because they would  be too private!)
+>
+> What if No_Duplicates is defined in an Ada 95 module that does not
+> permit Ada 2012 stuff?
+
+You can come up with all sorts of reasons why people can't use some useful
+feature, Predicate is just one such.  So what? I mean, what if they whole
+program is Ada 83 and can't use ... ?
+
+To answer the above question:  Write a wrapper.
+
+> Why ask someone to write things in a different way than they see the
+> problem at first glance?
+
+For all the reasons already discussed in this thread.
+
+> I know that you (Bob) find the use of predicates convincing, but I
+> think a lot of people will prefer to use Pre/Post because
+>
+> a) they are used to it
+
+Pre/Post were added to the language at the same time as Predicates, so I don't
+buy that argument.
+
+> b) they have a clearer idea of where the checks are made
+
+If you want to know where the checks are made, you should use pragma Assert.
+
+We've yet to see a single compelling example of a postcondition on an instance.
+And if it's so important to allow postconditions on instances, they why isn't
+anybody clamoring for an ability to put postconditions on subprograms inside
+package instances? That's by far the more common case of instances.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October  9, 2012  9:42 AM
+
+> I'm sure ARG members are well aware of the fact that some people don't
+> want to modify their code.  And we don't need yet another lecture on
+> that point.  Anyway, that fact is largely irrelevant to language
+> design, because if they're not modifying their code, they're not using
+> all the fancy new features.
+
+AARGH! The *NORMAL* mode of use of Ada 2012 will be that certain new units are
+written in this mode, leaving big chunks of untouched legacy 95 code. If the
+design of the language and the implementation do not accomodate that, then
+almost no one will use Ada 2012 at all.
+
+> Obviously, when I say "I'd put a Predicate...", I mean that when I
+> declare type No_Duplicates, I'd put a Predicate on it.
+> That's good advice, and I don't know why you object to it, other than
+> for rhetorical reasons.
+
+Because it may not be possible.
+
+>> Or perhaps No_Duplicates has associated routines that mess around and
+>> temporarily have duplicates...
+>
+> One of the strengths of Predicates is that they support exactly that
+> usage.
+
+I don't think so, not if they are checked when passed as parameters to other
+procedures??? Or you declare a temp variable initialized with a value that does
+not meet the predicate???
+
+>> ...(yes, it
+>> might be better to make it private, but sometimes we don't like to
+>> make things private, because they would be too private!)
+>>
+>> What if No_Duplicates is defined in an Ada 95 module that does not
+>> permit Ada 2012 stuff?
+>
+>> Why ask someone to write things in a different way than they see the
+>> problem at first glance?
+>
+> For all the reasons already discussed in this thread.
+>
+>> I know that you (Bob) find the use of predicates convincing, but I
+>> think a lot of people will prefer to use Pre/Post because
+>>
+>> a) they are used to it
+>
+> Pre/Post were added to the language at the same time as Predicates, so
+> I don't buy that argument.
+
+They are used to it because they have been writing in SPARK, or in Ada with our
+precondition/postcondition pragmas (where have you been? :-) GNAT has had
+preconditions and postconditions for ages, what the ARG does years later does
+not change that!) or in Eiffel or with faked preconditions/postconditions using
+assert etc.
+
+>> b) they have a clearer idea of where the checks are made
+>
+> If you want to know where the checks are made, you should use pragma
+> Assert.
+
+I disagree with this kind of viewpoint. I have an absolutely clear idea of when
+pre and post conditions are checked.
+
+I must say, I prefer to use pre and post conditions to predicates in most cases,
+especially for complex data. Why, because of all the discussion of predicates
+not being fully check in all situations, which I don't understand and am not
+sure I want to understand!
+
+> We've yet to see a single compelling example of a postcondition on an
+> instance.  And if it's so important to allow postconditions on
+> instances, they why isn't anybody clamoring for an ability to put
+> postconditions on subprograms inside package instances?
+> That's by far the more common case of instances.
+
+Yes, I think they should be allowed there too.
+
+Oh well, in GNAT at least, we have the pragmas, so if the aspects have arbitrary
+restrictions, real programmers will be able to get around them anyway by using
+the pragmas which have no such restrictions.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, October  9, 2012  9:52 AM
+
+> We've yet to see a single compelling example of a postcondition on an
+> instance.
+When a postcondition depends on the  properties of a formal subprogram?
+Something along the lines (OK, not realistic, just to show the  idea):
+
+generic
+   with function Get_Value return Integer; function Double_It return Integer
+   with Post => Double_It'Result mod 2 = 0;
+
+function Get_Even return Integer
+   with Post => Get_Even'Result mod 2 = 0;
+
+function Double_Even is new Double_It (Get_Even)
+   with Post => Double_Even'Result mod 4 = 0;
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October  9, 2012  10:00 AM
+
+>> We've yet to see a single compelling example of a postcondition on an
+>> instance.
+
+Well there are many useful things in the language that don't necessarily come
+with compelling examples showing they are necessary. Where's the compelling
+example showing that NOT IN is needed (after all we can always say not (A in
+B))?
+
+> When a postcondition depends on the  properties of a formal subprogram?
+> Something along the lines (OK, not realistic, just to show the  idea):
+>
+> generic
+>     with function Get_Value return Integer; function Double_It return
+> Integer
+>     with Post => Double_It'Result mod 2 = 0;
+>
+> function Get_Even return Integer
+>     with Post => Get_Even'Result mod 2 = 0;
+>
+> function Double_Even is new Double_It (Get_Even)
+>     with Post => Double_Even'Result mod 4 = 0;
+
+sounds like a reasonable example
+
+It's intereting that SPARK allows these multiple cases.
+That's awkward if the language doesn't allow them. Well not so awkward I guess,
+perhaps GNAT should add aspects Precondition and Postcondition which function
+like the pragmas and avoid the restrictions of Pre and Post :-)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October  9, 2012  10:27 AM
+
+There isn't any complexity in supporting *post*conditions on both generic and
+instance.  The complexity comes from *pre*conditions. Are they "or"ed or
+"and"ed?  If we could disallow preconditions on both places, that would avoid
+most of the "hair."
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October  9, 2012  10:30 AM
+
+FWIW, GNAT always "and"s multiple preconditions, e.g. when multiple precondition
+pragmas appear for a single subprogram, and if there is a pragma and an aspect,
+they are also and'ed. That seems the natural semantics to me, "or" would seem
+really weird.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October  9, 2012  12:17 PM
+
+> >> We've yet to see a single compelling example of a postcondition on
+> >> an instance.
+>
+> Well there are many useful things in the language that don't
+> necessarily come with compelling examples showing they are necessary.
+> Where's the compelling example showing that NOT IN is needed (after
+> all we can always say not (A in B))?
+
+Heh?  There are lots of compelling examples showing that "not in"
+is useful.  Obviously it's not essential, but that's not what we're talking about.
+
+On the other hand, I haven't seen any compelling examples showing that postconditions on instances are useful.  In fact, it seems to me they're asking for trouble.  When you write a postcondition, you're supposed to write a body that obeys the postcondition, but you can't do that for an instance.
+
+> > When a postcondition depends on the  properties of a formal subprogram?
+> > Something along the lines (OK, not realistic, just to show the  idea):
+> >
+> > generic
+> >     with function Get_Value return Integer; function Double_It
+> > return Integer
+> >     with Post => Double_It'Result mod 2 = 0;
+> >
+> > function Get_Even return Integer
+> >     with Post => Get_Even'Result mod 2 = 0;
+> >
+> > function Double_Even is new Double_It (Get_Even)
+> >     with Post => Double_Even'Result mod 4 = 0;
+>
+> sounds like a reasonable example
+
+Not to me.  ;-)
+
+Here, we've put a postcondition on Double_Even, not knowing what's in the body
+of Double_It, other than that it always returns an even number.
+
+If the body says:
+
+    It : Integer := 7;
+
+    function Double_It return Integer is
+    begin
+        if Get_Value > 0 then
+            return It * 2;
+        else
+            return 0;
+        end if;
+    end Double_It;
+
+Now the postcondition on Double_It is correct, but the one on Double_Even is
+wrong!  That's what happens when you write postconditions on things where you
+have no control over the body.
+
+> It's intereting that SPARK allows these multiple cases.
+
+Does it?  I'm not up on the latest SPARK, but I thought it didn't yet support
+generics.  I agree that supporting things that SPARK supports (hopefully with
+the same semantics) is a good idea.
+
+> That's awkward if the language doesn't allow them. Well not so awkward
+> I guess, perhaps GNAT should add aspects Precondition and
+> Postcondition which function like the pragmas and avoid the
+> restrictions of Pre and Post :-)
+
+Then we have to repeat this argument inside AdaCore.  ;-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October  9, 2012  12:17 PM
+
+> > I'm sure ARG members are well aware of the fact that some people
+> > don't want to modify their code.  And we don't need yet another
+> > lecture on that point.  Anyway, that fact is largely irrelevant to
+> > language design, because if they're not modifying their code,
+> > they're not using all the fancy new features.
+>
+> AARGH! The *NORMAL* mode of use of Ada 2012 will be that certain new
+> units are written in this mode, leaving big chunks of untouched legacy
+> 95 code.
+
+Yes, of course.  So what?  That's the case with Text_IO, which as you pointed
+out, we're probably not going to touch.
+
+AARGH! to you.  ;-)  Or maybe it should be ARG, since we're on the ARG list.
+
+>...If the design of the language and the implementation  do not
+>accomodate that, then almost no one will use Ada 2012 at all.
+
+Mole-hill ==> mountain.  Generic subprograms are rare anyway.
+
+My advice WHEN WRITING CODE is as I said -- put that Predicate on that
+No_Duplicates type.  Obviously, if you already have a No_Duplicates type you
+don't want to modify, you can't do that.  So what?  There's no way this will
+prevent people from using Ada 2012.
+
+You can write a wrapper that has Pre/Post, or has Assert.
+But the most likely thing is to do nothing -- just like we're not itching to add
+invariants to Text_IO.
+
+There's nothing "unaccomodating" here, nothing stopping people from mixing Ada
+95 and 2012!
+
+> > Obviously, when I say "I'd put a Predicate...", I mean that when I
+> > declare type No_Duplicates, I'd put a Predicate on it.
+    ^^^^^^^^^^^^^^^^^^^
+> > That's good advice, and I don't know why you object to it, other
+> > than for rhetorical reasons.
+>
+> Because it may not be possible.
+
+It is ALWAYS possible, when I declare type, to put a predicate.
+The fact that some existing code can't be changed is irrelevant.
+So don't put predicates on existing code unless you can change that code!
+
+> >> Or perhaps No_Duplicates has associated routines that mess around
+> >> and temporarily have duplicates...
+> >
+> > One of the strengths of Predicates is that they support exactly that
+> > usage.
+>
+> I don't think so, not if they are checked when passed as parameters to
+> other procedures??? Or you declare a temp variable initialized with a
+> value that does not meet the predicate???
+
+    type Sequence is ...;
+    subtype Sequence_With_No_Duplicates is Sequence with
+        Predicate => ...;
+
+Then you declare formal parameters of one or the other subtype, depending on
+where you want to allow duplicates.
+
+> I must say, I prefer to use pre and post conditions to predicates in
+> most cases, especially for complex data.
+> Why, because of all the discussion of predicates not being fully check
+> in all situations, ...
+
+That seems exactly backwards to me.  The whole point of predicates and
+invariants is so you don't forget to put in all the dozens of equivalent
+Pre/Post.
+
+Yes, there are loopholes in predicates, but there are loopholes in pre/post,
+too.
+
+> ...which I don't
+> understand and am not sure I want to understand!
+
+I'm sure you are quite capable of understanding where predicates are checked.
+Every time there's a constraint check, there is a predicate check.  See
+RM-3.2.4(31/3).
+
+> > We've yet to see a single compelling example of a postcondition on
+> > an instance.  And if it's so important to allow postconditions on
+> > instances, they why isn't anybody clamoring for an ability to put
+> > postconditions on subprograms inside package instances?
+> > That's by far the more common case of instances.
+>
+> Yes, I think they should be allowed there too.
+>
+> Oh well, in GNAT at least, we have the pragmas, so if the aspects have
+> arbitrary restrictions, real programmers will be able to get around
+> them anyway by using the pragmas which have no such restrictions.
+
+Heh?  Those pragmas don't allow pre/post on subprograms inside package
+instances.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October  9, 2012  3:19 PM
+
+...
+> We've yet to see a single compelling example of a postcondition on an
+> instance.  And if it's so important to allow postconditions on
+> instances, they why isn't anybody clamoring for an ability to put
+> postconditions on subprograms inside package instances?
+> That's by far the more common case of instances.
+
+This is the crux of the issue, really. Allowing pre- and postconditions on
+subprogram instances is different than the other parts of the language.
+Instances of subprograms declared inside of generic packages cannot have
+preconditions or postconditions added. Similarly, you can't add additional pre-
+or postconditions to calls with access-to-subprogram parameters.
+
+So writing them on a subprogram instance is a maintenance hazard: it will make
+it harder to change the generic to another form. That's quite common. For
+instance, all three of the following are roughly equivalent in functionality and
+it's not uncommon to change one to one of the others:
+
+generic
+   with function Get_Value return Integer;
+function Double_It return Integer
+   with Post => Double_It'Result mod 2 = 0;
+
+---
+
+generic
+   with function Get_Value return Integer;
+package Operations is
+   function Double_It return Integer
+       with Post => Double_It'Result mod 2 = 0;
+end Operations;
+
+---
+
+function Double_It (Get : access function return Integer) return Integer
+   with Post => Double_It'Result mod 2 = 0;
+
+---
+
+But while the first appears to allow having pre and post on the instance, there
+is no equivalent functionality on either of the others (on the package instance
+or on the call of the latter). Which to me makes the first suspicious as well.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October  9, 2012  3:39 PM
+
+> > There isn't any complexity in supporting *post*conditions on both
+> > generic and instance.  The complexity comes from *pre*conditions.
+> > Are they "or"ed or "and"ed?  If we could disallow preconditions on
+> > both places, that would avoid most of the "hair."
+>
+> FWIW, GNAT always "and"s multiple preconditions, e.g. when multiple
+> precondition pragmas appear for a single subprogram, and if there is a
+> pragma and an aspect, they are also and'ed.
+> That seems the natural semantics to me, "or" would seem really weird.
+
+"or" *is* really weird, but it is also what LSP and "Design-by-Contract"TM
+require. People coming from an Eiffel background would expect preconditions to
+be "or"ed and postconditions to be "and"ed.
+
+It's true that even then, you probably want "and" in some circumstances.
+Which is too hard for the language to solve, therefore we didn't try.
+
+Everything in the rules of Ada 2012 assume that there is only one Pre or Post,
+going all the way back to the definition of aspect_clause (which only allows an
+item to be specified once). Changing that assumption would require a lot of
+changes in wording throughout the Standard.
+
+As Bob notes, you can always use a wrapper to effectively "add" a precondition
+or postcondition to an existing routine. I don't see much need to have a weird
+special case to allow adding them to subprogram instances - which are rare and
+also causes a potential for maintenance headaches.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October  9, 2012  5:34 PM
+
+>> ...which I don't
+>> understand and am not sure I want to understand!
+>
+> I'm sure you are quite capable of understanding where predicates are
+> checked.  Every time there's a constraint check, there is a predicate
+> check.  See RM-3.2.4(31/3).
+
+Yes, for scalar types I understand, but I am much less clear about predicates on
+composite types. For example if I have a predicate on an array, does it get
+checked every time an element is changed e.g. by passing the element as in out
+to a procedure.
+
+>>> We've yet to see a single compelling example of a postcondition on
+>>> an instance.  And if it's so important to allow postconditions on
+>>> instances, they why isn't anybody clamoring for an ability to put
+>>> postconditions on subprograms inside package instances?
+>>> That's by far the more common case of instances.
+>>
+>> Yes, I think they should be allowed there too.
+>>
+>> Oh well, in GNAT at least, we have the pragmas, so if the aspects
+>> have arbitrary restrictions, real programmers will be able to get
+>> around them anyway by using the pragmas which have no such
+>> restrictions.
+>
+> Heh?  Those pragmas don't allow pre/post on subprograms inside package
+> instances.
+
+Why can't you have the pragmas in the instance, and pass their expressions in as
+generic parameters?
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October  9, 2012  5:35 PM
+
+> So writing them on a subprogram instance is a maintenance hazard: it
+> will make it harder to change the generic to another form. That's quite common.
+> For instance, all three of the following are roughly equivalent in
+> functionality and it's not uncommon to change one to one of the others:
+
+I find this argument (maintenance hazard) convincing
+
+****************************************************************
+
+From: Robert Deware
+Sent: Tuesday, October  9, 2012  5:39 PM
+
+>>> There isn't any complexity in supporting *post*conditions on both
+>>> generic and instance.  The complexity comes from *pre*conditions.
+>>> Are they "or"ed or "and"ed?  If we could disallow preconditions on
+>>> both places, that would avoid most of the "hair."
+>>
+>> FWIW, GNAT always "and"s multiple preconditions, e.g. when multiple
+>> precondition pragmas appear for a single subprogram, and if there is
+>> a pragma and an aspect, they are also and'ed.
+>> That seems the natural semantics tome, "or" would seem really weird.
+>
+> "or" *is* really weird, but it is also what LSP and
+> "Design-by-Contract"TM require. People coming from an Eiffel
+> background would expect preconditions to be "or"ed and postconditions to be
+> "and"ed.
+
+I don't think so, that's in the case of a hierarchy, if you just write
+
+     procedure XYZ (A, B : Natural);
+     pragma Precondition (A > 10);
+     pragma Precondition (B > A);
+
+I think anyone would expect an AND
+
+> As Bob notes, you can always use a wrapper to effectively "add" a
+> precondition or postcondition to an existing routine. I don't see much
+> need to have a weird special case to allow adding them to subprogram
+> instances - which are rare and also causes a potential for maintenance headaches.
+
+Yes, that seems good enough, or if you always expect an extra precondition, you
+can make it a generic parameter right?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October  9, 2012  8:22 PM
+
+> > I'm sure you are quite capable of understanding where predicates are
+> > checked.  Every time there's a constraint check, there is a
+> > predicate check.  See RM-3.2.4(31/3).
+>
+> Yes, for scalar types I understand, but I am much less clear about
+> predicates on composite types. For example if I have a predicate on an
+> array, does it get checked every time an element is changed e.g. by
+> passing the element as in out to a procedure.
+
+No.  The constraint on the composite does not get checked there, nor does the
+predicate.  You are right to be confused by that -- it's one of the loopholes.
+
+> Why can't you have the pragmas in the instance, and pass their
+> expressions in as generic parameters?
+
+Sure, you can do something like that, but you can't do it after the fact.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October  9, 2012  10:02 PM
+
+>> Yes, for scalar types I understand, but I am much less clear about
+>> predicates on composite types. For example if I have a predicate on
+>> an array, does it get checked every time an element is changed e.g.
+>> by passing the element as in out to a procedure.
+>
+> No.  The constraint on the composite does not get checked there, nor
+> does the predicate.  You are right to be confused by that -- it's one
+> of the loopholes.
+
+Well this particular case we were talking about was the case of a predicate on a
+composite.
+
+What does it mean to have a predicate that says an array is ordered if you can
+change an element and the predicate is not checked? I would rather stick to
+preconditions and postcondittions in this case I think :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 10, 2012  3:13 PM
+
+> What does it mean to have a predicate that says an array is ordered if
+> you can change an element and the predicate is not checked? I would
+> rather stick to preconditions and postcondittions in this case I think
+> :-)
+
+You're right of course, but I don't think preconditions and postconditions help
+much either, as they don't know about the actual parameters of a routine and
+have no benefit if the change is via an assignment statement.
+
+For instance, if you have
+    P_with_In_Out (Ordered(I));
+you can't write a precondition or postcondition on P_with_In_Out to check
+Ordered.
+
+Indeed, pretty much all you can do in this case is add some pragma Asserts
+around.
+
+We talked about whether it made sense to do more checks for predicates, but to
+do it right requires distributed overhead (in the above case, you need to make
+the check when the parameter is changed, which is somewhere inside of
+P_with_In_Out if the parameter is passed by-reference), and the rules aren't
+obvious. So we decided to leave this to implementers; if they defined a mode
+with additional checks and it proved useful, we'd consider adopting it down the
+road.
+
+So if you think this is important, I'd suggest coming up with a design for
+additional checks and define an Assertion_Policy to invoke it. (I'd certainly
+support such an invention, I'd like fewer holes, at least in a "paranoid" mode.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, October 10, 2012  3:51 PM
+
+> So if you think this is important, I'd suggest coming up with a design
+> for additional checks and define an Assertion_Policy to invoke it.
+> (I'd certainly support such an invention, I'd like fewer holes, at
+> least in a "paranoid" mode.)
+
+Probably it should be under the -gnatV switch which adds 'Valid calls all over
+the place :-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, October 10, 2012  4:20 PM
+
+> What does it mean to have a predicate that says an array is ordered if
+> you can change an element and the predicate is not checked?
+
+Basically, it means that you get a predicate check at the places where a
+whole-array operation would do a constraint check.  Those places include
+parameter passing and function return, so it covers all the places pre/post do.
+That's why I think a predicate is better that duplicating that condition all
+over in pre/post.
+
+>...I would rather stick to preconditions and  postcondittions in this
+>case I think :-)
+
+But the predicate covers all the pre/post you might write (and it won't forget
+to write some), plus it does MORE checks (like on whole-array assignments).
+
+Yes, predicates on composite types leak like a colander (e.g. your example of
+poking one component of an array).  That's a sad fact of life, but using
+pre/post instead just puts more holes in the colandar, and doesn't plug up any
+existing holes.
+
+You want a way to say "array objects of this [sub?]type NEVER have duplicates".
+Well, sorry, Ada doesn't provide that.  But predicates come closer than
+pre/post.  Suppose you accidentally poke one element with a duplicate.  That's a
+bug.  Most likely, you will soon pass that array as a parameter, or do some
+other thing that checks for duplicates, and thereby find the bug.  It's not
+guaranteed, but run-time checks don't guarantee lack of bugs in general.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, October 10, 2012  4:31 PM
+
+> Basically, it means that you get a predicate check at the places where
+> a whole-array operation would do a constraint check.
+
+Oh, and you can also choose to make that array a private type. Then the "poke
+one element" problem can only occur in the package body.  And if does occur,
+you're pretty-much guaranteed that there will soon be a predicate check (on an
+'in out', or on a function result, for ex.), so clients of that package will not
+see objects that violate the desired properties.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, October 10, 2012  4:44 PM
+
+>> What does it mean to have a predicate that says an array is ordered
+>> if you can change an element and the predicate is not checked?
+>
+> Basically, it means that you get a predicate check at the places where
+> a whole-array operation would do a constraint check.  Those places
+> include parameter passing and function return, so it covers all the
+> places pre/post do.
+> That's why I think a predicate is better that duplicating that
+> condition all over in pre/post.
+
+But I might not want the cheeck on every subprogram. For instance if I have a
+subprogram that checks the ordering and is called with this parameter type, and
+I have the predicate, don't I have an infinite recursion?
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, October 10, 2012  4:55 PM
+
+> But I might not want the cheeck on every subprogram. For instance if I
+> have a subprogram that checks the ordering and is called with this
+> parameter type, and I have the predicate, don't I have an infinite
+> recursion?
+
+The predicate is a property of the subtype, not of the type.
+Given
+
+     subtype Purple_Cow is Cow with
+       Dynamic_Predicate => Is_Purple (Purple_Cow);
+
+, the function Is_Purple should take a parameter of subtype Cow, not Purple_Cow.
+
+But yes, you would get infinite recursion if it takes a Purple_Cow parameter.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, October 10, 2012  5:02 PM
+
+Sure, but most typically your composite type may not be a subtype as far as the
+programmer is concerned.
+
+type Ordered is array (1 .. 10) of Natural;
+
+Now, what to do, we don't have Ordered'Base, so you are forced to write this in
+a weird way
+
+type OrderedB is array (Integer range <>) of Integer;
+subtype Ordered is OrderedB (1 .. 10);
+
+and you have to go rewriting rep clauses, e.g.
+
+   for Ordered'Component_Size use 31;
+
+will have to be rewritten.
+
+Yes, all Ada lawyers know about first subtypes and base types in a case like
+this, but not all programmers, so it's not so obvious.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, October 10, 2012  5:14 PM
+
+> Now, what to do, we don't have Ordered'Base, so you are forced to
+> write this in a weird way
+
+Agreed. I think Bob has argued that it would be useful to have either 'Base or
+something like it as a way of separating a (non-scalar) type from its predicate,
+but the language does not provide that today.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, October 10, 2012  5:15 PM
+
+Can you recall why not? Now we have predicates, it's a very irritating omission.
+
+I guess we could introduce an attribute
+(we = implementor)
+
+     XYZ'No_Predicate_Check
+
+which would be a subtype of XYZ with the predicate removed
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 10, 2012  5:26 PM
+
+> Now, what to do, we don't have Ordered'Base, so you are forced to
+> write this in a weird way
+>
+> type OrderedB is array (Integer range <>) of Integer; subtype Ordered
+> is OrderedB (1 .. 10);
+>
+> and you have to go rewriting rep clauses, e.g.
+>
+>    for Ordered'Component_Size use 31;
+>
+> will have to be rewritten.
+
+That's not how to do it.
+
+Like *any* Ada type, you almost never want the type to be constrained or have a
+predicate or have a null exclusion. (There are some cases where index
+constraints are an exception.) You almost always want the root type to be
+unchecked and then there to be a checked subtype.
+
+Thus:
+
+type Ordered is array (1 .. 10) of Natural;
+subtype Checked_Ordered is Ordered
+    with Dynamic_Predicate => ...;
+
+Perhaps you should have different names on these, but that's not required (of
+course).
+
+> Yes, all Ada lawyers know about first subtypes and base types in a
+> case like this, but not all programmers, so it's not so obvious.
+
+That's not it at all. A checked *type* is almost always a bad idea, and part of
+the reason is the recursion possibility that Steve mentioned. And that shows up
+in many ways, certainly not all having to do with predicates.
+
+This is identical to the way null exclusions have to be used. You can write a
+type like:
+
+    type My_Access is not null access Some_Type;
+
+but that will cause all kinds of problems handling object and component
+declarations, query functions, and anywhere else that null might appear briefly.
+What you almost always want to do is write something like:
+
+    type My_Access is access Some_Type;
+    subtype Not_Null_My_Access is not null My_Access;
+
+You then use My_Access where null might happen, and Not_Null_My_Access elsewhere
+(usually parameters).
+
+This is such a common pattern that pretty much all Ada programmers should be
+familiar with it. For instance, I usually declare handles something like:
+
+     type URL_Counts is range 0 .. Max_URLs;
+     subtype URL_Indicies is URL_Counts range 1 .. URL_Counts'Last;
+
+     URL_Store : array (URL_Indicies) of ...;
+
+Because you always need a "not set" value, and you don't want to include that
+value in the data set (so that accidentally using it is detected immediately).
+
+Predicates are no different in this way. I can imagine that novice Ada
+programmers will not have seen these patterns, but they're going to have issues
+and learn them quickly. So doing this with predicates is just an extension what
+one is doing anyway, there is little new here.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, October 10, 2012  5:28 PM
+
+> Sure, but most typically your composite type may not be a subtype as
+> far as the programmer is concerned.
+>
+> type Ordered is array (1 .. 10) of Natural;
+>
+> Now, what to do, we don't have Ordered'Base, so you
+
+Yeah, that's why I want to allow 'Base.
+
+> are forced to write this in a weird way
+>
+> type OrderedB is array (Integer range <>) of Integer; subtype Ordered
+> is OrderedB (1 .. 10);
+
+Indeed, I wrote some code just the other day that had something like:
+
+    type Tree_Base is ...
+    subtype Tree is Tree_Base with Predicate => ...;
+
+Then I use Tree all over the place, except in a few places where I need
+Tree_Base.  I think there was only one place where I needed Tree_Base -- in a
+constructor function, I needed to create an uninitialized Tree_Base, and then
+fill in some components to make it obey the predicate, and then the function
+returns Tree. (For some reason, I couldn't initialize the thing with an
+aggregate; if I could, then I wouldn't have needed Tree_Base there.)
+
+> and you have to go rewriting rep clauses, e.g.
+>
+>    for Ordered'Component_Size use 31;
+>
+> will have to be rewritten.
+
+Well, yeah, if you want to add predicates to existing code, you have to change
+the code, and maybe even some clients of that code.  Or you can choose not to
+use predicates, because you don't want to change the code.
+
+> Yes, all Ada lawyers know about first subtypes and base types in a
+> case like this, but not all programmers, so it's not so obvious.
+
+Well, programmers know about constraints, and multiple subtypes of the same type
+with different constraints.  If they're going to use predicates, then they're
+going to have to learn that you can have different subtypes with different
+predicates.
+
+It seems very similar to:
+
+    type Gizmo_Count is range 0 .. Max_Gizmos;
+    subtype Gizmo_Index is Gizmo_Count range 1 .. Max_Gizmos;
+    type Gizmo_Seq is array (Gizmo_Index range <>) of Gizmo;
+
+which can also be expressed as:
+
+    type Gizmo_Index is range 1 .. Max_Gizmos;
+    subtype Gizmo_Count is Gizmo_Index'Base range 0 .. Max_Gizmos;
+    type Gizmo_Seq is array (Gizmo_Index range <>) of Gizmo;
+
+When teaching about predicates, I'd say:
+
+Predicates are like constraints, except:
+
+    - Much more general (arbitrary Boolean conditions).
+
+    - Predicates have more loopholes than constraints;
+      that's the price we pay for that generality.
+
+Constraints have loopholes, too -- you can have an object of a subtype that
+doesn't obey its constraint.  Likewise you can have an object that doesn't obey
+the predicate of its subtype (but there are more ways to get into that bad
+situation).
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, October 10, 2012  5:38 PM
+
+>>> Now, what to do, we don't have Ordered'Base, so you are forced to
+>>> write this in a weird way
+>>
+>> Agreed. I think Bob has argued that it would be useful to have either
+>> 'Base or something like it as a way of separating a (non-scalar) type
+>> from its predicate, but the language does not provide that today.
+>
+> Can you recall why not?
+
+I think it was mostly the lack of a specific proposal.
+
+There would be some questions about what you want to allow with respect to
+private types - do you really want to allow someone outside to strip away the
+predicate of a private type?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, October 10, 2012  5:48 PM
+
+> Can you recall why not?
+
+My recollection is hazy.  I recall:
+
+    In Ada 83, 'Base was allowed on composites generally,
+    but on scalars it was severely restricted.
+
+    In Ada 9X, we disallowed it on composites, due to some semantic
+    anomalies (incompatible change!), and we made it work in general
+    on scalars.
+
+I'm not 100% sure, but I think the anomalies had to do with the fact that (in
+Ada 83) 'Base removed the constraint, and that caused problems with constrained
+arrays:
+
+    type Index is Integer range 1..10;
+    type T is array (Index) of ...;
+
+and then T'Base is an unconstrained array.  I don't remember why that was a
+problem.
+
+And I think the (then-new) things like:
+
+    type T2 (D2: ...) is new T1 (D1 => D2) with ...;
+
+    ...T1'Class (T2'Base(X))...
+
+were troublesome.
+
+That's why I suggested yesterday that for composites, the resurrected 'Base
+would not remove constraints.
+
+My suggestion was: 'Base removes constraints (only for scalars), and always
+removes "not null", predicates, and invariants.
+
+>... Now we have predicates, it's
+> a very irritating omission.
+>
+> I guess we could introduce an attribute (we = implementor)
+>
+>      XYZ'No_Predicate_Check
+>
+> which would be a subtype of XYZ with the predicate removed
+
+Yes, but it seems a shame to use such a long attribute name when 'Base seems
+nice and short and rather intuitive (except for the part about not removing
+composite constraints).
+
+Maybe ARG should issue a binding interp about 'Base.
+Maybe AdaCore should implement it first, and see if it causes trouble.  Maybe
+somebody (Steve? me?) should do some historical research.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, October 10, 2012  6:14 PM
+
+> There would be some questions about what you want to allow with
+> respect to private types - do you really want to allow someone outside
+> to strip away the predicate of a private type?
+
+Yeah, or its invariant?!  Sounds scary at first, but I think it's not a problem.
+
+If package P implements some abstraction, with private type P.T, then P has full
+control.  The rules about inv/pred are not trying prevent bugs in clients of P
+(after all, clients can crash the program by dividing by zero, and there's
+nothing P can do to prevent that). The rules are trying to:
+
+    - Help ensure that P is correct.
+
+    - Help ensure that clients can't break the P abstraction.
+
+P can make sure that the default-init of P.T obeys invariants/predicates, or it
+can forbid default-init via unknown discrims.
+
+P can ensure incoming objects are "good" by not providing any 'in[out]' params
+of subtype T'Base.  So clients can create junk objects, but can't do anything
+with them.
+
+P can prevent the creation of junk objects by not providing any '[in]out' params
+or function results that return T'Base.
+
+P has full control over whether clients can create and/or manipulate objects of
+subtype P.T'Base.  How "open" the P abstraction is, is entirely up to the
+programmer of P.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, October 10, 2012  6:34 PM
+
+> P has full control over whether clients can create and/or manipulate
+> objects of subtype P.T'Base.  How "open" the P abstraction is, is
+> entirely up to the programmer of P.
+
+And you can always totally break privacy with unchecked conversion in any case,
+so no need to get too fanatic about protecting privacy!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 10, 2012  7:16 PM
+
+I don't think we should try to treat predicates and invariants the same way
+here.
+
+A predicate is used to identify a subset of the values of a type.  If you define
+a predicate on the first subtype that doesn't change the fact that there can
+still be values of the type that don't satisfy the predicate.  And it generally
+limits how the *client* can use an object with the specified predicate.
+
+A type invariant serves a different purpose -- it is an implicit precondition of
+every visible operation, and that visible operation must preserve the invariant,
+and therefore it is also a postcondition. A type invariant need not be visible
+to the user of the private type. There should be no way a client can cause the
+invariant to be violated.
+
+It makes perfect sense to talk about a subtype to which no predicate applies.
+It doesn't really make sense to talk about a *subtype* of a type with a
+type-invariant that violates the invariant. An invariant is something that is
+preserved by visible operations.  A predicate is used to select a subset of
+values of a type.
+
+Another approach to this might be to define an aspect rather than an attribute
+which would allow the redefining of a predicate.  E.g.:
+
+    subtype Base_Subtype is Subtype_Having_Predicate
+      with New_{Static,Dynamic}_Predicate => True;
+
+This would give Base_Subtype a predicate that is not the "and" of the new
+predicate and the old predicate, but rather simply the new predicate.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 10, 2012  7:38 PM
+
+>> Can you recall why not?
+>
+> My recollection is hazy.  I recall:
+>
+>      In Ada 83, 'Base was allowed on composites generally,
+>      but on scalars it was severely restricted.
+
+In Ada 83, 'Base was only allowed as a prefix to attributes such as 'Base'First
+'and Base'Last.
+
+>      In Ada 9X, we disallowed it on composites, due to some semantic
+>      anomalies (incompatible change!), and we made it work in general
+>      on scalars.
+
+Ada 9x allowed the use of 'Base more generally, not merely as a prefix to
+another attribute, so you could declare objects of blah'Base.  We tried to allow
+this use with composite types, but gave up because of the anomalies.  To avoid
+confusion, we decided to disallow the use of 'Base on composite types in
+general.  There really were almost no attributes defined on unconstrained
+composite subtypes.  'Size might have been the only one, and it isn't clear what
+'Base'Size would mean if the first subtype of a derived record type were
+constrained with a specified representation that couldn't easily represent an
+unconstrained version of the type.
+
+> I'm not 100% sure, but I think the anomalies had to do with the fact
+> that (in Ada 83) 'Base removed the constraint, and that caused
+> problems with constrained arrays:
+>
+>      type Index is Integer range 1..10;
+>      type T is array (Index) of ...;
+>
+> and then T'Base is an unconstrained array.  I don't remember why that
+> was a problem. ..
+
+One problem was that you could specify the representation on a derived type with
+a constrained first subtype which would make no sense if you could de-constrain
+the subtype.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 10, 2012  7:45 PM
+
+> Sure, but most typically your composite type may not be a subtype as
+> far as the programmer is concerned.
+>
+> type Ordered is array (1 .. 10) of Natural;
+>
+> Now, what to do, we don't have Ordered'Base, so you
+> are forced to write this in a weird way
+>
+> type OrderedB is array (Integer range <>) of Integer; subtype Ordered
+> is OrderedB (1 .. 10);
+
+This particular case doesn't seem so weird.
+What would be the input type to the Sort routine whose output was Ordered?
+
+The "Tree" example is a bit more convincing.
 
 ****************************************************************
