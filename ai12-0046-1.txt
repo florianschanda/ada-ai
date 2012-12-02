@@ -1,0 +1,346 @@
+!standard 4.3.1(16/3)                               12-12-01    AI12-0046-1/01
+!class binding interpretation 12-12-01
+!status work item 12-12-01
+!status received 12-08-01
+!priority Low
+!difficulty Easy
+!subject Enforcing legality for anonymous access components in record aggregates
+!summary
+
+The legality of an expression is enforced separately for each associated
+component.
+
+!question
+
+4.3.1(16/3) says:
+   If a record_component_association with an expression has two or more
+   associated components, all of them shall be of the same type, or all
+   of them shall be of anonymous access types whose subtypes statically
+   match.
+
+There are currently three known situations where this allows constructs which
+would be legal for some but not all of the associated components.
+
+#1)
+
+     type Rec (D : access Integer) is
+        record F : access Integer; end record;
+
+     begin
+        declare
+          X : aliased Integer;
+          R : Rec := (D | F => X'Access); -- ok for D, not for F
+
+#2)
+
+     type T1 is tagged record F1 : access Integer; end record;
+
+     begin
+        declare
+           type T2 is new T2 with record F2 : access Integer; end record;
+            X : aliased Integer;
+            T2_Obj : T2 :=
+              (F1 | F2 => X'Access); -- ok for F2, not for F1
+
+3) We have T1 and T2 as in example #2 except that both are declared
+    at library level. Exactly one of the two is declared in a unit
+    which has a "null" default storage pool.
+
+    Then the aggregate is
+      (F1 | F2 => new Integer)
+    , which is legal only for the component with the non-null
+    default storage pool.
+
+Clearly, any legality rules that are to be applied to a component expression in
+a record aggregate are to be applied for each associated component. Do we need
+to state this explicitly? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+Add to the end of 4.3.1(16/3):
+
+In addition, Legality Rules are enforced separately for each associated
+component.
+
+Replace AARM 4.3.1(16.c):
+
+AI83-00244 also requires that the expression shall be legal for each associated
+component. Ada 95 omitted this wording, as they thought they had eliminated
+all cases of difference. That probably was true, but Ada 2005 reintroduced
+cases where the types match but the legality differs. For example:
+
+     type Rec (D : access Integer) is record
+               F : access Integer;
+     end record;
+
+     ...
+     X : aliased Integer;
+     R : Rec := (D | F => X'Access); -- Legal for D, illegal for F
+
+There are additional ways for this to happen; because of cases like the above
+we require that the Legality Rules are checked individually for each associated
+component.
+End AARM Note.
+
+!discussion
+
+We considered tightening up the rules so that only components with the same
+legality would be allowed. For instance, consider:
+      If a record_component_association with an expression has two
+      or more associated components, all of them shall be of the same
+      type, or all of them shall be of anonymous access types whose
+      subtypes statically match and whose definitions all occur within
+      one known_discriminant_part or record_definition.
+
+However, this is incompatible with Ada 2005 and Ada 2012. The above would
+make the following legal Ada 2005 code illegal:
+      type T1 is tagged record
+         F1 : access Integer;
+      end record;
+      type T2 is new T1 with record
+         F2 : access Integer;
+      end record;
+      X : aliased Integer;
+      T2_Obj : T2 := (others => X'Access); -- Ok in Ada 2005, illegal by proposed rule
+
+This problem isn't severe enough to introduce an incompatibility, so this
+option was dropped.
+
+!ACATS test
+
+An ACATS B-Test should be created to test that legality checks are
+made as needed.
+
+!appendix
+
+From: Steve Baird
+Sent: Friday, August 10, 2012  4:59 PM
+
+4.3.1(16/3) says:
+   If a record_component_association with an expression has two or more
+   associated components, all of them shall be of the same type, or all
+   of them shall be of anonymous access types whose subtypes statically
+   match.
+
+There are currently three known situation where this allows constructs which
+would be legal for some but not all of the associated components.
+
+#1)
+
+     type Rec (D : access Integer) is
+        record F : access Integer; end record;
+
+     begin
+        declare
+          X : aliased Integer;
+          R : Rec := (D | F => X'Access); -- ok for D, not for F
+
+#2)
+
+     type T1 is tagged record F1 : access Integer; end record;
+
+     begin
+        declare
+           type T2 is new T2 with record F2 : access Integer; end record;
+            X : aliased Integer;
+            T2_Obj : T2 :=
+              (F1 | F2 => X'Access); -- ok for F2, not for F1
+
+3) We have T1 and T2 as in example #2 except that both are declared
+    at library level. Exactly one of the two is declared in a unit
+    which has a "null" default storage pool.
+
+    Then the aggregate is
+      (F1 | F2 => new Integer)
+    , which is legal only for the component with the non-null
+    default storage pool.
+
+It seems that the existing RM wording doesn't unambiguously address these cases.
+
+After discussions with Gary and Randy, it seems clear that we need to somehow
+(wording TBD) explicitly state that any legality rules that are to be applied to
+a component expression in a record aggregate are to be applied for each
+associated component.
+
+[begin rejected alternative
+
+    We looked briefly at
+
+      If a record_component_association with an expression has two
+      or more associated components, all of them shall be of the same
+      type, or all of them shall be of anonymous access types whose
+      subtypes statically match and whose definitions all occur within
+      one known_discriminant_part or record_definition.
+
+    , but this introduces an incompatibility.
+    We would start rejecting, for example,
+
+      type T1 is tagged record F1 : access Integer; end record;
+      type T2 is new T1 with record F2 : access Integer; end record;
+      X : aliased Integer;
+      T2_Obj : T2 := (others => X'Access); -- Ok by A, illegal by B
+
+end rejected alternative]
+
+Is there agreement that there is a (very minor) problem here that ought to be
+fixed?
+
+Incidentally, Randy has convinced me that there is no problem with the fudging
+in name resolution where we say
+     The expected type for the expression of a
+     record_component_association is the type of
+     the associated component(s)
+
+Referring to "the type" when the associated components don't all have the same
+type is a bit odd, but it is ok if we interpret this to mean "any one of the
+types of the associated components" because the anonymous access types in
+question are interchangeable for purposes of name resolution (although not for
+purposes of legality checking, which is the point of this AI).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, August 10, 2012  5:44 PM
+
+I would say of course each component's legality is checked separately. Note that
+the two components could be of significantly different subtypes so the
+expression will need to be treated separately in much of the processing, so it
+is no surprise to me that legality checks might also differ.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, August 13, 2012  12:51 PM
+
+Right. The question is whether the existing RM wording capture this intent.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 13, 2012  1:57 PM
+
+16.c in the section on Record Aggregates says the following:
+
+    Discussion: AI83-00244 also requires that the expression
+    shall be legal for each associated component. ...
+
+and then goes on to say that this was due to legality of array aggregates
+depending on the subtype of the target, which was no longer true in Ada 95.  So
+we could add something back, perhaps even retrieving the old Ada 83 wording.
+But it still seems unnecessary, since there seems no alternative to enforcing
+legality rules from other sections of the manual, than doing it for each
+component named in the choice list.  How else could you possibly do it?  We
+don't mention legality rules from other parts of the manual in general, so why
+do we need to start mentioning them just because there are multiple components
+involved?  Clearly in the dynamic semantic section it states in paragraph 20:
+
+     The expression of a record_component_association is evaluated
+     (and converted) once for each associated component.
+
+and so the legality of that conversion, for example, seems necessarily to be
+checked for each associated component (we don't even mention the conversion in
+the static semantics of legality sections).
+
+I think we could get by with a "TBH" if we really felt it was important to make
+some clarification.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 13, 2012  2:26 PM
+
+> 16.c in the section on Record Aggregates says the following:
+>
+>     Discussion: AI83-00244 also requires that the expression
+>     shall be legal for each associated component. ...
+>
+> and then goes on to say that this was due to legality of array
+> aggregates depending on the subtype of the target, which was no longer
+> true in Ada 95.  So we could add something back, perhaps even
+> retrieving the old Ada 83 wording.
+
+Thanks for noticing this. It suggests that leaving the wording out was
+intentional, but that Ada 2005 added cases where it matters (because of
+anonymous access types, as noted by Steve). And Ada 2012 has added more. We
+should insert some similar wording.
+
+> But it still seems unnecessary, since there seems no alternative to
+> enforcing legality rules from other sections of the manual, than doing
+> it for each component named in the choice list.  How else could you
+> possibly do it?
+
+You certainly could enforce the rule just once. I suspect that the vast majority
+of implementers and Ada users would be surprised to learn that that is
+insufficient. One can read 16.c to say that it is not necessary to enforce the
+rules separately.
+
+>  We don't mention legality rules from other parts of the manual in
+> general, so why do we need to start mentioning them just because there
+> are multiple components involved?
+
+Because we're doing something unusual here: enforcing different rules on the
+same piece of source text. I don't know of any non-generic case where that's
+necessary, and for generics we explicit define how the Legality Rules are
+enforced (there's a lot of wording about that, as you well know). So I'd feel
+better if the wording explained what's necessary.
+
+At the very least, we need to redo 16.c, since it is a lie for Ada 2005 and
+later. And add a TBH. But the fact that it was considered necessary to talk
+about it in Ada 83 (and Ada 95 documents that the rules were changed so it
+wasn't necessary), suggests to me that first-class wording would be preferable.
+
+> Clearly in the dynamic semantic section it states in paragraph 20:
+>
+>      The expression of a record_component_association is evaluated
+>      (and converted) once for each associated component.
+>
+> and so the legality of that conversion, for example, seems necessarily
+> to be checked for each associated component (we don't even mention the
+> conversion in the static semantics of legality sections).
+
+I don't follow your implication. Lots of expressions are evaluated multiple
+times in Ada, but I'm not aware of any others for which the legality checks
+could get different answers (again, outside of generic instances, which have
+their own legality rules anyway). And in any case, we keep Dynamic Semantics and
+Legality Rules separate.
+
+I agree that we pretty much have to check the rules separately in order to do
+this evaluation successfully, but I think we need to say so explicitly.
+
+> I think we could get by with a "TBH" if we really felt it was
+> important to make some clarification.
+
+We could, but it would be inconsistent with the way generic instances handle a
+similar situation. That to me says we ought to have wording. It's only one
+sentence anyway, not a big deal. Adding at the end of 4.3.1(16/3) something
+like:
+
+    In addition, Legality Rules are enforced separately for each associated
+    component.
+
+And then updating 4.3.1(16.c) to explain how this can fail for one component and
+not another.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 13, 2012  2:46 PM
+
+> ... Adding at the end of 4.3.1(16/3) something
+> like:
+>
+>      In addition, Legality Rules are enforced separately for each
+> associated component.
+>
+> And then updating 4.3.1(16.c) to explain how this can fail for one
+> component and not another.
+
+That seems fine.  I would claim it is "obvious" but so are a lot of things we
+say explicitly now.  And certainly 16.c is a clear "lie" now, so it should be
+fixed.
+
+****************************************************************
