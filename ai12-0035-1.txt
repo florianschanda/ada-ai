@@ -1,4 +1,4 @@
-!standard A.18.18(47/3)                              12-06-08    AI12-0035-1/01
+!standard A.18.18(47/3)                              12-12-02    AI12-0035-1/02
 !class binding interpretation 12-06-08
 !status work item 12-06-08
 !status received 12-06-07
@@ -7,7 +7,10 @@
 !subject Accessibility checks for indefinite elements of containers
 !summary
 
-**TBD.
+Certain operations of instances of the indefinite container packages require
+accessibility checks to prevent dangling references. This is specified in terms
+of the checks that would be required for executing an initialized allocator for
+an access type associated with the instance.
 
 !question
 
@@ -27,20 +30,119 @@ Should this be fixed? (Yes.)
 
 !recommendation
 
-** TBD.
+See summary.
 
 !wording
 
-** TBD.
+Add at the end of A.18:
+
+Certain subprograms declared within instances of some of the generic packages
+presented in this clause are said to "require indefinite allocation". These
+subprograms are those corresponding (in the sense of the copying described in
+section 12.3) to the following subprograms that have formal parameters of a
+generic formal indefinite type:
+
+    Containers.Indefinite_Doubly_Linked_Lists.Append
+    Containers.Indefinite_Doubly_Linked_Lists.Insert
+    Containers.Indefinite_Doubly_Linked_Lists.Prepend
+    Containers.Indefinite_Doubly_Linked_Lists.Replace_Element
+
+    Containers.Indefinite_Hashed_Maps.Include
+    Containers.Indefinite_Hashed_Maps.Insert
+    Containers.Indefinite_Hashed_Maps.Replace
+    Containers.Indefinite_Hashed_Maps.Replace_Element
+
+    Containers.Indefinite_Hashed_Sets.Insert
+    Containers.Indefinite_Hashed_Sets.Include
+    Containers.Indefinite_Hashed_Sets.Replace
+    Containers.Indefinite_Hashed_Sets.Replace_Element
+    Containers.Indefinite_Hashed_Sets.To_Set
+
+    Containers.Indefinite_Hashed_Sets.Generic_Keys.Replace
+
+    Containers.Indefinite_Multiway_Trees.Append_Child
+    Containers.Indefinite_Multiway_Trees.Insert_Child
+    Containers.Indefinite_Multiway_Trees.Prepend_Child
+    Containers.Indefinite_Multiway_Trees.Replace_Element
+
+    Containers.Indefinite_Ordered_Maps.Include
+    Containers.Indefinite_Ordered_Maps.Insert
+    Containers.Indefinite_Ordered_Maps.Replace
+    Containers.Indefinite_Ordered_Maps.Replace_Element
+
+    Containers.Indefinite_Ordered_Multisets.Insert
+    Containers.Indefinite_Ordered_Multisets.Replace_Element
+    Containers.Indefinite_Ordered_Multisets.To_Set
+
+    Containers.Indefinite_Ordered_Sets.Include
+    Containers.Indefinite_Ordered_Sets.Insert
+    Containers.Indefinite_Ordered_Sets.Replace
+    Containers.Indefinite_Ordered_Sets.Replace_Element
+    Containers.Indefinite_Ordered_Sets.To_Set
+
+    Containers.Indefinite_Ordered_Sets.Generic_Keys.Replace
+
+    Containers.Indefinite_Holders.Replace_Element
+    Containers.Indefinite_Holders.To_Holder
+
+    Containers.Indefinite_Vectors."&"
+    Containers.Indefinite_Vectors.Append
+    Containers.Indefinite_Vectors.Insert
+    Containers.Indefinite_Vectors.Prepend
+    Containers.Indefinite_Vectors.Replace_Element
+    Containers.Indefinite_Vectors.To_Vector
+
+If a subprogram requires indefinite allocation, then certain run-time checks are
+performed as part of a call to the subprogram; if any of these checks fail, then
+the resulting exception is propagated to the caller and no container is modified
+by the call. These checks are performed for each parameter corresponding (in the
+sense of the copying described in 12.3) to a parameter in the corresponding
+generic whose type is a generic formal indefinite type. The checks performed for
+a given parameter are those checks explicitly specified in section 4.8 that
+would be performed as part of the evaluation of an initialized allocator whose
+access type is declared immediately within the instance, where:
+
+   - the initial value is the value of the parameter; and
+
+   - the designated subtype of the access type is the subtype of the
+     parameter; and
+
+   - finalization of the collection of the access type has started if and
+     only if the finalization of the instance has started.
+
+[Question: Do we need to worry about accessibility checks on container stream
+input in this AI?] [Editor's comment: This sounds suspiciously Bairdian. ;-)]
+
+AARM note:
+   The phrase "explicitly specified" means those checks for which section 4.8
+   includes the phrase "<some exception> is raised if ...". It does not refer,
+   for example, to any checks performed as part of any subtype conversion.
+   In particular, this wording includes the checks described in section 4.8
+   to be performed in the case of a class-wide designated type, and of a
+   designated subtype that has access discriminant parts. These checks are
+   needed to prevent containers from outliving their contained (Element_Type
+   or Key_Type) values.
+
+Discussion:
+   We are doing two things here. We are *requiring* checks needed to
+   prevent dangling references. As a side effect, we are also *allowing*
+   checks needed to permit an implementation of a container generic to
+   make use of access types in a straightforward way. Following that second
+   path, suppose that an implementation does declare such an access type and
+   suppose further that the access type's collection's finalization has
+   started. We want to allow Program_Error to be propagated in this case
+   (as specified in 4.8(10.2/2,11.1/2)).
 
 !discussion
 
-We want to be able to write the implementation of containers packages in
-Ada, and we expect the implementation to use allocators. As such, it would
-be odd if some of the reasons that those allocators could fail were not
-relected in the specification.
+Randy wrote the following as background for this AI:
 
-A grocery list of considerations for this solution.
+We want to be able to write the implementation of containers packages in Ada,
+and we expect the implementation to use allocators. As such, it would be odd if
+some of the reasons that those allocators could fail were not relected in the
+specification.
+
+A grocery list of considerations for this solution:
 
 (1) The problem occurs for any indefinite container, and occurs anytime an
     element is created in a container. That is not just Replace_Element but also
@@ -83,6 +185,28 @@ A grocery list of considerations for this solution.
     types and operations, but we rarely do that for the containers and it is not
     at all clear how it could be written in order to ensure that the right
     routines are covered and not any others.
+
+--------------
+
+The checks are only required on certain operations declared within certain
+instances of the indefinite containers. Specifically, they're needed when the
+actual types for the indefinite formal types (the Element_Type and Key_Type
+types) are class-wide types or indefinite subtypes with access discriminants,
+and for the operations that have parameters of those actual types that create
+and initialize container elements using those parameters. Those are the cases
+where dangling references could potentially be created, and are precisely the
+cases where an implementation that uses access types and allocators would
+naturally apply the accessibility checks required for allocators in section 4.8.
+
+Unfortunately there doesn't seem to be a simple way to characterize the set of
+operations (for example, it's a different set in each indefinite container),
+which is why we have given a list of them. An alternative would be to add
+wording to each such operation in its respective section, but that still
+requires identifying them, and would seem to add unnecessary verbiage.
+
+Of course, the downside of specifically identifying the operations is that when
+any new such operations are added, the list will need to be updated to include
+them.
 
 !example
 
@@ -409,5 +533,16 @@ routines are covered.
 
 So this looks difficult but necessary (and I'm not going to try to come up with
 wording before the meeting).
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Monday, December 3, 2012  12:53 AM
+
+This AI was worked on jointly by Steve and me, and addresses the issue of
+specifying that accessiblity checks get done for certain operations of
+indefinite containers.
+
+[Followed by version /02 of the AI - Editor.]
 
 ****************************************************************
