@@ -1,0 +1,252 @@
+!standard 7.3.2(10/3)                                12-12-03    AI12-0049-1/01
+!class binding interpretation 12-12-03
+!status work item 12-12-03
+!status received 12-09-10
+!priority Medium
+!difficulty Easy
+!subject Invariants need to be checked on the initialization of deferred constants
+!summary
+
+Invariants are checked on the initialization of deferred constants.
+
+!question
+
+Consider:
+
+package R is
+   type T is private with Type_Invariant => Non_Null (T);
+   function Non_Null (X : T) return Boolean;
+   Zero : constant T;
+private
+   type T is new Integer;
+   function Non_Null (X : T) return Boolean is (X /= 0);
+   Zero : constant T := 0;
+end R;
+
+Zero violates the invariant, but this will not be detected because there is no
+rule in the Standard that this should be checked.
+
+Should this be fixed? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+Modify RM 7.3.2(10/3):
+
+   After successful default initialization of an object of type T{, or explicit
+   initialization of the completion of a deferred constant with a part
+   of type T}, the check is performed on the new object;
+
+!discussion
+
+We want every value that can "escape" from the visible part of the package
+to have the invariant checked. There certainly shouldn't be any easy end-runs.
+
+!ACATS test
+
+An ACATS C-Test should be created to test that the invariant check fails in the
+example from the !question.
+
+!appendix
+
+From: Tucker Taft
+Sent: Monday, September 10, 2012  10:14 AM
+
+One of our engineers just came up with a way to bypass type invariants.
+This clearly violates the "Dewar" reasonableness rule, and so some sort of RM
+fix is needed.  Initializing a visible deferred constant should probably be
+treated like returning a value from a visible parameterless function for the
+purposes of invariant checks.
+
+
+> I just discovered a way to bypass a type invariant by declaring a
+> public deferred constant initialized with a value that violates the type invariant:
+>
+> --
+> package R is
+> type T is private with Type_Invariant => Non_Null (T); function
+> Non_Null (X : T) return Boolean; Zero : constant T; private type T is
+> new Integer; function Non_Null (X : T) return Boolean is (X /= 0);
+> Zero : constant T := 0; end R;
+>
+> with R; use R;
+> procedure Main is
+> X : T := Zero;
+> begin
+> null;
+> end Main;
+> --
+>
+> The code above compiled with assertions executes without any error:
+>
+> $ gnatmake -gnat12 -gnata main.adb
+> $ ./main
+> <no error>
+>
+> This is as designed in Ada 2012 RM, although a bit surprising.
+> I just wanted to share the info with other people interested.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, September 11, 2012  1:00 PM
+
+> Initializing a visible deferred constant should probably be treated
+> like returning a value from a visible parameterless function for the
+> purposes of invariant checks.
+
+Indeed.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, December 1, 2012  5:37 PM
+
+...
+> package R is
+>    type T is private with Type_Invariant => Non_Null (T);
+>    function Non_Null (X : T) return Boolean;
+>    Zero : constant T;
+> private
+>    type T is new Integer;
+>    function Non_Null (X : T) return Boolean is (X /= 0);
+>    Zero : constant T := 0;
+> end R;
+
+Followed by some code showing that GNAT does not make an invariant check in
+Zero.
+
+I was just going to write up this up as an AI, when after trying to figure out
+what wording needed to be changed, I don't think there is any problem with the
+Standard (GNAT, not so much ;-).
+
+The rules in question are 7.3.2(9-10/3):
+
+If one or more invariant expressions apply to a type T, then an invariant check
+is performed at the following places, on the specified object(s):
+
+* After successful default initialization of an object of type T, the check is
+  performed on the new object;
+
+(It's nice that the example uses T as the type name, no translation is needed.
+:-)
+
+This says that an invariant check is performed on Zero at the point where its
+default initialization is evaluated. This is in the private part of the package,
+but there is no wording in the above to restrict this check only to visible
+parts! (Other checks do have such wording.) So the check should be performed on
+Zero; there surely is no language hole.
+
+If there *is* a problem, it's that this wording implies that the check ought to
+be made on all objects, regardless of where they are declared. That means that
+objects declared in the package body also get such a check, which probably isn't
+intended (think temporaries used to create objects - one would hope that they
+could violate the invariant while being constructed).
+
+So maybe we *do* need an AI, but it is exactly the reverse of what is implied by
+the original question.
+
+What do the rest of you think?? If we need a change, what should the wording
+be??
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December 1, 2012  6:04 PM
+
+But Zero is not "default initialized," it is "explicitly initialized."
+See RM 3.3.1(18/2) for definition of "default initialization."
+Zero doesn't qualify.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, December 1, 2012  6:35 PM
+
+OK, now I'm officially confused. Where is the rule that an object has its
+invariant checked after it is (explicitly) initialized? We surely don't want to
+be creating objects without checking the invariant (other that in the body of
+the package). How is that prevented?
+
+Could you propose wording to fix the problem (whatever it is)? I am way, way
+behind on AI creation and it is unlikely I will get back to this one before the
+meeting.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December 1, 2012  7:13 PM
+
+> OK, now I'm officially confused. Where is the rule that an object has
+> its invariant checked after it is (explicitly) initialized? We surely
+> don't want to be creating objects without checking the invariant
+> (other that in the body of the package). How is that prevented?
+
+Outside of the package, a private type can only be initialized from another
+existing value of the private type, so there is no need for another
+type-invariant check, unless it is controlled.  If it is controlled, then an
+invariant check will be performed upon return from the Adjust procedure, since
+the mode is in-out.
+
+> Could you propose wording to fix the problem (whatever it is)? I am
+> way, way behind on AI creation and it is unlikely I will get back to
+> this one before the meeting.
+
+How about:
+
+Modify RM 7.3.2(10/3):
+
+   After successful default initialization of an object of type T{, or explicit
+   initialization of a deferred constant of type T}, the check is performed on
+   the new object;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, December 4, 2012  12:28 AM
+
+Well, I did manage to get back to this one. Unfortunately, the above doesn't
+work, because 7.4(2/3) defines a "deferred constant" thusly: A deferred constant
+declaration is an object_declaration with the reserved word constant but no
+initialization expression. The constant declared by a deferred constant
+declaration is called a deferred constant.
+
+I'm pretty sure that Adam or Steve or both will be happy to tell us that the
+above change has no effect at all, as there cannot be an explicit initialization
+of a declaration with no initialization expression. So no check would ever be
+required.
+
+I think we have to talk about the completion somehow ("or explicit
+initialization of the completion of a deferred constant of type T").
+
+But this *still* isn't enough. Let's move somewhat in the Bairdian territory,
+and consider a small expansion of the original example:
+
+package R is
+   type T is private with Type_Invariant => Non_Null (T);
+   function Non_Null (X : T) return Boolean;
+   type Conditional_T is record
+       Valid : Boolean;
+       Data  : T;
+   end record;
+   Invalid : constant Conditional_T;
+private
+   type T is new Integer;
+   function Non_Null (X : T) return Boolean is (X /= 0);
+   Invalid : constant Conditional_T := (Valid => False, Data => 0);
+end R;
+
+Invalid has a component of type T, but it isn't a "deferred constant of type T".
+So the component isn't checked and we still have the hole.
+
+So we need to work "part" into the added wording somehow. I tried that a bit,
+and didn't find a reasonable way to add it. Gack!
+
+I'll leave it for the meeting unless some wonderful suggestion is in my inbox
+tomorrow morning...
+
+****************************************************************
+
