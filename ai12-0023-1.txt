@@ -1,4 +1,4 @@
-!standard 6.1.1(0/3)                                 12-04-20    AI12-0023-1/01
+!standard 6.1.1(0/3)                                 12-12-02    AI12-0023-1/02
 !class Amendment 12-04-20
 !status work item 12-04-20
 !status received 12-01-29
@@ -18,6 +18,46 @@ Stream type, but it is a bit awkward, and perhaps not obvious for someone is
 trying to create such an abstraction.
 
 A better idea would be to make Ada.Streams.Root_Stream_Type into an interface.
+
+There are two known flavors to a solution to this problem. The first is a 
+minimal solution that involves introducing a backwards compatibility problem for 
+a case that is not very likely to occur in practice, and the other extends the 
+first solution to solve the problem without introducing any backward 
+compatibility issue. 
+
+The minimal solution involves adding a new aspect to the language, 
+Limited_Derivation which may be applied to a limited interface declaration.
+
+e.g.
+   type Root_Stream_Type is limited interface
+            with Limited_Derivation; 
+
+Such a declaration only would imply that any types derived from the interface
+are limited types, even if the derived declaration does not explitly use the
+limited keyword. 
+
+In the following declaration, type T would be a limited type.
+
+   type T is new Root_Stream_Type with -- no "limited" here 
+      record 
+	     X: Some_Limited_Type; 
+	  end record;
+
+The full solution also introduces the notion of hidable interfaces. Such
+interfaces may be used in the completion of a private type or private 
+extension, without having to be named in the partial view of the type, so long
+as the type does not have any ancestors that have non-visible parts. This is an
+assume the worst rule, where any ancestor types with private, non-visible parts
+are assumed to have hidable interfaces. Adding further hidden interfaces would
+be disallowed in such cases in order to avoid problems with multiple inheritance
+such as inheriting the same interface from multiple ancestors.
+
+Introducing hidable interfaces to the language however is viewed as being not
+worthwhile if it only solves the issue of this AI, being able to change the
+definition of Root_Stream_Type from an abstract type to an interface type.
+
+Before proceeding further with this AI, more compelling examples are needed.
+Such an example is included in the discussion section below.
 
 !wording
 
@@ -59,14 +99,144 @@ inherit it from abstract types. Thus:
             X: Some_Limited_Type; -- (A)
         end record;
 
-(A) is legal in Ada now, but would be illegal if Root_Stream_Type is an
-interface.
+   (A) is legal in Ada now, but would be illegal if Root_Stream_Type is an 
+       interface.
 
-(1) is not very likely to occur in practice (why hide streamability?), but
-(2) is quite likely to happen (indeed, the GNAT runtime has several instances
-of it). At the very least, we would need to do something to eliminate (2) before
+(1) is not very likely to occur in practice (why hide streamability?), but (2) 
+is quite likely to happen (indeed, the GNAT runtime has several instances of 
+it). At the very least, we would need to do something to eliminate (2) before 
 making this change.
 
+(2) Can be solved by adding a new aspect to the language, Limited_Derivation
+which could be applied to a limited interface declaration. This aspect would
+imply that any types derived from the interface are limited types, even if the
+limited keyword is not present in the derivation of the derived type.
+
+To solve (1), the notion of hidden interfaces is needed. Such an interface
+could be added to the private completion of a private type or private extension,
+so long as the declaration does not involve any ancestors that have non-visible
+private parts. A hideable interface would not need to be specified in the
+partial view of the private type, which is not currently the case for interfaces 
+in the 2012 standard.
+
+In order to gain support for adding hideable interfaces to the language, there
+needs to be more compelling examples showing how such a feature could solve
+other types of problems.
+
+The problem space applies to cases where a hidden interface can be used to
+facilitate the implementation, but otherwise is too low level in the abstraction
+to be exposed to clients of the abstraction.
+
+As an example of another use of this feature consider a Newtonian physics 
+problem involving finding the center of the universe, an average based on the 
+mass and the location of the particles: 
+Such a problem might involve millions or billions of data points, so the goal
+would be to perform the calculation in parallel using some parallelism library.
+The problem is essentially a divide and conquer problem involving a parallel
+loop of a large array of particles. As the loop iterations are divided amongst
+the available cores, the results from the workers need to be combined at the
+end to produce the final result. This involves a Reducing function that takes
+two results and combines them into a single result. An identity function is
+also needed to specify the initial value of the local copy of the result used by
+each worker. The parallelism functions are too low level to be exposed in the
+Particle abstraction. 
+
+package Point_3D is
+
+   type Dimension is (X, Y, Z);
+   type Location is array (Dimension) of Float;
+
+   type Point is tagged
+      record
+         Position : Location;
+      end record;
+
+end Point_3D;
+
+-- Defines an interface needed by the parallelism libraries.
+package Parallel_Reduction is
+
+   type Reduction_Value is interface with Hidable;
+
+   function Reducer
+     (L, R : Reduction_Value) return Reduction_Value
+   is abstract;
+
+   function Identity_Value return Reduction_Value
+     is abstract;
+
+end Parallel_Reduction;
+
+with Point_3D; use Point_3D;
+private with Parallel_Reduction;  -- Parallelism library support
+
+package Universe is
+
+   type Particle is new Point with private;
+
+   function Create         -- Some constructor for a particle
+     (Pos : Location;
+      Mass : Float) return Particle;
+
+   type Particle_Set is array (Integer range <>) of Particle;
+
+   -- Calculate the center of the universe
+   function Center (Particles : Particle_Set) return Point;
+
+private
+
+   --  Use of Hidden interface facilitates parallel implementation, otherwise
+   --  not of interest to clients of this abstraction.
+   type Particle is new Point and Parallel_Reduction.Reduction_Value with
+      record
+         Mass : Float;
+         ---   ...
+      end record;
+
+   overriding function Reducer (L, R : Particle) return Particle;
+   overriding function Identity_Value return Particle;
+
+end Universe;
+
+package body Universe is
+
+   function Center (Particles : Particle_Set) return Point is
+      Sum : Particle := Identity_Value;
+   begin
+      --  Call Parallelism Library to Get Sum of Locations
+      --  ...
+
+      --  Compute Average location as a function of mass and location
+      return (Position => (X => Sum.Position (X) / Float (Particles'Length),
+                           Y => Sum.Position (Y) / Float (Particles'Length),
+                           Z => Sum.Position (Z) / Float (Particles'Length)));
+   end Center;
+
+   function Create
+     (Pos : Location;
+      Mass : Float)
+      return Particle
+   is
+   begin
+      return (Position => Pos, Mass => Mass);
+   end Create;
+
+   function Identity_Value return Particle is
+   begin
+      return (Position => (X => 0.0, Y => 0.0, Z => 0.0),
+              Mass => <>);
+   end Identity_Value;
+
+   function Reducer (L, R : Particle) return Particle is
+   begin
+   --  Compute a weighed sum based on the mass of the particles and the 
+   --  location.
+      return (Position => ...,
+              Mass => <>);
+   end Reducer;
+
+end Universe;
+ 
 !ACATS test
 
 ** TBD.
@@ -1611,5 +1781,34 @@ For our purposes here, we only are interested in compatibility of older Ada code
 with Ada compilers for the most recent version of the Ada standard, so
 "compatible" and "incompatible" are enough. Let's not confuse everyone with
 directions that don't even seem to have a consistent meaning.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, December  2, 2012  2:29 PM
+
+The last part of my homework was to come up with some compelling examples showing
+the use of hidden interfaces, outside of making Root_Stream_Type an interface. I
+only have one so far, but I think other examples would likely look very similar.
+
+I described very briefly about how a new aspect, Limited_Derivation solves most of the
+backward compatibility issues associated with making Root_Stream_Type an interface.
+
+The part that fully solves the backward compatibility issue involves also adding
+hidable interfaces. I have not touched on the details for this feature yet, as there
+are two approaches in the email thread, one I suggested solves the backward compatiblity
+issue, and one based on Tuckers suggestion that doesn't solve the compatibility issue,
+but does have some nice features from a language syntax point of view. 
+
+Independent on whether the Root_Stream_Type issue is worth fixing, Hidable interfaces
+might be worth having in Ada on its own, in which case, we would need to decide which
+approach to follow.
+
+I haven't gone into much detail on how the hidable interface mechanism works, because
+people first need to be convinced whether adding such a feature to the language is
+worthwhile. The main point of this is to look at the example, and think about whether
+such a feature is useful enough for proceeding further.
+
+[Editor's note: this is version /02 of the AI.]
 
 ****************************************************************
