@@ -1,0 +1,325 @@
+!standard 4.6(8/2)                                   12-12-03    AI12-0048-1/01
+!standard 4.6(24.8/2)
+!class binding interpretation 12-11-29
+!status work item 12-11-29
+!status received 12-04-09
+!priority Low
+!difficulty Medium
+!subject Default behavior of tasks on a multiprocessor with a specified dispatching policy
+!summary
+
+In the absence of any setting of the CPU of a task and the creation of any dispatching
+domains, a partition that specifies a language-defined dispatching policy will allow
+all tasks to run on all processors.
+
+!question
+
+The language does not appear to say anything about which tasks are allowed to run on which
+CPUs of a multiprocessor in the absence of using any D.16 or D.16.1 facilities. Some real-time
+models map each task to  a single CPU by default. This seems as if it could cause unbounded
+priority inversion.
+
+For instance, consider an implementation which mapped all tasks of a particular task type to
+a single processor and the following state:
+
+Two tasks of type T1 are ready at priorty 10
+
+Two tasks of type T2 are ready at priority 6
+
+All T1 tasks are mapped to processor 1
+
+All T2 tasks are mapped to processor 2
+
+With this mapping, you could have a ready priority 10 task not running and a ready priority
+6 task running. Presuming that this program specified a language-defined dispatching policy,
+this situation cannot be tolerated.
+
+Should the wording be extended to cover this case? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+Add after D.16.1(30/3): [in Implementation Requirements]
+
+For all tasks that belong to the system dispatching domain, unless a task T has been assigned to a
+specific CPU, T can execute on all CPUs that belong to the system dispatching domain of T.
+
+AARM Reason: This ensures that priorities and deadlines are respected within the system dispatching
+domain. There is no such guarentee between multiple domains.
+
+We only need to talk about the system dispatching domain here, because Assign_Task and Set_CPU
+already have such wording for tasks that are assigned explicitly to a dispatching domain and
+specify Not_a_Specific_CPU.
+End AARM Reason.
+
+AARM Ramification: If no dispatching domains are created, all tasks can execute on all processors.
+(As always, implementation-defined dispatching policies may have other rules, so a partition that
+does not specify any language-defined dispatching policy may do anything at all and in particular
+does not need to follow this rule.)
+
+AARM Discussion: A task can be assigned to a specific CPU by specifying the aspect CPU for a task,
+or by calling a dynamic operation like Set_CPU or Assign_Task.
+
+Add an AARM note after D.16.1(31/3):
+
+AARM To Be Honest: "Ready queue" here doesn't mean the conceptual "ready queue" as defined
+in D.2.1 (one per processor); this rule is talking about the ready queues used by the
+implementation.
+
+
+!discussion
+
+Annex D compliance is required when a dispatching policy is specified for the partition.
+In that case, there should only be a single dispatching domain (the system dispatching
+domain) that contains all of the processors on the systems; and all tasks should be
+eligible to run on all processors.
+
+This is necessary so that priority inversion cannot occur in a program that is run on
+multiple processors but does not use any of the facilities in D.16. For instance, it
+must never be the case that a lower priority task is running while a higher priority
+task is ready if the dispatching policy is FIFO_within_Priorities. Automatically assigning
+tasks as described in the question is not allowed (the user can always make such
+assignment themselves).
+
+Note that the default behavior of a program that does not specify a dispatching policy
+is implementation-defined; in particular, there is no requirement on how the tasks are
+mapped to processors in that case. (It is OK, for instance, for the tasks to be mapped
+one per processor in that case).
+
+Also note that using Set_CPU for a task or assigning a task to a different dispatching
+domain eliminates any protection against priority inversion; we assume that users are
+aware of these possibilities and have taken steps to ensure that nothing bad happens
+in that case.
+
+!ACATS test
+
+Probably an ACATS C-Test should be created to test this behavior, but it is likely to
+be difficult to write a test that would detect this problem (it might be able to query
+the number of CPUs to create an approximation of the problem in the !question).
+
+!appendix
+
+From: Randy Brukardt
+Sent: Thursday, July  5, 2012  1:11 PM
+
+I have a related question about Dispatching_Domains:
+
+Where is the permission to violate the scheduling rules when multiple domains
+are used?
+
+(The same question can be asked when a task is assigned to a specific CPU, but
+for the moment lets talk about domains.)
+
+Specifically, once you "lock" tasks on particular CPUs, you can get unbounded
+priority inversion. I think that's OK and intended; if the user specifies
+something stupid, they should get that stupidity. But where is the exception to
+the other rules that allows that? With the current rules, I think that it is
+"required" to stop a lower priority task if higher priority tasks are ready to
+run, even if the higher priority tasks are not allowed to run on the CPU that
+the lower priority task is on.
+
+For instance, there is a documentation requirement for the maximum duration of
+priority inversion (D.2.3(11-13/2)). This appears unbounded if CPU or domain
+assignments are used.
+
+(You could get similar conditions for EDF, but there the requirement is to
+"document any conditions" that causes inversion; that could easily include any
+calls to Assign_Task or use of the Dispatching_Domain or CPU aspects/pragmas. So
+the problem is mainly limited to the priority inversion documentation
+requirement.)
+
+To take a specific example. Imagine a quad-core processor, on which a program
+with 5 tasks is executed. There is a continuously running lower priority task,
+and 4 higher priority tasks that run very rarely and execute for a fairly long
+time when executed. Further, imagine that the programmer has created a
+dispatching domain containing a single CPU, and assigned the low priority task
+to that domain. The remaining tasks remain in the system domain (now with 3
+CPUs).
+
+If the very rare case of all 4 high priority tasks needing to run at the same
+time occurs, then we would have priority inversion for however long it takes for
+one of the three running high priority tasks to finish (because the 4th task
+will have to wait, while the lower priority task will continue running on its
+dedicated CPU).
+
+Obviously, this is a bad architecture for this program, but it is possible and
+the language should be clear on what happens in such a case. I'm pretty sure
+that we don't want to preserve a maximum duration of priority inversion in that
+case, as that would require stopping the low priority task even though nothing
+else can run on its CPU. (If the low priority task is suspended, then there is
+no priority inversion.)
+
+Generally, we say that there should be no priority inversion beyond a small
+latency, but that clearly is not true if CPU or domain assignments are used.
+(The mention of "separate ready queues" for domains seems to show that this is
+the intent, as well.) It seems to me that this should be made clear somewhere in
+the wording; perhaps in D.2.3 or maybe with some sort of Notwithstanding rule in
+D.16.
+
+What do the rest of you think??
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, July  6, 2012  2:35 AM
+
+> If the very rare case of all 4 high priority tasks needing to run at
+> the same time occurs, then we would have priority inversion for
+> however long it takes for one of the three running high priority tasks
+> to finish (because the 4th task will have to wait, while the lower
+> priority task will continue running on its dedicated CPU).
+
+I would not describe that as a priority inversion, since it's not the low
+priority task that prevents the high priority task from executing - it's the
+other three high priority task.
+
+The low priority task plays no role here; if it releases CPU, nothing is
+changed. Not different from having 1 CPU, two high priority tasks: only one can
+run.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, July  6, 2012  10:44 AM
+
+I think D.2.3 should talk about the ready queues of a dispatching domain rather
+than of a processor.
+
+So 11/2 should say "highest priority nonempty ready queue of the dispatching
+domain while any processor of the domain executes a lower priority task" rather
+than "highest priority nonempty ready queue while the processor executes a lower
+priority task".
+
+****************************************************************
+
+From: Alan Burns
+Sent: Monday, July 16, 2012  5:31 AM
+
+I feel the wordings of D2.1 5/2 (2005 version of LRM) implies that each
+processor has its own ready queues and that a task can be on more than one
+processor's ready queues, but is not forced to be. Note the final sentence: 'A
+task can be on the ready queue of more than one processor.' it is not forced to
+be. So in Randy's example the two dispatching domains will have their own ready
+queues. The priority rules only apply to the involved ready queues and hence the
+low priority task on its own dispatching domain will always run when it is
+ready.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July 16, 2012  7:14 PM
+
+I guess I see this logic, but as a practical matter, I don't quite see how to
+(cheaply) allow a task to be in multiple places at once. (In the Janus/Ada task
+supervisor, the task is on only one queue: a ready queue, a delay queue, an
+entry queue, etc. It's never in more than one place.)
+
+Indeed, I thought the entire point of the dispatching domain construct was to
+support a more explicit way to define multiple sets of ready queues. (There is
+Implementation Advice to that effect, D.16.1(31/3)). It's weird to then have to
+say that each *processor* has a ready queue (or queues), when the real intent is
+that each *dispatching domain* has a ready queue (or queues). Indeed, the
+ImplAdv seems to conflict in that it seems to ask for a single set of ready
+queues for all of the processors in the system dispatching domain, while
+D.2.1(5/2) seems to require each processor to have its own set of ready queues.
+(This of course is the default situation if no calls to package
+Dispatching_Domains are made, so this ought to be reconciled somehow.)
+
+In any case, if we're going to use Alan's explanation as the "official"
+explanation, it would be valuable for it to be described somewhere (probably in
+the AARM), because it takes quite a leap of logic to say that just because a
+task can be on the ready queues of multiple processors, that a dispatching
+domain can then have a single set of ready queues for all of the processors it
+contains.
+
+But I think I'd prefer to "clean up" the model to tie ready queues to
+dispatching domains rather than processors and leave the rest of it to the
+implementation. I don't think that would require any implementation to change
+(at least not more than the existence of dispatching domains does).
+Alternatively, we have to do something about the conflicting ImplAdv (we never
+want to have ImplAdv that never can be followed). So it looks to me like some
+sort of AI is needed.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, July 16, 2012  8:14 PM
+
+> But I think I'd prefer to "clean up" the model to tie ready queues to
+> dispatching domains rather than processors and leave the rest of it to
+> the implementation. I don't think that would require any
+> implementation to change...
+
+Then why should ARG expend any effort on it?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July 16, 2012  8:47 PM
+
+Because the current Standard has Implementation Advice that cannot be followed
+if you take the model of the Standard literally (each processor is supposed to
+have a set of ready queues). Either the ImplAdv is bad or the model of the
+Standard is bad. One ought to be fixed. Or at the very least a Ramification AI
+and AARM note be created to explain how to reconcile them (if that's possible,
+I'm doubtful).
+
+It should never be the case that you can't follow ImplAdv!
+
+(The other option is deleting the entire Dispatching Domain section until
+someone actually properly integrates it into the Standard, defines it portably
+enough so that it can be used on multiple compilers [at least on the same
+target], and proves that a decent number of users need this facility. But I'm
+certain that isn't going to fly with the real-time folks.)
+
+****************************************************************
+
+From: Alan Burns
+Sent: Tuesday, July 17, 2012  3:51 AM
+
+I think you need to remember (D.2.1 13 - Note 9) that ready queues are purely
+conceptual, used in the LRM to describe the model, not the implementation.
+
+On multiprocessor Linux a task in only on one run-queue at a time but moves (via
+push and pull) to any free processor that it is entitled to run on.
+
+So I was using ready queues as a model to show that a task does not need to be
+on every processor's ready queues - but the implementation advice (and it is
+only advice) is still valid.
+
+I do not feel anything is sufficiently broken here to warrant any word changing.
+Even if you tied ready queues to dispatching domains, they would remain an
+abstraction.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, July 17, 2012  4:29 AM
+
+>But I think I'd prefer to "clean up" the model to tie ready queues to
+>dispatching domains rather than processors and leave the rest of it to the
+>implementation. I don't think that would require any implementation to change
+>(at least not more than the existence of dispatching domains does).
+>Alternatively, we have to do something about the conflicting ImplAdv (we never
+>want to have ImplAdv that never can be followed). So it looks to me like some
+>sort of AI is needed.
+
+Yes to most of that.  D2.1 5/2 seems to be assuming a particular implementation
+where each processor has copy of the ready queues, a ready task (may) go onto
+the appropriate queue for its priority on all of the processors, whichever
+processor becomes free first runs the task and presumably the task is magically
+removed from the queues of the other processors.
+
+Whereas it should be talking of the abstraction, i.e. that each domain
+conceptually has a single set of ready queues, and not imply a particular
+implementation.  The ready queues could be implemented in a protected structure
+in shared memory - in this case their physical existence would be a single
+instance - but there could be implementations in the manner implied above.  I
+would amend D2.1 5/2, D2.2 6.1/2, D2.3 9/2, D2.3 11/2 and D2.6 21/2 to talk of
+dispatching domains.
+
+****************************************************************
+
