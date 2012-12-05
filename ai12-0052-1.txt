@@ -1,0 +1,538 @@
+!standard A(3/2)                                   12-12-04    AI12-0052-1/01
+!standard A.10.3(21)
+!standard A.16(123/2)
+!standard A.16(30/2)
+!class binding interpretation 12-12-04
+!status work item 12-12-04
+!status received 12-07-19
+!priority Low
+!difficulty Medium
+!subject Implicit objects are considered overlapping
+!summary
+
+Implicit objects (like the default output file in Text_IO and the current
+default directory in Directories) defined in language-defined are considered
+implicit parameters to the associated routines for the purposes of determining
+whether A(3) applies.
+
+A(3) applies to any pair of concurrent calls to language-defined subprograms,
+not just to calls to the same subprogram.
+
+!question
+
+We all know that calling Put on the same file from multiple tasks
+is not expected to work. The justification is that A(3) says that
+language-defined operations have to work when "nonoverlapping" objects
+are involved. Clearly a file "overlaps" with itself.
+
+However, the situation is murkier when on of the default files is involved.
+The default files are not parameters to the operations in question, so the
+A(3) rules doesn't (obviously) apply to them.
+
+While it might be possible to tease out that these are the same objects,
+it would better to mention this explicitly, right? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+Modify A(3):
+
+The implementation shall ensure that each language-defined subprogram is
+reentrant in the sense that concurrent calls on {any language-defined}[the same]
+subprogram perform as specified, so long as all parameters that could be passed
+by reference denote nonoverlapping objects.
+
+   AARM Ramification: So long as the parameters are disjoint, concurrent calls
+   on the same language-defined subprogram, and concurrent calls on two
+   different language-defined subprograms are required to work. But concurrent
+   calls on overlapping objects (be they of the same or different
+   language-defined subprograms) are NOT required to work (being unsafe use of
+   shared variables) unless both subprograms are required to pass the associated
+   parameter by-copy.
+
+Add after A.10.3(21):
+
+Implementation Requirements
+
+For the purpose of determining whether concurrent calls on text input-output
+subprograms are required to perform as specified (see Annex A), when calling a
+subprogram within Text_IO or its children that implicitly operates on one of the
+default input/output files, the subprogram should be considered to have a
+parameter of Current_Input or Current_Output (as appropriate).
+
+[Editor's note: This is an Implementation Requirement because the original
+rule is an ImplReq. None of the other headings ("Implementation Permissions",
+and so on) made any more sense to me. See also the !discussion.]
+
+
+Add after A.16(123/2):
+
+[in Implementation Requirements]
+
+For the purpose of determining whether concurrent calls on directory
+subprograms are required to perform as specified (see Annex A), when calling a
+subprogram within Directories or its children that implicitly operates on
+the current default directory, the subprogram should be considered to have
+a parameter representing the current default directory.
+
+AARM Ramification:
+This means that concurrent calls on operations that set or read the current
+default directory are not required to work. (They might work if the underlying
+system has the needed protection.)
+
+Add after A.17(30/2):
+
+Implementation Requirements
+
+For the purpose of determining whether concurrent calls on environment
+variable subprograms are required to perform as specified (see Annex A), when
+calling a subprogram within Environment_Variables, the subprogram should be
+considered to have a parameter representing the entire set of environment
+variables.
+
+AARM Ramification:
+This means that concurrent calls on environment variable operations are not
+required to work. (They might work if the underlying system has the needed
+protection, or if the calls only involve reading.)
+
+!discussion
+
+We make a wording change to A(3) to make it crystal clear that it applies
+to any pair of calls to language-defined subprograms from different tasks.
+In particular, we want the wording to ensure that:
+
+    task T1 is
+    begin
+        Put (A_File, "Text");
+    end T1;
+
+    task T2 is
+    begin
+        Put_Line (A_File, "More Text");
+    end T2;
+
+is not required to work (being unsafe use of shared variables), while
+
+    task T1 is
+    begin
+        Put (A_File, "Text");
+    end T1;
+
+    task T2 is
+    begin
+        Put_Line (B_File, "More Text");
+    end T2;
+
+is always required to work (assuming A_File and B_File are different file
+objects, not renamings or formal parameters mapped to the same actual).
+
+
+There was concern that wording is also needed for "Current_Error", but as it is
+never a default file for any operation in Ada.Text_IO, the wording given for
+the insertion after A.10.3(21) does not need to mention it.
+
+[Arguably, there is a separate question about whether the result of
+Current_<something> overlaps with the original file passed as Set_<something>
+(including Standard_<something> initially). This has nothing to do with default
+files, so it doesn't belong in this piece of new wording. But it might be
+worth saying something about it. I think an AARM note would be enough, after
+all A.10.3(22/1) makes it clear that the objects are tightly tied together.]
+
+We mention "or its children" in these wordings so that calling routines in
+packages like Text_IO.Bounded_IO and Directories.Information are covered
+appropriately.
+
+For the cases of the current default directory and environment variables,
+we don't want to require any overhead beyond that used by the target system.
+Moreover, reading these (especially environment variables) can be common in
+programs, and we don't want to require locking overhead. Thus we do not
+require these to work.
+
+[Are there any other "global" data structures used by the definition of
+language-defined packages? Clocks and locales only can be read (if setting
+is provided, it's not via a language-defined subprogram, and thus isn't covered
+by A(3)). Implementations can do what they want with implementation-defined
+routines. Any others?]
+
+!ACATS test
+
+An ACATS x-Test should be created to test these rules.
+
+!appendix
+
+From: Tucker Taft
+Sent: Thursday, July 19, 2012  8:47 AM
+
+AdaCore recently received a customer inquiry about the race conditions
+associated with using "Put" to the default output file from multiple tasks.  It
+seems like it would be worth clarifying that for the purposes of deciding about
+shared variables, an I/O operation which implicitly operates on the
+Current_Input, Current_Output, or Current_Error, is considered an update to
+these File_Type objects, and as such is subject to a possible erroneous use of a
+shared variable.
+
+I know we have worried about this problem in the past, but it is painfully hard
+in the RM to justify that it is OK for implementations to *not* synchronize
+access to the default I/O files.  It requires a chain of reasoning, including
+walks into wording only appearing in the AARM.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  9:18 AM
+
+> I know we have worried about this problem in the past, but it is
+> painfully hard in the RM to justify that it is OK for implementations
+> to *not* synchronize access to the default I/O files.  It requires a
+> chain of reasoning, including walks into wording only appearing in the
+> AARM.
+
+Well not to worry too much, no one could imagine that the form with and without
+an explicit file name would have different semantics, but I agree, worth a note.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  9:33 AM
+
+> Well not to worry too much, no one could imagine that the form with
+> and without an explicit file name would have different semantics, but
+> I agree, worth a note.
+
+By the way, to me the principle here is (as I wrote to a user a little bit ago):
+
+> The general principle to understand here is that while reentrancy is
+> guaranteed for all standard run-time routines, this does not ensure
+> serialization for operations on shared variables unless there is a
+> specific statement that this is the case.
+>
+> So in general if two tasks use a library routine that updates a shared
+> variable in an unsynchronized manner that is wrong!
+>
+> The Text_IO case is simply a special case of this general principle.
+> If you write to any file, you are updating the internal file object
+> associated with that file, and if two tasks do it, that's erroneous
+> access to a shared variable.
+
+If the RM doesn't say this or its equivalent, then it is wrong :-) :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  3:27 PM
+
+> If the RM doesn't say this or its equivalent, then it is wrong :-) :-)
+
+This was exactly the design we chose for Claw. Claw does internal locking
+intended to prevent unrelated objects from clobbering each other, but we make no
+attempt to allow two operations on the same object at the same time. I thought
+we got this model from the RM somewhere.
+
+The rule in question is A(3) (that's in the introduction to Annex A):
+
+"The implementation shall ensure that each language-defined subprogram is
+reentrant in the sense that concurrent calls on the same subprogram perform as
+specified, so long as all parameters that could be passed by reference denote
+nonoverlapping objects. "
+
+That is, except for by-copy parameters, the parameters of simulaneous calls have
+to be disjoint.
+
+Getting back to Tucker's original question: surely File_Type is not a by-copy
+type. And surely the result of Current_Output is the same object for each call.
+Ergo, multiple calls to Text_IO routines are not required. I don't see this as
+hard or needing of special notes. (Not that I would object to someone like STT
+crafting a user note for A.10.1.)
+
+The only problem I can see is that the above wording is talking about a single
+subprogram. That means it doesn't appear to apply (for example) to a Put and
+Put_Line call that happen to occur simultaneously. The rule really applies to
+*any* language-defined subprogram called concurrently. So I think we ought to
+consider changing this wording to say:
+
+   "The implementation shall ensure that each language-defined subprogram is
+   reentrant in the sense that concurrent calls on any language-defined
+   subprogram perform as specified, so long as all parameters that could be
+   passed by reference denote nonoverlapping objects."
+
+   AARM Note: So long as the parameters are disjoint, concurrent calls on the
+   same language-defined subprogram, and concurrent calls on two different
+   language-defined subprograms are required to work. But concurrent calls on
+   overlapping objects (be they of the same or different language-defined
+   subprograms) are NOT required to work (being unsafe use of shared variables)
+   unless both subprograms are required to pass the associated parameter
+   by-copy.
+
+This would eliminate any confusion (I hope) and make the implementation
+requirements clearer as well.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 19, 2012  3:35 PM
+
+> ... Getting back to Tucker's original question: surely File_Type is
+> not a by-copy type. And surely the result of Current_Output is the
+> same object for each call. Ergo, multiple calls to Text_IO routines
+> are not required. I don't see this as hard or needing of special
+> notes. (Not that I would object to someone like STT crafting a user
+> note for A.10.1.)
+
+But you are missing the point.  The default text I/O routines don't have a
+File_Type parameter at all, so by A(3), they should be reentrant. If there were
+a defaulted parameter specifying Current_Input or Current_Output, that would be
+different, but there is nothing in their parameter profile that would justify
+there not being reentrant.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  3:39 PM
+
+Obviously the general rule should not restrict the effects to parameters, if a
+global variable is modified, then it is even more obvious that the shared
+variable prohibition clicks in!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 19, 2012  3:46 PM
+
+The whole point of A(3) is that implementations are not allowed to use global
+variables willy-nilly in their run-time libraries.  On the other hand, the
+global variables corresponding to Current_Input/Output/Error are part of the
+specification of the default text I/O routines, so that is a special case.
+
+There are not many global variables that are part of the specification of a
+language-defined package, but it seems like we should acknowledge them where
+they appear.  For example, what about the notion of "current" directory?  Is it
+erroneous for two different tasks to concurrently set the current directory, or
+is it just unspecified which one "wins"?  Environment variables are another such
+situation.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  3:48 PM
+
+> The whole point of A(3) is that implementations are not allowed to use
+> global variables willy-nilly in their run-time libraries.  On the
+> other hand, the global variables corresponding to
+> Current_Input/Output/Error are part of the specification of the
+> default text I/O routines, so that is a special case.
+
+Write, yes, of course my comment applies to global variables that are modified
+as part of the spec.
+
+> There are not many global variables that are part of the specification
+> of a language-defined package, but it seems like we should acknowledge
+> them where they appear.  For example, what about the notion of
+> "current"
+> directory?  Is it erroneous for two different tasks to concurrently
+> set the current directory, or is it just unspecified which one "wins"?
+> Environment variables are another such situation.
+
+Well these are part of the external state, note that the clock is part of that
+too so if we set the clock?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  4:10 PM
+
+> But you are missing the point.  The default text I/O routines don't
+> have a File_Type parameter at all, so by A(3), they should be
+> reentrant.
+> If there were a defaulted parameter specifying Current_Input or
+> Current_Output, that would be different, but there is nothing in their
+> parameter profile that would justify there not being reentrant.
+
+Surely there is or ought to be a rule that these are considered parameters to
+the routines for the purposes of A(3).
+
+But you never commented on my main point: I can't find anything that suggests
+that:
+
+    task T1 is
+    begin
+        Put (A_File, "Text");
+    end T1;
+
+    task T2 is
+    begin
+        Put_Line (A_File, "More Text");
+    end T2;
+
+(simultaneously called) should not work, as the routines in question are
+different, as A(3) does not apply.
+
+Similarly, I don't see anything that requires:
+
+    task T1 is
+    begin
+        Put (A_File, "Text");
+    end T1;
+
+    task T2 is
+    begin
+        Put_Line (B_File, "More Text");
+    end T2;
+
+(simultaneuously called) should work. Again, A(3) does not apply.
+
+And that's even more true if A_File is left out so that the calls use
+Current_Output.
+
+This matters if say Put and Put_Line somehow shared a global variable.
+
+The point is that *any* pair of simultaneous calls to language-defined
+subprograms ought to work, unless some non-by-copy parameters overlap. It's
+important that the calls are disjoint from each other as well as allowing
+simultaneous calls to the same routine.
+
+It would take some work to create routines that are reentrant individually, but
+not in pairs -- but it's definitely possible (especially via ham-handed
+mitigation of simultaneous calls) and it should be clear that there cannot be
+any coupling, either.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 19, 2012  4:20 PM
+
+> But you never commented on my main point: I can't find anything that
+> suggests that:
+>
+>      task T1 is
+>      begin
+>          Put (A_File, "Text");
+>      end T1;
+>
+>      task T2 is
+>      begin
+>          Put_Line (A_File, "More Text");
+>      end T2;
+>
+> (simultaneously called) should not work, as the routines in question
+> are different, as A(3) does not apply. ...
+
+Perhaps the overall point is that we left a lot to the good sense of the
+implementor.  We required "reentrancy" under certain circumstances, and then
+presumed that that suggested no random unsynchronized use of global variables.
+That is really the requirement, but we didn't have a good way of saying it.
+Some kind of "Globals" annotation would be nice... ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  4:52 PM
+
+Well, I think my suggestion would go a long way toward ensuring that (even
+without "globals" annotations):
+
+  "The implementation shall ensure that each language-defined subprogram is
+  reentrant in the sense that concurrent calls on {any language-defined}[the
+  same] subprogram perform as specified, so long as all parameters that could be
+  passed by reference denote nonoverlapping objects."
+
+   AARM Ramification: So long as the parameters are disjoint, concurrent calls
+   on the same language-defined subprogram, and concurrent calls on two
+   different language-defined subprograms are required to work. But concurrent
+   calls on overlapping objects (be they of the same or different
+   language-defined subprograms) are NOT required to work (being unsafe use of
+   shared variables) unless both subprograms are required to pass the associated
+   parameter by-copy.
+
+The note is new, the change to A(3) is quite small.
+
+I think we would need to add something like this as well as some statement in
+A.10.3 to cover your original question (as recently explained):
+
+For the purpose of determining whether concurrent calls on text input-output
+subprograms are required to perform as specified (see Annex A), when a file
+parameter is omitted from an text input-output subprogram, the subprogram should
+be considered to have a parameter of Current_Input or Current_Output (as
+appropriate).
+
+These change would make it clear that concurrent calls of
+    Put ("text"); and Put_Line ("text"); aren't expected to work.
+
+Other cases should be dealt with on a case-by-case basis, although I have to
+think that leaving current directory and environment variable unspecified is
+best. (In both cases, we want to do whatever the underlying OS does, and I don't
+think there is any benefit to requiring expensive locking around these
+operations.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 19, 2012  5:29 PM
+
+> I think we would need to add something like this as well as some
+> statement in A.10.3 to cover your original question (as recently explained):
+>
+> For the purpose of determining whether concurrent calls on text
+> input-output subprograms are required to perform as specified (see
+> Annex A), when a file parameter is omitted from an text input-output
+> subprogram, the subprogram should be considered to have a parameter of
+> Current_Input or Current_Output (as appropriate).
+
+Something like that, though Current_Error is also relevant, and rather than
+saying "when a file parameter is omitted" which is a bit strange, perhaps "when
+calling a subprogram within Text_IO that implicitly operates on one of the
+default input/output files" might make a bit more sense.
+
+>
+> These change would make it clear that concurrent calls of
+>      Put ("text"); and Put_Line ("text"); aren't expected to work.
+>
+> Other cases should be dealt with on a case-by-case basis, although I
+> have to think that leaving current directory and environment variable
+> unspecified is best. (In both cases, we want to do whatever the
+> underlying OS does, and I don't think there is any benefit to
+> requiring expensive locking around these
+> operations.)
+
+But what if the Ada implementation does some buffering of these?
+Should we allow these to have concurrent access be erroneous?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  5:53 PM
+
+> But what if the Ada implementation does some buffering of these?
+> Should we allow these to have concurrent access be erroneous?
+
+My first thought is that buffering is evil anyway.
+
+My second thought is that of course both of these could be implemented all
+within the Ada system if the OS doesn't support them, and some guidance would be
+good.
+
+So I don't know -- which I think is the point -- if the answer isn't obvious, it
+should be left unspecified because the alternative is to add significant
+overhead to both the definition and implementation (and in the worst case, make
+it unimplementable on some target). For environment variables in particular,
+that could matter to an application (reading a variable frequently isn't that
+unusual).
+
+So I still lean toward unspecified, in large part because I don't know what the
+rules ought to be if they were specified. But this is not a strong feeling.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 19, 2012  6:03 PM
+
+> ... So I still lean toward unspecified, in large part because I don't
+> know what the rules ought to be if they were specified. But this is
+> not a strong feeling.
+
+That seems fine, but I think we ought to make it clear, so users don't expect
+synchronized access.
+
+****************************************************************
