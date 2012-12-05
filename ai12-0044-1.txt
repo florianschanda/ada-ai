@@ -524,7 +524,760 @@ them isn't that important.
 
 ****************************************************************
 
-[Editor's note: There are 70 more messages on this topic (and a few
+From: Yannick Moy
+Sent: Wednesday, October 3, 2012  2:19 AM
+
+> I should note that I was never really convinced of the need for "in"
+> parameter checks in the first place; I dropped my opposition mainly
+> because it was obvious that enough others were convinced and I wanted
+> to move on to more important problems. I'm writing the following
+> possible rules in order to have solutions to consider, but I would
+> personally prefer just dropping the checks on "in" parameters and
+> making it clear that if you don't declare you side-effects to the outside
+> world, no one is going to help.
+
+I prefer this rule to any other that you mentioned. Like you say, this is a
+problem of distinguishing functions with side-effects from functions without
+side-effects, so this would be best dealt with a language that supports global
+IN, OUT and IN OUT declarations, like SPARK. So best left for a possible future
+version of Ada when these annotations are part of the language.
+
+> Let's narrow the problem somewhat. I will postulate that the only
+> place that we need to avoid invariant checks is in the actual
+> invariant expression. If that expression calls functions that in their
+> bodies make calls that do invariant checks, there will be a problem,
+> but it seems impossible to prevent such problems (given that the
+> bodies can be arbitrarily complex), and such expressions could never
+> be used in static analysis anyway
+
+Note that such expressions can be used in formal verification, like we do in the
+GNATprove tool developed between AdaCore and Praxis.
+
+> (1) Check all parameters for procedures, but check only "in out" and "out"
+> parameters for functions.
+
+Surprising for the user, given the asymmetry.
+
+> (2) Check only "in out" and "out" parameters for (visible) functions
+> returning a boolean type; check all parameters otherwise.
+
+Even more asymmetry. Rule is hard to remember, and the workaround that you
+propose (put a function not returning a Boolean in the private part, possibly
+inserting an indirection if needed) is a burden.
+
+> (3) Check all parameters unless aspect "Part_of_Invariant_Expression"
+> is used (only allowed on boolean functions?), thus:
+
+Makes using type invariants too complex.
+
+> (4) Make no change to the language. Public invariants are essentially
+> impossible (but not necessary anyway).
+
+Again, this forces an indirection if the actual function called in the invariant
+is in the public API.
+
+> I think that (2) or (3) is the best solution if we think checking "in"
+> parameters is very important, and (0) is the best solution if we think
+> checking them isn't that important.
+
+I think checking invariant on IN parameters is likely to lead to infinite
+recursion, because in the body of some function called from the invariant,
+another function is called which triggers the invariant again. This largely
+out-weights the possible gains from additional checking.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 3, 2012  9:46 PM
+
+...
+> > (2) Check only "in out" and "out" parameters for (visible) functions
+> > returning a boolean type; check all parameters otherwise.
+>
+> Even more asymmetry. Rule is hard to remember, and the workaround that
+> you propose (put a function not returning a Boolean in the private
+> part, possibly inserting an indirection if needed) is a burden.
+
+Sure, but so what? Ada is not designed to make it easy to *write* anything.
+Surely we would rather make it harder to write a type invariant rather than
+allow a "truck-sized hole" in the checking. (More below.)
+
+> > (3) Check all parameters unless aspect "Part_of_Invariant_Expression"
+> > is used (only allowed on boolean functions?), thus:
+>
+> Makes using type invariants too complex.
+
+See above. Making it easy to write an invariant (or anything else) is not a goal
+of Ada. If you tried to craft an argument about readability, it would carry much
+more weight.
+
+> > (4) Make no change to the language. Public invariants are
+> > essentially impossible (but not necessary anyway).
+>
+> Again, this forces an indirection if the actual function called in the
+> invariant is in the public API.
+
+That's backwards. The indirection is in the function in the public API; the
+private function called by the invariant never has an indirection. (You can
+never call anything in the public API from an invariant in this model; it's
+fairly easy to remember and the workaround isn't that hard.)
+
+> > I think that (2) or (3) is the best solution if we think checking "in"
+> > parameters is very important, and (0) is the best solution if we
+> > think checking them isn't that important.
+>
+> I think checking invariant on IN parameters is likely to lead to
+> infinite recursion, because in the body of some function called from
+> the invariant, another function is called which triggers the invariant
+> again. This largely out-weights the possible gains from additional
+> checking.
+
+For people that believe that there is a "truck-sized hole" if invariants are not
+checked on "in" parameters, any extra effort required to create an invariant is
+worthwhile. Ada is certainly not about leaving serious holes in the checking
+simply to make it a bit easier to write something uncommon. After all, you'll
+write a lot more calls to routines protected by an invariant than you will write
+invariants.
+
+Erhard had made a fairly convincing argument that a package structured like
+Ada.Text_IO ought to be able to use and enforce invariants. More generally, any
+package using handles (as opposed to direct data) ought to be able to use and
+enforce invariants. In both cases, a parameter being an "in" parameter does not
+tell us anything about whether the invariant might need to be rechecked (because
+the backing data structures could have changed).
+
+Erhard didn't convince me with that argument, but he convinced everyone else. It
+seems to me that it is silly to throw out that argument simply because it makes
+it a bit harder to write an invariant expression. That doesn't seem very
+Ada-like to me.
+
+There also is the obvious issue that making such a change (to not check "in"
+parameters) would be incompatible with the "published standard", as Tucker put
+it in another thread. The incompatibility would only show up in programs that
+fail an assertion somewhere, so you can make an argument that it is OK to be
+incompatible. But still it would be better to stay as close to the Ada 2012
+standard as possible.
+
+Of course, I'm essentially arguing Erhard's position for him. That sometimes
+leads down an incorrect path. It would be valuable to hear from him and others
+who thought that checking "in" parameters was important, to see what they think
+now.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Thursday, October 4, 2012  5:19 AM
+
+How about don't check in parameters for any expression functions?
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Thursday, October 4, 2012  5:58 AM
+
+> How about don't check in parameters for any expression functions?
+
+I like this proposal. This is simple, yet does the job of separating functions
+which are expected to be called in type invariants and should not have effects
+(the expression functions) from functions which may have effects (even on their
+IN parameters).
+
+Of course, it might be necessary to have the body of a unit to know whether a
+function is implemented as an expression function or not, but that's fine,
+because the place where the type invariant is checked should not concern the
+user of a unit, but it's implementer.
+
+And it has the nice effect of requiring the use of expression functions
+precisely for expressing the properties to check in assertions, which was the
+reason for introducing them in the first place. I like this proposal a lot!!!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 4, 2012  7:53 AM
+
+> How about don't check in parameters for any expression functions?
+
+I agree with Yannick that these kinds of rules are adding complexity without
+being a clear solution to the problem.
+
+OK, so here is my attempt to add complexity:
+
+If a subprogram has at least one OUT or IN OUT parameter, then upon return we
+check the appropriate invariant on *all* parameters, be they IN, IN-OUT, or OUT.
+
+Since I presume it would be illegal/evil to have an OUT or IN OUT parameter for
+a function used to define a type invariant, this would make certain we don't
+check any invariants recursively.
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Thursday, October 4, 2012  8:49 AM
+
+>> How about don't check in parameters for any expression functions?
+>
+> I agree with Yannick that these kinds of rules are adding complexity
+> without being a clear solution to the problem.
+
+I found this specific proposal quite interesting on the contrary. (See my
+previous email earlier today.)
+
+> OK, so here is my attempt to add complexity:
+>
+> If a subprogram has at least one OUT or IN OUT parameter, then upon
+> return we check the appropriate invariant on *all* parameters, be they
+> IN, IN-OUT, or OUT.
+>
+> Since I presume it would be illegal/evil to have an OUT or IN OUT
+> parameter for a function used to define a type invariant, this would
+> make certain we don't check any invariants recursively.
+
+I guess this does not solve the issue for Text_IO like units.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Thursday, October 4, 2012  9:41 AM
+
+I think that users would see my suggestion as a cleaner split between when in
+parameters are checked and when they aren't, expression functions will be
+perceived as a different class of things from other subprograms.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 4, 2012  9:49 AM
+
+> OK, so here is my attempt to add complexity:
+
+;-)
+
+> If a subprogram has at least one OUT or IN OUT parameter, then upon
+> return we check the appropriate invariant on *all* parameters, be they
+> IN, IN-OUT, or OUT.
+
+Clever.  I think I like it.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  10:09 AM
+
+> I think that users would see my suggestion as a cleaner split between
+> when in parameters are checked and when they aren't, expression
+> functions will be perceived as a different class of things from other
+> subprograms.
+
+I agree, and in fact I think it is very ugly to have OUT or IN OUT parameters
+for expression functions :-(
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  10:11 AM
+
+> I think that users would see my suggestion as a cleaner split between
+> when in parameters are checked and when they aren't, expression
+> functions will be perceived as a different class of things from other
+> subprograms.
+
+I actually think that expression functions should be required to be clearly pure
+(the arguments about memo functions etc really do not apply here), and even
+though the language does not require this, I think it is good style, and may
+consider adding a style switch to GNAT to enforce this view.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  10:12 AM
+
+>> If a subprogram has at least one OUT or IN OUT parameter, then upon
+>> return we check the appropriate invariant on *all* parameters, be
+>> they IN, IN-OUT, or OUT.
+>
+> Clever.  I think I like it.
+
+Yes, I think this is a good idea
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 4, 2012  10:14 AM
+
+> I found this specific proposal quite interesting on the contrary. (See
+> my previous email earlier today.)
+
+I didn't see any earlier message from you today.  I saw your message from
+yesterday.
+
+>> OK, so here is my attempt to add complexity:
+>>
+>> If a subprogram has at least one OUT or IN OUT parameter, then upon
+>> return we check the appropriate invariant on *all* parameters, be
+>> they IN, IN-OUT, or OUT.
+>>
+>> Since I presume it would be illegal/evil to have an OUT or IN OUT
+>> parameter for a function used to define a type invariant, this would
+>> make certain we don't check any invariants recursively.
+>
+> I guess this does not solve the issue for Text_IO like units.
+
+It helps somewhat, since many of these have [IN] OUT parameters.
+
+If we made it check *all* invariants on all procedure calls and on function
+calls with [IN] OUT parameters, we would probably catch all of the interesting
+Text_IO operations.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 4, 2012  10:31 AM
+
+> I actually think that expression functions should be required to be
+> clearly pure (the arguments about memo functions etc really do not
+> apply here), and even though the language does not require this, I
+> think it is good style, and may consider adding a style switch to GNAT
+> to enforce this view.
+
+You can't enforce it without outlawing calls to normal functions.
+
+I'm not sure I agree that it's good style.  Why shouldn't I call Cosine from an
+expression function?  And why shouldn't Cosine memo-ize?
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  10:33 AM
+
+> You can't enforce it without outlawing calls to normal functions.
+
+Why is that? I just check that expression meets the requirements for a pure
+function???
+
+> I'm not sure I agree that it's good style.  Why shouldn't I call
+> Cosine from an expression function?  And why shouldn't Cosine
+> memo-ize?
+
+Because it's not that much of a burden in practice to write a normal function in
+this case (after all Ada up to now has required this for *all* functions).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 4, 2012 10:57 AM
+
+> Why is that? I just check that expression meets the requirements for a
+> pure function???
+
+Yes, you're right -- you could do that.
+
+> > I'm not sure I agree that it's good style.  Why shouldn't I call
+> > Cosine from an expression function?  And why shouldn't Cosine
+> > memo-ize?
+>
+> Because it's not that much of a burden in practice to write a normal
+> function in this case (after all Ada up to now has required this for
+> *all* functions).
+
+I don't see how that's relevant.  You said impure expression functions are poor
+style, without explaining why they're poor style. The fact that there's an easy
+workaround (write a function body) doesn't tell me why they're evil in the first
+place.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  11:13 AM
+
+Because to me, expression functions feel like pure functions it seems very odd
+for instance for them to have an IN OUT parameter.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 4, 2012  12:41 PM
+
+...which they can't even (directly) modify (as they have no assignment).
+They could pass an IN OUT parameter to some other function with an IN OUT
+parameter, but that's about it.
+
+When I proposed them, I imagined them as pure and always inlined. We didn't
+require either of those things, but I would expect the vast majority of them to
+qualify.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  1:25 PM
+
+> ...which they can't even (directly) modify (as they have no assignment).
+> They could pass an IN OUT parameter to some other function with an IN
+> OUT parameter, but that's about it.
+
+Right, you really have to work to have IN OUT parameters that are actually changed. That's why I find it odd.
+>
+> When I proposed them, I imagined them as pure and always inlined. We
+> didn't require either of those things, but I would expect the vast
+> majority of them to qualify.
+
+ditto!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 4, 2012  2:35 PM
+
+> Because to me, expression functions feel like pure functions it seems
+> very odd for instance for them to have an IN OUT parameter.
+
+I think you're saying you don't like impure expression functions because you
+just don't like them -- in other words, it's a matter of taste for you.  That's
+a perfectly reasonable opinion, but I think expert opinions should be taken as
+weaker arguments than facts and reasons.
+
+Here's a fact:  If you require expression functions to be pure, then changing a
+function from non-memo-izing to memo-izing is not a compatible change (callers
+might have to change).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  2:40 PM
+
+> I think you're saying you don't like impure expression functions
+> because you just don't like them -- in other words, it's a matter of
+> taste for you.  That's a perfectly reasonable opinion, but I think
+> expert opinions should be taken as weaker arguments than facts and
+> reasons.
+
+Well matters of taste are what style switches are about (remember that's what I
+was suggesting!)
+
+> Here's a fact:  If you require expression functions to be pure, then
+> changing a function from non-memo-izing to memo-izing is not a
+> compatible change (callers might have to change).
+
+Don't understand that, can you explain?
+
+P.S. I still find it strange to have in out parameters in expression functions!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 4, 2012  2:54 PM
+
+> Well matters of taste are what style switches are about (remember
+> that's what I was suggesting!)
+
+Fair enough.  I probably wouldn't even mind using that, so long as I get to
+suppress the warning once in a while.
+
+But I don't see how the solution to this issue (Type_Invariant and "in"
+parameters) can be based on any style switches.
+
+> > Here's a fact:  If you require expression functions to be pure, then
+> > changing a function from non-memo-izing to memo-izing is not a
+> > compatible change (callers might have to change).
+>
+> Don't understand that, can you explain?
+
+Suppose F is a regular old function with a body, no pragma Pure, but also no
+side effects. And suppose you call it from an expression function. (I think that
+will be common -- Tucker gave a good example.) Then if you change F to be
+memo-izing, you will have to change the expression function.
+
+But you pointed out above that "require expression functions to be pure"
+isn't what you meant -- it's just a warning, and warnings are suppressable.
+
+We should probably quit all this talk about warnings here -- that's GNAT
+specific, and not entirely appropriate for an ARG discussion.
+
+> P.S. I still find it strange to have in out parameters in expression
+> functions!
+
+Sure, so do I.  I also find it strange to have 'in out' params on regular old
+functions with bodies.  I want to be able to do it, but only once in a while.
+Most functions really ought to be pure.  Even if you can't say pragma Pure, as
+for memo-izing functions, they should be conceptually pure.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  3:01 PM
+
+> But I don't see how the solution to this issue (Type_Invariant and
+> "in" parameters) can be based on any style switches.
+
+It's not based on the style switches but on the thought behind them. If in
+general this view of expression functions appeals to a lot of people, then it's
+not terrible to have the language rule about checking parameters follow this
+rule.
+
+It seems rare enough to need to check in parameters in expressin functions, and
+rare enough to have IN OUT or OUT parameters for expression functions that
+having to write a body if you do need these checks is not a significant
+hardship!
+
+>>> Here's a fact:  If you require expression functions to be pure, then
+>>> changing a function from non-memo-izing to memo-izing is not a
+>>> compatible change (callers might have to change).
+>>
+>> Don't understand that, can you explain?
+>
+> Suppose F is a regular old function with a body, no pragma Pure, but
+> also no side effects.
+> And suppose you call it from an expression function.
+> (I think that will be common -- Tucker gave a good example.) Then if
+> you change F to be memo-izing, you will have to change the expression
+> function.
+
+Yes, but that's not incompatible for callers, you just change it to have a body,
+which does not affect the callers, so I still don't get it!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 4, 2012  3:13 PM
+
+> It's not based on the style switches but on the thought behind them.
+> If in general this view of expression functions appeals to a lot of
+> people, then it's not terrible to have the language rule about
+> checking parameters follow this rule.
+
+OK, if it's a style rule that I'm allowed to break once in a while, then yes,
+this view of expression functions appeals to me.
+
+> > Suppose F is a regular old function with a body, no pragma Pure, but
+> > also no side effects.
+> > And suppose you call it from an expression function.
+> > (I think that will be common -- Tucker gave a good example.) Then if
+> > you change F to be memo-izing, you will have to change the
+> > expression function.
+>
+> Yes, but that's not incompatible for callers, you just change it to
+> have a body, which does not affect the callers, so I still don't get
+> it!
+
+The caller I'm talking about is the caller of F.
+
+F is in some package.  The expression function is in some other package that is
+a client of the first package. It would be nice if you could change F without
+changing its caller.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 4, 2012  12:37 PM
+
+> I didn't see any earlier message from you today.  I saw your message
+> from yesterday.
+
+Yannick's mail is getting moderated (presumably he hasn't sent enough messages to qualify for the "free pass", or his sending address doesn't match his subscription address), so I have to approve it. Given that he's sending his messages in the middle of the night my time, that delays them quite a bit).
+
+> >> OK, so here is my attempt to add complexity:
+> >>
+> >> If a subprogram has at least one OUT or IN OUT parameter, then upon
+> >> return we check the appropriate invariant on *all* parameters, be
+> >> they IN, IN-OUT, or OUT.
+> >>
+> >> Since I presume it would be illegal/evil to have an OUT or IN OUT
+> >> parameter for a function used to define a type invariant, this would
+> >> make certain we don't check any invariants recursively.
+> >
+> > I guess this does not solve the issue for Text_IO like units.
+
+Yannick beat me to this. I was going to say that your rule would exclude Put and
+Put_Line. If you had an invariant involving the line and column counters, that
+would leave it unchecked in far too many cases.
+
+> It helps somewhat, since many of these have [IN] OUT parameters.
+>
+> If we made it check *all* invariants on all procedure calls and on
+> function calls with [IN] OUT parameters, we would probably catch all
+> of the interesting Text_IO operations.
+
+And I was going to suggest the above as a fix. Great minds and all of that.
+
+But I think I kind of prefer the expression function rule suggested elsewhere.
+Although I'm not quite sure how it would work when the expression function is
+given in the package body and is the completion of a declaration from the
+specification. In that case, the reader couldn't see that it was unchecked.
+OTOH, as Robert notes, impure expression functions are likely to be pretty rare
+(they could only occur if the function calls something impure or with "in out"
+parameters, as no assignments are possible inside of the expression). So maybe
+it's OK to suppress the checks even if the body is invisible.
+
+And I was actually leaning toward the "aspect" solution, because it changes the
+least. But the expression function solution is nearly as good.
+
+It should be noted that any routines that an expression function calls still
+would have checks if public, so the dual private/public routines I had suggested
+still might be needed in some cases. As I noted yesterday, this doesn't bother
+me because ease of writing isn't a goal of Ada.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 4, 2012  1:17 PM
+
+>> How about don't check in parameters for any expression functions?
+> ... And it has the nice effect of requiring the use of expression
+> functions precisely for expressing the properties to check in
+> assertions, which was the reason for introducing them in the first place. I like this proposal a lot!!!
+
+I don't. ;-)
+
+I don't see why an invariant should imply use of an expression function.
+Also, it seems quite possible that even though the invariant might be defined by
+a call on an expression function, the expression might turn around and call a
+non-expression function.  E.g.:
+
+     ... with Type_Invariant => Is_Valid(T);
+
+    function Is_Valid(X : T) return Boolean is (Width(X) in 0..Max_Width);
+
+where Width is an out-of-line function.
+
+You are going to force all of the functionality required to establish validity
+into expression functions.  That could be a big disruption on existing code,
+making it harder to add Type_Invariant to existing abstractions.
+
+In my view, many invariants are going to be completely private to the
+implementation, and there is no need to expose them at all to the client, nor
+expose all of their functionality in the private part.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, October 4, 2012  1:24 PM
+
+>> How about don't check in parameters for any expression functions?
+>
+> I like this proposal. This is simple, yet does the job of separating
+> functions which are expected to be called in type invariants and
+> should not have effects (the expression functions) from functions
+> which may have effects (even on their IN parameters).
+>
+> Of course, it might be necessary to have the body of a unit to know
+> whether a function is implemented as an expression function or not,
+> but that's fine, because the place where the type invariant is checked
+> should not concern the user of a unit, but it's implementer.
+>
+> And it has the nice effect of requiring the use of expression
+> functions precisely for expressing the properties to check in
+> assertions, which was the reason for introducing them in the first
+> place. I like this proposal a lot!!!
+
+I agree, this proposal also makes sense to me
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 4, 2012  3:16 PM
+
+> You are going to force all of the functionality required to establish
+> validity into expression functions.  That could be a big disruption on
+> existing code, making it harder to add Type_Invariant to existing
+> abstractions.
+
+Not at all. You can always call private functions from the invariant code, and
+as I showed on Monday, it's easy to make a private version of a public function.
+
+> In my view, many invariants are going to be completely private to the
+> implementation, and there is no need to expose them at all to the
+> client, nor expose all of their functionality in the private part.
+
+If they're completely private, the issue never arises, because we don't check
+invariants on private subprograms. Ever. The issue only arises when calling
+*public* functions from an invariant, and the solution mainly is to call private
+versions instead. But we have to have some solution for the top-level function
+(which necessarily has to be public), and the expression function idea works as
+well as any other proposed.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, October 4, 2012  7:13 PM
+
+I'd still have a semantic rather than a "syntactic" rule, partly because all the
+rules discussed so far have a "fragile feel" to them, partly because it is hard
+to rationalize them froma user perspective.
+
+How about: "A type invariant check on an object succeeds trivially if invoked
+during a type invariant check on this object."
+
+The run-time protocol would look like:
+ if currently_checked_object = this then null;  else
+    declare old_cco: object := currently_checked_object;
+    begin
+      currently_checked_object := this;
+      <do the type invariant check on this>
+      currently_checked_object := old_cco;
+    end;
+  end if;
+
+(It is not a 100%-proof rule, but it is much harder to see the hole that the
+rule has in theory.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 4, 2012  8:50 PM
+
+> How about: "A type invariant check on an object succeeds trivially if
+> invoked during a type invariant check on this object."
+>
+> The run-time protocol would look like:
+>  if currently_checked_object = this then null;  else
+>     declare old_cco: object := currently_checked_object;
+>     begin
+>       currently_checked_object := this;
+>       <do the type invariant check on this>
+>       currently_checked_object := old_cco;
+>     end;
+>   end if;
+
+That's a lot of overhead for the common case that a routine is not called from
+the invariant. And it's certainly not possible in general to determine whether
+that happens (if an invariant calls a routine defined elsewhere, there is no way
+for the compiler to tell if that routine uses the public interface of the
+package in any way). My main objection to checking "in" parameters is that it
+increases the overhead of checking by many times; this idea would also have such
+a multipler.
+
+I think a fully static rule is needed so we're not making checking much more
+expensive to fix an unusual case; if you don't like any of the rules based on
+the profile or body, surely a rule based on an aspect is acceptable? (The
+compiler could even warn if a public routine is called from the invariant that
+doesn't have the aspect -- although that's true for all of the other ideas as
+well.)
+
+Note that a rule based on an aspect definitely has a clear user case: if you
+plan to call a public routine from an invariant expression, it needs the aspect.
+And the aspect clearly declares the intentional hole.
+
+(Humm, I suppose you could combine your idea and my aspect idea to eliminate the
+hole altogether, and only force the overhead on routines that need it, although
+I think that is overkill.)
+
+BTW, I'm unconvinced that you actually can implement the above: "this" isn't
+well-defined for by-copy types (like an access type), and a private type surely
+can have a full type which is such a type.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 4, 2012  9:36 PM
+
+> How about: "A type invariant check on an object succeeds trivially if
+> invoked during a type invariant check on this object."
+
+Let's not forget multitasking!
+
+****************************************************************
+
+[Editor's note: There are 39 more messages on this topic (including a few
 that are off-topic) that remain to be filed.]
 
 ****************************************************************

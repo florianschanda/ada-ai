@@ -1354,3 +1354,392 @@ I can't give any reasonable thoughts on the answer.
 
 ****************************************************************
 
+From: Randy Brukardt
+Sent: Saturday, December  1, 2012  12:14 AM
+
+...
+> I admit, I lost you completely at this point. I don't have time to
+> work this example through on a whiteboard (which might be the only way
+> to understand it -- but I would have expected the two parameters to
+> point at different frames (frame objects) if they have a different
+> lifetime. How could it be otherwise here?
+
+Having been unable to stop thinking about this (instead of doing critical work
+for the upcoming meeting ;-), I think the problem is that you are trying to
+solve the problem the wrong way. Specifically, dynamic masters are nested
+dynamically, and their static links are pretty much irrelevant. If you try to
+treat this like the static checks (or the small integer model, for that matter),
+you are working harder than necessary. So I think your Level_Objects are much
+too complex (and expensive to create).
+
+I believe that there is a simple solution and usually very efficient solution
+that piggybacks on the finalization chain mechanism. (Of course, if your
+compiler just spent $$$$ and time to get rid of that, you're going to be out of
+luck, but in any case we're trying to find a simple reference implementation,
+and the RM reference implementation for finalization uses a chain.)
+
+The basic idea is to ensure that the first object in every master is the special
+Level_Object that you described in your paper, and it is linked to the innermost
+enclosing *dynamically* enclosing master of this frame. (This is dirt cheap in
+Janus/Ada because such an object already exists, all I have to do is add the
+pointer into it.) And how do you find that pointer to the enclosing master's
+level object? The thumb points to it (or immediately before it, I forget) when
+you enter the scope. The finalization setup already has all of the needed
+information. (This lets us skip levels for which no level object or finalization
+is needed; nothing bad will happen.)
+
+The check is essentially the same as you suggest (run the chain looking for the
+frame). Note that if one is willing to have a bit more fixed overhead, and the
+single stack of a task is contiguous, one can stick the current task id into the
+Level_Object. In that case, preceding the check with:
+     if A.Task_Id = B.Task_Id then
+          if A.Link > B.Link then
+               -- Error.
+          -- else OK.
+          end if;
+     else
+         -- Run chain as before.
+     end if;
+
+Makes the check dirt cheap unless the levels are from two different task's
+stacks. (Which should be very rare!) [Although simply special-casing
+library-level probably is enough to make the checks cheap enough, since the vast
+majority of types are declared at library-level.]
+
+I'm pretty sure this ought to work for your example (the levels belong to
+different stack frames for the two parameters, and surely cannot be the same in
+this case). Whether it works in all cases is something to think about some other
+day.
+
+Now, moving on to critical work...
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, December  1, 2012  8:34 AM
+
+>...Specifically, dynamic masters are
+> nested dynamically, and their static links are pretty much irrelevant.
+
+I think any method that involves chasing dynamic links will be too inefficient
+in some cases.  (If my name were Randy, I'd use words like "non-starter".  ;-))
+
+Imagine a recursive procedure that takes an access parameter.
+You could easily get thousands of stack frames, and if you have an accessibility
+check for each call, it's quadratic in the recursion depth.
+
+Static chains, on the other hand, are (approximately) never longer than 3.
+
+We do indeed need a whiteboard or equivalent to understand this stuff.  I
+understood it briefly during the meeting with Steve and Tuck, but that was while
+staring at a picture Steve had drawn.
+
+>      if A.Task_Id = B.Task_Id then
+
+That's an interesting idea.
+
+> Now, moving on to critical work...
+
+With 2020 still 7 years away, I wouldn't consider anything critical, but yeah,
+OK, get back to work.  ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, December  1, 2012  2:27 PM
+
+> >...Specifically, dynamic masters are
+> > nested dynamically, and their static links are pretty much irrelevant.
+>
+> I think any method that involves chasing dynamic links will be too
+> inefficient in some cases.  (If my name were Randy, I'd use words like
+> "non-starter".  ;-))
+>
+> Imagine a recursive procedure that takes an access parameter.
+> You could easily get thousands of stack frames, and if you have an
+> accessibility check for each call, it's quadratic in the recursion
+> depth.
+
+Only if your check is stupid. :-) The only time the check needs to chase
+anything is if the objects are not library level and are possibly incomparable
+(come from different tasks). I think it would be extremely difficult to create
+an example like that which was quadratic (I'm sure it would be possible, but
+surely would be pathological).
+
+Besides that, I personally don't care if it take 6 months to execute a check on
+a anonymous access parameter. These checks are rare in any case (most such
+parameters are just dereferenced which don't require any checks), and they are
+(as one B. Duff said) a "tripping hazard" in any case -- I'd hope that the users
+saw the error of their ways and used "in out" or "aliased in out" or a named
+access instead (none of which require complex dynamic checks).
+
+> Static chains, on the other hand, are (approximately) never longer
+> than 3.
+
+True enough. But if you have as much overhead as in Steve's description to
+*create* those data structures (recall that they're dynamically sized, which in
+Janus/Ada would mean heap allocation!) -- and for the vast majority of anonymous
+access parameters they'll never be used at all (I've only used anonymous access
+to get "in out reference" parameters on functions, not necessary in Ada 2012 and
+in any case, these never generated any checks). So that overhead is completely
+wasted. Piggybacking on a mechanism that already exists (in Janus/Ada at least)
+has less overhead, and the objects are statically sized.
+
+> We do indeed need a whiteboard or equivalent to understand this stuff.
+> I understood it briefly during the meeting with Steve and Tuck, but
+> that was while staring at a picture Steve had drawn.
+>
+> >      if A.Task_Id = B.Task_Id then
+>
+> That's an interesting idea.
+
+It's the only reason that I agreed to "incomparable levels" in the first place
+-- the check is cheap in all cases except when the levels appear incomparable.
+
+Probably I should repeat the entire check algorithm again (it's in the e-mail of
+the AI for "incomparable levels").
+
+When checking that "A shall not be deeper than B, else Program_Error is raised",
+we ought to do the following:
+
+      if A.Level = Library_Level then
+          return; -- OK
+      elsif B.Level = Library_Level then
+          raise Program_Error; -- The case where both levels are library-level is included in the first branch.
+      elsif A.Task_ID = B.Task_Id then -- The levels belong to the same task (this includes both the same level).
+          -- We assume that the stack for a single task is contiguous.
+          if A.Level'Address > B.Level'Address then
+              -- The direction ("<" or ">") depends on which way your stacks
+              -- grow in memory.
+              raise Program_Error;
+          else
+              return; -- OK.
+          end if;
+      else -- Two different tasks (can't be the same level).
+          -- A has to be on B's chain.
+          Temp := B.Level.Link;
+          while Temp /= null loop
+              if Temp = A then
+                   return; -- OK.
+              else
+                 Temp := Temp.Link;
+              end if;
+          end loop;
+          -- If we get here, we didn't find A on B's chain.
+          raise Program_Error;
+      end if;
+
+This is ordered in the order of likelihood, so the most common cases are checked
+first and use the least instructions to check.
+
+Note that the "two different tasks" case is quite rare, and probably will fail
+most of the time. So it's hard to get worried about how expensive it is.
+Besides, these dynamic checks themselves are quite rare in real code. Usually,
+rare * rare = don't care!
+
+> > Now, moving on to critical work...
+>
+> With 2020 still 7 years away, I wouldn't consider anything critical,
+> but yeah, OK, get back to work.  ;-)
+
+Sorry, you misunderstood. While Ada 2012 does have a couple of critical bugs
+that need fixing yesterday, that's not what I meant. I meant "work critical to
+my continued employment in this position". Specifically:
+
+(1) People are coming from all over the world for this ARG meeting (I realize
+    you just have to take the T or something, but that's not the case for most
+    of us). They won't be happy if the agenda is mostly empty because I didn't
+    get the work done.
+(2) I have a HILT panel on Thursday (please come, BTW), and I'll look pretty
+    clueless if I don't have anything to say.
+
+That's why I'm here right now, rather than relaxing and watching football.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December  1, 2012  8:11 PM
+
+>> Static chains, on the other hand, are (approximately) never longer
+>> than 3.
+>
+> True enough. But if you have as much overhead as in Steve's
+> description to
+> *create* those data structures (recall that they're dynamically sized,
+> which in Janus/Ada would mean heap allocation!)  ...
+
+There is no need for dynamically-sized structures.  Steve might have described
+them that way, but in our discussions, these were linked stack-based structures,
+each node of which was of fixed size.
+
+When we discussed it, we had two kinds of (singly-linked) lists of frame ids:
+one kind of list represented a particular named access type (which is the target
+of a conversion or an allocator), and consisted of one link per static nesting
+level enclosing the declaration of the access type; the other kind of list
+represented a set of levels for a particular run-time tag or access parameter,
+where the set starts out as a single level, but which grows when an access
+parameter is passed to a more nested subprogram, by linking into the set the
+frame-id for the outer subprogram which received the original access parameter.
+This corresponds exactly to the situation where the small-number approach
+requires a possible fixup.  The check is to verify that at least one of the
+members of the set appears in the list representing the target access type.  If
+we treat the two lists as representing sets of frame ids, then it is a check to
+see if the two sets overlap at all.
+
+In any case, a white board would definitely be helpful to explain this.
+I think the overhead is pretty low overall.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, December  2, 2012  4:47 PM
+
+> With 2020 still 7 years away, I wouldn't consider anything critical,
+> but yeah, OK, get back to work.  ;-)
+
+And then, ASIS raises its ugly head...
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, December  3, 2012  11:34 AM
+
+> There is no need for dynamically-sized structures.  Steve might have
+> described them that way, but in our discussions, these were linked
+> stack-based structures, each node of which was of fixed size.
+
+Even in my description, there is no *need* for dynamic-sized structures
+(although such structures are an implementation option).
+
+Suppose we have a subprogram for which we need to declare an accessibility level
+object. The idea is that the number of predecessors stored in that object is
+known statically - one for the "static link" and then a known additional number
+(usually zero or one) for each parameter.
+
+Consider, however, a routine with a bunch of anonymous-access-to-object typed
+parameters.
+
+The straightforward approach would include a predecessor for each one. If it
+turns out at runtime that many of the parameters for some particular execution
+of the subprogram body have the same accessibility level (e.g., they designate
+library-level objects), then this would result in storing repeated (and
+therefore redundant) predecessors.
+
+This is ok but one could imagine an implementation trying to detect at least
+some cases like this and reduce the number of predecessors by eliminating
+redundant ones. In that case, I agree, we do end up with a dynamically
+constrained object, but even then we have a reasonable statically-known upper
+bound on the size of the object (i.e., the size we would have used in the
+unoptimized scheme) which could be used to avoid dynamic storage allocation.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December  3, 2012  4:32 PM
+
+...
+> This is ok but one could imagine an implementation trying to detect at
+> least some cases like this and reduce the number of predecessors by
+> eliminating redundant ones. In that case, I agree, we do end up with a
+> dynamically constrained object, but even then we have a reasonable
+> statically-known upper bound on the size of the object (i.e., the size
+> we would have used in the unoptimized scheme) which could be used to
+> avoid dynamic storage allocation.
+
+I think you're missing the big picture here. This implementation is amazingly
+complex, and the number of people who understand it can be counted on one hand
+(something I highly doubt is going to change significantly no matter how many
+whiteboard presentations are given). Tucker says that "This corresponds exactly
+to the situation where the small-number approach requires a possible fixup." --
+which I can believe -- but the number of people who understand why that fixup is
+necessary can be counted on two hands (and I'm being generous). I know that our
+compiler uses that fixup in some situations, but I have no real idea why or
+whether it is implemented right -- it just passes the tests that we have. (I
+certainly shouldn't be counted on either of these hands at the moment.)
+
+I proposed a simpler implementation that:
+(A) Piggybacks on the existing *reference* implementation of finalization;
+(B) Directly corresponds to the rules being checked;
+(C) As the same or better per-master overhead in the default implementation
+    (only one word per master is needed);
+(D) Has the same overhead in passing "Level_Objects", and allows the most
+    masters (that don't need a Level_Object) to skip having them.
+
+The only downside is that the checks might be expensive in some *unusual* cases.
+I point out:
+
+(1) Those cases are quite unusual (they need both recursive routines and dynamic
+    checks in the same subprograms);
+(2) Ada 2012 tries hard to eliminate dynamic checks. A significant reason for
+    the inclusion of "in out" parameters on functions was to get rid of the
+    dynamic checks associated with the workaround. Similarly, the motivating
+    reason for including "aliased" parameters is that these are guaranteed to
+    work with the return object of a function (as any needed checks are made at
+    the call site) -- there should be no dynamic checks involved with those
+    either. So, in new code, the presence of dynamic checks pretty much indicate
+    a design error -- it's hard to worry about the performance of things that
+    shouldn't occur.
+(3) So we're mostly left with the performance of legacy code, and for that,
+    there is a clear solution if adding a small amount of additional overhead in
+    the Level_Object is acceptable (and task stacks are contiguous, which they
+    usually are), in which case the only time the check could become expensive
+    is when the levels belong to different tasks and neither is library level.
+
+    And then to actually become expensive, recursion would also need to be
+    involved (you'd need hundreds of nested masters before the performance could
+    become at all noticeable). That ought to be rare enough to be ignorable (I
+    would really doubt that anyone would be complaining about the performance of
+    something so rarely encountered).
+
+It's valuable to work out an alternative implementation for those not using
+finalization chains and thumbs (which I suppose includes GNAT), but I really
+doubt that we should talk about that implementation in the AARM notes, simply
+because it is so complex and frankly, bizarre. And this AI is primarily about a
+reference implementation for the AARM; what GNAT chooses to do is essentially
+irrelevant for the AARM.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, December  3, 2012  8:27 PM
+
+> ... It's valuable to work out an alternative implementation for those
+> not using finalization chains and thumbs (which I suppose includes
+> GNAT), but I really doubt that we should talk about that
+> implementation in the AARM notes, simply because it is so complex and
+> frankly, bizarre. And this AI is primarily about a reference
+> implementation for the AARM; what GNAT chooses to do is essentially irrelevant for the AARM.
+
+GNAT is relevant since it tends to be the first "real" implementation of the
+language features.
+
+But in any case, I think we should probably leave most of the details out of the
+AARM, and put them in separate design notes, or perhaps in AIs. We can describe
+both alternatives at a high level, and give a reference to the AI or wherever we
+decide to put the details.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December  3, 2012  9:02 PM
+
+...
+> GNAT is relevant since it tends to be the first "real"
+> implementation of the language features.
+
+Well, sure, but we all know that real compilers have all kinds of gunk to deal
+with that we surely don't want to be discussing in terms of a reference
+implementation.
+
+> But in any case, I think we should probably leave most of the details
+> out of the AARM, and put them in separate design notes, or perhaps in
+> AIs.
+> We can describe both alternatives at a high level, and give a
+> reference to the AI or wherever we decide to put the details.
+
+I agree that we don't want a lot of details. Preferably, we'd have a level of
+detail roughly the same as we have for implementing finalization, and then a
+suggestion to read AI12-0016-1 for more details and alternative implementations.
+
+****************************************************************
+

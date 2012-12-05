@@ -750,7 +750,7 @@ A follow-on to my previous message:
 I never actually showed the real wording, as the rule I gave was the "simple"
 version, which doesn't include the generic boilerplate and also doesn't have a
 way for the completion of a private extension to be written. In the interest of
-heading of Steve Baird (fat chance :-), here's what I put into the AI for
+heading off Steve Baird (fat chance :-), here's what I put into the AI for
 wording:
 
 !wording
@@ -801,6 +801,234 @@ can't escape the generic (no dispatching can be involved). And they're pretty
 much useless. So I don't much care whether or not those are checked. (We could
 add a run-time check on the declaration of such an extension if someone truly
 cares, but I don't think it's worth the complication.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, November 30, 2012  8:13 AM
+
+> ... Add after 7.3.2(6/3):
+>
+> If a Type_Invariant'Class expression applies to any ancestor of a type
+> extension, the extension shall be a private extension.
+
+Intriguing idea.  I would also allow "null" extensions, as that would address
+the idiom of using a null extension as a rename.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 30, 2012  8:51 PM
+
+Humm. That would require a bit more wording (to deal with invariants of
+inherited primitive routines when derived outside of a package spec), but also
+would eliminate the minor hole associated with the untagged derivation possible
+in a package body (as it would be treated like a null extension outside of a
+package specification).
+
+It probably also would help with the technical justification for the rule.
+During the e-mail, Erhard described the model as the following:
+
+"Type invariants are sensible only for private types, because for non-private
+types they would have to be checked with every modification of instances
+anywhere in the code - this in turn would not really be manageable, since one
+needs to allow for temporary inconsistency, but where do you put the bounds for
+the inconsistency if the type is not private? For private types, visible ops are
+the bounds and we can guarantee that every call on a {visible} primitive
+operation leaves the invariant intact."
+
+[Note: I added "visible" into the above as there certainly can be private
+primitive operations and they aren't included in the above.]
+
+Even though you can't add invariants to a non-private derived type, you still
+can *change* the behavior of an inherited invariant. That's because class-wide
+invariants dispatch to the included operations, and an overridden operation can
+use visible extension components. Moreover, it makes perfect sense for this to
+happen, and it may be out of the hands of the programmer if the operation is a
+publicly visible and useful outside of the invariant. [See the example below.]
+In such a case, there can be no guarantees about the invariant, and that
+violates the principles given above.
+
+OTOH, if there aren't any visible extension components, trouble can happen only
+if the programmer goes out of their way to allow (by adding some
+invariant-breaking non-primitive operation in a child unit, for instance). So it
+makes sense to allow that, and only that.
+
+---
+
+Why would an invariant get (implicitly) changed to depend on extension
+components? Consider the following scenario. We have a widget component in some
+sort of third-party GUI library, and it includes an invariant that uses the size
+of the widget. For instance:
+
+     package Widget is
+         type Root is abstract tagged private
+            with Type_Invariant'Class => ... Size (Root) ...;
+         function Size (W : in Root) return Size_Type is abstract;
+         ...
+     private
+         ...
+     end Widget;
+
+Now, our programmer creates their own widget extension, using a record
+extension:
+
+     with Widget;
+     package Mine is
+         type My_Widget is new Widget.Root with record
+            My_Size : Size_Type := ...;
+            ...
+         end record;
+         function Size (W : in My_Widget) return Size_Type is (W.My_Size);
+     end Mine;
+
+My_Widget will inherit the invariant from Root, that invariant will make a
+dispatching call to Mine.Size, and Mine.Size returns some visible extension
+components. Anyone can change those components, and if they do, potentially
+change the result of the invariant.
+
+Moreover, the extender of Widget can't change package Widget (it's a third-party
+library, remember), they can't avoid overriding Size (it's abstract, and even if
+it wasn't, it's a useful public function that is useful outside of the invariant
+-- not changing it is not an option). The only thing they can avoid doing is
+declaring a non-private type -- and we should *make* them do that in cases like
+this, as the result otherwise is a swiss cheese form of protection. (Besides, we
+already have Dynamic_Predicates for cases where near bullet-proof protection is
+not required.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December  1, 2012  10:38 AM
+
+> ... I would also allow "null" extensions, as
+>> that would address the idiom of using a null extension as a rename.
+>
+> Humm. That would require a bit more wording (to deal with invariants
+> of inherited primitive routines when derived outside of a package
+> spec), but also would eliminate the minor hole associated with the
+> untagged derivation possible in a package body (as it would be treated
+> like a null extension outside of a package specification).
+>
+> It probably also would help with the technical justification for the rule.
+> During the e-mail, Erhard described the model as the following: ...
+
+Allowing null extensions seems quite important, given that we made a big effort
+to allow them as a stand-in for renaming.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Saturday, December  1, 2012  4:00 PM
+
+> Even though you can't add invariants to a non-private derived type,
+> you still can *change* the behavior of an inherited invariant. That's
+> because class-wide invariants dispatch to the included operations, and
+> an overridden operation can use visible extension components.
+> Moreover, it makes perfect sense for this to happen, and it may be out
+> of the hands of the programmer if the operation is a publicly visible and
+> useful outside of the invariant.
+> [See the example below.] In such a case, there can be no guarantees
+> about the invariant, and that violates the principles given above.
+
+The principle can also be violated without resorting to extensions.
+Methods could return a component value of access type. If the type invariant
+refers to this hidden component, the "exported" reference to its designated
+object would nevertheless make the invariant susceptable to violations from
+the outside.
+
+I believe the right way to think about it is that
+ - the writer of the invariant must not refer to values that are
+   susceptable to change from the outside by whatever means. Privacy
+   helps tremendously, but is not the entire story.
+ - the deriver from a type must not redefine methods called in the
+   type invariant to make the invariant susceptable to changes from
+   the outside.
+
+Now, IF I do not touch indirectly accessible stuff in the invariant AND I am not
+performing dispatching calls, I am safe behind the curtains of privacy. If I go
+beyond, I require cooperation from the (re-)definers of the classes involved, in
+order to stay safe. Unfortunately, to cast this into static rules, is difficult
+at best and may turn out to be draconic for real OOP. Your example would not be
+legal, yet I realize that it should be on practical grounds.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, December  1, 2012  4:42 PM
+
+> > Even though you can't add invariants to a non-private derived type,
+> > you still can *change* the behavior of an inherited invariant.
+> > That's because class-wide invariants dispatch to the included
+> > operations, and an overridden operation can use visible extension components.
+> > Moreover, it makes perfect sense for this to happen, and it may be
+> > out of the hands of the programmer if the operation is a publicly
+> > visible and useful outside of the invariant.
+> > [See the example below.] In such a case, there can be no guarantees
+> > about the invariant, and that violates the principles given above.
+>
+> The principle can also be violated without resorting to extensions.
+> Methods could return a component value of access type. If the type
+> invariant refers to this hidden component, the "exported" reference to
+> its designated object would nevertheless make the invariant
+> susceptable to violations from the outside.
+
+Sure, the designer of an abstraction can write one that contains holes. No one
+has ever doubted that. The thing that bothers me is the case when the extender
+*introduces* a hole, *by accident*. (And returning an access value is *never*
+an accident.)
+
+> I believe the right way to think about it is that
+>  - the writer of the invariant must not refer to values that are
+>    susceptable to change from the outside by whatever means. Privacy
+>    helps tremendously, but is not the entire story.
+>  - the deriver from a type must not redefine methods called in the
+>    type invariant to make the invariant susceptable to changes from
+>    the outside.
+
+But this latter is impossible to follow, because they cannot change the
+invariant, and they probably cannot change the operations that they need to
+implement, either.
+
+> Now, IF I do not touch indirectly accessible stuff in the invariant
+> AND I am not performing dispatching calls, I am safe behind the
+> curtains of privacy. If I go beyond, I require cooperation from the
+> (re-)definers of the classes involved, in order to stay safe.
+> Unfortunately, to cast this into static rules, is difficult at best
+> and may turn out to be draconic for real OOP. Your example would not
+> be legal, yet I realize that it should be on practical grounds.
+
+I don't understand this paragraph. The only proposal is to make non-private
+non-null extensions of types with invariants illegal. The reason is in part to
+reduce the chance of inadvertent holes. It certainly won't eliminate all
+possibilities of holes, but these are major and unavoidable. (You talk about
+avoiding dispatching in your invariant, but that is impossible with
+Type_Invariant'Class, in which calls are defined to be dispatching and which is
+required to be public, so you can *only* make public calls to query properties
+of your type.)
+
+Methodologically, all composite types should be private types in an Ada program.
+(Pretty much the only exception that I've seen in practice is for tuples of
+elementary types, like coordinates, sizes of rectangles, and complex numbers.
+And that's a close call.) Arguably, Ada should never have allowed record
+extensions that aren't completions of private extensions. Obviously too late for
+that, but since it clearly causes trouble with this new feature, banning the
+combination seems OK.
+
+The work-around to a type illegal on these grounds is easy: make the type a
+private extension (and, if necessary wrap it in a package). If that somehow
+breaks your abstraction, you don't *have* an abstraction! So I don't see why it
+is necessary to allow such a record extension "on practical grounds".
+
+I'd prefer to not allow any such extensions, but Tucker points out the use of
+null extensions as a stand-in for renames. I absolutely detest this use of
+derivation (it's wrong on many levels), but given that we haven't created a
+viable alternative (and we certainly have tried) we probably do have to allow
+that. But there is very little compelling about the non-null case.
+
+Again, in almost all of the above, I'm only talking about extensions from types
+that have Type_Invariant'Class specified non-trivially. (I don't keep mentioning
+that repeatedly because otherwise the actual points get lost.)
 
 ****************************************************************
 

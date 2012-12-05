@@ -1188,6 +1188,347 @@ that aren't portable at all. package Machine_Code is the most oobvious case.
 
 ****************************************************************
 
+From: Geert Bosch
+Sent: Thursday, July 26, 2012  1:14 PM
+
+As far as sets vs. ranges are concerned, the topology of typical shared memory
+systems can be given as a tree:
+
+                           [System]
+                         /          \
+                    [node1]  . . . [nodeN]
+                  /         \
+             [socket1] . . . socketN]
+            /           \
+         [die1] . . . [dieN]
+       /        \
+   [core1] . . . [coreN]
+   /       \
+[thread1] . . . [threadN]
+
+The threads at the leaves represent simultaneously executing threads (such as
+Intel's hyper threading), while higher levels represent multi-core to up to
+inter-node shared memory connects. The term "processor" or CPU is ambiguous, and
+is used to refers to different levels in the hierarchy. While it may be
+reasonable to equate the Ada notion of processor or CPU to each of the  nodes *
+sockets * dies * cores * threads execution leaves, that is not the only possible
+or reasonable one. In particular, it is an unreasonable  restriction and
+expectation that there is a fixed 1-to-1 mapping between system threads and Ada
+processors.
+
+Even the Linux OS kernel does not define a specific mapping between its concept
+of CPU number and actual sockets or cores. With the widespread use of
+hypervisors and virtualization, even in the real-time embedded systems that
+Dispatching_Domains are meant for, there may not even be the possibility to
+guarantee a fixed mapping.
+
+If we accept that the Ada notion of processor/CPU only relates to some execution
+resource that has a single running task associated with it, and if we accept
+that a CPU can only belong to a single dispatching domain, it becomes clear that
+allowing users to specify sets doesn't achieve anything. The Ada implementation,
+or the OS or hypervisor it runs in, can always change the mapping in an
+arbitrary way.
+
+A good implementation (wether the Ada run time, or the OS kernel) would indeed
+do that in such a manner that each dispatching domain would have maximal
+locality by using execution resources on the same socket, die or core. Anything
+else would mean that a program tuned for one specific observed mapping between
+CPU numbers and execution resources might perform horribly on any other system,
+or even on the same system on a different day. This would mean writing portable
+code using Dispatching_Domains would be impossible.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 26, 2012  2:27 PM
+
+...
+
+> If we accept that the Ada notion of processor/CPU only relates to some
+> execution resource that has a single running task associated with it,
+> and if we accept that a CPU can only belong to a single dispatching
+> domain, it becomes clear that allowing users to specify sets doesn't
+> achieve anything. The Ada implementation, or the OS or hypervisor it
+> runs in, can always change the mapping in an arbitrary way.
+
+If it does, then the user can't use this for any sort of tuning, which seems to
+ensure that it can't be used for anything. And I think we all agree that
+existing OSes (and hypervisors) are incompatible with strict Annex D semantics,
+so we're really only talking about purpose-built Annex-D compliant kernels. You
+can't say anything interesting about programs that run on Windows or Linux or
+VMWare.
+
+> A good implementation (wether the Ada run time, or the OS
+> kernel) would indeed do that in such a manner that each dispatching
+> domain would have maximal locality by using execution resources on the
+> same socket, die or core. Anything else would mean that a program
+> tuned for one specific observed mapping between CPU numbers and
+> execution resources might perform horribly on any other system, or
+> even on the same system on a different day. This would mean writing
+> portable code using Dispatching_Domains would be impossible.
+
+I don't understand your thinking. Of course writing portable code using
+Dispatching_Domains is impossible. The entire point of using facilities like
+this is to tightly tune an application for a particular piece of hardware.
+Moving it to another piece of hardware requires retuning; the only thing that is
+"portable" is that the application will most likely still continue to run on
+another piece of hardware (but with substantially degraded performance).
+
+If the underlying system is doing all of this remapping anyway, there is no real
+possibility of tuning (because as soon as you do, the system will remap and the
+work to tune will go out the window). Moreover, on such a system, 98% of
+programs are better off letting the system do the tuning on the fly -- it has
+far more information than the programmer could use. (This is very similar to
+optimizations, almost always the programmer is better off letting the compiler
+decide on optimizations rather than trying to force them by recoding.) Using
+dispatching domains in such a system would almost always make performance worse.
+
+D.16 facilities are clearly a very specialized need that ought to be only used
+in rare instances. And in those instances, performance will clearly trump
+portability, so little or none is required. (Which is why I don't think
+Dispatching_Domains should be in the language at all, but I digress.) And the
+sorts of systems on which it even makes sense to talk about it are very limited
+kernels - no fancy OSes or hypervisors in sight.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 26, 2012  2:44 PM
+
+> I don't understand your thinking. Of course writing portable code
+> using Dispatching_Domains is impossible. The entire point of using
+> facilities like this is to tightly tune an application for a particular piece of hardware.
+> Moving it to another piece of hardware requires retuning; the only
+> thing that is "portable" is that the application will most likely
+> still continue to run on another piece of hardware (but with
+> substantially degraded performance).
+
+Or just incorrect performance. For instance we may assign one task to a single
+processor, if that does not map properly on the new hardrware, that one task
+might be preempted, and the application may assume this is impossible.
+
+> D.16 facilities are clearly a very specialized need that ought to be
+> only used in rare instances. And in those instances, performance will
+> clearly trump portability, so little or none is required. (Which is
+> why I don't think Dispatching_Domains should be in the language at
+> all, but I digress.) And the sorts of systems on which it even makes
+> sense to talk about it are very limited kernels - no fancy OSes or hypervisors in sight.
+
+The one thing about having dispatching domains in the language is that it means
+Ada programmers know about it and know to go and look for the feature and how it
+is implemented. If they are nnot in the language, you are counting on the
+programmer to read all the documentation and find out about the specialized
+facility for a particular implementation. That's unlikely, you would be amazeed
+how many of our support questions are of the form:
+
+Is there a way to do xxx
+
+answer: yes, this is a standard part of the GNAT implementation, as follows
+
+....
+
+P.S. this is documented in section xxxx of yyyy manual.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July 26, 2012  3:14 PM
+
+>> If we accept that the Ada notion of processor/CPU only relates to
+>> some execution resource that has a single running task associated
+>> with it, and if we accept that a CPU can only belong to a single
+>> dispatching domain, it becomes clear that allowing users to specify
+>> sets doesn't achieve anything. The Ada implementation, or the OS or
+>> hypervisor it runs in, can always change the mapping in an arbitrary
+>> way.
+>
+> If it does, then the user can't use this for any sort of tuning, which
+> seems to ensure that it can't be used for anything. And I think we all
+> agree that existing OSes (and hypervisors) are incompatible with
+> strict Annex D semantics, so we're really only talking about
+> purpose-built Annex-D compliant kernels. You can't say anything
+> interesting about programs that run on Windows or Linux or VMWare.
+
+Linux supports running real-time programs. Of course, this requires root
+privilege. If I use Linux for driving my 3D printer, I may want to use one or
+two processors using FIFO scheduling for controlling the stepper motors,
+monitoring heaters and sensors, while I want to use the remaining processors for
+user-interface, model slicing, network communication and such. Using today's
+language that should be possible.
+
+The comment from the early adopter that started this thread just reflects that
+GNAT doesn't do a good job implementing dispatching domains yet. That will
+change with time.
+
+>> A good implementation (wether the Ada run time, or the OS
+>> kernel) would indeed do that in such a manner that each dispatching
+>> domain would have maximal locality by using execution resources on
+>> the same socket, die or core. Anything else would mean that a program
+>> tuned for one specific observed mapping between CPU numbers and
+>> execution resources might perform horribly on any other system, or
+>> even on the same system on a different day. This would mean writing
+>> portable code using Dispatching_Domains would be impossible.
+>
+> I don't understand your thinking. Of course writing portable code
+> using Dispatching_Domains is impossible. The entire point of using
+> facilities like this is to tightly tune an application for a particular piece of hardware.
+> Moving it to another piece of hardware requires retuning; the only
+> thing that is "portable" is that the application will most likely
+> still continue to run on another piece of hardware (but with
+> substantially degraded performance).
+
+I disagree. I think it is perfectly possible to write portable code using
+dispatching domains on top of a real time operating system such as Linux. This
+thread started with an early adopter trying to do just that. While indeed he
+didn't have a good experience yet, that was just because of a poor
+implementation.
+
+> If the underlying system is doing all of this remapping anyway, there
+> is no real possibility of tuning (because as soon as you do, the
+> system will remap and the work to tune will go out the window).
+> Moreover, on such a system, 98% of programs are better off letting the
+> system do the tuning on the fly
+> -- it has far more information than the programmer could use. (This is
+> very similar to optimizations, almost always the programmer is better
+> off letting the compiler decide on optimizations rather than trying to
+> force them by
+> recoding.) Using dispatching domains in such a system would almost
+> always make performance worse.
+
+No, I think dispatching domains make sense on general purpose real time
+operating systems. As for specialized Ada implementations for very small custom
+kernels, they can always allow the user to specify a mapping between Ada
+processor numbers and hardware threads, though I think that a sensible default
+mapping (walking the CPU tree depth first) will always suffice.
+
+> D.16 facilities are clearly a very specialized need that ought to be
+> only used in rare instances. And in those instances, performance will
+> clearly trump portability, so little or none is required. (Which is
+> why I don't think Dispatching_Domains should be in the language at
+> all, but I digress.) And the sorts of systems on which it even makes
+> sense to talk about it are very limited kernels - no fancy OSes or
+> hypervisors in sight
+
+I'd reverse this argument: it only makes sense to have Dispatching_Domains in
+the language if we allow them to make sense on real-time operating systems such
+as Linux and VxWorks.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 26, 2012  3:50 PM
+
+...
+> > If it does, then the user can't use this for any sort of tuning,
+> > which seems to ensure that it can't be used for anything. And I
+> > think we all agree that existing OSes (and hypervisors) are
+> > incompatible with strict Annex D semantics, so we're really only
+> > talking about purpose-built Annex-D compliant kernels. You can't say
+> > anything interesting about programs that run on Windows or Linux or VMWare.
+>
+> Linux supports running real-time programs.
+
+Sure. But it doesn't support strict Annex D compliance. So it's not relevant
+here.
+
+> Of course, this
+> requires root privilege. If I use Linux for driving my 3D printer, I
+> may want to use one or two processors using FIFO scheduling for
+> controlling the stepper motors, monitoring heaters and sensors, while
+> I want to use the remaining processors for user-interface, model
+> slicing, network communication and such. Using today's language that
+> should be possible.
+
+Sure, but that's just using Annex D to define (hopefully thin) interfaces to the
+whatever the underlying kernel. All of the semantics described in Annex D is
+irrelevant in that case. (You can't possibly figure out whether the OS actually
+supports everything correctly - it could change with every OS update - so you
+have two choices: (A) lie, or (B) don't claim Annex D compliance. Most
+implementations used to do (A), but I think more are now leaning toward (B),
+which is much better IMHO, both for the implementer and the user.)
+
+...
+> >> A good implementation (wether the Ada run time, or the OS
+> >> kernel) would indeed do that in such a manner that each dispatching
+> >> domain would have maximal locality by using execution resources on
+> >> the same socket, die or core. Anything else would mean that a
+> >> program tuned for one specific observed mapping between CPU numbers
+> >> and execution resources might perform horribly on any other system,
+> >> or even on the same system on a different day. This would mean
+> >> writing portable code using Dispatching_Domains would be impossible.
+> >
+> > I don't understand your thinking. Of course writing portable code
+> > using Dispatching_Domains is impossible. The entire point of using
+> > facilities like this is to tightly tune an application for a
+> > particular piece of hardware.
+> > Moving it to another piece of hardware requires retuning; the only
+> > thing that is "portable" is that the application will most likely
+> > still continue to run on another piece of hardware (but with
+> > substantially degraded performance).
+> I disagree. I think it is perfectly possible to write portable code
+> using dispatching domains on top of a real time operating system such
+> as Linux.
+> This thread started with an early adopter trying to do just that.
+> While indeed he didn't have a good experience yet, that was just
+> because of a poor implementation.
+
+The implementation doesn't sound "poor" to me. Your imaginary "good"
+implementation sounds harmful to me. If you're implementing on top of an OS, you
+want packages like Dispatching_Domains to be as thin as possible a binding to
+the underlying OS's facilities. (Much like Stream_IO and Ada.Directories.)
+Because your users are going to want to use the features of the kernel, not some
+weird Ada mapping of them. So any mapping beyond what the OS does is much more
+likely to be harmful than helpful.
+
+> > If the underlying system is doing all of this remapping anyway,
+> > there is no real possibility of tuning (because as soon as you do,
+> > the system will remap and the work to tune will go out the window).
+> > Moreover, on such a system, 98% of programs are better off letting
+> > the system do the tuning on the fly
+> > -- it has far more information than the programmer could use. (This
+> > is very similar to optimizations, almost always the programmer is
+> > better off letting the compiler decide on optimizations rather than
+> > trying to force them by
+> > recoding.) Using dispatching domains in such a system would almost
+> > always make performance worse.
+> No, I think dispatching domains make sense on general purpose real
+> time operating systems. As for specialized Ada implementations for
+> very small custom kernels, they can always allow the user to specify a
+> mapping between Ada processor numbers and hardware threads, though I
+> think that a sensible default mapping (walking the CPU tree depth
+> first) will always suffice.
+
+That sort of extra level of mapping is precisely what we *don't* want. You end
+up with some implementation-defined control mechanism on top of
+Dispatching_Domains, and you have to use both to do any tuning. How that helps
+portability is beyond me.
+
+> > D.16 facilities are clearly a very specialized need that ought to be
+> > only used in rare instances. And in those instances, performance
+> > will clearly trump portability, so little or none is required.
+> > (Which is why I don't think Dispatching_Domains should be in the
+> > language at all, but I digress.) And the sorts of systems on which
+> > it even makes sense to talk about it are very limited kernels - no
+> > fancy OSes or hypervisors in sight
+>
+> I'd reverse this argument: it only makes sense to have
+> Dispatching_Domains in the language if we allow them to make sense on
+> real-time operating systems such as Linux and VxWorks.
+
+For that, only the interface matters (the semantics will be defined by the
+underlying system, not anything written in the RM). And the more flexible the
+interface, the better it can map to the underlying facilities.
+
+P.S. Why are you still fighting this battle that's lost? The rest of us have
+long since agreed and moved on. Sheesh.
+
+****************************************************************
+
+[Some possibly relevant discussion that happened in parallel with the above
+can be found in AI12-0048-1 - Editor.]
+
+****************************************************************
+
 From: Tucker Taft
 Sent: Wednesday, November 28, 2012  7:34 PM
 

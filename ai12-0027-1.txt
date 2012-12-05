@@ -260,7 +260,1623 @@ aren't checked in an instance body.
 
 ****************************************************************
 
-[*** Editor's note: There are 33 unfiled ARG e-mails that should be here.]
+From: Steve Baird
+Sent: Sunday, July 15, 2012  8:55 PM
+
+Here is proposed wording and a little bit of discussion.
+Thanks to Gary for valuable review.
+    -- Steve
+
+
+AI12-0027
+
+!wording
+
+append to 4.6(8/2):
+   In addition to the places where Legality Rules normally apply
+   (see 12.3), this rule applies also in the private part of an
+   instance of a generic unit.
+
+TBD: do we need similar boilerplate for 21/3 and 24/3? Let's wait
+     until a need is demonstrated.
+
+append after 4.6(24.8/2), as another bulleted list item:
+
+   - if the Target_Type of a view conversion is a generic formal array
+     type of a generic unit G that does not have aliased components, then
+     the conversion shall not occur within the body of G, nor within the
+     body of a generic unit declared within the declarative region of G.
+
+TBD: this is the 4th occurrence of this somewhat opaque "within the
+      body of a of a generic unit declared within" wording. See 8.5.1,
+      8.5.4, and 12.6. Do we want to define a term like "the extended
+      body" of a generic unit and then use that term in these 4 places?
+
+
+=====
+
+I think the above wording change addresses the problem Adam identified.
+But what about the case of a non-view conversion when the element type of the
+array is a by-reference type?
+
+It looks like the RM authors assumed  that this is only a problem in the view
+conversion case. See AARM 4.6 (24.d/2).
+
+But 6.2(10/3) says:
+   Each value of a by-reference type has an associated object. For a
+   parenthesized expression, qualified_expression, or type_conversion,
+   this object is the one associated with the operand. For a
+   conditional_expression, this object is the one associated with the
+   evaluated dependent_expression.
+
+We don't want access values pointing to unaliased objects.
+
+Consider
+
+    type T is tagged null record;
+
+    type Rec is record F1 : T; F2 : Integer; end record;
+
+    type Rec_Ref is access constant Rec;
+    Ptr : Rec_Ref;
+
+    subtype Index is Integer range 1 .. 3;
+
+    type A1 is array (Index) of Rec;
+    type A2 is array (Index) of aliased Rec;
+
+    X1 : A1;
+  begin
+    Ptr := A2 (X1)(Index'First)'Access;
+    -- Ptr now designates an unaliased object
+
+Maybe this is a separate problem that we don't need to worry about in the
+context of this AI.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July 16, 2012  8:38 PM
+
+> !wording
+>
+> append to 4.6(8/2):
+>    In addition to the places where Legality Rules normally apply
+>    (see 12.3), this rule applies also in the private part of an
+>    instance of a generic unit.
+>
+> TBD: do we need similar boilerplate for 21/3 and 24/3? Let's wait
+>      until a need is demonstrated.
+
+The meta-rule for the boilerplate is that it is used for all Legality Rules,
+unless:
+(1) The rule cannot depend on generic formal entities; or
+(2) There is a reason that we do not want the rule enforced in private parts
+    (only one known case of this).
+
+As such, I would expect the boilerplate to apply to all of the rules in 4.6. I
+can't quite imagine why we would want to allow an illegal type conversion just
+because it was in a private part.
+
+Most of the rules can't change in a private part (such as the dimensionality of
+an array type), but it's just too much work to figure out which ones can and
+can't differ in the generic and the instance (that is, between the formal and
+the actual).
+
+So I would put this boilerplate after 4.6(24.21/2) and make it apply to the
+entire legality rules section (we did something like this in 4.8, so steal that
+wording). We should let the implementers and/or testers figure out when it
+matters.
+
+> append after 4.6(24.8/2), as another bulleted list item:
+>
+>    - if the Target_Type of a view conversion is a generic formal array
+>      type of a generic unit G that does not have aliased components, then
+>      the conversion shall not occur within the body of G, nor within the
+>      body of a generic unit declared within the declarative region of G.
+>
+> TBD: this is the 4th occurrence of this somewhat opaque "within the
+>       body of a of a generic unit declared within" wording. See 8.5.1,
+>       8.5.4, and 12.6. Do we want to define a term like "the extended
+>       body" of a generic unit and then use that term in these 4 places?
+
+Does that really help anything? I'm dubious that "extended body" says anything
+clearer. It's really talking about related generic children and nested units.
+This wording at least makes it obvious that we're including units that are
+inside the generic. Maybe if you came up with a term that evoked bodies of child
+and nested units.
+
+> =====
+>
+> I think the above wording change addresses the problem Adam identified.
+> But what about the case of a non-view conversion when the element type
+> of the array is a by-reference type?
+
+I don't see a separate problem for "by-reference". A non-view conversion always
+has to be illegal in such a case (see below).
+
+> It looks like the RM authors assumed  that this is only a problem in
+> the view conversion case. See AARM 4.6 (24.d/2).
+>
+> But 6.2(10/3) says:
+>    Each value of a by-reference type has an associated object. For a
+>    parenthesized expression, qualified_expression, or type_conversion,
+>    this object is the one associated with the operand. For a
+>    conditional_expression, this object is the one associated with the
+>    evaluated dependent_expression.
+>
+> We don't want access values pointing to unaliased objects.
+>
+> Consider
+>
+>     type T is tagged null record;
+>
+>     type Rec is record F1 : T; F2 : Integer; end record;
+>
+>     type Rec_Ref is access constant Rec;
+>     Ptr : Rec_Ref;
+>
+>     subtype Index is Integer range 1 .. 3;
+>
+>     type A1 is array (Index) of Rec;
+>     type A2 is array (Index) of aliased Rec;
+>
+>     X1 : A1;
+>   begin
+>     Ptr := A2 (X1)(Index'First)'Access;
+>     -- Ptr now designates an unaliased object
+
+I don't think the above is (or should be) legal, for reasons unrelated to your
+point.
+
+(1) The model appears to be that value (not-view) type conversions are always
+    logically copies. Notes like 4.6(24.e/2) reinforce this view (the intent
+    being that a value conversion can change representations of by-reference
+    components. As such, by-reference has no effect here. This means that
+    6.2(10/3) should only be talking about view conversions, not all
+    type_conversions. (Yes, there is an object associated with the by-reference
+    components, but there ought to be nothing that requires it to be the *same*
+    object as in the operand object.) I think the authors of 6.2(10/3) expected
+    that all type conversions of by-reference types be view conversions, but
+    that is not achieved.
+
+(2) If the expectation is that 6.2(10/3) is in fact correct, then *all* of the
+    rules in 4.6 have to be rechecked, because virtually every rule that applies
+    to a view conversion also would have to apply to a conversion of a
+    by-reference type. An obvious example is 4.6(24.9/2), which specifically
+    expects value conversions to be able to use by-copy to reconcile
+    representation differences.
+
+     type A3 is array (Index) of Rec
+        with Component_Size => Rec'Size*2;
+
+     procedure Proc3 (P : A3);
+
+     Proc3 (A3 (X1)); -- By-copy better be allowed
+
+    The compiler probably has no reason to reject either A1 or A3 or the value
+    conversion between them, so how does the representation change get
+    accomplished??
+
+(3) If this type conversion is implemented by-copy, then there is a very local
+    object created to hold the result of the conversion. (One would expect the
+    master to be that of the statement.) One would hope that such an object
+    would fail an accessibility check (taking 'Access of a very local object and
+    putting it into a more global type should never be allowed). (By-copy
+    certainly should be allowed in the non-by-reference case, so this is true no
+    matter what the answer to (1) and (2) are).
+
+(4) We don't want accessibility checks to depend on implementation choices, so
+    this check should apply to all value type conversions to target types with
+    aliased components. So the above should be illegal as it fails an
+    accessibility check. (I don't have the ambition to dig around in the Heart
+    of Darkness to find out if this is already true or if there is
+    yet-another-hole in the accessibility rules.)
+
+(5) One could make this not-necessarily-illegal by passing the 'Access as an
+    access parameter. Then the too-short lifetime of the copy would not be a
+    problem. That would look like:
+
+    procedure Proc (P : access constant Rec);
+
+    Proc (A2 (X1)(Index'First)'Access);
+
+(6) The remaining question is whether the above case is worth allowing in the
+    rare case that the accessibility would work. I think not (and this allows
+    avoiding a trip to the Heart of Darkness). So probably the word "view"
+    should be dropped from 4.6(24.9/2).
+
+(7) But note that there is likely a similar accessibility problem for a value
+    conversion to a record type with aliased components. Even though the type is
+    related (and thus there is no change of "aliased" for the components), we
+    still will be making a copy, and that should have a short lifetime. And that
+    also would happen when converting between two array types with aliased
+    components in a value conversion.
+
+> Maybe this is a separate problem that we don't need to worry about in
+> the context of this AI.
+
+Right, it doesn't belong to this AI. But perhaps you ought to write up the AI
+that it does belong to. :-)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, July 17, 2012  4:54 PM
+
+...
+> So I would put this boilerplate after 4.6(24.21/2) and make it apply
+> to the entire legality rules section (we did something like this in
+> 4.8, so steal that wording).
+>
+
+Fine with me.
+
+>> append after 4.6(24.8/2), as another bulleted list item:
+>>
+>>    - if the Target_Type of a view conversion is a generic formal array
+>>      type of a generic unit G that does not have aliased components, then
+>>      the conversion shall not occur within the body of G, nor within the
+>>      body of a generic unit declared within the declarative region of G.
+>>
+>> TBD: this is the 4th occurrence of this somewhat opaque "within the
+>>       body of a of a generic unit declared within" wording. See 8.5.1,
+>>       8.5.4, and 12.6. Do we want to define a term like "the extended
+>>       body" of a generic unit and then use that term in these 4 places?
+>
+> Does that really help anything? I'm dubious that "extended body" says
+> anything clearer. It's really talking about related generic children
+> and nested units. This wording at least makes it obvious that we're
+> including units that are inside the generic. Maybe if you came up with
+> a term that evoked bodies of child and nested units.
+
+I agree that "extended body" is not a great name for this idea; it was intended
+more as a placeholder until someone came up with a better name. But even if we
+called it "Scooby Doo Where Are You?", it would still have the advantage of
+consolidating what would otherwise be four copies of this subtle wording.
+
+> So probably the word "view" should be dropped from 4.6(24.9/2).
+
+I agree, although I think we'd want to delete the phrase "of a view conversion"
+(see, for example, 24.7/2's use of "the operand type").
+
+I read 13.1(10/3) as supporting this change - it suggests that it was intended
+that a type conversion for a by-reference type should never have to make a copy.
+I think this is not just eisegesis on my part.
+
+There is, however, the argument that this is too much of an incompatibility (it
+would disallow some conversions that are currently legal). Instead, one might
+argue, we could go with the "short-lived copy" model that you outlined.
+
+This would require
+   1) Modifying 6.2(10/3) to know about this exception to
+      the rule that the associated object of a type conversion
+      is that of the operand.
+   2) Modifying 3.10.2 to define the accessibility level of this
+      copy, probably by somehow piggybacking on the existing
+      wording for aggregates. This may need to be done
+      in any case - as I read 3.10.2, I found no definition
+      for the accessibility level of the result of a non-view
+      type conversion.
+
+But it would also require, I think, RM wording to deal with controlled
+subcomponents of the copies and I don't think we want to allow such copying.
+
+I think we really want to stick with the rule that a conversion of a
+by-reference type never makes a copy.
+
+    Begin side-topic discussion:
+        4.6(24.9/2) correctly uses the wording
+        "tagged, private, or volatile" to capture the
+        idea of a type that "might be by-reference".
+        I think this is the sort of wording that is
+        needed when talking about by-reference
+        types in the context of static semantics.
+        13.1(10/3) doesn't do this. It just says
+           For an untagged derived type, it is illegal to specify
+           a type-related representation aspect if the parent type
+           is a by-reference type, or ....
+
+        Is this wording really ok?  I know that legality checking
+        for representation aspect specifications ignores privacy, but
+        suppose you are in the body of a generic package and you
+        have a component of a formal private type. Does the rule apply?
+        We want it to, but it's not clear that the current wording
+        captures this intent. Can we fix that wording to follow
+        the example of 4.6(24.9/2) as part of this AI?
+    end side-topic discussion
+
+> (7) But note that there is likely a similar accessibility problem for
+> a value conversion to a record type with aliased components. Even
+> though the type is related (and thus there is no change of "aliased"
+> for the components), we still will be making a copy, and that should
+> have a short lifetime. And that also would happen when converting
+> between two array types with aliased components in a value conversion.
+
+So 6.2(10/3) needs to know that some type conversions make copies and 3.10.2
+needs to define the accessibility level of these copies.
+
+If we have to do this work anyway, then that slightly weakens the argument for
+incompatibly tightening up 4.6(24.9/2).
+
+Still, I think the issue with copying controlled parts is enough by itself to
+justify this change.
+
+>> Maybe this is a separate problem that we don't need to worry about in
+>> the context of this AI.
+>
+> Right, it doesn't belong to this AI. But perhaps you ought to write up
+> the AI that it does belong to. :-)
+
+Ok. At this point, I'm just trying to get consensus on intent.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 17, 2012  5:39 PM
+
+...
+> >> append after 4.6(24.8/2), as another bulleted list item:
+> >>
+> >>    - if the Target_Type of a view conversion is a generic formal array
+> >>      type of a generic unit G that does not have aliased components, then
+> >>      the conversion shall not occur within the body of G, nor within the
+> >>      body of a generic unit declared within the declarative region of G.
+> >>
+> >> TBD: this is the 4th occurrence of this somewhat opaque "within the
+> >>       body of a of a generic unit declared within" wording. See 8.5.1,
+> >>       8.5.4, and 12.6. Do we want to define a term like "the extended
+> >>       body" of a generic unit and then use that term in these 4 places?
+> >
+> > Does that really help anything? I'm dubious that "extended body"
+> > says anything clearer. It's really talking about related generic
+> > children and nested units. This wording at least makes it obvious
+> > that we're including units that are inside the generic. Maybe if you
+> > came up with a term that evoked bodies of child and nested units.
+>
+> I agree that "extended body" is not a great name for this idea; it was
+> intended more as a placeholder until someone came up with a better name.
+> But even if we called it "Scooby Doo Where Are You?", it would still
+> have the advantage of consolidating what would otherwise be four
+> copies of this subtle wording.
+
+I don't see any benefit to replacing subtle wording with a rarely used term
+(which will have to be looked up). That could only have a benefit to the reader
+if the term evoked the correct semantics (but still is obviously a defined term
+- we don't want a replay of the "part" fiasco). Usually, the subtle wording is
+long and replacing it with a term helps because it avoids repeating a long
+description. But this would only replace a handful of words - the only real
+advantage is avoiding copying the associated AARM note, and I don't think we
+should be designing wording solely to simplify the *AARM*.
+
+...
+> > So probably the word "view" should be dropped from 4.6(24.9/2).
+>
+> I agree, although I think we'd want to delete the phrase "of a view
+> conversion" (see, for example, 24.7/2's use of "the operand type").
+>
+> I read 13.1(10/3) as supporting this change - it suggests that it was
+> intended that a type conversion for a by-reference type should never
+> have to make a copy. I think this is not just eisegesis on my part.
+
+I guess I can buy that. That gives two paragraphs that imply that a value
+conversion of a by-reference type never makes a copy (6.2, 13.1). (Of course,
+the problem is that in the current case, 13.1(10/3) provides no protection,
+because the array types are not related.)
+
+> There is, however, the argument that this is too much of an
+> incompatibility (it would disallow some conversions that are currently
+> legal).
+
+Right. Argubly, these are conversions that should never have been allowed, and
+they're pretty rare. But, as I noted below, this doesn't really fix the problem
+(at least not completely).
+
+> Instead, one might argue, we could go with the "short-lived copy"
+> model that you outlined.
+>
+> This would require
+>    1) Modifying 6.2(10/3) to know about this exception to
+>       the rule that the associated object of a type conversion
+>       is that of the operand.
+>    2) Modifying 3.10.2 to define the accessibility level of this
+>       copy, probably by somehow piggybacking on the existing
+>       wording for aggregates. This may need to be done
+>       in any case - as I read 3.10.2, I found no definition
+>       for the accessibility level of the result of a non-view
+>       type conversion.
+>
+> But it would also require, I think, RM wording to deal with controlled
+> subcomponents of the copies and I don't think we want to allow such
+> copying.
+>
+> I think we really want to stick with the rule that a conversion of a
+> by-reference type never makes a copy.
+
+I think that's OK, which means deleting "view conversion" from 4.6(24.9/2).
+But we have to "go with the short-lived copy model" because there are certainly
+types that are not by-reference and require copying.
+
+>     Begin side-topic discussion:
+>         4.6(24.9/2) correctly uses the wording
+>         "tagged, private, or volatile" to capture the
+>         idea of a type that "might be by-reference".
+>         I think this is the sort of wording that is
+>         needed when talking about by-reference
+>         types in the context of static semantics.
+>         13.1(10/3) doesn't do this. It just says
+>            For an untagged derived type, it is illegal to specify
+>            a type-related representation aspect if the parent type
+>            is a by-reference type, or ....
+>
+>         Is this wording really ok?  I know that legality checking
+>         for representation aspect specifications ignores privacy, but
+>         suppose you are in the body of a generic package and you
+>         have a component of a formal private type. Does the rule apply?
+>         We want it to, but it's not clear that the current wording
+>         captures this intent. Can we fix that wording to follow
+>         the example of 4.6(24.9/2) as part of this AI?
+>     end side-topic discussion
+
+Specifying type-related aspects for a type derived from a generic formal type is
+illegal (see 13.1(11/3), so I don't think we ever get to 13.1(10/3) in that
+case. How else could this happen? I suppose you could define a record type in
+the generic specification and then immediately derive from it, but that is such
+a silly thing to do that it hardly is worth worrying about. Moreover, virtually
+all representation aspects are not required (in "RLS") on types with components
+of a formal type, so this can only be a problem if the implementation wants it
+to be a problem. And we already know there are many stupid things that an
+implementation can try to support; this is clearly another. So I don't see a
+problem here that is worth fixing (especially at a compatibility cost) unless
+you can find an example that falls under the RLS (and in that case, the RLS is
+probably wrong).
+
+> > (7) But note that there is likely a similar accessibility problem
+> > for a value conversion to a record type with aliased components.
+> > Even though the type is related (and thus there is no change of "aliased"
+> > for the components), we still will be making a copy, and that should
+> > have a short lifetime. And that also would happen when converting
+> > between two array types with aliased components in a value conversion.
+>
+> So 6.2(10/3) needs to know that some type conversions make copies and
+> 3.10.2 needs to define the accessibility level of these copies.
+
+I don't think 6.2(10/3) is involved; it is only talking about by-reference
+types, and in the above I'm talking only about types that are *not* by-reference
+types. (We covered them previously, and you want to make those illegal for good
+reason.)
+
+But 3.10.2 is certainly involved.
+
+And we can't eliminate this case unless we eliminate the entire idea of "Change
+of Representation" (as described in 13.6) for composite types. We're pretty
+close as it is (it is hard to write an example where "Change of Representation"
+actually works).
+
+> If we have to do this work anyway, then that slightly weakens the
+> argument for incompatibly tightening up 4.6(24.9/2).
+>
+> Still, I think the issue with copying controlled parts is enough by
+> itself to justify this change.
+
+Sure, make the by-reference cases illegal. But we still have to define the
+accessibility for types that are not by-reference, as those conversions can make
+a copy.
+
+Example:
+
+        type Rec1 is record
+            A : aliased Integer;
+            C : Character;
+        end record;
+        for Rec1 use record
+            A at 0 range 0 .. 31;
+            C at 4 range 0 .. 7;
+        end record;
+        type Rec2 is new Rec1;
+        for Rec2 use record
+            A at 4 range 0 .. 31;
+            C at 0 range 0 .. 7;
+        end record;
+
+     procedure Bar (P : access Integer);
+     R1 : Rec1;
+
+     Bar (Rec2(R1).A'Access);
+
+We can also construct similar cases using unrelated array types (for which there
+is no possibility of something like 13.1(10/3) to save us).
+
+The only alternative would be to make all types with aliased components be
+"by-reference". Maybe that would have been a good idea, but it would be quite
+incompatible these days (given the number of legality rules that it would
+trigger).
+
+> >> Maybe this is a separate problem that we don't need to worry about
+> >> in the context of this AI.
+> >
+> > Right, it doesn't belong to this AI. But perhaps you ought to write
+> > up the AI that it does belong to. :-)
+>
+> Ok. At this point, I'm just trying to get consensus on intent.
+
+You've got mine above. Hopefully others will weight in as well.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, July 17, 2012  5:58 PM
+
+I'm not convinced either way yet about whether value conversions of by-reference
+types are always by-reference.  I would hold off on writing this up until we
+have more e-mail discussion and reach some kind of consensus.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, July 17, 2012  6:22 PM
+
+> I don't see any benefit to replacing subtle wording with a rarely used
+> term (which will have to be looked up).
+
+I think you left out something important when you said 'subtle wording", not
+"four copies of subtle wording". But I see your point - there is a lot more
+benefit to defining a new term if the new term has a good name.
+
+>> I think we really want to stick with the rule that a conversion of a
+>> by-reference type never makes a copy.
+>
+> I think that's OK, which means deleting "view conversion" from 4.6(24.9/2).
+> But we have to "go with the short-lived copy model" because there are
+> certainly types that are not by-reference and require copying.
+
+Agreed, but the not-by-reference guys don't introduce the problem I was worried
+about with controlled parts.
+
+>>     Begin side-topic discussion:
+>>         4.6(24.9/2) correctly uses the wording
+>>         "tagged, private, or volatile" to capture the
+>>         idea of a type that "might be by-reference".
+>>         I think this is the sort of wording that is
+>>         needed when talking about by-reference
+>>         types in the context of static semantics.
+>>         13.1(10/3) doesn't do this. It just says
+>>            For an untagged derived type, it is illegal to specify
+>>            a type-related representation aspect if the parent type
+>>            is a by-reference type, or ....
+>>
+>>         Is this wording really ok?  I know that legality checking
+>>         for representation aspect specifications ignores privacy, but
+>>         suppose you are in the body of a generic package and you
+>>         have a component of a formal private type. Does the rule apply?
+>>         We want it to, but it's not clear that the current wording
+>>         captures this intent. Can we fix that wording to follow
+>>         the example of 4.6(24.9/2) as part of this AI?
+>>     end side-topic discussion
+>
+> Specifying type-related aspects for a type derived from a generic
+> formal type is illegal (see 13.1(11/3), so I don't think we ever get
+> to 13.1(10/3) in that case. How else could this happen?
+
+I think you misunderstood me. I'm not talking about deriving from a generic
+formal type. I'm talking about deriving from, say, a record type that has a
+generic formal private component where that component will determine whether the
+record type is a by-reference type.
+
+> I suppose you could define a
+> record type in the generic specification and then immediately derive
+> from it,
+
+No, not immediately. The derivation occurs in the generic body.
+And the parent type could be declared either in the spec or the body.
+
+A more plausible example might be
+
+     generic
+        type Element is private;
+     package G is
+        type Vec is array (Positive range <>) of Element;
+        ...
+     end G;
+     package body G is
+        type Packed_Vec is new Vec with Pack;
+         ...
+     end G;
+
+But maybe this is a bad example because if Element turns out to be a
+by-reference type, then Packed_Vec will probably have the same representation as
+Vec.
+
+Anyhow, you get the idea.
+
+>  but that is such a silly thing to do that it hardly is worth worrying
+> about.
+
+So you think there is a wording problem, but not one worth fixing?
+Ok by me.
+
+> Moreover, virtually all representation aspects are not required (in
+> "RLS") on types with components of a formal type, so this can only be
+> a problem if the implementation wants it to be a problem. And we
+> already know there are many stupid things that an implementation can
+> try to support; this is clearly another. So I don't see a problem here
+> that is worth fixing (especially at a compatibility cost) unless you
+> can find an example that falls under the RLS (and in that case, the RLS
+> is probably wrong).
+
+I got lost here. Whatever are you talking about?
+
+>> So 6.2(10/3) needs to know that some type conversions make copies and
+>> 3.10.2 needs to define the accessibility level of these copies.
+>
+> I don't think 6.2(10/3) is involved; it is only talking about
+> by-reference types, and in the above I'm talking only about types that
+> are *not* by-reference types. (We covered them previously, and you
+> want to make those illegal for good reason.)
+
+OK.
+
+> But 3.10.2 is certainly involved.
+
+Didn't Anita Bryant once say that an AI without a 3.10.2 change is like a day
+without sunshine? Perhaps I'm misremembering her exact words.
+
+> Sure, make the by-reference cases illegal. But we still have to define
+> the accessibility for types that are not by-reference, as those
+> conversions can make a copy.
+
+Agreed.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 17, 2012  7:16 PM
+
+> > I don't see any benefit to replacing subtle wording with a rarely
+> > used term (which will have to be looked up).
+>
+> I think you left out something important when you said 'subtle
+> wording", not "four copies of subtle wording".
+
+And you left out something important when I noted that the "subtle wording" only
+adds a dozen or so words over what a term would. Using a "term" here would make
+the Standard longer, and it's unclear that it would improve the
+understandability at all.
+
+> But I see your point - there is a lot more benefit to defining a new
+> term if the new term has a good name.
+
+...
+> >> I think we really want to stick with the rule that a conversion of
+> >> a by-reference type never makes a copy.
+> >
+> > I think that's OK, which means deleting "view conversion" from 4.6(24.9/2).
+> > But we have to "go with the short-lived copy model" because there
+> > are certainly types that are not by-reference and require copying.
+>
+> Agreed, but the not-by-reference guys don't introduce the problem I
+> was worried about with controlled parts.
+
+Right, I agree with that. Note, however, that once the accessibility is properly
+defined, then the controlled part rules fall out for free. So I don't see a big
+issue here. (There is an implementation cost, of course, which is a legitimate
+concern.)
+
+...
+> > I suppose you could define a
+> > record type in the generic specification and then immediately derive
+> > from it,
+>
+> No, not immediately. The derivation occurs in the generic body.
+> And the parent type could be declared either in the spec or the body.
+>
+> A more plausible example might be
+>
+>      generic
+>         type Element is private;
+>      package G is
+>         type Vec is array (Positive range <>) of Element;
+>         ...
+>      end G;
+>      package body G is
+>         type Packed_Vec is new Vec with Pack;
+>          ...
+>      end G;
+>
+> But maybe this is a bad example because if Element turns out to be a
+> by-reference type, then Packed_Vec will probably have the same
+> representation as Vec.
+
+Right; that's my second point: it's never required to support something that
+would cause any trouble. Pack in this situation is either ignored or illegal
+(depending on the implementation). Neither can cause trouble.
+
+> Anyhow, you get the idea.
+>
+> >  but that is such a silly thing to do that it hardly is worth
+> > worrying about.
+>
+> So you think there is a wording problem, but not one worth fixing?
+> Ok by me.
+
+I'm unconvinced that the "wording problem" could ever matter in practice.
+
+> > Moreover, virtually all representation aspects are not required (in
+> > "RLS") on types with components of a formal type, so this can only
+> > be a problem if the implementation wants it to be a problem. And we
+> > already know there are many stupid things that an implementation can
+> > try to support; this is clearly another. So I don't see a problem
+> > here that is worth fixing (especially at a compatibility cost)
+> > unless you can find an example that falls under the RLS (and in that
+> > case, the RLS is probably wrong).
+>
+> I got lost here. Whatever are you talking about?
+
+"RLS" = Recommended Level of Support.
+
+There is no case where the RLS requires supporting anything when the component
+is a generic formal type. (At least, there ought not be; you don't know the size
+or alignment involved, and generic bodies are always "assume-the-worst". I don't
+know what you *could* specify.)
+
+I don't care if an implementer wants to shoot themselves in the head by
+supporting something that would require copying by-reference objects. It only
+matters if the language requires such support.
+
+Ada has many things (especially involving alignment) that cannot sanely be
+supported, and we don't try to make them illegal. So it does not matter if there
+is one more such case. It only matters if the RLS requires supporting something
+which would be impossible to implement for a by-reference type (assuming we
+don't require copies for value conversions).
+
+BTW, note that changing 13.1(10/3) as you suggest would be wildly incompatible,
+as it would apply to all private types (not just formal private types). I don't
+think we want to change this unless there is a *real* problem, not just one in
+Steve's mind.
+
+...
+> > But 3.10.2 is certainly involved.
+>
+> Didn't Anita Bryant once say that an AI without a 3.10.2 change is
+> like a day without sunshine? Perhaps I'm misremembering her exact
+> words.
+
+Uh-huh.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, July 18, 2012  1:19 PM
+
+> I'm not convinced either way yet about whether value conversions of
+> by-reference types are always by-reference.  I would hold off on
+> writing this up until we have more e-mail discussion and reach some
+> kind of consensus.
+
+Sounds like a good approach.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 18, 2012  1:45 PM
+
+I'd expect you to say that, because it makes less work for you. ;-)
+
+I agree that we need more discussion; in particular, we need other ARG members
+to join these discussions that seem to be mainly between Steve and I. But we
+know from experience that if that doesn't happen soon, then we have to write up
+what we have in order to stimulate a new discussion. So Steve should not get too
+comfortable in avoiding a write-up. :-)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, July 18, 2012  2:08 PM
+
+> Sounds like a good approach.
+
+Could you summarize, for those of us who have not been following this debate
+closely, exactly what are the indications in the RM for and against this rule
+about requiring value conversions of by-reference types to be by-reference?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 18, 2012  2:44 PM
+
+IMHO, this is a secondary question. (It started out as the primary question, and
+probably ought to remain the primary question of the AI above, but there is a
+more important question that needs to be answered and could change the answer to
+the above.)
+
+We all agree (I hope) that some type conversions involve copying. The problem is
+that the accessibility rules don't, so far as I can tell, take this copying into
+account. This is irrespective of whether by-reference types can be copied or
+not, as aliased components don't make a type by-reference. (Perhaps they should
+have, but it is way too late for that sort of change, as it would have severe
+compatibility effects.)
+
+Consider a modified version of the example I showed yesterday:
+
+        type Rec1 is record
+            A : aliased Integer;
+            C : Character;
+        end record;
+        for Rec1 use record
+            A at 0 range 0 .. 31;
+            C at 4 range 0 .. 7;
+        end record;
+        type Rec2 is new Rec1;
+        for Rec2 use record
+            A at 4 range 0 .. 31;
+            C at 0 range 0 .. 7;
+        end record;
+
+     procedure Bar (P : access constant Integer);
+     R1 : Rec1;
+     type CAccInt is access constant Integer;
+     P1 : CAccInt;
+
+     P1 := Rec2(R1).A'Access; -- (1)
+     Bar (Rec2(R1).A'Access);
+
+     procedure Bar (P : access constant Integer) is
+     begin
+         P1 := P; -- (2)
+     end Bar;
+
+One hopes that (1) is illegal and (2) raises Program_Error, as in both cases the
+access value far outlives the (temporary) object that it designates. That's
+because the type conversion Rec2(R1) has to make a copy of the object in order
+to change the representation.
+
+We haven't been able to find any rules that make this the case (the rules all
+talk about function calls and aggregates, but value conversions have the same
+issues).
+
+We can also construct similar examples using unrelated array types (for which
+there is no possibility of banning representation changes).
+
+Also note that there is an entire (short) clause in the Standard about the
+wonders of type conversions like the above (13.6). So it seems pretty clear that
+such a conversion is intended to be allowed. As such, it needs accessibility.
+
+Steve (in his typically Bairdian way) has managed to worry about controlled
+components in such a conversion; presuming the accessibility of the conversion
+is properly defined, the components will get appropriate lifetimes. So that's
+not a real problem (although it might be enough of an implementation headache to
+want to ban it).
+
+Steve would like to go further and ban any type conversions that change
+representations for by-reference types, using as his argument 6.2(10/3). That
+may or may not be a good idea (I'll leave it to Steve to argue that), but I
+don't find it important because the underlying problem remains unless *all*
+representation changing conversions of composite types are banned (or "aliased"
+is made by-reference), and both of those solutions would be a massive
+incompatibility.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, July 18, 2012  3:11 PM
+
+> We all agree (I hope) that some type conversions involve copying. The
+> problem is that the accessibility rules don't, so far as I can tell,
+> take this copying into account. This is irrespective of whether
+> by-reference types can be copied or not, as aliased components don't
+> make a type by-reference. (Perhaps they should have, but it is way too
+> late for that sort of change, as it would have severe compatibility effects.) ...
+
+I agree that a value conversion should be treated like a function return in
+general, as far as the accessibility levels of the aliased subcomponents and
+access discriminants.  This doesn't seem very controversial to me...
+
+I still am curious about the by-ref value conversions, however!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 18, 2012  3:54 PM
+
+>  This doesn't seem very controversial to me...
+
+It's not that controversial, just a pain in the wording and possibly
+implementation.
+
+> I still am curious about the by-ref value conversions, however!
+
+Steve is preparing something on that, I think. I personally think that 6.2(10/3)
+is bogus in the case of value conversions; it is written as if only view
+conversions can be passed as parameters, but that is clearly not true for "in"
+parameters. Fixing that along with properly defining the accessibility of value
+conversions would fix all known problems. But there are other options, which I
+will let Steve outline.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, July 18, 2012  5:07 PM
+
+> I still am curious about the by-ref value conversions, however!
+
+6.2(10/3) says:
+    Each value of a by-reference type has an associated object.
+    For a ... type_conversion, this object is the one associated
+    with the operand.
+
+I think there was no oversight there; the above wording is just what was
+intended. The case where a conversion would have to make a copy of an object of
+a by-reference type was supposed to be prevented by 13.1(10/3):
+
+    For an untagged derived type, it is illegal to specify a
+    type-related representation aspect if the parent type is
+    a by-reference type, or has any user-defined primitive subprograms.
+
+Unfortunately, we encountered an obscure case where such a copy-requiring type
+conversion is allowed. 4.6(24.9/2).says
+
+   The operand type of a view conversion shall not have a tagged,
+   private, or volatile subcomponent.
+
+Some background here:
+    1) Because we are talking about static semantics here,
+       we have to conservatively talk about whether a type
+       *might* be a by-reference type (which is what this
+       wording accomplishes), as opposed to whether it
+       definitely *is* a by-reference type.
+       (there was also a secondary discussion about how
+       13.1(10/3), quoted above, gets this point wrong -
+       that is a separate problem).
+
+    2) This is a rule about the legality of "structural"
+       array type conversions - conversions between
+       array types that are unrelated by derivation.
+       This rule has nothing to do with "normal" type
+       conversions.
+
+So this rule, roughly speaking, bans view conversions between by-reference array
+types that are unrelated by derivation.
+
+The problem is that it doesn't go far enough. It says nothing about value
+conversions.
+
+Randy and I concluded that this ban should not be restricted to view
+conversions. I suggested this paragraph should be replaced with
+
+      The operand type shall not have a tagged,
+      private, or volatile subcomponent.
+
+This would strengthen the ban to include value conversions.
+
+This would be an incompatible change. It would ban some conversions which were
+previously legal (albeit with unclear dynamic semantics, at least in some
+cases).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, July 18, 2012  5:21 PM
+
+> 6.2(10/3) says:
+> Each value of a by-reference type has an associated object.
+> For a ... type_conversion, this object is the one associated with the
+> operand. ...
+
+Why not change this to say "for a view conversion"?
+Then for a value conversion, we could get a new object.
+
+Or say "for a type conversion between types with a common ancestor", and get a
+new object for other conversions.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 18, 2012  5:37 PM
+
+...
+> 6.2(10/3) says:
+>     Each value of a by-reference type has an associated object.
+>     For a ... type_conversion, this object is the one associated
+>     with the operand.
+>
+> I think there was no oversight there; the above wording is just what
+> was intended. The case where a conversion would have to make a copy of
+> an object of a by-reference type was supposed to be prevented by
+> 13.1(10/3):
+>
+>     For an untagged derived type, it is illegal to specify a
+>     type-related representation aspect if the parent type is
+>     a by-reference type, or has any user-defined primitive subprograms.
+
+The problem here is that you are assuming a conclusion and justifying it.
+Tucker asked to see both sides...
+
+> Unfortunately, we encountered an obscure case where such a
+> copy-requiring type conversion is allowed. 4.6(24.9/2).says
+>
+>    The operand type of a view conversion shall not have a tagged,
+>    private, or volatile subcomponent.
+
+Steve didn't provide an example here, so let me do it:
+
+    type T is tagged ...
+
+    type A1 is array (1 .. 10) of T;
+    for A1'Component_Size use 48; -- Assume this is OK for this type.
+
+    type A2 is array (1 .. 10) of T;
+    for A2'Component_Size use 64; -- Assume this is OK for this type.
+
+    Var : A1;
+
+    procedure P1 (Obj : in out A2);
+    procedure P2 (Obj : in A2);
+
+    P1 (A2(Var)); -- Illegal by 4.6(24.9/2)
+    P2 (A2(Var)); -- Currently OK, must make a copy of the operand.
+
+The wording of rules 4.6(24.8/2) and 4.6(24.9/2), which only apply to view
+conversions, imply that the expectation was that even by-reference objects can
+be copied in a *value* conversion. If that is not true, then clearly both of
+these rules should apply to all conversions, not just view conversions. (I also
+worry that there are other rules with similar problems, but I have not done any
+extensive looking for that.)
+
+...
+> The problem is that it doesn't go far enough. It says nothing about
+> value conversions.
+
+You again are assuming the conclusion. There is almost equal evidence in the
+Standard for and against this proposition, and we ought to not leap to
+conclusions.
+
+> Randy and I concluded that this ban should not be restricted to view
+> conversions. I suggested this paragraph should be replaced with
+>
+>       The operand type shall not have a tagged,
+>       private, or volatile subcomponent.
+
+Note that I did so totally for implementation reasons. Having to treat a type
+conversion as a local master (with the finalization implications) seems like a
+pain in the neck, and we might want a build-in-place analog as well so such
+finalization was not required. Banning them is easier than going through that.
+But there is no *semantic* problem with allowing them, presuming that the
+accessibility of type conversions is properly defined (as noted in my previous
+mail).
+
+Once one makes this decision, it is unnecessary to decide whether by-reference
+is never copied or not. Which is better than arguing it, because I strongly
+believe that it should be OK to copy non-limited by-reference types in value
+conversions and the like. (Janus/Ada 83 depended very heavily on this in our
+generic sharing implementation -- almost all parameters were passed by-copy. Not
+so much in Ada 95.)
+
+...
+> This would be an incompatible change. It would ban some conversions
+> which were previously legal (albeit with unclear dynamic semantics, at
+> least in some cases).
+
+It would ban conversions with just fine dynamic semantics:
+
+     Var2 : A2;
+
+     Var2 := A2 (Var); -- Illegal by proposed rule.
+
+Type conversions aren't just used to pass parameters!!
+
+I think the reason to tolerate the incompatibility is because of the mess that
+controlled components would make. I don't see any strong reason beyond that to
+ban this (I'd rather repeal 13.1(10/3), which is a pain in the neck as it
+prevents most useful uses of derivation of untagged types - but let's leave that
+for another day).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 18, 2012  5:39 PM
+
+...
+> > 6.2(10/3) says:
+> > Each value of a by-reference type has an associated object.
+> > For a ... type_conversion, this object is the one associated with
+> > the operand. ...
+>
+> Why not change this to say "for a view conversion"?
+> Then for a value conversion, we could get a new object.
+>
+> Or say "for a type conversion between types with a common ancestor",
+> and get a new object for other conversions.
+
+Steve has no adequate answer for that, because there is none. ;-)
+
+The important problem is the one Steve ignored: finalization of controlled
+components in copied value type conversions could be a mess. (Controlled always
+makes a type by-reference.) If they are *not* a mess, I throughly agree with
+you.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, July 19, 2012  1:10 AM
+
+> Steve has no adequate answer for that, because there is none. ;-)
+
+Well, I agree that these are appealing approaches given that we have to worry
+about compatibility. I'd argue more strongly for the simpler
+tighten-up-the-legality-rule solution that I mentioned earlier if we didn't have
+to worry about compatibility, but we do.
+
+> The important problem is the one Steve ignored: finalization of
+> controlled components in copied value type conversions could be a
+> mess. (Controlled always makes a type by-reference.) If they are *not*
+> a mess, I throughly agree with you.
+
+But, as Randy points out, Tuck's proposed changes don't completely solve the
+problem. Making a copy requires some new wording to handle the case where
+controlled parts are copied. Implementing this case would also have a poor
+implementation-effort-to-user-utility ratio. Randy says he would like the
+solutions Tuck suggests if the interactions with controlled types are not messy;
+I suppose I agree with that, but I think those interactions are messy. Tuck - do
+you want to consider a an approach where the copy is not adjusted and finalized?
+Maybe this could be made to work, but the thought makes me nervous. Using
+controlled types to implement reference counting is complicated enough without
+introducing something like this.
+
+Tucker Taft wrote:
+> I agree that a value conversion should be treated like a function
+> return in general
+
+If you want to follow the function/aggregate model (which I agree is the
+cleanest model if we are going to make a copy), then this would suggest that the
+copy is adjusted and finalized,
+
+There is also a dynamic-semantics compatibility concern (which, of course, is in
+some sense more serious than the statically-detectable incompatibility
+associated with tightening up a legality rule). If we change the rules about
+when a copy is generated for a type conversion, then this could be an
+incompatible change in the dynamic semantics of an existing non-erroneous
+program. Such a change would rarely make a difference in practice, but debugging
+the consequences if it did make a difference could be painful.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  2:02 AM
+
+...
+> But, as Randy points out, Tuck's proposed changes don't completely
+> solve the problem. Making a copy requires some new wording to handle
+> the case where controlled parts are copied.
+> Implementing this case would also have a poor
+> implementation-effort-to-user-utility ratio.
+> Randy says he would like the solutions Tuck suggests if the
+> interactions with controlled types are not messy; I suppose I agree
+> with that, but I think those interactions are messy.
+> Tuck - do you want to consider a an approach where the copy is not
+> adjusted and finalized? Maybe this could be made to work, but the
+> thought makes me nervous. Using controlled types to implement
+> reference counting is complicated enough without introducing something
+> like this.
+
+That would be a disaster. There can be no such places in the language. (We went
+through removing such misguided permissions from Ada 95, let's not put any
+back!)
+
+> Tucker Taft wrote:
+> > I agree that a value conversion should be treated like a function
+> > return in general
+>
+> If you want to follow the function/aggregate model (which I agree is
+> the cleanest model if we are going to make a copy), then this would
+> suggest that the copy is adjusted and finalized,
+
+Yes, it has to be.
+
+> There is also a dynamic-semantics compatibility concern (which, of
+> course, is in some sense more serious than the statically-detectable
+> incompatibility associated with tightening up a legality rule).
+> If we change the rules about when a copy is generated for a type
+> conversion, then this could be an incompatible change in the dynamic
+> semantics of an existing non-erroneous program.
+> Such a change would rarely make a difference in practice, but
+> debugging the consequences if it did make a difference could be
+> painful.
+
+There has to be a build-in-place permission here, just as there is for functions
+and aggregates. (We surely don't want to force copies if they aren't needed.)
+With that permission, there is no need for adjusting/finalizing unless an actual
+copy is made by the type conversion. And if a copy is made, and no
+adjust/finalize is going on, the code is already broken (it would destroy Claw,
+for example) and I don't really care about a dynamic "incompatibility" (the
+"incompatibility" probably would fix as many bugs as it caused).
+
+So I think this would work. My big concern is about the cost of implementing
+such a mechanism for rare cases, but perhaps that's not a significant concern
+(the mechanism being the same as used for aggregates in similar locations in the
+code).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 19, 2012  8:22 AM
+
+> If you want to follow the function/aggregate model (which I agree is
+> the cleanest model if we are going to make a copy), then this would
+> suggest that the copy is adjusted and finalized,
+
+Absolutely, if a copy is actually performed.
+I am not proposing we *require* a copy, but rather, we allow a value conversion
+between two arrays with different representations, even if one of the components
+might be by-reference.
+
+> There is also a dynamic-semantics compatibility concern (which, of
+> course, is in some sense more serious than the statically-detectable
+> incompatibility associated with tightening up a legality rule).
+> If we change the rules about when a copy is generated for a type
+> conversion, then this could be an incompatible change in the dynamic
+> semantics of an existing non-erroneous program. Such a change would
+> rarely make a difference in practice, but debugging the consequences
+> if it did make a difference could be painful.
+
+I certainly don't want to require a copy if it is not needed, so I don't see the
+issue here.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, July 19, 2012  11:12 AM
+
+> There has to be a build-in-place permission here, just as there is for
+> functions and aggregates. (We surely don't want to force copies if
+> they aren't needed.) With that permission, there is no need for
+> adjusting/finalizing unless an actual copy is made by the type conversion.
+> And if a copy is made, and no adjust/finalize is going on, the code is
+> already broken (it would destroy Claw, for example) and I don't really
+> care about a dynamic "incompatibility" (the "incompatibility" probably
+> would fix as many bugs as it caused).
+
+I agree that if we don't want to accept the incompatibility of tightening up the
+legality rule, then allowing, as opposed to requiring, a copy is probably the
+way to go.
+
+In 3.10.2, would the (dynamic) accessibility level of the conversion result
+depend on whether a copy was made?
+
+What about static accessibility checking?
+
+      type Ref is access constant Element;
+      Ptr : Ref;
+
+      type A1 is array (...) of aliased Element
+        with Component_Size => Xxx;
+      type A2 is array (...) of aliased Element
+        with Component_Size => Yyy; --- Xxx /= Yyy
+
+      X1 : A1 (...);
+
+      procedure Foo is
+      begin --
+          Ptr := A2 (X1) (23)'Access; -- legal?
+      end Foo;
+
+Perhaps for purposes of static accessibility checking, we could make a
+conservative assumption (and therefore unconditionally reject the above
+example).
+
+Similarly, would the definition of "associated object" depend on this choice?
+
+Dealing with these complications may well be worth it in order to avoid the
+incompatibility problem, but they would need to be dealt with.
+
+It sure would be simpler to just delete a few words in one paragraph, plug the
+legality hole, and implement the original intent of the language designers.
+However, I appreciate that we should be willing to go to some trouble to avoid
+introducing an incompatibility.
+
+It would be interesting to know the impact of the incompatibility we are trying
+to avoid. How often to folks really convert between unrelated-by-derivation
+might-be-by-reference array types?
+
+> So I think this would work. My big concern is about the cost of
+> implementing such a mechanism for rare cases, but perhaps that's not a
+> significant concern (the mechanism being the same as used for
+> aggregates in similar locations in the code).
+
+Agreed (on all points).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 19, 2012  11:35 AM
+
+> In 3.10.2, would the (dynamic) accessibility level of the conversion
+> result depend on whether a copy was made?
+
+No.  It would only depend on whether the types have a common ancestor, and the
+conversion is a "value" conversion.
+
+> What about static accessibility checking?
+
+No.
+
+> type Ref is access constant Element;
+> Ptr : Ref;
+>
+> type A1 is array (...) of aliased Element with Component_Size => Xxx;
+> type A2 is array (...) of aliased Element with Component_Size => Yyy;
+> --- Xxx /= Yyy
+>
+> X1 : A1 (...);
+>
+> procedure Foo is
+> begin --
+> Ptr := A2 (X1) (23)'Access; -- legal?
+
+No.
+
+> end Foo;
+>
+> Perhaps for purposes of static accessibility checking, we could make a
+> conservative assumption (and therefore unconditionally reject the
+> above example).
+
+Yes.
+
+>
+> Similarly, would the definition of "associated object" depend on this
+> choice?
+
+No, it would always be the newly created object (even if it happens to reside in
+the same place as the old object).
+
+> Dealing with these complications may well be worth it in order to
+> avoid the incompatibility problem, but they would need to be dealt with.
+>
+> It sure would be simpler to just delete a few words in one paragraph,
+> plug the legality hole, and implement the original intent of the
+> language designers. However, I appreciate that we should be willing to
+> go to some trouble to avoid introducing an incompatibility.
+>
+> It would be interesting to know the impact of the incompatibility we
+> are trying to avoid. How often to folks really convert between
+> unrelated-by-derivation might-be-by-reference array types?
+
+Based on your might-be-by-reference, that includes any array type with private
+subcomponents.  That puts a pretty harsh effect on using private types.
+
+>> So I think this would work. My big concern is about the cost of
+>> implementing such a mechanism for rare cases, but perhaps that's not
+>> a significant concern (the mechanism being the same as used for
+>> aggregates in similar locations in the code).
+>
+> Agreed (on all points).
+
+I really don't see this as a major burden, since temps are created in many
+circumstances, and I presume the mechanism for creating a temp is smart enough
+to deal with temps that need finalization.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, July 19, 2012  12:19 PM
+
+> No.  ...
+> No.
+> No.
+
+Sounds right. The idea is that a copy is created unconditionally for one of
+these conversions; the only thing that is implementation dependent is whether
+the "copy" is  built-in-place on top of the operand of the type conversion. This
+is a novel use for build-in-place, but I don't see any obvious problems with it.
+
+> Based on your might-be-by-reference, that includes any array type with
+> private subcomponents.  That puts a pretty harsh effect on using
+> private types.
+
+I suspect that "structural" array conversions between array types with
+non-scalar element types are uncommon to begin with. However, I don't have
+supporting data for this.
+
+If I am correct about this, then the legality rule change we've been discussing
+would have the effect of disallowing some subset of an unimportant corner case
+and  I wouldn't call that "a harsh effect".
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, July 20, 2012  1:23 AM
+
+> I suspect that "structural" array conversions between array types with
+> non-scalar element types are uncommon to begin with. However, I don't
+> have supporting data for this.
+
+I think the same - because most people are not aware of that possibility. I
+don't even talk about it in my course.
+
+Hmmm... I could add a check in AdaControl for this case, and run it on clients
+code I have here. I'll report the result here, but don't hold your breath (I'm
+off the Internet all of next week).
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, July 20, 2012  7:56 AM
+
+> It would be interesting to know the impact of the incompatibility we
+> are trying to avoid. How often to folks really convert between
+> unrelated-by-derivation might-be-by-reference array types?
+
+I suppose one of the most likely cases for this would be where one wants one
+type that is compact for minimal storage in an embedded device where persistent
+storage space is highly constrained, and where a non-packed type is used for
+computation purposes. I recall seeing such usages, though the arrays in this
+case weren't might-be-by-reference array types, as this code was originally
+written for Ada 83, which didn't support aliased components. That would of
+course further reduce the likelihood of usage, as I doubt any such array types
+would have been introduced when the code was ported to Ada 2005.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, July 20, 2012  12:41 PM
+
+> I suppose one of the most likely cases for this would be where one
+> wants one type that is compact for minimal storage in an embedded
+> device where persistent storage space is highly constrained, and where
+> a non-packed type is used for computation purposes.
+
+In cases like this, the two array types are usually related by derivation.
+Typically one of them is derived from the other, but at least they have a common
+ancestor.
+
+The legality change we have been discussing would have no effect in this case;
+it could only make a difference if the two array types have no common ancestor.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 20, 2012  1:07 PM
+
+> The legality change we have been discussing would have no effect in
+> this case; it could only make a difference if the two array types have
+> no common ancestor.
+
+That would be the case if 13.1(10/3) did not exist, but since it does, it's
+almost impossible to have two derived types with different representations in
+practice. (Having no primitive operations is highly unlikely unless you go out
+of your way to create an insane program architecture.)
+
+And since you can interconvert the arrays whether or not they are related, there
+is no need for them to be related by derivation. In addition, there are lots of
+anonymous array types out there (which you can convert from, not to). So I would
+not jump to conclusions here.
+
+I suspect that such conversions are rare, but that's mainly because value
+conversions (and indeed copying) are rare for non-scalar types.
+
+The better question is whether its worth the baggage to disallow perfectly good
+conversions simply because you don't want to bother to implement them. We need
+to define the accessibility and build-in-place rules in any case (they can
+matter in the non-by-reference conversion case, which no one is suggesting to
+ban). So definitionally, there is no extra work here.
+
+(Aside: I just saw a case where such an implementation-oriented restriction has
+bitten someone; I've asked them to submit their example to Ada-Comment but I
+don't know if they actually will do so. As always, the rule ought to be to
+minimize such restrictions.)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, July 20, 2012  1:29 PM
+
+> That would be the case if 13.1(10/3) did not exist, but since it does,
+> it's almost impossible to have two derived types with different
+> representations in practice. (Having no primitive operations is highly
+> unlikely unless you go out of your way to create an insane program
+> architecture.)
+
+I disagree, but I also think this is just a conflict of opinions unsupported by
+data.
+
+An array type may often be declared without any user-defined primitive ops,
+particularly if it is used as a component type or a designated type in the
+context of declaring some other type that does have interesting operations.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, July 20, 2012  1:39 PM
+
+> ... An array type may often be declared without any user-defined
+> primitive ops, particularly if it is used as a component type or a
+> designated type in the context of declaring some other type that does
+> have interesting operations.
+
+But if you go to the trouble of declaring *two* array types, one packed, and one
+not, it seems pretty likely that at least one of them is going to have some
+operations. Furthermore, it is annoying to suddenly run into this limitation
+when during maintenance you decide it would be appropriate to add an operation
+on one or the other.
+
+But as you say, we don't really have data here.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 20, 2012  1:54 PM
+
+> > ... An array type may often be declared without any user-defined
+> > primitive ops, particularly if it is used as a component type or a
+> > designated type in the context of declaring some other type that
+> > does have interesting operations.
+>
+> But if you go to the trouble of declaring *two* array types, one
+> packed, and one not, it seems pretty likely that at least one of them
+> is going to have some operations.
+
+The use case that you (Steve) postulated was a packed array for storage and a
+faster unpacked array for processing. Exactly how is that processing going to
+happen without operations? Osmosis??
+
+> Furthermore, it is annoying to suddenly run into this limitation when
+> during maintenance you decide it would be appropriate to add an
+> operation on one or the other.
+>
+> But as you say, we don't really have data here.
+
+Right. In the absence of good data, I would tend to err on the conservative
+side: don't introduce an incompatibility and bite the bullet on the work needed
+(which probably can be ignored until/unless a bug report appears).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, July 20, 2012  2:18 PM
+
+I don't consider this "new work."  If this was legal before, it clearly required
+a copy, since the representation was different.  I presume that a copy implies a
+temp, and a temp implies the possibility of finalization.  Of course it might
+not have been implemented before at all, in which case it is probably OK to
+leave it unimplemented now as well... ;-)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, July 20, 2012  2:28 PM
+
+> Right. In the absence of good data, I would tend to err on the conservative
+> side: don't introduce an incompatibility and bite the bullet on the
+> work needed (which probably can be ignored until/unless a bug report appears).
+
+You are probably right. A FUD argument cannot be ignored when we are talking
+about an incompatibility.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, July 27, 2012  4:30 AM
+
+> I suspect that "structural" array conversions between array types with
+> non-scalar element types are uncommon to begin with. However, I don't
+> have supporting data for this.
+
+Well, I just had some (unexpected) free time, so I added the rule to AdaControl
+and checked on some sample code from my clients (no names of course ;-) ).
+
+- Client 1: 2 big air traffic applications. App1: 3218 comp units, 26 structural
+  array conversions. App2: 5553 comp units, 39 structural array conversions
+
+- Client 2: Railway application. 228 comp units, 26 structural array conversions
+  (located in 5 units).
+
+- Client3: Competitor Railway application. 315 comp units, no structural array
+  conversions.
+
+I sampled some conversions; from what I've seen, they seem to be caused by
+incorrect typing (same type defined in two different packages), or by the use of
+'Image/'Value with custom defined string types. The only ones I saw whose
+components were not scalars were arrays of Unbounded_Wide_String.
 
 ****************************************************************
 
@@ -271,5 +1887,14 @@ Sent: Friday, November 30, 2012  7:07 PM
 
 [Followed by new !wording and !discussion sections, in version /03 of the AI;
 most of the submitted !discussion was placed in the !question.]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December  1, 2012  10:15 AM
+
+> We don't want access values pointing to unaliased objects.
+
+I prefer your solution #2, and just require copying when aliased-ness disagrees.
 
 ****************************************************************

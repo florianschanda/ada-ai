@@ -1,5 +1,4 @@
-!standard 4.6(8/2)                                   12-12-03    AI12-0048-1/01
-!standard 4.6(24.8/2)
+!standard D.16.1(30/3)                               12-12-03    AI12-0048-1/01
 !class binding interpretation 12-11-29
 !status work item 12-11-29
 !status received 12-04-09
@@ -320,6 +319,1488 @@ in shared memory - in this case their physical existence would be a single
 instance - but there could be implementations in the manner implied above.  I
 would amend D2.1 5/2, D2.2 6.1/2, D2.3 9/2, D2.3 11/2 and D2.6 21/2 to talk of
 dispatching domains.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, July 17, 2012  6:42 AM
+
+> 'A task can be on the
+> ready queue of more than one processor.
+
+I think that the LRM has no problem there. At most, Note 11 (D.2.1 (15))
+exaggerates by saying "At the extreme,". I would see this as the normal case for
+duplicated ready queues within each dispatching domain.
+
+The LRM follows the principle of a logical ready queue, defined in 5/2 as the
+set of tasks ready to run on THAT processor, but not running on ANY processor.
+Logically that is just fine in order to explain that scheduling on a single
+processor then picks one from the ready queues of that processor. To enable
+FP-scheduling across cores, this does imply that ready tasks are duplicated
+across the cores. But, for example, cooperative scheduling would be happy as a
+clam with queues of different content.
+
+An actual FP-implementation of all this duplicated stuff would be quite
+handcapped by all the needed data synchronization.
+
+The inverse logical or physical model is that there is only one ready queue for
+each priority on the system per dispatching domain and the scheduler
+(distributed or central) picks one task from the central queue of highest
+priority.
+
+On a shared-memory multi-core architecture this makes sense; without shared
+memory this model looks worse to me than the other one. And in that sense the
+logical model of the RM is just fine. For mere mortals it defaults
+implementation-wise to complete copies or fully shared queues within each
+dispatching domain. For Einsteins and comptetitive marketers there might be
+edges where lazy copying gives you an performance edge over any "must be shared
+queue only, no doubt"-model.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 17, 2012  1:45 PM
+
+> I think you need to remember (D.2.1 13 - Note 9) that ready queues are
+> purely conceptual, used in the LRM to describe the model, not the
+> implementation.
+
+OK, but that brings up two problems:
+
+(1) The Implementation Advice makes no sense in terms of conceptual ready
+queues, because each processor already has "separate and disjoint" conceptual
+ready queues, and a processor can belong only to a single dispatching domain. So
+this is always true by definition and thus totally meaningless. It makes much
+more sense that the ImplAdv be understood as an actual implementation technique;
+if so, there needs to be some indication that the "conceptual ready queues" of
+D.2.1 are not the same thing as the "ready queues" the D.16.1 ImplAdv. By using
+the same exact term for something purely conceptual and something that is
+supposed to be implemented, you've confused me beyond all understanding, and I
+doubt that I am the only one.
+
+(2) The model described in D.2.1(5/2) seems to allow unbounded priority
+inversion in the normal case (normal meaning that no facilities of D.16 and
+D.16.1 are used) when a program is run on a multiprocessor. In that case, we
+don't seem to have any rules guiding how tasks are assigned to processors, and
+thus the implementation can assign them such that priority inversions occur. I
+realize there is a need to allow priority inversions to occur for some time
+period (since communication may be needed to avoid them), but allowing them to
+occur without bound seems unacceptable. (The documentation requirement of
+D.2.3(11-13/2) seems to apply only on a single processor.)
+
+This was a known problem with Ada 95 (there were almost no rules for
+multiprocessor tasking), which I thought that we had fixed. But apparently,
+we've only made it worse. Perhaps I've missed something.
+
+It should be the case that a correct Ada program ("correct" here meaning no race
+conditions) that does not use D.16/D.16.1 facilities can be executed on machines
+with any number of processors (and compiled with any Ada compiler) without
+changing its meaning. Unbounded priority inversion between processors means that
+priorities are effective only on machines with a single processor (and there are
+very few of those today), and thus it seems to violate this rule. (Other cases
+*might* work, but there is no requirement on implementations that they *do*
+work.)
+
+If the conceptual ready queues belonged to dispatching domains rather than
+processors, then this couldn't happen (unless some specific action was taken to
+create separate domains). Perhaps there is some better solution, but I don't
+think it should be left solely to implementations.
+
+And a comment:
+
+In the absence of a strong reason to something else, us implementers are likely
+to exactly implement the model as written. Certainly, that's how the Janus/Ada
+task supervisor is written -- it explicitly defines the states and queues as
+described in the RM. (It doesn't use any target system facilities to implement
+tasking, thus it doesn't need any abstraction.) It does a disservice to
+implementers to describe a model which we *never* want actually implemented (for
+all of the cost reasons outlined by Erhard).
+
+At the very least, there needs to be a warning in the AARM that the language
+should not be implemented this way.
+
+...
+> I do not feel anything is sufficiently broken here to warrant any word
+> changing.
+> Even if you tied ready queues to dispatching domains, they would
+> remain an abstraction.
+
+You might be right, but there is no way for a reader to know when these queues
+are only conceptual and when they are actually intended to be implemented. And
+that makes even less sense for the Dispatching Domain Implementation Advice. If
+we're not going to change these words, at the very least we need to explain that
+the model of ready queues is not intended to be implemented as described. And
+that "ready queue" in D.16.1 is not the same as "ready queue" in D.2.1. And how
+we eliminate unbounded priority inversion when multiple processors are involved.
+
+****************************************************************
+
+From: Alan Burns
+Sent: Wednesday, July 18, 2012  5:13 AM
+
+I do not think the situation is as bad as you state.
+
+The notion of priority inversion really only applies to a single processor.
+That is why the documentation requirement (D2.3 11/2) talks about the time
+'while the processor executes a lower priority task'.
+
+In the absence of the new stuff (D.16/D.16.1) then an implementation on a dual
+core system could run all tasks on just one core, run all tasks on all cores, or
+arbitrary split the tasks between the cores. Functionally this makes no
+difference. From a real-time point of view of course it does - and so we need to
+use priorities and affinities (in a consistent way). If we only have priorities
+then we cannot do the full job, hence the new additions.
+
+I agree that with the new stuff we should perhaps have made it clear that the
+default behaviour is that all tasks can run on all CPUs. But we would still have
+the problem of interrupt handlers (where do they run?).
+
+Yes the term 'ready queue' is perhaps used in a not fully consistency way. But
+its use in D16.1 31/3 is in 'implementation advice' so clearly is not just
+concerned with the conceptual model.
+
+I think any implementer of a multicore run-time knows that there is a choice of
+a shared set of queues or per-core queues with migration. Both are valid ways of
+implementing the conceptual model. For a dual core and global scheduling then a
+single set of queues shared between the two cores is probably the most
+efficient. For many-core systems then the shared queue solution has high
+overheads, and so a set of queues per core with task migration is best (this is
+what Linus does with push and pull functions). Hybrid schemes are also used.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 18, 2012  7:39 PM
+
+> I do not think the situation is as bad as you state.
+
+You're right, it seems much worse.
+
+> The notion of priority inversion really only applies to a single processor.
+> That is why the documentation requirement (D2.3 11/2) talks about the
+> time 'while the processor executes a lower priority task'.
+
+Right, but that means priorities are useless on multiprocessors, and since
+almost all machines have multiple cores these days, that makes them useless
+outside of very controlled circumstances. There has to be *some* guarantee.
+
+> In the absence of the new stuff (D.16/D.16.1) then an implementation
+> on a dual core system could run all tasks on just one core, run all
+> tasks on all cores, or arbitrary split the tasks between the cores.
+> Functionally this makes no difference.
+
+Here I disagree fairly strongly. It's certainly OK to run all tasks on one core
+(that's an implementation that doesn't support multiprocessors - like
+Janus/Ada), so long as the single processor rules about priority inversion are
+followed. But the similar rules need to be followed when the tasks are run on
+multiple processors. Otherwise, code that is proven to have no race conditions
+on a single processor might end up failing to work when moved to a
+multiprocessor simply because a lower priority task is executing when it ought
+to be pre-empted. This could happen even if the program is not recompiled (just
+moved to a machine with more processors).
+
+Are you seriously saying that a portable Ada program has to avoid all use of
+priorities? In that case, it's actively harmful to even have priorities in the
+Standard at all.
+
+> From a real-time point of view of course it does
+> - and so we need to use priorities and affinities (in a consistent
+> way). If we only have priorities then we cannot do the full job, hence
+> the new additions.
+
+If you have a hard-real-time application with critical timing, it's clear that
+you'll need to use all of these things. And such programs aren't going to be
+portable to other Ada implementations (including updates to the current one)
+without refiguring the timings. So those aren't very interesting from a
+standardization perspective.
+
+I'm MUCH more interested in "soft" real-time programs, like my web server.
+Such a program ought to be able to be ported unmodified from, say Windows 2000
+with one processor, to a different compiler for Linux on a quadcore processor.
+(This is not hypothetical, I need to do this when I can scrape up the money for
+a new server.) It ought to be the case that it will work semantically the same,
+just faster, on the new system.
+
+In my programs, I've only used locking and queuing to manage interactions
+(Janus/Ada has never supported priorities because preemption was impossible to
+implement properly on MS-DOS, and that led to a code generation design that
+doesn't map to threads on Windows or Linux). But it's easy to imagine having
+used priorities to give the user-facing tasks (the ones that respond to URL
+requests) a higher priority than the housekeeping tasks. You are saying that it
+is OK for the housekeeping tasks to hog the processors in such a scenario. (This
+could happen, for instance, if the implementation mapped all of the tasks of a
+particular task type to a single core.)
+
+I don't think programs of the type I'm thinking about should even think about
+using affinities for anything - the implementation's scheduler ought to do a
+better job mapping tasks to processors than any programmer could. That's
+especially true if keeping the processors busy is important (as it is to me).
+But it seems that, at least when it comes to priorities, it's completely up to
+the implementation as to how that's done, and there is not even a hint of what
+*ought* to happen.
+
+I'll say it again: there never should be unbounded priority inversion, even on a
+multiprocessor, in a program that does not use anything in D.16 or D.16.1. It
+makes sense that it will happen, for perhaps many milliseconds, on a
+multiprocessor, but it shouldn't run to minutes.
+
+> I agree that with the new stuff we should perhaps have made it clear
+> that the default behaviour is that all tasks can run on all CPUs. But
+> we would still have the problem of interrupt handlers (where do they
+> run?).
+
+OK, this seems like it would help. (And I personally don't care much about
+interrupt handlers, they're not relevant for the sort of stuff that I do.)
+
+> Yes the term 'ready queue' is perhaps used in a not fully consistency way.
+> But its use in D16.1 31/3 is in 'implementation advice' so clearly is
+> not just concerned with the conceptual model.
+
+Sorry, but we've learned over and over that we can't use defined terms (and
+"ready queue" is a defined term) in ways other than that definition. We even had
+problems with people thinking that "mentioned" was used in the sense of the
+defined term.
+
+At the very least, we need an AARM note to explain that this use of "ready
+queue" is talking about the actual implementation, and not the conceptual queues
+as defined in the rest of the Standard.
+
+> I think any implementer of a multicore run-time knows that there is a
+> choice of a shared set of queues or per-core queues with migration.
+> Both are valid ways of implementing the conceptual model. For a dual
+> core and global scheduling then a single set of queues shared between
+> the two cores is probably the most efficient.
+> For many-core systems then the shared queue solution has high
+> overheads, and so a set of queues per core with task migration is best
+> (this is what Linus does with push and pull functions). Hybrid schemes
+> are also used.
+
+Well, I'm the implementer of such a runtime (at least, I will be if I ever get
+the code generation problems fixed), and I don't "know" this. I think again you
+are confusing implementers of hard real-time (usually bare) systems with soft
+real-time (as when run on top of a target OS or kernel). Some of us only know
+enough to get by, and I hardly read anything other than the Ada standard to
+determine what to do. (Especially in things that I don't personally use much,
+like tasking.)
+
+[Aside: There is a story about an employee that Tucker had that implemented
+everything in the Standard literally, even when it didn't make any sense. This
+is pretty common, especially in the parts of the Standard that aren't
+well-understood.]
+
+The Standard needs to at least be self-consistent enough so that people like me
+can pick a reasonable implementation (and tell if that implementation is
+conforming) without having to read between the lines (or spend days reading and
+trying to understand outside materials like your books).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, July 18, 2012  9:10 PM
+
+> Right, but that means priorities are useless on multiprocessors, and
+> since almost all machines have multiple cores these days, that makes
+> them useless outside of very controlled circumstances. There has to be *some* guarantee.
+
+The ONLY guarantee is that if two tasks are ready, and one is higher priority
+than the other, then the higher priority task is running. Of *COURSE* the lower
+priority task may also be running,
+
+> Here I disagree fairly strongly. It's certainly OK to run all tasks on
+> one core (that's an implementation that doesn't support
+> multiprocessors - like Janus/Ada), so long as the single processor
+> rules about priority inversion are followed. But the similar rules
+> need to be followed when the tasks are run on multiple processors.
+> Otherwise, code that is proven to have no race conditions on a single
+> processor might end up failing to work when moved to a multiprocessor
+> simply because a lower priority task is executing when it ought to be
+> pre-empted. This could happen even if the program is not recompiled (just moved to a machine with more processors).
+
+I completely and strongly disagree with this totally bizarre notion. If you
+write code that assumes that a high priority task will preempt a lower priority
+task and stop it from running, that code is highly non-portable and will only
+run on a single processor.
+
+> Are you seriously saying that a portable Ada program has to avoid all
+> use of priorities? In that case, it's actively harmful to even have
+> priorities in the Standard at all.
+
+That's junk! he is saying is that a portable Ada program must avoid the
+assumption that a lower priority task cannot be running if a higher priority
+task is running. This has been true for ever from Ada 83 days. It does NOT mean
+priorities are useless, or that portable programs must avoid the use of
+priorities.
+
+>>  From a real-time point of view of course it does
+>> - and so we need to use priorities and affinities (in a consistent
+>> way). If we only have priorities then we cannot do the full job,
+>> hence the new additions.
+
+> In my programs, I've only used locking and queuing to manage
+> interactions (Janus/Ada has never supported priorities because
+> preemption was impossible to implement properly on MS-DOS, and that
+> led to a code generation design that doesn't map to threads on Windows
+> or Linux). But it's easy to imagine having used priorities to give the
+> user-facing tasks (the ones that respond to URL requests) a higher
+> priority than the housekeeping tasks. You are saying that it is OK for
+> the housekeeping tasks to hog the processors in such a scenario. (This
+> could happen, for instance, if the implementation mapped all of the
+> tasks of a particular task type to a single core.)
+
+OK, so perhaps I begin to understand what Randy is worrying about. An
+implementation which mapped all tasks of a particular task type to a single core
+would indeed be wrong if say
+
+two tasks of type T1 are ready at priorty 10
+
+two tasks of type T2 are ready at priority 6
+
+all T1 tasks are mapped to core 1
+
+all T2 tasks are mapped to core 2
+
+Because then you could have a ready priority 10 task not running and a ready
+priority 6 task running. This cannot happen in the default mode where annex D
+semantics are obeyed.
+
+>> Yes the term 'ready queue' is perhaps used in a not fully consistency
+>> way.
+>> But its use in D16.1 31/3 is in 'implementation advice' so clearly is
+>> not just concerned with the conceptual model.
+>
+> Sorry, but we've learned over and over that we can't use defined terms
+> (and "ready queue" is a defined term) in ways other than that
+> definition. We even had problems with people thinking that "mentioned"
+> was used in the sense of the defined term.
+
+I strongly agree with Randy on this one
+
+> Well, I'm the implementer of such a runtime (at least, I will be if I
+> ever get the code generation problems fixed), and I don't "know" this.
+> I think again you are confusing implementers of hard real-time
+> (usually bare) systems with soft real-time (as when run on top of a target OS or kernel).
+> Some of us only know enough to get by, and I hardly read anything
+> other than the Ada standard to determine what to do. (Especially in
+> things that I don't personally use much, like tasking.)
+
+Well that's unlikely to be sufficient to generate a usable implementation.
+
+> The Standard needs to at least be self-consistent enough so that
+> people like me can pick a reasonable implementation (and tell if that
+> implementation is
+> conforming) without having to read between the lines (or spend days
+> reading and trying to understand outside materials like your books).
+
+If you are building on top of an existing OS, the notion of conforming to Annex
+D is HIGHLY dubious.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 18, 2012  9:39 PM
+
+[Thanks, BTW, for taking the time to read my writing on this topic.]
+
+> > Right, but that means priorities are useless on multiprocessors, and
+> > since almost all machines have multiple cores these days, that makes
+> > them useless outside of very controlled circumstances.
+> > There has to be *some* guarantee.
+>
+> The ONLY guarantee is that if two tasks are ready, and one is higher
+> priority than the other, then the higher priority task is running. Of
+> *COURSE* the lower priority task may also be running,
+
+I agree with that, the problem is that there is no such guarantee (that the
+higher priority task be running) in Annex D as it stands. According to the D.2.1
+model, a task can be assigned to the ready queues of one or more processors, and
+nothing more seems to be said.
+
+...
+> >>  From a real-time point of view of course it does
+> >> - and so we need to use priorities and affinities (in a consistent
+> >> way). If we only have priorities then we cannot do the full job,
+> >> hence the new additions.
+>
+> > In my programs, I've only used locking and queuing to manage
+> > interactions (Janus/Ada has never supported priorities because
+> > preemption was impossible to implement properly on MS-DOS, and that
+> > led to a code generation design that doesn't map to threads on
+> > Windows or Linux). But it's easy to imagine having used priorities
+> > to give the user-facing tasks (the ones that respond to URL
+> > requests) a higher priority than the housekeeping tasks. You are
+> > saying that it is OK for the housekeeping tasks to hog the
+> > processors in such a scenario. (This could happen, for instance, if
+> > the implementation mapped all of the tasks of a particular task type
+> > to a single core.)
+>
+> OK, so perhaps I begin to understand what Randy is worrying about. An
+> implementation which mapped all tasks of a particular task type to a
+> single core would indeed be wrong if say
+>
+> two tasks of type T1 are ready at priorty 10
+>
+> two tasks of type T2 are ready at priority 6
+>
+> all T1 tasks are mapped to core 1
+>
+> all T2 tasks are mapped to core 2
+>
+> Because then you could have a ready priority 10 task not running and a
+> ready priority 6 task running. This cannot happen in the default mode
+> where annex D semantics are obeyed.
+
+And that's the problem. Annex D, as it stands, says this is a perfectly
+acceptable mapping. Or more accurately, there is nothing in Annex D which says
+that this is not an acceptable mapping. But I'm pretty sure that we don't want
+to allow this in the default mode (as you mentioned).
+
+I believe the intent (especially as expressed in D.16.1) is that all tasks can
+be run on all processors unless some D.16/D.16.1 facilities are used. (Alan
+seemed to indicate this as well.) If we had such a statement somewhere in Annex
+D (and added an AARM note to explain the misuse of the defined term "ready
+queue" in D.16.1(31/3)), I think I would be reasonably happy. (I'd be happier
+still if the AARM note also explained how the "conceptual ready queues" for each
+processor are in fact mapped to the implementation ready queues of a dispatching
+domain.)
+
+I still think that the entire ready queue discussion should be in terms of
+dispatching domains rather than individual processors (which would neatly
+eliminate this problem, and the need for the Implementation Advice in the first
+place), but I can imagine how that would be too much change and might cause
+unintended implementation work. (And I'd be happy to not make major RM wording
+changes for a few years!)
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, July 19, 2012  1:13 AM
+
+> OK, so perhaps I begin to understand what Randy is worrying about. An
+> implementation which mapped all tasks of a particular task type to a
+> single core would indeed be wrong if say
+>
+> two tasks of type T1 are ready at priorty 10
+>
+> two tasks of type T2 are ready at priority 6
+>
+> all T1 tasks are mapped to core 1
+>
+> all T2 tasks are mapped to core 2
+>
+> Because then you could have a ready priority 10 task not running and a
+> ready priority 6 task running. This cannot happen in the default mode
+> where annex D semantics are obeyed.
+
+And this happens because the "necessary resources" (the CPU) are not available
+for T1. How is that different from the case where a T1 task wants to open a file
+that is currently held by a T2 task?
+
+The issue is not in the principle, it's in the fact that the user has not
+control on such "resources". Maybe it should simply be clear that such an
+implementation is not acceptable in default mode.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  2:04 AM
+
+Yes, exactly. Such an implementation is not acceptable in default mode. But how
+best to explain that in language terms (specifically Annex D terms)?
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, July 19, 2012  5:51 AM
+
+> Yes, exactly. Such an implementation is not acceptable in default
+> mode. But how best to explain that in language terms (specifically
+> Annex D terms)?
+
+Please do not. You are trying to mandate the model of a single scheduler across
+the cores. Language-wise you may be right, but if you are, then the language got
+it wrong for several reasons:
+- I see very few users of multi-core architectures that want this
+  scheduling. Instead - in the real-time arena - they are using what
+  we would term active partitions for each core.
+- All the scheduling paradigms presently incorporated in the Ada
+  standard, e.g., ICPP and friends, have most of their good properties
+  distroyed when used with multi-core and a shared scheduling. To
+  preserve them, the partition model is being used.
+- The other model that I am aware of is one, where the tasks are
+  deployed dynamically across the cores based on load, not on priority.
+  This model is used typically in non-critical environments,e.g.
+  infotainment.
+  Consequently, the situation that you describe can happen (and I
+  see no way to prevent it short of hugely expensive synchronization
+  across cores at each release point of any task - the same is true for
+  an FP-scheduling, too, or maybe I do not see clever ways of dealing
+  with priority-caused preemption across cores?).
+
+To make a very inefficient behavior the language default seems very wrong.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  7:49 AM
+
+> To make a very inefficient behavior the language default seems very wrong.
+
+It's only the language default if you select Annex D semantics, and if you do,
+you expect priorities to work, I am 100% with Randy on this one.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  7:55 AM
+
+By the way, this issue is MUCH less important in practice than you might
+imagine. Nearly all real-life real-time apps in Ada are built on top of existing
+operating systems or real time executives these days, and you get whatever the
+underlying system gives you, so annex D semantics are pretty much irrelevant.
+Early on we tried in the GNAT run-time to kludge things to make them annex D
+compliant in such situations, we have since abandoned these misguided attempts!
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Thursday, July 19, 2012  8:06 AM
+
+That -- which may very well be an accurate picture of the present commercial
+market -- causes Ada to divorce its unique strength of enabling embedded
+implementations where its runtime is all one needs in the way of real-time
+kernel and its semantics are very precisely nailed.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  8:21 AM
+
+Right in theory, but in practice, no one cares much about this any more.
+
+****************************************************************
+
+From: Alan Burns
+Sent: Thursday, July 19, 2012  11:00 AM
+
+Randy raises a number of points, I think the main one is
+that you get priority inversion with simple programs such
+as the one Robert gave:
+
+two tasks of type T1 are ready at priority 10
+two tasks of type T2 are ready at priority 6
+all T1 tasks are mapped to core 1
+all T2 tasks are mapped to core 2
+
+Because then you could have a ready priority 10 task not running
+and a ready priority 6 task running.
+
+I do not consider this to be surprise or really a problem.
+
+Priorities are used to define the order in which competing
+tasks gain access to a shared resource. If a resource
+is not shared then the notion if priority is void.
+
+In the above example the priorities on core 1 are
+independent of those on core 2 - it is wrong to argue
+that 10 is higher than 6. But if all four tasks run on the
+same core, or share both cores then priority is relevant.
+
+In a non real-time system, one would like all task to
+make 'fair' progress. OSs will usually use round robin
+scheduling and some form of load balancing - perhaps
+when a task is released it is placed on the core with the
+shortest current run-q. Priority is not really used.
+
+In a real-time system you must control priorities and
+affinities. Just one is not enough (hence why IRTAW
+asked for D16 to be added to the LRM).
+
+The current issue, is what is the behaviour of a program
+if it uses priorities but none of the new D16 features.
+I would hope that the default behaviour is a single
+dispatching domain with all tasks able to run of all
+cores - hence the priority inversion problem disappears.
+
+If the underlying OS maps tasks to cores in a 'arbitrary'
+way (non-sharing) then all that can be said is that
+those tasks that happen to be on the same core
+execute in priority order.
+
+For me, summarising, a non-real-time program will
+just do what the OS dictates. For a real-time program
+the default behaviour (no D16 features) is an all
+sharing model. If a partitioned scheme is needed
+(and the OS will allow) then the D16 features are used
+so that the programmer controls priorities and affinities
+in a consistent way
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  2:36 PM
+
+> Randy raises a number of points, I think the main one is that you get
+> priority inversion with simple programs such as the one Robert gave:
+>
+> two tasks of type T1 are ready at priority 10 two tasks of type T2 are
+> ready at priority 6 all T1 tasks are mapped to core 1 all T2 tasks are
+> mapped to core 2
+>
+> Because then you could have a ready priority 10 task not running and a
+> ready priority 6 task running.
+>
+> I do not consider this to be surprise or really a problem.
+
+And yet below you say it would be an incorrect default. I guess perhaps I was
+not clear, I am talking ONLY about the default behavior in the above.
+
+> Priorities are used to define the order in which competing tasks gain
+> access to a shared resource. If a resource is not shared then the
+> notion if priority is void.
+>
+> In the above example the priorities on core 1 are independent of those
+> on core 2 - it is wrong to argue that 10 is higher than 6. But if all
+> four tasks run on the same core, or share both cores then priority is
+> relevant.
+
+Sure, but what I and Randy argue is that in the case where any task can run on
+any processor (i.e. no hardware reasons otherwise), then the default affinity
+that allows this situaion is not an acceptable default!
+
+> In a non real-time system, one would like all task to make 'fair'
+> progress. OSs will usually use round robin scheduling and some form of
+> load balancing - perhaps when a task is released it is placed on the
+> core with the shortest current run-q. Priority is not really used.
+>
+> In a real-time system you must control priorities and affinities. Just
+> one is not enough (hence why IRTAW asked for D16 to be added to the
+> LRM).
+>
+> The current issue, is what is the behaviour of a program if it uses
+> priorities but none of the new D16 features.
+> I would hope that the default behaviour is a single dispatching domain
+> with all tasks able to run of all cores - hence the priority inversion
+> problem disappears.
+
+That's what I was talking about above, so now I have no idea why you objected to
+my conclusion, you seem to be agreeing with it now.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  3:11 PM
+
+> For me, summarising, a non-real-time program will
+> just do what the OS dictates. For a real-time program
+> the default behaviour (no D16 features) is an all
+> sharing model. If a partitioned scheme is needed
+> (and the OS will allow) then the D16 features are used
+> so that the programmer controls priorities and affinities
+> in a consistent way
+
+I agree that is sufficient. So I think we all agree (possibly excepting Erhard).
+But Annex D currently has no such requirements, and we need to add those
+somehow. In particular, in the absence of any D.16 features, an "all sharing
+model" needs to be required. (Alternatively, one could describe this as all
+tasks can run on all processors.)
+
+Perhaps it would be enough to have an Implementation Requirement that all tasks
+assigned to a dispatching domain can run on any processor in that domain in the
+absence of some command limiting it (such as Set_CPU or Assign_Task). That of
+course would apply to the System_Dispatching_Domain, so when no D.16 features
+are used, all tasks can run on all processors.
+
+Probably include some AARM notes on this as well.
+
+Do you think this is OK? I'll be happy to attempt to draft some wording having
+the right effect.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  3:28 PM
+
+>     I agree that is sufficient. So I think we all agree (possibly
+>     excepting Erhard). But Annex D currently has no such requirements,
+>     and we need to add those somehow. In particular, in the absence of
+>     any D.16 features, an "all sharing model" needs to be required.
+>     (Alternatively, one could describe this as all tasks can run on all
+>     processors.)
+>     Perhaps it would be enough to have an Implementation Requirement
+>     that all tasks assigned to a dispatching domain can run on any
+>     processor in that domain in the absence of some command limiting it
+>     (such as Set_CPU or Assign_Task). That of course would apply to the
+>     System_Dispatching_Domain, so when no D.16 features are used, all
+>     tasks can run on all processors.
+
+I think Implementation advice would be enough After all this is not going to
+cause any actual changes in any implementation.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  3:41 PM
+
+> By the way, this issue is MUCH less important in practice than you
+> might imagine. Nearly all real-life real-time apps in Ada are built on
+> top of existing operating systems or real time executives these days,
+> and you get whatever the underlying system gives you, so annex D
+> semantics are pretty much irrelevant. Early on we tried in the GNAT
+> run-time to kludge things to make them annex D compliant in such
+> situations, we have since abandoned these misguided attempts!
+
+You're right of course.
+
+I had forgotten that the real default is "anything goes", as the task
+dispatching policy is "unspecified" unless one of the pragmas is used. It seems
+dodgy to use an Annex D facility (Priority) for a non-Annex D purpose, but I
+suppose it doesn't make sense to invent a separate system for such things.
+
+And to think that we never implemented Priorities in Janus/Ada because we
+couldn't "do them right". Humm, I wonder how many ACATS tests incorrectly depend
+on priorities (there used to be a lot in the Ada 83 days), since you can't
+assume anything about the meaning of priorities unless a task dispatching policy
+is specified.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 19, 2012  3:55 PM
+
+> > Yes, exactly. Such an implementation is not acceptable in default
+> > mode. But how best to explain that in language terms (specifically
+> > Annex D terms)?
+>
+> Please do not. You are trying to mandate the model of a single
+> scheduler across the cores.
+
+Yes, that has to be the default.
+
+...
+> Language-wise you may be
+> right, but if you are, then the language got it wrong for several
+> reasons:
+> - I see very few users of multi-core architectures that want this
+>   scheduling. Instead - in the real-time arena - they are using what
+>   we would term active partitions for each core.
+
+And that's fine: that's the purpose of the Dispatching_Domain facility. It's
+perfectly reasonable to split the processors into partitions (domains) and
+assign tasks to each.
+
+But what cannot happen is having the system arbitrarily assigning tasks to
+domains, because that can make priorities meaningless.
+
+> - All the scheduling paradigms presently incorporated in the Ada
+>   standard, e.g., ICPP and friends, have most of their good properties
+>   distroyed when used with multi-core and a shared scheduling. To
+>   preserve them, the partition model is being used.
+
+Doing so explicitly is fine and necessary in such circumstances. Doing it by
+default is dangerous, as the priority model no longer works as expected.
+
+> - The other model that I am aware of is one, where the tasks are
+>   deployed dynamically across the cores based on load, not on priority.
+>   This model is used typically in non-critical environments,e.g.
+>   infotainment.
+>   Consequently, the situation that you describe can happen (and I
+>   see no way to prevent it short of hugely expensive synchronization
+>   across cores at each release point of any task - the same is true for
+>   an FP-scheduling, too, or maybe I do not see clever ways of dealing
+>   with priority-caused preemption across cores?).
+
+Such systems are not using Annex D at all (as Robert points out). Formally, they
+are using some implementation-defined scheduling policy. Obviously, the Standard
+has nothing to say about them at all.
+
+> To make a very inefficient behavior the language default seems very
+> wrong.
+
+To make a behavior that allows lower priority tasks to be running while higher
+priority tasks are ready but not running the language default seems very wrong.
+:-)
+
+Correctness ought to beat efficiency any day!
+
+If efficiency matters, clearly the programmer will create the needed partitions
+(aka dispatching domains) and assign tasks to each. They'll get the efficiency
+that they need and the effects will be clearly visible in the code. This ability
+seems to be the entire justification for including the dispatching domain
+facility in the language. (What else could it possibly be for?)
+
+Invisible creation of partitions (aka dispatching domains) seems dangerous,
+especially as it means that your carefully analyzed program could misbehave just
+because a new implementation decided to be clever and split the tasks into
+multiple partitions. Portability is pretty much gone in that situation.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  6:25 PM
+
+> To make a behavior that allows lower priority tasks to be running
+> while higher priority tasks are ready but not running the language
+> default seems very wrong. :-)
+
+I regard any implementation that claims a mode in which Annex D semantics apply
+and does that to be broken! I definitely agree with Randy on this one.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 19, 2012  6:42 PM
+
+Just to be clear, I mean does that by default! Of course if you specify
+dispatching domains, it can result in this effect if that's what you ask for!
+
+****************************************************************
+
+From: Alan Burns
+Sent: Friday, July 20, 2012  2:34 AM
+
+> Perhaps it would be enough to have an Implementation Requirement that
+> all tasks assigned to a dispatching domain can run on any processor in
+> that domain in the absence of some command limiting it (such as
+> Set_CPU or Assign_Task). That of course would apply to the
+> System_Dispatching_Domain, so when no D.16 features are used, all tasks can
+> run on all processors.
+>
+> Probably include some AARM notes on this as well.
+>
+> Do you think this is OK? I'll be happy to attempt to draft some
+> wording having the right effect.
+
+Yes that  seems OK to me (or implementation advice as Robert notes).
+
+I feel any reasonable reading of the LRM would come to the conclusion that the
+default behaviour for a system compliant to Annex D, but not using any D16
+features would be that there is a single dispatching domain (the System one),
+obviously all tasks are in that domain, and as none have been set to a specific
+CPU then they all can run on any CPU.
+
+However I understand that we also have to deal with unreasonable reading - so a
+note of clarification would do no harm. I guess in the AARM is easier to do
+(more immediate)
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, July 20, 2012  8:15 AM
+
+> To make a behavior that allows lower priority tasks to be running
+> while higher priority tasks are ready but not running the language
+> default seems very wrong. :-)
+>
+> Correctness ought to beat efficiency any day!
+>
+> If efficiency matters, clearly the programmer will create the needed
+> partitions (aka dispatching domains) and assign tasks to each. They'll
+> get the efficiency that they need and the effects will be clearly
+> visible in the code. This ability seems to be the entire justification
+> for including the dispatching domain facility in the language. (What
+> else could it possibly be
+> for?)
+
+I can see the need for this inefficiency if one assigns different priorities to
+tasks, but what if all priorities assigned to tasks are the same, or no
+priorities are assigned? I'm thinking of cases where one wants to write parallel
+algorithms where all workers have the same priority, and likely the same
+priority as the main task. It seems to me in this case, the implementation could
+avoid the inefficiency of synchronization across cores when using the default
+scheduler.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, July 20, 2012  8:19 AM
+
+Yes, of course, what would make you think otherwise?
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, July 20, 2012  9:35 AM
+
+This was mostly a clarification in response to an earlier comment from Erhard.
+
+> To make a very inefficient behavior the language default seems very
+> wrong.
+
+I just wanted to make sure, and point out at the same time, that the language
+default isn't necessarily inefficient in all cases.
+
+It does seem to suggest however that if one is interested in efficiency, they
+might be better off avoiding the use of priorities. This is a bit counter
+intuitive, in my view. Eg. Assigning worker tasks higher priorities to get the
+job done quicker, might take longer than if no priorities were assigned.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, July 20, 2012  12:19 PM
+
+> It does seem to suggest however that if one is interested in
+> efficiency, they might be better off avoiding the use of priorities.
+> This is a bit counter intuitive, in my view. Eg. Assigning worker
+> tasks higher priorities to get the job done quicker, might take longer
+> than if no priorities were assigned.
+
+ONLY if you have specified Annex D behavior in an environment which allows it,
+and the only point in specifying Annex D behavior is so you can get precise
+priority control!
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, July 26, 2012  7:04 AM
+
+> For me, summarising, a non-real-time program will just do what the OS
+> dictates. For a real-time program the default behaviour (no D16
+> features) is an all sharing model. If a partitioned scheme is needed
+> (and the OS will allow) then the D16 features are used so that the
+> programmer controls priorities and affinities in a consistent way
+
+That is certainly a fine position, and it differs from what has been discussed.
+If the question is indeed:
+
+"The default behaviour is that of a single dispatching domain."
+
+then not only do I agree, but ask what else could it possibly be.
+That rule is also very easy to state, if so desired.
+
+But the question as put earlier was (paraphrased):
+"In default behaviour priorities shall be obeyed across the entire system. To
+have it otherwise, you have to step outside Annex D in unspecified territory of
+whatever your kernel/OS happens to support (c.f. Robert's argument)"
+
+And that position I found truly unwise, to put it mildly.
+
+Of course, within a single dispatching domain you get the coordinated priorities
+due to the scheduling rules that apply, but as a consequence, not as a rule
+that, in the absence of a rule to the contrary, would extend over multiple
+dispatching domains as well.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 26, 2012  8:03 AM
+
+> But the question as put earlier was (paraphrased):
+> "In default behaviour priorities shall be obeyed across the entire
+> system. To have it otherwise, you have to step outside Annex D in
+> unspecified territory of whatever your kernel/OS happens to support
+> (c.f. Robert's argument)"
+>
+> And that position I found truly unwise, to put it mildly.
+
+I don't undrstand what you find unwise. If you are operating e.g. under VxWorks,
+you get what VxWOrks provides for your hard real-time program, what other
+possibility is there? As for features like priorities and dispatching domains
+etc, you map them as best you can to the facilities of the underlying operating
+system. how could it be otherwise?
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, July 26, 2012  11:37 AM
+
+> I don't undrstand what you find unwise. If you are operating e.g.
+> under VxWorks, you get what VxWOrks provides for your hard real-time
+> program, what other possibility is there?
+
+I do not find the position unwise to step outside the Annex D when I am based on
+something that does not match up with Annex D.
+
+I found it very unwise to postulate the Period in "if Annex D is supported,
+priorities must work as advertised (Period)".
+
+(Read "as advertised" as in the usual Ada priority
+preempt/inherit/ceilinged/etc. way.)
+
+As opposed to the reasonable and "correct" position: "Priorities must work as
+advertised in a single dispatching domain, and by default there is only a single
+dispatching domain. They need (and probably will) not work as normally expected
+across multiple dispatching domains and this is still well within Annex D
+conformity."
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 26, 2012  12:03 PM
+
+> As opposed to the reasonable and "correct" position: "Priorities must
+> work as advertised in a single dispatching domain, and by default
+> there is only a single dispatching domain. They need (and probably
+> will) not work as normally expected across multiple dispatching
+> domains and this is still well within Annex D conformity."
+
+Yes, that's just fine, I agree.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July 26, 2012  12:57 PM
+
+> That is certainly a fine position, and it differs from what has been
+> discussed. If the question is indeed:
+>
+> "The default behaviour is that of a single dispatching domain."
+>
+> then not only do I agree, but ask what else could it possibly be.
+> That rule is also very easy to state, if so desired.
+
+The Ravenscar model, the default is that a task shall be only on the ready queue
+of a single processor, which is statically known. Tasks do not migrate between
+CPUs. In essence, each CPU is its own dispatching domain. This seems an
+implementation model that should not be forbidden by the language outside the
+Ravenscar profile.
+
+On a large (multi-node, NUMA) coherent memory system, tasks may by default only
+be dispatched to a subset of processors corresponding to the local node. A
+single dispatching domain may just not be feasible due to the cost of migration.
+
+The biggest problem I have with the current D.16 is with the process of
+assigning processors to dispatching domains. On the one hand, the assignment of
+processors to dispatching domains is fixed (an assignment cannot be undone) and
+on the other the process of assigning tasks is done dynamically at run time.
+This makes the System_Dispatching_Domain too special: though it is defined as a
+constant, it is the only domain that can shrink and contain an arbitrary subset
+of processors instead of a range.
+
+I really don't understand the model of taking away processors from a dispatching
+domain. What happens if a task is executing on a processor in the
+System_Dispatching_Domain, and that processor gets assigned to another domain?
+This is just too complicated and cannot be what is intended.
+
+Also note that Assign_Task cannot be called with Domain => System_Dispatching_Domain, as the mode for domain is "in out"
+while System_Dispatching_Domain is defined as a constant.
+Still D.16.1(26) seems to imply this should be possible:
+> Assigning a task to System_Dispatching_Domain that is already assigned
+> to that domain has no effect.
+
+The language about Create raising Dispatching_Domain_Error if called after the
+call to the main subprogram (D.16.1(23)) seems suspect too, as a partition may
+not have a main subprogram. As tasks may be running during elaboration, I don't
+see how this limitation helps.
+
+I'd think that in practice, you'd have some library package that specifies the
+dispatching domains using either static ranges, or ranges based on
+Number_Of_CPUs or command line arguments. This package declaring the dispatching
+domains is elaborated before any tasks are created.
+
+Shouldn't we require that no dispatching domains may be created after creation
+of the first task other than the environment task?
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 26, 2012  1:02 PM
+
+> The Ravenscar model, the default is that a task shall be only on the
+> ready queue of a single processor, which is statically known.
+> Tasks do not migrate between CPUs. In essence, each CPU is its own
+> dispatching domain. This seems an implementation model that should not
+> be forbidden by the language outside the Ravenscar profile.
+
+I disagree with this, in default Annex D mode, we should NEVER have a high
+priority task waiting while a low priority task runs.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July 26, 2012  2:46 PM
+
+>> The Ravenscar model, the default is that a task shall be only on the
+>> ready queue of a single processor, which is statically known.
+>> Tasks do not migrate between CPUs. In essence, each CPU is its own
+>> dispatching domain. This seems an implementation model that should
+>> not be forbidden by the language outside the Ravenscar profile.
+>
+> I disagree with this, in default Annex D mode, we should NEVER have a
+> high priority task waiting while a low priority task runs.
+
+Well, D.2.1(15) explicitly allows the model of separate dispatching domains:
+>   Note 11: In a multiprocessor system, a task can be on the ready
+>   queues of more than one processor. At the extreme, if several
+>   processors share the same set of ready tasks, the contents of
+>   their ready queues is identical, and so they can be viewed as
+>   sharing one ready queue, and can be implemented that way. Thus,
+>   the dispatching model covers multiprocessors where dispatching
+>   is implemented using a single ready queue, as well as those with
+>   separate dispatching domains.
+
+While I agree that the single queue model is sensible on small homogeneous SMP
+systems, on large NUMA systems task migration is very expensive and would kill
+the performance of the high-priority tasks if they get bounced all across the
+system. In such a system, one would expect multiple dispatching domains to be
+the default.
+
+Consider a low-priority task and a high priority periodic task running  on the
+same CPU and communicating through a simple protected object.
+
+   protected Value is
+      pragma Priority (System.Priority'Last);
+      procedure Set (New_Value : Integer);
+      function Get return Integer;
+   private
+      Value : Integerl
+   end Value;
+
+You wouldn't want the low-priority task doing a Get (and temporarily raising its
+priority to System.Priority'Last) cause the high priority task to do a processor
+migration if it happens to become ready just at the wrong time.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 26, 2012  2:49 PM
+
+>> >I disagree with this, in default Annex D mode, we should NEVER have
+>> >a high priority task waiting while a low priority task runs.
+
+I am repeating this. No amount of discussion will convince me that a purpose
+built kernel that claims Annex D compatibility should violate this rule in
+default mode.
+
+If you are on some weird machine where it is impractical to provide Annex D
+compatibility by default, that's fine, just say so, and don't claim
+compatibility.
+
+All this discussion is purely theoretical anyway, no one is going to build these
+kind of Ada kernels from scratch anyway. All real code will be run on top of
+OS's or kernel's that don't know specifically about Ada.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July 26, 2012  3:32 PM
+
+> If you are on some weird machine where it is impractical to provide
+> Annex D compatibility by default, that's fine, just say so, and don't
+> claim compatibility.
+
+Annex D compatibility doesn't require a single dispatching domain.
+
+> All this discussion is purely theoretical anyway, no one is going to
+> build these kind of Ada kernels from scratch anyway. All real code
+> will be run on top of OS's or kernel's that don't know specifically
+> about Ada.
+
+I'm talking about running Ada on a real-time operating system such as Linux,
+LynxOS or VxWorks. It is practical to provide Annex D compatibility on these
+systems (Linux needs root access, of course), and it is practical to provide
+multiple dispatch domains on these systems.
+
+That is, until somebody decides that the Ada standard is in the business of
+deciding how to map Ada programs to hardware.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, July 26, 2012  3:55 PM
+
+>> If you are on some weird machine where it is impractical to provide
+>> Annex D compatibility by default, that's fine, just say so, and don't
+>> claim compatibility.
+>
+> Annex D compatibility doesn't require a single dispatching domain.
+
+But it should guarantee the above, or it is useless, and it is trivial to
+implement this "properly".
+
+>> All this discussion is purely theoretical anyway, no one is going to
+>> build these kind of Ada kernels from scratch anyway. All real code
+>> will be run on top of OS's or kernel's that don't know specifically
+>> about Ada.
+>
+> I'm talking about running Ada on a real-time operating system such as
+> Linux, LynxOS or VxWorks. It is practical to provide Annex D
+> compatibility on these systems (Linux needs root access, of course),
+> and it is practical to provide multiple dispatch domains on these
+> systems.
+
+It is NOT possibole to have Annex D compatibility on VxWOrks, that I know for
+sure (because of the fact that when you the priority of a task it goes on the
+wrong end of the dispatching queue). Not sure of LynxOS or Linux, but I wonder
+if your statements about them are right, given you are definitely wrong on
+VxWorks.
+
+> That is, until somebody decides that the Ada standard is in the
+> business of deciding how to map Ada programs to hardware.
+
+It is in the business of describing what priorities mean in the default case!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 26, 2012  3:55 PM
+
+> > If you are on some weird machine where it is impractical to provide
+> > Annex D compatibility by default, that's fine, just say so,
+> > and don't claim compatibility.
+>
+> Annex D compatibility doesn't require a single dispatching domain.
+
+By default, there is only one dispatching domain (the System Dispatching
+Domain). The implementation doesn't get to create domains that the user doesn't
+know about!
+
+I think that's exactly the crux of this argument: if you want real portability,
+you *cannot* allow implementations to change the rules anyway that they feel
+like. Annex D is about iron-clad portability of real-time applications.
+
+> > All this discussion is purely theoretical anyway, no one is going to
+> > build these kind of Ada kernels from scratch anyway. All real code
+> > will be run on top of OS's or kernel's that don't know specifically
+> > about Ada.
+>
+> I'm talking about running Ada on a real-time operating system such as
+> Linux, LynxOS or VxWorks. It is practical to provide Annex D
+> compatibility on these systems (Linux needs root access, of course),
+> and it is practical to provide multiple dispatch domains on these
+> systems.
+
+You can allow users on those systems to create multiple dispatching domains.
+But you *cannot* do that by default, and still claim Annex D compatibility.
+
+(And I'm *very* skeptical that you can prove that you are providing Annex D
+compability on such systems. You might be able to get close, but there are so
+many unknowns I think you're getting on pretty thin ice making such a claim.)
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July 26, 2012  4:39 PM
+
+> It is NOT possibole to have Annex D compatibility on VxWOrks, that I
+> know for sure (because of the fact that when you the priority of a
+> task it goes on the wrong end of the dispatching queue). Not sure of
+> LynxOS or Linux, but I wonder if your statements about them are right,
+> given you are definitely wrong on VxWorks.
+
+No, I'm right for newer versions of VxWorks that actually implement the POSIX
+API:
+
+> Differences in Re-Queuing Pthreads and Tasks With Lowered Priorities
+>
+> The POSIX thread scheduler repositions pthreads that have had their priority
+> lowered differently in the ready queue than tasks that have had their priority
+> lowered. The difference is as follows:
+>
+> * When the priority of a pthread is lowered-with the pthread_setschedprio( )
+>   routine-the POSIX thread scheduler places it at the front of the ready queue
+>   list for that priority.
+>
+> * When the priority of a task is lowered-with the taskPrioritySet( ) routine-
+>   the POSIX thread scheduler places it at the end of the ready queue list for
+>   that priority, which is the same as what the traditional VxWorks scheduler
+>   would do.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, July 26, 2012  5:25 PM
+
+I was just trying out the dispatching domains facility, and ran into another
+limitation due to inflexibility.
+
+What I wanted to do was declare an array of worker tasks, and set the affinity
+of each task such that each task is locked to a particular CPU.
+
+eg.
+
+4 cpu's, 8 workers,
+
+Worker 1 and 5 get locked to the first CPU, Worker 2 and 6 get locked to second
+CPU, 3 and 7 to the 3rd CPU, and 4 and 8 to the fourth CPU.
+
+Since the program is general purpose, and could run on different targets with
+different numbers of CPUs, to do this in a generic sort of way suggests that
+you'd want to declare an array of dispatching domains, where each domain has one
+CPU.
+
+The problem is, you cannot create an array of dispatching domains, because the
+type is declared as a private type with unknown discriminants. This means I
+likely wont want to use the dispatching domains facility for what I want to do,
+and have to come up with my own non-portable mechanism to set the affinity of a
+worker task.
+
+It's unfortunate that the dispatching domains package isn't flexible enough to
+support this sort of usage.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 26, 2012  5:49 PM
+
+> ... The problem is, you cannot create an array of dispatching domains,
+> because the type is declared as a private type with unknown discriminants.
+> This means I likely wont want to use the dispatching domains facility for what
+> I want to do, and have to come up with my own non-portable mechanism to set
+> the affinity of a worker task.
+>
+> It's unfortunate that the dispatching domains package isn't flexible enough to
+> support this sort of usage.
+
+Couldn't you create an array of "access Dispatching_Domain"?
+I realize that heap allocation is never fun, but these would be all at
+elaboration time, which is often better.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Thursday, July 26, 2012  7:57 PM
+
+> It's unfortunate that the dispatching domains package isn't flexible enough to support this sort of usage.
+
+I have done this in the past as follows:
+
+   Max_CPUs : CPU := (if Argument_Count < 1 then Number_Of_CPUs
+                      else CPU'Value (Argument (1)));
+
+   subtype Worker_Id is CPU range 1 .. Max_CPUs;
+
+   Last_Worker : Worker_Id'Base := 0;
+
+   Submissions : Counter := 0;
+
+   Terminated  : Boolean := False;
+   pragma Atomic (Terminated);
+
+   function Next_Worker return Worker_Id;
+   --  Increment Last_Worker and return its value
+
+   task type Worker (Id : Worker_Id := Next_Worker)
+      with CPU => Id mod Number_Of_CPUs + 1
+   is
+   end Worker;
+
+   Workforce : array (Worker_Id) of Worker;
+
+This works well.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, July 26, 2012  8:49 PM
+
+Creating an array of Worker tasks was not the issue.
+Creating an array of Dispatching Domains is problematic, because it is declared
+as;
+
+   type Dispatching_Domain (<>) is limited private;
+
+with unknown discriminants, which makes it difficult to create an array.
+
+Tuck's suggestion to create an array of access-to-dispatching domains however
+would work. As he mentioned, having to allocate dispatching domains from the
+heap is not ideal, but at least it should work.
+
+Thanks both for the suggestions.
+
+****************************************************************
+
+From: Alan Burns
+Sent: Friday, July 27, 2012  4:02 AM
+
+A point on Brad's example.
+
+The motivation for Dispatching Domains is to define (small) clusters of CPUs on
+which tasks can execute globally (move between CPUs following rules of priority
+for example). If a program wants all tasks to execute over all available CPUs
+then just use a single (the default) domain, and that is what you get (eg
+priority works).
+
+Your example has all tasks fixed  to CPUs (as you would in a Ravenscar program).
+You could do this by using 4 dispatching domains (one CPU per domain), but I
+would not do it that way. I would ignore domains (so all CPUs and tasks in the
+systems domain), and use Set_CPU to fix workers 1 and 5 to one CPU, 2 and 6 to
+the second etc.
+
+Of course another example with more dynamic behaviour (eg. 4 workers to each
+pairs of CPUs) would require Dispatching Domains and, as Tucker said, this can
+be made 'flexible' by using an array of "access Dispatching_Domain".
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, July 27, 2012  5:09 AM
+
+> If it does, then the user can't use this for any sort of tuning, which
+> seems to ensure that it can't be used for anything. And I think we all
+> agree that existing OSes (and hypervisors) are incompatible with
+> strict Annex D semantics, so we're really only talking about
+> purpose-built Annex-D compliant kernels.
+
+Interesting. The standard kernels in the automotive industry that I know about
+would support multiple dispatching domains, one each on each core of an MC-node
+(if Ada ever could make inroads there). They use different terminology, but the
+capability is there. As to dispatching domains spanning multiple cores, well
+.... a research topic currently being worked in one of the biggest federally
+funded projects in Germany.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, July 27, 2012  7:57 AM
+
+> If it does, then the user can't use this for any sort of tuning,
+> which seems to ensure that it can't be used for anything. And I think
+> we all agree that existing OSes (and hypervisors) are incompatible
+> with strict Annex D semantics, so we're really only talking about
+> purpose-built Annex-D compliant kernels.
+
+BTW, I found yesterday that my knowledge on this subject was definitely out of
+date. In the original Posix standard there was an argument as to whether the
+standard should require requeing on the front of the queue when priority is
+decreased (allowing ceiling protocol to be properly implemented), and this
+argument was not resolved. Furthermore e.g. in VxWorks, the task is queued on
+the wrong end, making strict Annex D compliance impossible.
+
+But the Posix standard has been amended to require the proper thing.
+Geert thinks that using posix threads we could now do an accurate Annex D
+implementation on top of VxWorks, and that this is also possible in GNU/Linux
+systems in real time mode. So, now we dont "all agree" wth the above statement.
+Windows is hopeless (for one thing not enough priority levels), but being able
+to do accurate Annex D on VW and GL is interesting.
+
+> Interesting. The standard kernels in the automotive industry that I
+> know about would support multiple dispatching domains, one each on
+> each core of an MC-node (if Ada ever could make inroads there). They
+> use different terminology, but the capability is there. As to
+> dispatching domains spanning multiple cores, well .... a research
+> topic currently being worked in one of the biggest federally funded projects in Germany.
+
+Would they support ceiling priority procotols properly?
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, July 27, 2012  11:08 AM
+
+> Would they support ceiling priority procotols properly?
+
+"Yes" on the "would they support". It is called OSEK PCP and is a realization of
+ICPP rules. It is also part of the AutoSar specification.
+
+"Don't know" on the "properly", but I would assume so on the basic scheduling
+paradigm.
+
+One needs to add that there are profiles defined as being required that are even
+more stringent than Ravenscar. It probably is the case that these profiles are
+not Annex-D conformant in the sense that they exclude behavior that Annex D
+capabilities imply to be present. I have not done an analysis of that aspect.
+
+AutoSar 4.0 is supposed to work in Multicore settings. The profiles that I
+mentioned can be sensibly realized only if there is a separate scheduler per
+core. ICPP across cores will not work on AutoSar 4.0. (See Kluge et al, SCOPES
+09) For safety-critical software, I am not aware of anybody trying for a
+multi-core single scheduler. On the infotainment, it is the opposite, but in the
+research departments.
+
+AutoSar 4.0 and its MC-extensions are fairly recent (a.k.a. bleeding edge
+versions with all the immaturity). OSEK PCP for a network of single cores has
+been around for a long time, though, more than a decade, maybe.
 
 ****************************************************************
 
