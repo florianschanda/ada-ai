@@ -1,0 +1,440 @@
+!standard 8.6(9)                                    12-11-29    AI12-0040-1/01
+!class binding interpretation 12-11-29
+!status work item 12-11-29
+!status received 12-11-28
+!priority Low
+!difficulty Easy
+!subject Resolving the selecting_expression of a case_expression
+!summary
+
+The selecting_expression of a case_expression resolves in the same way as
+the selecting_expression of a case_statement; in particular, it is a
+complete context.
+
+!question
+
+The selecting_expression of a case_statement is a complete context by
+8.6(9); the selecting_expression of a case_expression is not. In unusual
+cases, this can make case_expressions legal where the corresponding
+case_statement would be illegal.
+
+Consider:
+
+  procedure Complete_Contexts is
+    type E1 is (Aa, Bb, Cc);
+    type E2 is (Bb, Cc, Dd);
+
+    function F return E1 is begin return E1'First; end F;
+    function F return E2 is begin return E2'First; end F;
+
+    N : Natural;
+  begin
+    N := (case F is -- Legal? (No.)
+            when Aa => 123,
+            when Bb => 456,
+            when Cc => 789);
+
+    case F is -- Illegal.
+       when Aa => null;
+       when Bb => null;
+       when Cc => null;
+    end case;
+  end;
+
+Should this be fixed? (Yes.)
+
+!recommendation
+
+(See summary.)
+
+!wording
+
+Modify 8.6(9):
+
+ The {*selecting_*}expression of a case_statement {or case_expression}.
+
+!discussion
+
+We want case statements and case expressions resolve the same way; consistency
+is important.
+
+It's a bit odd to have a complete context in the middle of an expression, but as
+the wording of 8.6(4) makes it clear that complete contexts can be nested, there
+is no semantic problem. Moreover, other constructs like the operand of a type
+conversion and conditions of an if expression act like complete contexts (their
+resolution has no effect on whether the rest of the expression can be resolved).
+So this isn't really new.
+
+A selecting_expression has to be a complete context in order to prevent the
+case choices from affecting the resolution. In cases that aren't complete
+contexts (like the target of an assignment), all of the possibilities
+are considered together (thus the source expression of an assignment can
+help the resolutiuon of the target).
+
+!ACATS test
+
+An ACATS B-Test like the example in the question should be created to verify
+that this is detected. It's low priority, though, as it is hard to imagine that
+this would be done wrong.
+
+!appendix
+
+From: Steve Baird
+Sent: Wednesday, November 28, 2012  5:43 PM
+
+We've got (in 8.6):
+   Each of the following constructs is a complete context:
+    ...
+    The expression of a case_statement.
+    Ramification: This means that the expression is resolved without
+    looking at the choices.
+
+Shouldn't the expression of a case_expression also be on this list?
+
+I believe the following example was intended to be illegal, but is legal because
+of this omission:
+
+  procedure Complete_Contexts is
+    type E1 is (Aa, Bb, Cc);
+    type E2 is (Bb, Cc, Dd);
+
+    function F return E1 is begin return E1'First; end F;
+    function F return E2 is begin return E2'First; end F;
+
+    N : Natural;
+  begin
+    N := (case F is
+            when Aa => 123,
+            when Bb => 456,
+            when Cc => 789);
+
+    --  case F is
+    --     when Aa => null;
+    --     when Bb => null;
+    --     when Cc => null;
+    --  end case;
+  end;
+
+Note that the commented out case statement, if uncommented, is certainly
+illegal. I believe that we want case statements and case expressions to be
+treated consistently in this respect.
+
+What do folk think about replacing (in 8.6)
+    "The expression of a case_statement."
+with
+    "The expression of a case_statement or case_expression."
+?
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Wednesday, November 28, 2012  9:17 PM
+
+It's certainly simple to state and consistent with case statements, but it find
+it a bit bizarre to say that a portion of an expression is a complete context.
+After all the case expression appears within some larger context that imposes a
+type on it, and maybe this larger context is used to resolve the expression.
+This would be consistent with overload resolution everywhere else. But your
+proposed rule is simple to present and trivial to implement,  obviously a big
+plus.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 28, 2012  9:49 PM
+
+The selecting_expression of a case statement (like a condition of an if
+expression) doesn't contribute in any way to the final type of the expression.
+It is "used up". Its resolution and legality is separate from any other part of
+the expression. I'll call such a (sub)expression an "expression sink" for the
+lack of a better term.
+
+The point here is that a selecting_expression is an "expression sink" without a
+defined type. We don't want to be using information from elsewhere (specifically
+from the case choices) to resolve this expression. Most other "expression sinks"
+(like the condition of an if statement or expression) have a defined type, so
+they don't need to be complete contexts.
+
+I agree that it is weird to consider a selecting_expression of a case_expression
+a complete context, but since it doesn't have any effect on the resolution of
+the rest of the expression, I don't quite know what else it could be.
+
+BTW, we gave this thing a name ("selecting_expression"), so it would be better
+to use that name in the wording above: "The selecting_expression of a
+case_statement or case_expression." (thus preventing any confusion with the
+choice_expressions).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, November 28, 2012  11:31 PM
+
+I agree, we should make the selecting expression a complete context.
+Note that the operand of a type conversion is also effectively a complete
+context.  This is essentially equivalent to saying the expected type is "any
+type."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, November 29, 2012 12:20 AM
+
+Humm. The expression of a type conversion is *not* defined to be a complete
+context, but it has an expected type of "any type". If that's good enough for
+type conversions to make them "effectively complete contexts" (and I can't find
+any specific rules for type conversions), then there is nothing that we need to
+do for selecting_expressions of case expressions.
+
+That's because they're defined to resolve to "any discrete type" (5.4(4/3)).
+
+Steve is arguing that the types of the choice expressions could be used to
+disambiguate a selecting_expression. But I'm not sure why we would expect that
+to work differently than the "any type" of a type conversion - you don't get to
+use the target type to disambiguate the operand expression of a type conversion.
+
+So I conclude that there is no problem here - at least until someone points out
+some explicit language about type conversions not using the target type. (In
+which case we need similar language for *all* selecting_expressions.)
+
+BTW, I'm not sure why we need special language to make the selecting_expression
+of a case statement a "complete context", while we don't have such language for
+the condition of an if_statement -- these both are data and resolution "sinks".
+If the only point is to enforce the separation of the selecting_expression from
+the choice_expressions, that probably should be explicit in the resolution
+rules, rather than implicit in something irrelevant like "complete context".
+
+(Even if there is no problem, we still need a ramification AI to point that
+out.)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, November 29, 2012  11:23 AM
+
+> Humm. The expression of a type conversion is *not* defined to be a
+> complete context, but it has an expected type of "any type". If that's
+> good enough for type conversions to make them "effectively complete
+> contexts" (and I can't find any specific rules for type conversions),
+> then there is nothing that we need to do for selecting_expressions of case
+> expressions.
+
+Randy - You make a good argument that there is no need to define the
+selecting_expressions of a case_expression to be a complete context. If that
+argument is valid (and it sounds right to me), then doesn't it also apply to
+case statements? You make the same point:
+
+> BTW, I'm not sure why we need special language to make the
+> selecting_expression of a case statement a "complete context", while
+> we don't have such language for the condition of an if_statement --
+> these both are data and resolution "sinks". If the only point is to
+> enforce the separation of the selecting_expression from the
+> choice_expressions, that probably should be explicit in the resolution
+> rules, rather than implicit in something irrelevant like "complete context".
+
+I understand the "if it ain't broke" argument (and the "insufficiently broken"
+argument), but I still think that case_statements and case_expressions should be
+treated consistently - selecting_expressions of either both or neither should be
+defined to be complete contexts. It sounds like you are arguing for "neither",
+which sounds good to me. So there *is* a need for a wording change.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, November 29, 2012 12:00 PM
+
+> So there *is* a need for a wording change.
+
+I agree with you and Randy that there's no need to say "complete context" in
+either case, because there is an expected type defined (and that expected type
+is not defined in terms of the when's).
+
+But this falls into the category of language changes that have no effect:  No
+compiler writer or programmer will change their behavior.  I'm opposed to making
+such purely-cosmetic changes.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, November 29, 2012 12:24 PM
+
+> But this falls into the category of language changes that have no
+> effect:  No compiler writer or programmer will change their behavior.
+> I'm opposed to making such purely-cosmetic changes.
+
+You are right about the impact on compilers, but the current RM wording is
+misleading (it suggests a difference in the treatment of the two "case"
+constructs when there is none) and the AARM note 8.6(9.a) is simply wrong.
+
+The real problem is that the current wording is a source of confusion; it
+certainly confused me.
+
+Given that all of this can be cleaned up with one simple deletion (delete 8.6(9)
+and its accompanying AARM note), I think this is worth doing.
+
+On the other hand, I would agree that this is one is a close call precisely
+because of the issues you raise.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, November 29, 2012  1:21 PM
+
+> > So there *is* a need for a wording change.
+>
+> I agree with you and Randy that there's no need to say "complete
+> context" in either case, because there is an expected type defined
+> (and that expected type is not defined in terms of the when's).
+
+I'm not so sure I agree with myself this morning. :-)
+
+The problem is that the expected type of the choices are defined in terms of the
+type of the selecting_expression. In other cases in the language (such as
+assignments), we interpret that to mean that all of these things are resolved
+together. Here, we don't want that to happen.
+
+Compare the wording for assignments [5.2(4/2)]:
+
+The variable_name of an assignment_statement is expected to be of any type.
+The expected type for the expression is the type of the target.
+
+to the wording for case statements (and case expressions) [5.4(4/3]:
+
+The selecting_expression is expected to be of any discrete type. The expected
+type for each discrete_choice is the type of the selecting_expression.
+
+These are almost identical, but we want different things to happen. That won't
+work!
+
+I was mislead by the lack of a similar rule for type conversions. But that's not
+needed, because the rules on the target type are all Legality Rules, and thus
+aren't considered during resolution.
+
+So I now think Steve's original suggestion was correct, and we *do* need a
+wording change in 8.6(9):
+
+The {selecting_}expression of a case_statement {or case_expression}.
+
+[Might as well use the new prefix in this wording.]
+
+Note to Ed: It is expected that complete contexts can be nested, as 8.6(4)
+mentions "not counting inner complete contexts". So there isn't any real problem
+with part of an expression being a complete context.
+
+Note to self: resolution "sinks" like conditions and type conversions probably
+ought to have been "complete contexts", but as no resolution rules depend on
+their resolved type (hopefully), it's not required to get the correct effect.
+And probably the 9x team decided to keep this as simple as possible, leaving out
+such sinks.
+
+Note to Bob: I agree that no compiler is going to implement this wrong (it would
+be a lot of extra work), but some pedant like Adam will ask the question if we
+don't handle it now. That's the task of the ARG, after all, answering boring
+questions about unimportant holes in the Standard. The fun stuff like designing
+new kinds of contracts is more of the ARG's hobby (especially now, between
+revisions).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, November 29, 2012  1:40 PM
+
+> The problem is that the expected type of the choices are defined in
+> terms of the type of the selecting_expression. In other cases in the
+> language (such as assignments), we interpret that to mean that all of
+> these things are resolved together. Here, we don't want that to happen.
+
+Good point.
+
+> Note to Bob: I agree that no compiler is going to implement this wrong
+> (it would be a lot of extra work), but some pedant like Adam will ask
+> the question if we don't handle it now. That's the task of the ARG,
+> after all, answering boring questions about unimportant holes in the
+> Standard. The fun stuff like designing new kinds of contracts is more
+> of the ARG's hobby (especially now, between revisions).
+
+I think we should be more willing to vote "No Action" on the kinds of things
+Adam comes up with.  If he's honestly confused, as to nitpicking the wording, we
+one of us can tell him on ada-comment@ that case exps work like case stms, or
+whatever.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, November 29, 2012  2:33 PM
+
+I disagree with Tuck version 1, and agree with Randy version 2 and Steve version
+1.  We *should* say "complete context" to prevent it from factoring in the name
+resolution rules that apply to the various choice expressions.  And I agree with
+Steve versions 1 and 2 that these two should be consistent. And I agree with Bob
+(all versions) that this is very low priority.
+
+But if we do some fixups, might as well fix this one up.
+
+I trust that was crystal clear...
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, November 29, 2012  2:54 PM
+
+> I trust that was crystal clear...
+
+I think this discussion illustrates the point that when we meddle with RM
+wording, we're about as likely to break things as to fix things -- we almost
+decided to break case statements rather than fixing case expressions, until
+Randy came to the rescue.  So we should, in general be reluctant to change
+things.
+
+I don't feel strongly about whether this one should be fixed now that we all
+(think we) understand it.
+
+Just keep in mind that if we keep fiddling with the RM forever, we will never
+reach perfection, nor even asymptotically approach it.  But we can spend a lot
+of energy discussing it.  ;-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, November 29, 2012  3:16 PM
+
+...
+> I think this discussion illustrates the point that when we meddle with
+> RM wording, we're about as likely to break things as to fix things --
+> we almost decided to break case statements rather than fixing case
+> expressions, until Randy came to the rescue.  So we should, in general
+> be reluctant to change things.
+...
+> Just keep in mind that if we keep fiddling with the RM forever, we
+> will never reach perfection, nor even asymptotically approach it.  But
+> we can spend a lot of energy discussing it.  ;-)
+
+I think you once pointed out that the RM doesn't have a regression test suite.
+Most of us are used to fiddling with our compilers in an attempt to reach
+perfection. But we have the ACATS (and usually in-house tests) to keep us on
+course if we screw up. (And in my experience, I end up breaking something fully
+a quarter of the time I "fix" our compiler.)
+
+We don't have that sort of backup for the RM. (Other than for basic editing
+issues; Pascal built a tool years ago to compare the wording in the Amendment
+document with the wording in the RM; that found a lot of glitches in both
+documents, a few which were significant. Ada 2020 probably won't have that, as I
+doubt that we'll do an Amendment-style document [to be discussed].)
+
+OTOH, a lot of these changes are straightforward. And quite a few of them
+indicate real language problems (for instance, the ability to use a generic unit
+to convert from a tagged type to an extension of it -- without having to mess
+with those pesky extension components -- that's the Adam AI I wrote up last
+night) -- even if those are obscure, they're often the sort of holes that we
+can't tolerate). Cases like the one at hand (where no one would do it wrong
+whether or not the RM is changed) are in fact rather rare. And remember the
+lesson of the Sofcheck employee who dutifully implemented exactly what the
+Standard said, no matter how nonsensical. [That also happened to me, with the
+Ada 95 alignment rules, which I implemented exactly as written in the Standard,
+although I later found out that no one intended them to work that way. I would
+have liked to find that out a lot sooner!]
+
+Takeaway: we should fix as much as we can, but we must never stop being
+vigilant. But it probably isn't worth it to fix ticky-tack wording that is
+slightly confusing to someone - just stick in an AARM note and go.
+
+****************************************************************
