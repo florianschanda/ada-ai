@@ -1,5 +1,7 @@
-!standard 7.3.2(10/3)                                12-12-03    AI12-0049-1/01
+!standard 7.3.2(10/3)                                12-12-27    AI12-0049-1/02
 !class binding interpretation 12-12-03
+!status Amendment 202x 12-12-27
+!status ARG Approved 9-0-1  12-12-07
 !status work item 12-12-03
 !status received 12-09-10
 !priority Medium
@@ -34,16 +36,68 @@ Should this be fixed? (Yes.)
 
 !wording
 
-Modify RM 7.3.2(10/3):
+Add after RM 7.3.2(10/3):
 
-   After successful default initialization of an object of type T{, or explicit
-   initialization of the completion of a deferred constant with a part
-   of type T}, the check is performed on the new object;
+   After successful explicit initialization of the completion of a deferred constant
+   with a part of type T, if the completion is inside the immediate scope of the
+   full view of T, and the deferred constant is visible outside the immediate
+   scope of T, the check is performed on the part(s) of type T;
 
 !discussion
 
 We want every value that can "escape" from the visible part of the package
 to have the invariant checked. There certainly shouldn't be any easy end-runs.
+
+This wording seems more complicated than necessary, but a number of considerations
+arise.
+
+First, we have to talk about "the completion of a deferred constant" as the deferred
+constant itself has no initializer (and thus nothing to check).
+
+Second, we have to check more than just deferred constants of type T. Deferred
+constants can be of any type, and thus T could have been used as a component:
+
+package R2 is
+   type T is private with Type_Invariant => Non_Null (T);
+   function Non_Null (X : T) return Boolean;
+   type Conditional_T is record
+       Valid : Boolean;
+       Data  : T;
+   end record;
+   Invalid : constant Conditional_T;
+private
+   type T is new Integer;
+   function Non_Null (X : T) return Boolean is (X /= 0);
+   Invalid : constant Conditional_T := (Valid => False, Data => 0);
+end R2;
+
+This has the same leak as the original example. Thus, we have to talk about "a part
+of type T".
+
+Third, we have to also make the check in visible child packages. Consider this
+child of the original example:
+
+package R.C is
+   Zero : constant T;
+private
+   Zero : constant T := 0;
+end R.C;
+
+This also has the same hole as in the original example. The wording here talks
+about "immediate scope", so that the check does not apply to private child
+packages (which cannot leak values out of the "subsystem").
+
+!corrigendum 7.3.2(10/3)
+
+@dinsa
+@xbullet<After successful default initialization of an object of type @i<T>,
+the check is performed on the new object;>
+@dinst
+@xbullet<After successful explicit initialization of the completion of a
+deferred constant with a part of type @i<T>, if the completion is inside
+the immediate scope of the full view of @i<T>, and the deferred constant
+is visible outside the immediate scope of @i<T>, the check is performed on
+the part(s) of type @i<T>;>
 
 !ACATS test
 
