@@ -1,0 +1,115 @@
+!standard 11.3(4/2)                                 12-12-08    AI12-0054-1/01
+!class binding interpretation
+!status work item 12-12-08
+!status received 12-12-07
+!priority High
+!difficulty Medium
+!qualifier Error
+!subject A raise_expression does not cause membership failure
+
+!summary
+
+If a raise_expression occurs in a membership test, as in:
+
+    subtype S is Integer
+        with Dynamic_Predicate => Is_Round(S) or else raise Program_Error;
+
+then a membership test "X in S" does not raise Program_Error just because
+Is_Round(X) returns False.
+
+!question
+
+AI12-0022-1, "Raise expressions for specifying the exception raised for an
+assertion" added the ability to control which exception is raised by failure of
+various assertions. This is an important capability, because it allows to change
+interfaces to use assertions while preserving compatibility.
+
+However, this feature doesn't work properly for predicates, because predicates
+are evaluated by membership tests, so we would get spurious failures. Should
+these spurious failures be removed from the language, so that raise_expressions
+can be used in predicates? (Yes.)
+
+!recommendation
+
+See !summary.
+
+!wording
+
+11.3(4/2) was amended by AI12-0022-1 as follows:
+
+... For the execution of a raise_statement with an exception_name, the named
+exception is raised. {Similarly, for the evaluation of a raise_expression, the
+named exception is raised.} [{In both of these cases, if}[If] a
+string_expression is present, the expression is evaluated and its value is
+associated with the exception occurrence.] ...
+
+Add a new paragraph after that:
+
+There is one exception to the above rule: For an individual membership test (see
+4.5.2) of the form "X in S", if S has a predicate that contains a
+raise_expression, then the raise_expression does not raise an exception, but
+instead evaluates to False.
+
+!discussion
+
+Note that "contains" in the new wording means statically/textual containment.
+We're not talking about anything dynamic.
+
+The purpose of a raise_expression in an assertion is to specify which exception
+is raised on failure. For example:
+
+    subtype S is Integer
+        with Dynamic_Predicate => Is_Round(S) or else raise Program_Error;
+
+is not really saying that Program_Error should be raised. It is saying that
+Is_Round should be True for all objects of subtype S (and, oh by the way, if
+it's not, then Program_Error should be raised instead of the usual exception).
+
+That works just fine for parameter passing and the like:
+
+    procedure P(X: S);
+    ...
+    P(X);
+
+If Is_Round(X) is False on the call, Program_Error is raised as expected.
+But if we have:
+
+    Some_Integer : Integer := ...;
+    ...
+    if Some_Integer in S then
+        ...
+
+we don't want to raise Program_Error. We want the 'if' condition to return True
+or False according to whether Is_Round(X) is True. Therefore, we change the rule
+so that "Is_Round(S) or else raise Program_Error" is evaluated as "Is_Round(S)
+or else False" -- but only for membership tests.
+
+Note that this special case for raise_expressions in membership tests does not
+apply to any other ways of raising an exception. For example, if Is_Round(X)
+propagates an exception, then the membership test propagates that exception
+occurrence.
+
+Intended implementation: If the implementation chooses to generate code for
+predicates inline at the places where they are used, then it would be
+appropriate to replace "raise ..." with "False" whenever the predicate is being
+evaluated as part of a membership test. If an implementation uses an out-of-line
+function to evaluate the predicate, it can pass an extra "In_Membership" flag,
+or it can generate two copies of the function.
+
+An implementation that wraps the predicate with an exception handler like "when
+others => False" would be incorrect.
+
+!appendix
+
+This AI was created out of a problem noted during discussion on AI12-0037-1
+during ARG meeting #48 in Boston.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December  8, 2012  12:06 PM
+
+I think a raise expression in a predicate should yield False only if it has a
+boolean expected type.
+
+****************************************************************
