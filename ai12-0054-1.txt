@@ -1,4 +1,6 @@
-!standard 11.3(4/2)                                 12-12-08    AI12-0054-1/01
+!standard 11.3(4/2)                                 12-12-09    AI12-0054-1/02
+!standard 13.9.2(2)
+!standard 13.9.2(3/3)
 !class binding interpretation
 !status work item 12-12-08
 !status received 12-12-07
@@ -9,13 +11,14 @@
 
 !summary
 
-If a raise_expression occurs in a membership test, as in:
+Consider:
 
     subtype S is Integer
-        with Dynamic_Predicate => Is_Round(S) or else raise Program_Error;
+        with Dynamic_Predicate => Is_Gnarly(S) or else raise Program_Error;
 
 then a membership test "X in S" does not raise Program_Error just because
-Is_Round(X) returns False.
+Is_Gnarly(X) returns False. Similarly, "X'Valid" does not raise Program_Error
+just because Is_Gnarly(X) returns False.
 
 !question
 
@@ -46,14 +49,31 @@ associated with the exception occurrence.] ...
 Add a new paragraph after that:
 
 There is one exception to the above rule: For an individual membership test (see
-4.5.2) of the form "X in S", if S has a predicate that contains a
-raise_expression, then the raise_expression does not raise an exception, but
-instead evaluates to False.
+4.5.2) of the form "X in S", where S has a predicate that contains a
+raise_expression, if that raise_expression is evaluated, then the exception is
+not raised; instead, the entire predicate immediately evaluates to False. This
+includes raise_expressions contained within the default_expression for a formal
+parameter, but not raise_expressions within the default_expression for a
+component.
+
+Modify 13.9.2(2-3/3) so it refers to the semantics of "in" rather than directly to the semantics of the predicate, so the newly-modified semantics of "in"
+automatically work for 'Valid:
+
+2   For a prefix X that denotes a scalar object Redundant[(after any implicit
+dereference)]{of nominal subtype S}, the following attribute is defined:
+
+3/3 X'Valid     Yields True if and only if the object denoted by
+                X is normal, has a valid representation, and the [predicate of
+                the nominal subtype of X]{the membership test "X in S"} evaluates
+                to True. The value of this attribute is of the predefined type
+                Boolean.
+
 
 !discussion
 
 Note that "contains" in the new wording means statically/textual containment.
-We're not talking about anything dynamic.
+We're not talking about anything dynamic. But we do include formal parameter
+defaults.
 
 The purpose of a raise_expression in an assertion is to specify which exception
 is raised on failure. For example:
@@ -89,15 +109,35 @@ apply to any other ways of raising an exception. For example, if Is_Round(X)
 propagates an exception, then the membership test propagates that exception
 occurrence.
 
+The following example shows how to raise a particular exception for a particular
+"reason" the predicate fails. If the evaluation of "X in T" evaluates one of the
+raise_exceptions, then "X in T" will be True.
+
+    type T is ...
+        with Predicate =>
+            (T >= First_Allowed or else raise Too_Small) and then
+            (T <= Last_Allowed or else raise Too_Big) and then
+            (Is_Good(T) or else raise Badness);
+
+Rationale for the default_expression business: A defaulted parameter really
+should be strongly equivalent to an explicit parameter. Switching from one to
+the other should not cause subtle changes in run-time semantics. The component
+case is less clear, but there would be an implementation difficulty if we made
+the opposite choice, for implementations that choose to wrap default
+initializations in an initialization procedure (whether or not inlined), because
+an extra "we're in an 'in'" flag would need to be passed.
+
 Intended implementation: If the implementation chooses to generate code for
 predicates inline at the places where they are used, then it would be
-appropriate to replace "raise ..." with "False" whenever the predicate is being
-evaluated as part of a membership test. If an implementation uses an out-of-line
-function to evaluate the predicate, it can pass an extra "In_Membership" flag,
-or it can generate two copies of the function.
+appropriate to replace "raise ..." with a jump to "return False from the
+predicate" whenever the predicate is being evaluated as part of a membership
+test. If an implementation uses an out-of-line function to evaluate the
+predicate, it can pass an extra "In_Membership" flag, or it can generate two
+copies of the function.
 
 An implementation that wraps the predicate with an exception handler like "when
-others => False" would be incorrect.
+others => False" would be incorrect. An implementation that turns "raise ..."
+into "False" would also be wrong.
 
 !appendix
 
@@ -113,3 +153,4 @@ I think a raise expression in a predicate should yield False only if it has a
 boolean expected type.
 
 ****************************************************************
+
