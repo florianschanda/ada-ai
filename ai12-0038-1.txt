@@ -1,5 +1,7 @@
-!standard E.2.3(7/1)                           12-11-28    AI12-0038-1/01
+!standard E.2.1(7/1)                           12-12-31    AI12-0038-1/02
 !class binding interpretation 12-11-28
+!status Amendment 202x 12-12-31
+!status ARG Approved 5-0-4  12-12-09
 !status work item 12-11-28
 !status received 12-06-23
 !priority Low
@@ -8,17 +10,17 @@
 !summary
 
 Shared_Passive restrictions have to be adjusted because declared-pure
-package now allow the declarations of access types.
+packages now allow the declarations of access types.
 
 !question
 
 Shared passive packages are allowed to depend on declared-pure packages.
-In Ada 2005, access types declarations were allowed in declared-pure
+In Ada 2005, access type declarations were allowed in declared-pure
 packages, but the implications of this were not accounted for in the
-restrictions on shared passive packages.  Should we add new restrictions
+restrictions on shared passive packages. Should we add new restrictions
 directly on shared passive packages to account for this change?  (Yes)
 
-!response
+!recommendation
 
 Shared passive packages are not allowed to declare access-to-class-wide
 types, but there is nothing preventing them from referencing an access-to-
@@ -28,23 +30,36 @@ a shared-passive package.
 
 !wording
 
-Modify E.2.3(7/1):
+Modify E.2.1(7/1):
 
    * it shall not contain a library-level declaration of an access type that
    designates a class-wide type, task type, or protected type with
-   entry_declarations{; further, it shall not contain a library-level
-   declaration that includes a name that denotes an access type declared
-   in a declared-pure package}.
+   entry_declarations{; further, it shall not contain a library-level declaration
+   that includes a name that denotes a subtype with a part having an access type
+   that is declared within a declared-pure package}.
 
 !discussion
 
-The accessibility rule of E.2.3(8) is intended to prevent pointers being created
+The accessibility rule of E.2.1(8) is intended to prevent pointers being created
 in a shared-passive package that point "back" into the data area of some
-particular active partition.  Unfortunately, this doesn't work if the access
+particular active partition. Unfortunately, this doesn't work if the access
 type is declared in something other than a shared-passive package, in
-particular, in a declared-pure package.  Therefore, we need to disallow the use
+particular, in a declared-pure package. Therefore, we need to disallow the use
 of such "unprotected" access types in a shared-passive package.  That is the
-point of the wording added to E.2.3(7/1).
+point of the wording added to E.2.1(7/1).
+
+!corrigendum E.2.1(7/1)
+
+@drepl
+@xbullet<it shall not contain a library-level declaration of an access type that
+designates a class-wide type, task type, or protected type with
+@fa<entry_declaration>s.>
+@dby
+@xbullet<it shall not contain a library-level declaration of an access type that
+designates a class-wide type, task type, or protected type with
+@fa<entry_declaration>s; further, it shall not contain a library-level declaration
+that includes a @fa<name> that denotes a subtype with a part having an access type
+that is declared within a declared-pure package.>
 
 !ACATS test
 
@@ -102,9 +117,83 @@ Upon further reflection, you probably meant "point" (no "ing").
 From: Tucker Taft
 Sent: Thursday, November 29, 2012  8:16 PM
 
-> "poing" is a new term for Ada, even informally. :-) I presume you mean 
+> "poing" is a new term for Ada, even informally. :-) I presume you mean
 > "pointing", right?
 
 Oops.  I meant "point".
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 31, 2012  6:08 PM
+
+For AI12-0038-1, we approved the following wording:
+
+it shall not contain a library-level declaration of an access type that
+designates a class-wide type, task type, or protected type with
+entry_declarations{; further, it shall not contain a library-level declaration
+that includes a name that denotes a subtype with a part having an access type
+that is declared within a declared-pure package}.
+
+So far so good. Then, the first draft of the minutes on the meeting go on to
+say:
+
+A non-limited private type that has stream attributes and an access component
+could be legal in a declared-pure package (as the type would then have external
+streaming). If the package also declares a function that is passed an access
+value and returns that type could cause trouble by storing the parameter value
+into the component and then returning that to be stored in an object of the
+shared-passive partition. No solution is obvious: a solution would seem to
+require making referencing any non-limited private types illegal which seems way
+over the top. We're going to ignore this problem.
+
+Say what?? Did we really decide this? (Probably, as 4 people abstained,
+presumably because of this hole.)
+
+The problem here is that we can't get away with completely ignoring this "hole".
+If we ignore it, we're saying that compilers have to make it work. But that
+makes no sense; if we're going to require it to work in some (obscure) case,
+then we surely don't need E.2.1(7-8) to prevent it in most cases. Even if we
+can't figure out an appropriate rule, we need to let compilers off the hook
+somehow.
+
+Specifically, we either need a Legality Rule, some sort of run-time check, or it
+has to be erroneous.
+
+A Legality Rule would be easy if we could break privacy, but we can't.
+Probably the best solution would to attack the function that is required to
+cause a problem (as it has to return the type, and take a parameter with a part
+of an access type). But there probably are more forms of this (for instance, a
+procedure with an out parameter of the type), so such a solution is likely to be
+fragile.
+
+I suppose we could have a To-Be-Honest AARM note that implementations need to
+break privacy to make the check described by the wording given above. (That
+seems to be OK since Mr. Private is retired. ;-) I would hope that is a last
+resort, however.
+
+A run-time check might happen here anyway (we're talking about passing an access
+parameter in most of the scenarios), but adding overhead for this is not
+appealing. And figuring out the interactions of E.2.1(8) and the algorithms
+described for AI12-0016-1 sound like torture.
+
+There is some argument for making it erroneous; I suspect that there are other
+ways to get an access value of some other partition (via chapter 13 means, at
+least), and those are probably going to be erroneous (at least we hope so!). A
+small expansion isn't going to be a major problem.
+
+Another option would be to make assigning a non-limited private type that has
+part of an access type declared in a declared-pure package a bounded error
+inside of a shared-passive package. Either it works (no one will want to
+implement that) or it raises Program_Error. This check (being at runtime) can
+break privacy, but in actual fact, it would always be detected at compile-time.
+(And presumably would have an associated warning.) [Since the package is
+preelaborated, a dangerous value can only be introduced by a later assignment,
+as no constructor functions are allowed -- I think.] Or perhaps just do this for
+the declaration of such an object at library-level in a shared passive package.
+
+Should we reopen this AI to get *some* solution to this problem?? (I have no
+idea what to write in the AI to explain why we're ignoring this hole.) Is there
+any better ideas of a solution?
 
 ****************************************************************
