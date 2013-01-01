@@ -1,14 +1,18 @@
-!standard 4.6(8/2)                                   12-11-30    AI12-0027-1/03
+!standard 4.6(8/2)                                   12-12-08    AI12-0027-1/04
 !standard 4.6(24.8/2)
+!standard 6.2(10/3)
+!standard 3.10.2(10/3)
 !class binding interpretation 12-06-04
 !status work item 12-06-04
 !status received 12-04-09
 !priority Medium
 !difficulty Medium
-!subject Access values should never designated unaliased components
+!subject Access values should never designate unaliased components
 !summary
 
-** TBD
+Composite value conversions can cause a copy of the operand object
+to be made; as such, the accessibility level of such conversions
+is usually local.
 
 !question
 
@@ -48,89 +52,28 @@ as 4.6(24.8) aren't checked in an instance body.
 
 !wording
 
-This wording has two alternatives; the first alternative solves the problem
-statically, the second dynamically.
-
-Wording common to both alternatives (the first alternative solves the problem statically, the second dynamically):
-
 append to the end of the Legality Rules section of 4.6 (after 24.p/2):
-   In addition to the places where Legality Rules normally apply (see 12.3),
-   these rules apply also in the private part of an instance of a generic unit.
-
-Wording alternative #1: (disallow the problematic construct)
-
-replace 4.6(24.8/2)
-
-   If the target type of a view conversion has aliased components, then so
-   shall the operand type; and
-
-with
-
-   It is said that the conversion *may yield aliased components* if
-     - the target type has aliased components; or
-     - the target type is generic formal array type and the
-       conversion occurs within the body of G or within the
-       body of a generic unit declared within the declarative
-       region of G.
-
-TBD: this is the 4th occurrence of this somewhat opaque "within the body of a
-      of a generic unit declared within" wording. See 8.5.1, 8.5.4, and 12.6.
-      Do we want to define a term like "the unverified region" of
-      a generic  unit and then use that term in these 4 places?
-
-   If the conversion may yield aliased components and the operand type
-   does not have aliased components, then
-     - the conversion shall not be a view conversion; and
-     - the target type shall not be a by-reference type; and
-     - the target type shall not have private part.
-
-TBD: This wording could be restructured to avoid defining a term
-      which is only used once, but then we get into either nested
-      ifs or mixing of conjunctions and disjunctions (which requires
-      nested lists).
-
-AARM note:
-    The "shall not have a private part" clause is needed
-    because otherwise the preceding "by-reference type" rule
-    would break privacy.
-
-========================
-
-Wording alternative #2: (allow the problematic construct)
+   In addition to the places where Legality Rules normally apply
+   (see 12.3), these rules apply also in the private part of an
+   instance of a generic unit.
 
 Append at the end of Dynamic Semantics section of 4.6:
 
-    Evaluation of a value conversion of a composite type may, in some cases,
-    create a new anonymous object [, similar to the object created by the
-    evaluation of an aggregate or a function call]. In other cases,
-    evaluation of a value conversion may yield only a new view of the
-    operand object, and no new object is created. The circumstances under
-    which creation of a new object is required, permitted, or prohibited
-    are as follows:
+    Evaluation of a value conversion of a composite type will either
+    create a new anonymous object [(similar to the object
+    created by the evaluation of an aggregate or a function call)] or
+    yield a new view of the operand object without creating
+    a new object:
 
-      - If there is a composite type that is an ancestor of both the target
-        type and then either
-           - the target type is a by-reference type; or
-           - all type-related representation aspects of the target and
-             operand types agree and the alignment aspects of the
-             first named subtypes of the two types agree
-        then creation of a new object is prohibited.
+      - If the target type is a by-reference type and there is a
+        type that is an ancestor of both the target type and the
+        operand type then a new object shall not be created.
 
-   TBD: Do we want to prohibit copying if alignment of operand type is
-        an unequal multiple of the alignment of the target type?
+      - If the target type is an array type having aliased components and
+        the operand type is an array type having unaliased components,
+        then a new object shall be created.
 
-      - Otherwise, if there is no type that is an ancestor of both the target
-        type and the operand type, and if the target type is an array type
-        having aliased components, and if the operand type is not such an
-        array type, then creation of a new object is required.
-
-   AARM note:
-   This rule is needed to prevent creation of an aliased view of an
-   unaliased array element.
-
-      - Otherwise, creation of a new object is permitted. [It is expected
-        that a new object will be created if the two types have incompatible
-        representations, but that is not required by this rule.]
+      - Otherwise, it is unspecified whether a new object is created.
 
    If a new object is created, then the initialization of that object is
    an assignment operation.
@@ -138,7 +81,6 @@ Append at the end of Dynamic Semantics section of 4.6:
    AARM note: This makes a difference in the case of converting from
    an array type with unaliased components to one with aliased components
    if the element type has a controlled part.
-
 
 Append after 3.10.2(10/3):
 
@@ -152,26 +94,30 @@ In 6.2(10/3), replace
 
 with
 
-   For a parenthesized expression, qualified_expression, or view conversion,
-   this object is the one associated with the operand.
+   For a parenthesized expression, qualified_expression, or
+   view conversion, this object is the one associated with the operand.
    For a value conversion, the associated object is the anonymous result
    object if such an object is created (see 4.6); otherwise it is the
    associated object of the operand.
 
 !discussion
 
-[Editor's musings without understanding the above very well:
+The Ada 2012 never defines the accessibility of value conversions. However,
+these are expected to be able to change representations (as described in
+13.6), and such a change surely will require a copy. If the type contains
+aliased components, surely those will need to be copied, too.
 
-The statically checked rule almost certainly is incompatible in some cases.
-We need to develop some examples to see how severe this might be.
+Thus, simply designing a rule to make cases like the one in the question
+directly illegal doesn't fix anything. Moreover, as it needs to be enforced
+in an assume-the-worst manner in generic bodies, it could make existing
+code that has no problem illegal. That doesn't seem very promising.
 
-The dynamically checked rule doesn't have an inconsistency (runtime
-incompatibility) unless something nasty is happening. But of course there is a
-runtime overhead in some cases.
-
-Note that the "dynamic" wording defines the accessibility level of a value
-conversion; this might cause some incompatibility (as it might cause
-accessibility checks to fail that currently succeed).
+Rather, we explicitly define the copying done by a value conversion,
+and define the accessibility of such a conversion when it is copied to
+be similar to that for an aggregate defined in the same place. That will
+give such components a very short lifetime such that most attempts to
+take 'Access of them will fail an accessibility check. As most such
+checks are made statically, this will not add much overhead.
 
 !ACATS test
 
@@ -1886,7 +1832,7 @@ Sent: Friday, November 30, 2012  7:07 PM
 > Thanks to Randy for much useful discussion on this one.
 
 [Followed by new !wording and !discussion sections, in version /03 of the AI;
-most of the submitted !discussion was placed in the !question.]
+most of the submitted !discussion was placed in the !question. - Editor.]
 
 ****************************************************************
 
@@ -1896,5 +1842,58 @@ Sent: Saturday, December  1, 2012  10:15 AM
 > We don't want access values pointing to unaliased objects.
 
 I prefer your solution #2, and just require copying when aliased-ness disagrees.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Saturday, December 31, 2012  2:09 AM
+
+proposed AI12-0027 wording:
+
+[Followed by a new !wording section, in version /04 of the AI - Editor.]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December 31, 2012  6:59 AM
+
+...
+> Append at the end of Dynamic Semantics section of 4.6:
+>
+>     Evaluation of a value conversion of a composite type will either
+>     create a new anonymous object [(similar to the object
+>     created by the evaluation of an aggregate or a function call)] or
+>     yield a new view of the operand object without creating
+>     a new object:
+>
+>       - If the target type is a by-reference type and there is a
+>         type that is an ancestor of both the target type and the
+>         operand type then a new object shall not be created.
+
+No "shall" in dynamic semantics.
+>
+>       - If the target type is an array type having aliased components and
+>         the operand type is an array type having unaliased components,
+>         then a new object shall be created.
+
+Lose the "shall"
+>
+>       - Otherwise, it is unspecified whether a new object is created.
+>
+>    If a new object is created, then the initialization of that object is
+>    an assignment operation.
+>
+>    AARM note: This makes a difference in the case of converting from
+>    an array type with unaliased components to one with aliased components
+>    if the element type has a controlled part.
+>
+>
+> Append after 3.10.2(10/3):
+>
+>    The accessibility of a value conversion (see 4.6) is defined as for an
+>    aggregate. ...
+
+This still makes me nervous.  We need to look at all places "aggregate"
+appears in 3.10.2.
 
 ****************************************************************
