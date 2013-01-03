@@ -1,4 +1,4 @@
-!standard A(3/2)                                   12-12-04    AI12-0052-1/01
+!standard A(3/2)                                   13-01-02    AI12-0052-1/02
 !standard A.10.3(21)
 !standard A.16(123/2)
 !standard A.16(30/2)
@@ -10,10 +10,10 @@
 !subject Implicit objects are considered overlapping
 !summary
 
-Implicit objects (like the default output file in Text_IO and the current
-default directory in Directories) defined in language-defined are considered
-implicit parameters to the associated routines for the purposes of determining
-whether A(3) applies.
+Implicitly referenced objects (like the default output file in Text_IO and the
+current default directory in Directories) defined in language-defined units are
+considered implicit parameters to the associated routines for the purposes of
+determining whether A(3) applies.
 
 A(3) applies to any pair of concurrent calls to language-defined subprograms,
 not just to calls to the same subprogram.
@@ -25,9 +25,9 @@ is not expected to work. The justification is that A(3) says that
 language-defined operations have to work when "nonoverlapping" objects
 are involved. Clearly a file "overlaps" with itself.
 
-However, the situation is murkier when on of the default files is involved.
+However, the situation is murkier when one of the default files is involved.
 The default files are not parameters to the operations in question, so the
-A(3) rules doesn't (obviously) apply to them.
+A(3) rules don't (obviously) apply to them.
 
 While it might be possible to tease out that these are the same objects,
 it would better to mention this explicitly, right? (Yes.)
@@ -45,6 +45,13 @@ reentrant in the sense that concurrent calls on {any language-defined}[the same]
 subprogram perform as specified, so long as all parameters that could be passed
 by reference denote nonoverlapping objects.
 
+For the purpose of determining whether concurrent calls on text input-output
+subprograms are required to perform as specified above, when calling a
+subprogram within Text_IO or its children that implicitly operates on one of the
+default input/output files, the subprogram is considered to have a
+parameter of Current_Input or Current_Output (as appropriate).
+
+Add AARM notes:
    AARM Ramification: So long as the parameters are disjoint, concurrent calls
    on the same language-defined subprogram, and concurrent calls on two
    different language-defined subprograms are required to work. But concurrent
@@ -53,50 +60,26 @@ by reference denote nonoverlapping objects.
    shared variables) unless both subprograms are required to pass the associated
    parameter by-copy.
 
+   This rule applies to all language-defined subprograms, including those
+   defined in packages that manage some global state (like environment
+   variables or the current directory). Unless specified above, such subprograms
+   need to work when the explicit parameters are not overlapping; in particular,
+   the existence of the global state is not considered. Packages with global
+   state may require some locking in order to avoid violating this rule.
+   End AARM Ramification.
+
 Add after A.10.3(21):
 
-Implementation Requirements
+AARM Discussion:
 
 For the purpose of determining whether concurrent calls on text input-output
-subprograms are required to perform as specified (see Annex A), when calling a
-subprogram within Text_IO or its children that implicitly operates on one of the
-default input/output files, the subprogram should be considered to have a
-parameter of Current_Input or Current_Output (as appropriate).
-
-[Editor's note: This is an Implementation Requirement because the original
-rule is an ImplReq. None of the other headings ("Implementation Permissions",
-and so on) made any more sense to me. See also the !discussion.]
-
-
-Add after A.16(123/2):
-
-[in Implementation Requirements]
-
-For the purpose of determining whether concurrent calls on directory
-subprograms are required to perform as specified (see Annex A), when calling a
-subprogram within Directories or its children that implicitly operates on
-the current default directory, the subprogram should be considered to have
-a parameter representing the current default directory.
-
-AARM Ramification:
-This means that concurrent calls on operations that set or read the current
-default directory are not required to work. (They might work if the underlying
-system has the needed protection.)
-
-Add after A.17(30/2):
-
-Implementation Requirements
-
-For the purpose of determining whether concurrent calls on environment
-variable subprograms are required to perform as specified (see Annex A), when
-calling a subprogram within Environment_Variables, the subprogram should be
-considered to have a parameter representing the entire set of environment
-variables.
-
-AARM Ramification:
-This means that concurrent calls on environment variable operations are not
-required to work. (They might work if the underlying system has the needed
-protection, or if the calls only involve reading.)
+subprograms are required to perform as specified, subprograms that implicitly
+operate on one of the default input/output files are considered to have a
+parameter of Current_Input or Current_Output (as appropriate). The result of
+Current_Output is considered to be overlapping with the file give to the latest
+call of Set_Output (or Standard_Output if Set_Output hasn't been called); a
+corresponding consideration applies to the result of Current_Input.
+See the introduction of Annex A for details.
 
 !discussion
 
@@ -134,32 +117,35 @@ There was concern that wording is also needed for "Current_Error", but as it is
 never a default file for any operation in Ada.Text_IO, the wording given for
 the insertion after A.10.3(21) does not need to mention it.
 
-[Arguably, there is a separate question about whether the result of
-Current_<something> overlaps with the original file passed as Set_<something>
-(including Standard_<something> initially). This has nothing to do with default
-files, so it doesn't belong in this piece of new wording. But it might be
-worth saying something about it. I think an AARM note would be enough, after
-all A.10.3(22/1) makes it clear that the objects are tightly tied together.]
+We mention "or its children" in the Text_IO wording so that calling a routine
+defined in a package like Text_IO.Bounded_IO is covered appropriately.
 
-We mention "or its children" in these wordings so that calling routines in
-packages like Text_IO.Bounded_IO and Directories.Information are covered
-appropriately.
 
-For the cases of the current default directory and environment variables,
-we don't want to require any overhead beyond that used by the target system.
-Moreover, reading these (especially environment variables) can be common in
-programs, and we don't want to require locking overhead. Thus we do not
-require these to work.
+We considered applying similar rules for the cases of the current default
+directory and environment variables, where the "state" would considered
+an implicit parameter. However, this would make these packages harder to use
+in a multitasking system. Moreover, the calls are likely to be expensive anyway
+(if this state is managed by the underlying target OS), and it is quite
+likely that the target OS already provides some guarentees for concurrent
+access.
 
-[Are there any other "global" data structures used by the definition of
-language-defined packages? Clocks and locales only can be read (if setting
-is provided, it's not via a language-defined subprogram, and thus isn't covered
-by A(3)). Implementations can do what they want with implementation-defined
-routines. Any others?]
+Therefore, we require these packages to "work" when called concurrently.
+Extra locking might be necessary (especially when the packages are implemented
+without using an underlying OS).
+
+
+We don't believe that there are any other "global" data structures used by the
+definition of language-defined packages that could require locking. Clocks and
+locales only can be read (if setting is provided, it's not via a language-defined
+subprogram, and thus isn't covered by A(3)). Of course, implementations can do
+what they want with implementation-defined routines.
 
 !ACATS test
 
-An ACATS x-Test should be created to test these rules.
+An ACATS C-Test could be created to test these rules, but it would be difficult
+to usefully test (because it would be hard to force concurrent calls to
+language-defined subprograms), and many interesting cases (like Text_IO) would
+usually be overlapping and thus not required to work.
 
 !appendix
 
