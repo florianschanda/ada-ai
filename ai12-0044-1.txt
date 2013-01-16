@@ -1277,7 +1277,1163 @@ Let's not forget multitasking!
 
 ****************************************************************
 
-[Editor's note: There are 39 more messages on this topic (including a few
-that are off-topic) that remain to be filed.]
+From: Geert Bosch
+Sent: Thursday, October 4, 2012  10:24 PM
+
+> Of course, I'm essentially arguing Erhard's position for him. That
+> sometimes leads down an incorrect path. It would be valuable to hear
+> from him and others who thought that checking "in" parameters was
+> important, to see what they think now.
+
+Maybe the rule should be that type invariants should be checked for IN
+parameters if they have limited types. After all, these are the types that one
+uses for the Rosen trick with references to variable views.
+
+Incidentally, these also correspond to the File_Type and Generator types where
+subprograms take IN parameters of these types and modify them.
+
+In order to prevent recursive calls on the invariant checking routines, it
+probably would make sense to have a separate entry points (or wrapper functions)
+for the variants that performs invariant checks and the ones that don't. This
+seems more like an implementation nuisance than a fundamental problem.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October 5, 2012  12:14 AM
+
+...
+> In order to prevent recursive calls on the invariant checking
+> routines, it probably would make sense to have a separate entry points
+> (or wrapper functions) for the variants that performs invariant checks
+> and the ones that don't. This seems more like an implementation
+> nuisance than a fundamental problem.
+
+I've been suggesting that be done explicitly since my message Monday. Trying to
+do it automatically is full of problems: when do you call the unchecked version
+and when do you call the checked version? We looked at options for doing that
+early on, and nothing looked very appealing.
+
+Using an unchecked version only when called directly from an invariant
+expression might work, but it wouldn't fix much (a lot of functions call other
+functions, which would still be checked), and more importantly would be a large
+implementation burden (it would require context-dependent code generation for
+expressions, something not necessary currently, plus every public routine would
+need two versions in case it was called from a type invariant - we've "proved"
+the Erhard's suggestion wouldn't work, so only a wrapper could work). There also
+would be a small overhead in the normal case (as the checking would have to be
+in the wrapper, thus an extra level of calls would be required for the normal
+checked calls). All told, I don't think this idea is very appealing.
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Friday, October 5, 2012  2:38 AM
+
+>> You are going to force all of the functionality required to establish
+>> validity into expression functions.  That could be a big disruption
+>> on existing code, making it harder to add Type_Invariant to existing
+>> abstractions.
+>
+> Not at all. You can always call private functions from the invariant
+> code, and as I showed on Monday, it's easy to make a private version
+> of a public function.
+
+I was about to say the same thing.
+
+>> In my view, many invariants are going to be completely private to the
+>> implementation, and there is no need to expose them at all to the
+>> client, nor expose all of their functionality in the private part.
+>
+> If they're completely private, the issue never arises, because we
+> don't check invariants on private subprograms. Ever. The issue only
+> arises when calling *public* functions from an invariant, and the
+> solution mainly is to call private versions instead. But we have to
+> have some solution for the top-level function (which necessarily has
+> to be public), and the expression function idea works as well as any other
+> proposed.
+
+Given the variety of solutions proposed, I'd like to say that the final solution
+should rather be simple than complete. No solution will ever 'close all the
+holes'. Even the recent proposal by Geert that only IN parameters of limited
+types are checked does not account for cases where the type is just a
+(non-limited) index in a global data structure. I see two simple solutions:
+
+- either do not check type invariants on IN parameters;
+- or do not check type invariants on IN parameters of expression functions.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, October 5, 2012  8:51 AM
+
+> Let's not forget multitasking!
+
+Yeah.
+
+We talked about following the Eiffel model, which checks at run time "am I
+inside the class?" or "am I inside the assertion check?" or something like that.
+But we decided it's way too complicated, both implementation-wise and
+programmer-wise.
+
+The Eiffel model was invented before Eiffel had multi-threading, by the way.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, October 5, 2012  9:02 AM
+
+> and more importantly would
+> be a large implementation burden (it would require context-dependent
+> code generation for expressions, something not necessary currently,
+
+That seems a bogus concern, this seems a trivial implementation issue,
+esppecially since we already have context dependent things, like where 'Old is
+used.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October 5, 2012  12:54 PM
+
+Huh? I'm talking about context-dependent *code generation*, not legality checks
+(these are separate phases in our compiler, and I would expect in most
+compilers). 'Old gets generated the same way anywhere it legally appears, it
+doesn't depend on context. There is an extra pass to extract and evaluate 'Old
+prefixes at the start of the subprogram, but that has nothing to do with the
+code generated to evaluate a use of 'Old (it will be a totally separate walk of
+the tree, sharing nothing with normal expression code generation).
+
+The only context our compiler uses for code generation is the expected type of
+the subexpression. Everything else comes from the resolved symbols in the
+expression. I could imagine some solution to context-dependent calls using an
+extra tree walk and duplicate symbol table entries, but it is *very* heavy
+compared to the actual problem.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October 5, 2012  1:00 PM
+
+...
+> Given the variety of solutions proposed, I'd like to say that the
+> final solution should rather be simple than complete. No solution will
+> ever 'close all the holes'. Even the recent proposal by Geert that
+> only IN parameters of limited types are checked does not account for
+> cases where the type is just a (non-limited) index in a global data
+> structure. I see two simple solutions:
+>
+> - either do not check type invariants on IN parameters;
+> - or do not check type invariants on IN parameters of expression
+> functions.
+
+You left out the simplest solution at all: have an aspect to declare that a
+routine is used in a type invariant. In which case no invariant checks are done
+for the routine; otherwise, the checks are done as specified in the language.
+
+That's more flexible than just limiting to expression functions, and has far
+fewer holes than never checking invariants on IN parameters (and would never
+cause a hole unintentionally, as the expression function rule might).
+
+No one seems to have seriously considered this idea other than me; that could be because everyone hates it, but no one has said that or tried to explain why. More likely it's because no one noticed the idea.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, October 5, 2012  1:11 PM
+
+> I see two simple solutions:
+>
+> - either do not check type invariants on IN parameters;
+> - or do not check type invariants on IN parameters of expression functions.
+
+I believe whatever solution we produce should prevent infinite recursion at
+compile-time due to type-invariant checks, in all but the most obscure cases.  I
+don't think the programmer should have to think about/worry about this problem
+at all, and shouldn't have to create wrappers, etc. to avoid infinite recursion.
+The programmer should be able to write the most natural and appropriate type
+invariant, and it should work as expected.
+
+To me it is much better to omit the check on an IN parameter, than to make
+Type_Invariant a burden to use properly.  But perhaps there is some clever
+solution which gets the check on most IN parameters without introducing the
+recursion for the "typical" situation. (The "expression function" solution
+doesn't do it for me because choosing whether or not to use an expression
+function seems like an independent decision, and if there are already visible
+out-of-line functions that are useful in defining the invariant, duplicating
+their logic or moving their logic into an expression function seems an
+unnecessary burden on using Type_Invariant.)
+
+For the types that do involve levels of indirection where "IN" mode is
+essentially a "lie", the implementor of the abstraction can always add
+postconditions to check the invariant explicitly on those few operations that
+have this characteristic.  This also reduces the performance burden of
+Type_Invariant, by *not* performing it in all of those situations where the "IN"
+mode was truthful, and no noticeable change to the state of the object was
+occurring.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, October 5, 2012  1:17 PM
+
+> ... No one seems to have seriously considered this idea other than me;
+> that could be because everyone hates it, but no one has said that or
+> tried to explain why. More likely it's because no one noticed the idea.
+
+I don't like this idea.  This is adding complexity to Type_Invariant, and
+requires you to indicate that an operation is used somewhere in the definition
+of a type invariant when that seems potentially irrelevant to the purpose.
+
+What would make more sense to me would be the opposite, that is, identify places
+where an "in" parameter is a lie, and hence a Type_Invariant check is desired on
+the parameter.
+
+E.g.
+     procedure Read(File : File_Type; Item : out Item_Type)
+       with Check_Invariant => File;
+
+This provides useful documentation, and if it results in infinite recursion,
+then the programmer gets just what they deserve for calling an operation like
+"Read" from a Type_Invariant for File_Type.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October 5, 2012  1:40 PM
+
+> I believe whatever solution we produce should prevent infinite
+> recursion at compile-time due to type-invariant checks, in all but the
+> most obscure cases.  I don't think the programmer should have to think
+> about/worry about this problem at all, and shouldn't have to create
+> wrappers, etc.
+> to avoid infinite recursion.  The programmer should be able to write
+> the most natural and appropriate type invariant, and it should work as
+> expected.
+
+This is why I find the aspect solution appealing. Add the aspect to any routine
+you call from the invariant, and you are done. There is no wrappers required,
+and the compiler can warn if you call a routine that doesn't have the aspect.
+
+> To me it is much better to omit the check on an IN parameter, than to
+> make Type_Invariant a burden to use properly.  But perhaps there is
+> some clever solution which gets the check on most IN parameters
+> without introducing the recursion for the "typical" situation.
+> (The "expression function" solution doesn't do it for me because
+> choosing whether or not to use an expression function seems like an
+> independent decision, and if there are already visible out-of-line
+> functions that are useful in defining the invariant, duplicating their
+> logic or moving their logic into an expression function seems an
+> unnecessary burden on using
+> Type_Invariant.)
+
+Minor quibble here: neither "duplicating their logic" or "moving their logic
+into an expression function" is necessary. Instead, you make a private version
+of the routine (with a different name); rename the body to the new name; and
+provide an expression function that calls the private version to complete the
+public version. This is much better than duplicating the logic (if the logic can
+be in an expression function, it probably ought to be there anyway, so that
+change is probably for the better).
+
+I expect this construct to be fairly common even without considering the type
+invariant expression issue. It's quite common to need to call operations within
+the package while the invariant is violated, and calling a public operation in
+such a case would cause a bogus invariant failure. So you'll still need the
+workaround.
+
+Even so, your original point about the burden of rearranging the code stands.
+
+> For the types that do involve levels of indirection where "IN" mode is
+> essentially a "lie", the implementor of the abstraction can always add
+> postconditions to check the invariant explicitly on those few
+> operations that have this characteristic.  This also reduces the
+> performance burden of Type_Invariant, by *not* performing it in all of
+> those situations where the "IN" mode was truthful, and no noticeable
+> change to the state of the object was occurring.
+
+The whole point of type invariants is to eliminate the error-prone process of
+adding explicit checks to postconditions.
+
+You're rehashing all of the arguments that I made (and failed with) in
+Stockholm. If it wasn't good enough then, it's surely not good enough now. I
+realize that you were on the fence about this argument -- when I lost you on the
+topic was when I gave on it. But there were lots of people *not* on the fence,
+they didn't buy any of the above from the beginning and I'd be shocked if they
+started now. (In addition, the expression function suggestions make it fairly
+clear that at least in the case of expression functions, IN mode invariant
+checks can be omitted unless the expression function calls a private function
+that is not an expression function -- otherwise, it is not possible for the
+function to modify its parameters, so no check could possibly fail.)
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Saturday, October 6, 2012  4:47 PM
+
+>> > I'd still have a semantic rather than a "syntactic" rule, partly
+>> > because all the rules discussed so far have a "fragile feel" to
+>> > them, partly because it is hard to rationalize them froma user
+>> > perspective.
+
+> Of course, I'm essentially arguing Erhard's position for him. That
+> sometimes leads down an incorrect path. It would be valuable to hear
+> from him and others who thought that checking "in" parameters was
+> important, to see what they think now.
+
+There are two concerns that I am trying to get resolved:
+
+The infinite recursion:
+- I am unsure that not checking "in" parameters solves the infinite
+  recursion problem. It solves mostly the case at hand, i.e., a
+  simple function call in the type invariant, where the recursion is
+  blatently obvious. What if that function calls on procedures that
+  do have in out parameters, though? I suspect that "in" parameters
+  take the bad rap for a problem that runs much deeper.
+
+The IN parameters:
+- I am trying to preserve the notion that a type invariant IS
+  GUARANTEED to hold outside of primitive ops. Any model of
+  verification that I am aware of is based on this property.
+  That's why it is called a type invariant as opposed to
+  ocasionally checked type assertion. ;-)
+  I would prefer Ada not to be the exception to this rule,
+  merely because it is perceived by some to be too expensive to implement.
+  That is my main concern in this issue. Whatever solutions are being
+  presented, this is my yard stick for being for or against it.
+  I do not care so much what the rules will be, but give me that guarantee.
+  (When it comes to IN parameters, this is both a question of
+   Rosen semantics and of modified indirect hidden components.)
+
+(Aside: I did think about multi-tasking. I presumed the stack to be
+thread-local, but failed to write it down.)
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Monday, October 8, 2012  3:03 AM
+
+> What would make more sense to me would be the opposite, that is,
+> identify places where an "in" parameter is a lie, and hence a
+> Type_Invariant check is desired on the parameter.
+>
+> E.g.
+>      procedure Read(File : File_Type; Item : out Item_Type)
+>        with Check_Invariant => File;
+>
+> This provides useful documentation, and if it results in infinite
+> recursion, then the programmer gets just what they deserve for calling
+> an operation like "Read" from a Type_Invariant for File_Type.
+
+Like Randy said, this puts the burden on the programmer to annotate each
+subprogram with the appropriate aspect. Following your idea, it would be better
+to identify the places where a type is not "flat", that is, you can expect that
+taking it as an IN parameter still allows modifications of the parameter
+(whether through Rosen semantics or modified indirect hidden components, like
+Erhard said):
+
+   type File_Type is limited private with
+     Check_Invariant_In => True;
+
+The meaning of the above would be: "check the type invariant for each part of an
+IN parameter of type File_Type, as if it was an IN OUT parameter".
+
+This does not detect a possible infinite recursion problem due to type
+invariants being called, but this problem seems better handled with static
+analysis than with a language rule.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 8, 2012  10:07 AM
+
+> The meaning of the above would be: "check the type invariant for each
+> part of an IN parameter of type File_Type, as if it was an IN OUT parameter".
+
+The name of the aspect is a bit awkward ;-), but it seems we can agree that the
+*default* should be don't check "in" parameters, and only if the programmer
+makes it clear that there are levels of indirection should we start checking an
+"in" parameter.  Whether it is per-type or per-subprogram seems like a smaller
+concern.
+
+I prefer per-subprogram because it clarifies which subprograms take advantage of
+the indirection to update the parameter, and which don't.  This is like a "poor
+man's" global-in-out annotation.   Perhaps on the subprogram:
+
+    with Modifies => <in_parameter>
+  or
+    with Modifies => (<in_param1>, <in_param2>, <in_param3>, ...)
+
+which when combined with a Type_Invariant, results in a check on the invariant
+upon return from the subprogram on the specified IN parameters.
+
+> This does not detect a possible infinite recursion problem due to type
+> invariants being called, but this problem seems better handled with static
+> analysis than with a language rule.
+
+The per-subprogram approach *does* solve the infinite recursion problem, which
+is the original problem we are trying to solve!
+
+Also, the per-subprogram approach can be combined with some static analysis to
+allow the compiler/static-analyzer to complain if you have a Type_Invariant on a
+type, and you don't correctly identify the visible operations that modify IN
+parameters.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October 8, 2012  10:28 AM
+
+> I prefer per-subprogram because it clarifies which subprograms take
+> advantage of the indirection to update the parameter, and which don't.
+
+But we already have a per-subprogram syntax for that: "in out".
+Even better than per-subprogram -- it's per-parameter.
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Monday, October 8, 2012  10:33 AM
+
+> I prefer per-subprogram because it clarifies which subprograms take
+> advantage of the indirection to update the parameter, and which don't.
+> This
+> is like a "poor man's" global-in-out annotation.   Perhaps on the
+> subprogram:
+>
+>     with Modifies => <in_parameter>
+>   or
+>     with Modifies => (<in_param1>, <in_param2>, <in_param3>, ...)
+>
+> which when combined with a Type_Invariant, results in a check on the
+> invariant upon return from the subprogram on the specified IN parameters.
+
+It seems risky to add such an aspect to Ada 2012 now, given that a lot of
+discussion went into the similar AI05-0186 (global-in and global-out
+annotations) without reaching a consensus. Maybe the best solution now is to do
+nothing, and add checks on IN after adding global aspects to Ada.
+
+>> This does not detect a possible infinite recursion problem due to
+>> type invariants being called, but this problem seems better handled
+>> with static analysis than with a language rule.
+>
+> The per-subprogram approach *does* solve the infinite recursion
+> problem, which is the original problem we are trying to solve!
+
+How does it solve it? A real solution would have to detect at run-time that the
+type invariant is already being checked for the object, before attempting to
+check it again.
+
+> Also, the per-subprogram approach can be combined with some static
+> analysis to allow the compiler/static-analyzer to complain if you have
+> a Type_Invariant on a type, and you don't correctly identify the
+> visible operations that modify IN parameters.
+
+This requires having proper aspects for these effect (read/write) annotations, I
+think.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October 8, 2012  10:30 AM
+
+> The name of the aspect is a bit awkward ;-)
+
+bit awkward????
+it's HORRIBLE!
+
+I would just call it Check_Invariants
+and let documentation explain the details.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October 8, 2012  10:35 AM
+
+>> I prefer per-subprogram because it clarifies which subprograms take
+>> advantage of the indirection to update the parameter, and which don't.
+>
+> But we already have a per-subprogram syntax for that: "in out".
+> Even better than per-subprogram -- it's per-parameter.
+
+I agree that labeling such parameters IN OUT is not terrible, yes, it's not
+technically accurate, but it's more reflective of what's going on than labeling
+them IN and changing them!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 8, 2012  10:46 AM
+
+It is a bit late to change the mode of the File_Type parameters in Get_Line and
+Put_Line in Text_IO!
+
+In any case, so long as the default is *not* to check IN parameters for type
+invariants, I am happy.  If the programmer has to take some concrete action
+(over and above using Type_Invariant, that is) to create the possibility of
+infinite recursion, then we can say "caveat emptor."  As it is now, almost *any*
+use of Type_Invariant is likely to produce infinite recursion, and that makes
+Type_Invariant pretty nearly useless in my view.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October 8, 2012  12:04 AM
+
+> It is a bit late to change the mode of the File_Type parameters in
+> Get_Line and Put_Line in Text_IO!
+
+Sure, but the issue is much more general than Text_IO, which is little used in serious programs anyway.
+>
+> In any case, so long as the default is *not* to check IN parameters
+> for type invariants, I am happy.  If the programmer has to take some
+> concrete action (over and above using Type_Invariant, that is) to
+> create the possibility of infinite recursion, then we can say "caveat
+> emptor."  As it is now, almost *any* use of Type_Invariant is likely
+> to produce infinite recursion, and that makes Type_Invariant pretty
+> nearly useless in my view.
+
+Right, I think the default should be not to check!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October 8, 2012  12:35 PM
+
+> It is a bit late to change the mode of the File_Type parameters in
+> Get_Line and Put_Line in Text_IO!
+
+Sure.  If the implementer of Text_IO (or any other existing package that can't
+have its interface modified) wants to check invariants on 'in' parameters,
+they'll have to do it by hand if we go this route.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October 8, 2012  12:39 PM
+
+The likelihood of any implementor doing *anything* with Text_IO is amazingly
+minimal! :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 8, 2012   5:53 PM
+
+> I prefer per-subprogram because it clarifies which subprograms take
+> advantage of the indirection to update the parameter, and which don't.
+
+I don't. That puts the burden back on the programmer to know where these
+modifications might happen. But a significant part of the benefit of
+Type_Invariant over Post is that it gets automatically added everywhere it is
+needed, even if the programmer doesn't know that it is needed.
+
+It is a property of the invariant expression whether or not it can change via
+indirect components, and that is where any extra annotation should be.
+
+(Note, however, that having such an annotation does nothing to fix the recursion
+problem; it just limits it to cases with indirect components. I still think we
+need separate annotation to mark routines used in invariants; at the very least
+for Type_Invariant'Class, whose function call must be public.)
+
+If the real solution to this problem is global in/out annotations, then we
+better get back to work on them (I don't want any "poor man's" solution to that
+problem - it's far too important for half solutions) -- but I'm very skeptical
+that those would help at all.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 8, 2012  6:29 PM
+
+...
+> There are two concerns that I am trying to get resolved:
+>
+> The infinite recursion:
+> - I am unsure that not checking "in" parameters solves the infinite
+>   recursion problem. It solves mostly the case at hand, i.e., a
+>   simple function call in the type invariant, where the recursion is
+>   blatently obvious. What if that function calls on procedures that
+>   do have in out parameters, though? I suspect that "in" parameters
+>   take the bad rap for a problem that runs much deeper.
+
+This problem is unfixable (in any automatic way).
+
+It can't be fixed dynamically. You had suggested a solution involving wrapping
+every check with code like:
+   if Current_Invariant /= this then <<Make check>> end if;
+
+But this doesn't work for two reasons:
+(1) Tasking. Most packages containing private types are library-level. The
+    intent is that the type invariant checks are added automatically to the body
+    of these routines. "Current_Invariant" above has to be a per-task global (to
+    avoid tasking issues). Since these routines are library-level, a global
+    can't be on any stack (there is no stack context passed into library-level
+    routines). That only leaves two ways of accessing "Current_Invariant":
+    (A) pass it as a parameter to every such routine. That is a nasty
+	distributed overhead, also requiring wrappers for uses of 'Access
+	(Janus/Ada has to do that for generic sharing, and I wouldn't wish that
+	on my worst competitor).
+    (B) Make it a task attribute. But the performance of task attributes can be
+	slow, and moreover, there is no current requirement that Ada compilers
+	even implement them. (And even if they do, they can limit the number and
+	size allowed -- C.7.2(29) -- not a theorectical concern -- I had to
+	modify the task attribute ACATS tests to allow rejection because some
+	existing implementations only allowed a single task attribute.)
+(2) Value semantics. Type invariants are allowed on all private types, including
+    those completed by by-copy types like integers and access values. In this
+    case, "this" is not well-defined, because the object in question is not
+    available (or may not even exist) within the subprogram.
+
+To take a concrete example, if a private type is an integer handle, a call from
+within the package might pass an expression:
+     Do_Something (Handle + 1, ...);
+What is "this" for "Handle + 1"? If we simply use the value in these cases,
+besides needing a much more complicated definition, we might fail to perform the
+check because some old invariant check happened to use the same value. That
+doesn't sound good.
+
+So I don't think there is any reliable fix for this problem that would work
+dynamically.
+
+A static fix would require that only private routines or those public marked (or
+allowed by rule) to be used in invariant expressions. The top level of any such
+rule could be checked easily, but what about calls in subprograms called by the
+invariant expression? There is no way for a compiler to check such a rule,
+unless we adopted a subprogram classification just for invariant expressions,
+and disallowed calling anything other than those subprograms from within
+themselves. That seems pretty complex and draconian.
+
+A static analysis tool could make such a check, of course, but not an Ada
+compiler.
+
+So I think this problem is unfixable. We could adopt one or more rules to
+minimize it, but it can't be eliminated.
+
+> The IN parameters:
+> - I am trying to preserve the notion that a type invariant IS
+>   GUARANTEED to hold outside of primitive ops. Any model of
+>   verification that I am aware of is based on this property.
+>   That's why it is called a type invariant as opposed to
+>   occasionally checked type assertion. ;-)
+>   I would prefer Ada not to be the exception to this rule,
+>   merely because it is perceived by some to be too expensive
+>   to implement.
+>   That is my main concern in this issue. Whatever solutions are being
+>   presented, this is my yard stick for being for or against it.
+>   I do not care so much what the rules will be, but give me
+>   that guarantee.
+>   (When it comes to IN parameters, this is both a question of
+>    Rosen semantics and of modified indirect hidden components.)
+
+This is the crux of the issue. If you believe this, then I don't think anything
+that excepts "IN" parameters generally is going to be acceptable. It would have
+to be limited to cases where "IN" parameters cannot be modified or by some
+explicit exception annotation. The former is the expression function case
+previously proposed (it is quite hard to write an expression function that could
+modify an "IN" parameter and *not* have it checked somewhere else); the latter
+is an annotation asking that a particular function not have "IN" parameters
+checked.
+
+Both of these minimize likelihood of hitting the infinite recursion in
+"sensible" code, but it can happen. Compilers can sometimes warn about it, and
+static analysis tools can always see the problem. The workaround is easy and
+will be needed anyway (I think).
+
+What would not be acceptable is having to mark routines that might need "IN"
+parameters checked, because that means that the invariant only holds if the
+programmer is smart enough to find all of the places that need to be marked.
+That doesn't seem like a guarantee to me.
+
+> (Aside: I did think about multi-tasking. I presumed the stack to be
+> thread-local, but failed to write it down.)
+
+As noted above, I don't see any way for that to help. Feel free to set me
+straight if I'm wrong.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Monday, October 8, 2012  7:46 PM
+
+> The infinite recursion:
+   ...
+> So I think this problem is unfixable. We could adopt one or more rules
+> to minimize it, but it can't be eliminated.
+
+Well, I do not believe that yet. What about the notion of (unchecked) inner
+calls vs. (checked) outer calls of primitive ops, with the understanding that
+calls in pre/post/invariants qualify as inner calls? It is easily decided
+statically (because "inner" is a syntactic concept), enforces the invariant at
+the interface to the outside world, but does not enforce it "internally", which
+is how type invariants usually work, don't they?
+
+Yes, Tuck said that this is not the present Ada model. But, with that model, you
+really have to work hard to create the infinite recursion (via a call-out that
+calls back in - the latter does NOT qualify as an inner call even if the
+call-chain to it originated "inside").
+
+Anyway, this is probably academic, since there is no support for changing the
+model significantly, and the "modified-in"-aspect addresses most concerns. I
+don't like it, but I am willing to live with it, since the creator of the type
+has the necessary controls.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 8, 2012  8:34 PM
+
+> > The infinite recursion:
+>    ...
+> > So I think this problem is unfixable. We could adopt one or more
+> > rules to minimize it, but it can't be eliminated.
+>
+> Well, I do not believe that yet. What about the notion of
+> (unchecked) inner calls vs. (checked) outer calls of primitive ops,
+> with the understanding that calls in pre/post/invariants qualify as
+> inner calls?
+> It is easily decided statically (because "inner" is a syntactic
+> concept), enforces the invariant at the interface to the outside
+> world, but does not enforce it "internally", which is how type
+> invariants usually work, don't they?
+
+I don't believe that this is "easily" decided statically, and in extreme cases,
+it isn't even known statically.
+
+The problem here is that you are bringing the notions of visibility and scope
+into this problem, and are going to have to do so in unintuitive ways.
+Specifically, you are going to have to have some sort of rules defining what is
+"inner" and what is "outer" in child packages. I'm sure consistent rules could
+be found, but I much doubt that they would be obvious.
+
+In addition, you've got cases (like composition of equality) where you don't
+actually know whether the call is inner or outer (depending on what you mean by
+inner and outer). If your implementation is mostly based on thunks for record
+types (as ours is), you'd probably have to pass an "inner/outer" flag into every
+thunk. Yuck.
+
+Equality, in particular, is likely to be used a lot in invariant expressions,
+and I can imagine how composition could come into play in such cases. I don't
+think you'd actually fix anything unless the rule was quite complex.
+
+> Yes, Tuck said that this is not the present Ada model. But, with that
+> model, you really have to work hard to create the infinite recursion
+> (via a call-out that calls back in - the latter does NOT qualify as an
+> inner call even if the call-chain to it originated "inside").
+
+In order for that to be the case, equality composition would have to be both
+inner and outer. I suspect that would not be easy to explain. (Imagine a record
+type containing an access type that designates the access type, and a
+user-defined equality for the access type, all in a single package.)
+
+> Anyway, this is probably academic, since there is no support for
+> changing the model significantly, and the "modified-in"-aspect
+> addresses most concerns. I don't like it, but I am willing to live
+> with it, since the creator of the type has the necessary controls.
+
+Well, I don't like such an aspect either, unless it is applied to the type
+invariant (not subprograms). (Applying such an aspect to subprograms eliminates
+most of the value of type invariants, which is to detect bugs that you've never
+imagined [after all, if you imagined them, you probably eliminated them from the
+design; it's the problems you didn't think of that bite so hard]. If they aren't
+automatically checked, you'll never find the actual bugs.)
+
+But if that's the case, the recursion problem still remains. That's why I prefer
+almost any other solution that has been proposed (but especially the
+"Do_not_check_invariants_on_in_parameters" aspect).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October 8, 2012  6:41 PM
+
+> I had to modify the
+> task attribute ACATS tests to allow rejection because some existing
+> implementations only allowed a single task attribute.)
+
+I consider an implementation that allows only a single task attribute to be
+non-conforming from a practical point of view. Yes, formally it is allowed, but
+it also allowed to raise Storage_Error on the execution of every ACATS C tests,
+and no one would believe this is acceptable.
+
+The ACATS tests should be making sure that compilers have no unreasonable
+arbitrary limits on what they can accept, even though the RM in a formal sense
+allows any limits on anything, and as I say, allows SE to be raised anywhere.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 8, 2012  8:17 PM
+
+In this case, there is a specific rule (C.7.2(29)) allowing such an
+implementation, so it could not be justified to require anything else in the
+ACATS. This is not a general question of capacity, but rather a specific
+permission given in the Standard.
+
+In general, I agree with you, and I surely would not have made such a test
+change without the explicit permission to restrict the number of attributes. We
+could of course consider repealing or modifying C.7.2(29), but I think we'd need
+more of a reason than "I consider an implementation that allows only a single
+task attribute to be non-conforming from a practical point of view".
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October 8, 2012  8:49 PM
+
+> In this case, there is a specific rule (C.7.2(29)) allowing such an
+> implementation, so it could not be justified to require anything else
+> in the ACATS. This is not a general question of capacity, but rather a
+> specific permission given in the Standard.
+
+I still think it is unreasonable to intepret C.7.2(29) to allow arbitrary and
+ludicrous restrictions. The idea of this clause is to acknowledge that in some
+operating systems, there may be natural limits, but it is a distortion to allow
+this. After all you could even argue "I fully implement this feature, but the
+maximum number of task attributes is zero". This is of course nonsense. But a
+maximum number of 1 is just as nonensical.
+
+As I say, please remember the standard allows you to raise SE any time you feel
+like it!
+
+> In general, I agree with you, and I surely would not have made such a
+> test change without the explicit permission to restrict the number of attributes.
+> We could of course consider repealing or modifying C.7.2(29), but I
+> think we'd need more of a reason than "I consider an implementation
+> that allows only a single task attribute to be non-conforming from a
+> practical point of view".
+
+I don't remember this being discussed, but I may just be forgetting
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 8, 2012  9:33 PM
+
+> I don't remember this being discussed, but I may just be forgetting
+
+Well, I just looked this up, and it happened much longer ago than I thought.
+Indeed, it was one of the first test petitions I handled, in January of 1999.
+I'm not surprised that you forgot about it. It was discussed on the FRT list,
+including you and Tucker.
+
+Here's the complete ruling:
+
+This message conveys the ACAA ruling for the petition against for ACATS 2.1 test
+programs CXC7002 and CXC7003.  This petition is accepted.
+
+The petitioner states that the implementation permission C.7.2(29) allows an
+implementation to raise Storage_Error when instantiated Ada.Task_Attributes in
+these tests.
+
+The ACAA has consulted its panel of experts on this issue. While the experts
+agree that it is not desirable to allow implementations to essentially disable
+this feature, there is no agreement on what the minimum requirements ought to
+be. There is, however, agreement that more than one attribute should be
+supported, and that attributes should be able to hold an access value or
+similarly sized value.
+
+Therefore, the ACAA has modified the test CXC7002 to insure that all attributes
+tested are smaller than the size of an access value. The ACAA has modified test
+CXC7003 to print a Not_Applicable result if an exception is raised by the
+instantiation or first use of Set_Value for the Task_Attributes. The modified
+test are available on the ACAA web site (www.ocsystems.com/~acats/), and will be
+issued with the next Modified Tests List (2.1E).
+
+---------
+
+So I mis-remembered the "one attribute". CXC7002 actually requires two, of the
+size of an access value. (Hardly different, IMHO.)
+
+I think the problem really still comes down to: "there is no agreement on what
+the minimum requirements ought to be". In the absence of that, it would be hard
+to make any serious requirement in the ACATS or the RM.
+
+P.S. The FRT thread is interesting reading. I summarized it thusly at the
+time:
+"Well, I haven't seen this much flip-flopping since my dad drained the goldfish
+pond without removing the fish." ;-)
+
+Essentially, we started with a number of people saying that the tests were
+reasonable, and they shouldn't be modified (and a few others saying that
+anything should be allowed). Then (after more input from the petitioner),
+everyone flipped to a position of modify the tests to allow attributes to be
+limited to access size.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October 8, 2012  9:43 PM
+
+> I think the problem really still comes down to: "there is no agreement
+> on what the minimum requirements ought to be". In the absence of that,
+> it would be hard to make any serious requirement in the ACATS or the RM.
+
+Well there is also no agreement on the size of subprograms that must be handled
+or many other limits, but nevertheless the ACATS tests impose some reasonable
+limits.
+
+> Essentially, we started with a number of people saying that the tests
+> were reasonable, and they shouldn't be modified (and a few others
+> saying that anything should be allowed). Then (after more input from
+> the petitioner), everyone flipped to a position of modify the tests to
+> allow attributes to be limited to access size.
+
+Allowing attributes to be limited to access size is not unreasonable, allowing
+only two is bogus.
+
+A better approach in the RM would be to completely remove this paragraph. Then
+if an implementation has a GOOD reason for limiting the number or size, e.g. OS
+limitations, it can argue for an exception under the general rule of not
+requiring implementations to do unreasonable things.
+
+Oh well water under the proverbial bridge, does the affected implementation
+still exist? :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 8, 2012  10:03 PM
+
+...
+> Oh well water under the proverbial bridge, does the affected
+> implementation still exist? :-)
+
+The implementation exists (I've had occasional contact with that vendor, most
+recently in July), but whether the specific target is still supported I have no
+knowledge.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 9, 2012   9:06 AM
+
+>... C.7.2(29)
+
+is off topic for this thread, which is already too long for me to follow.  Could
+we please stay focussed?  (I must admit that the side issue is indeed more
+interesting!)
+
+Randy wrote, quoting himself:
+
+> "Well, I haven't seen this much flip-flopping since my dad drained the
+> goldfish pond without removing the fish." ;-)
+
+Better not run for Pres.  That's right up there with Romney's dog-on-car-roof
+story.  ;-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 9, 2012   9:07 AM
+
+> The likelihood of any implementor doing *anything* with Text_IO is
+> amazingly minimal! :-)
+
+Yes, indeed.  The point of the Text_IO example is that people write code similar
+to Text_IO, and it would be nice to have invariants working nicely for that sort
+of code.  The GNAT front end is full of that sort of code:  we have "N: in
+Node_Id" params all over, and then say "Set_Some_Field(N, ...);".  It works
+because Node_Id is a pointer (represented as an index into a table).
+
+Here's an idea:  An attribute that takes away the invariant on a private type.
+It denotes a subtype of the private type that has no invariant.  Then you can
+declare some parameters with the private type, and they get checked (including
+'in'). For things you call from the invariant itself, you declare the parameters
+to be of the without-invariant subtype.  This would give the per-subprogram
+control that Tuck wants.
+
+Now we already have something like that for scalars:  T'Base is the same as T,
+but with all the constraints and predicates removed. So I'm suggesting we could
+allow 'Base on all types.  For access types, T'Base would remove the null
+exclusions and predicates. For composite types, T'Base would remove the
+predicates and invariants. (I think you don't want to allow removal of
+discriminant or index constraints, because I think it would introduce the
+anomalies that caused us to disallow Composite'Base back in Ada 9X.  I don't
+remember the details.)
+
+> You left out the simplest solution at all: have an aspect to declare
+> that a routine is used in a type invariant. In which case no invariant
+> checks are done for the routine; otherwise, the checks are done as
+> specified in the language.
+
+This is very similar to what I'm proposing.  But you don't want to say "this is
+used in an invariant".  You want to say "don't check the invariant on this".
+
+> That's more flexible than just limiting to expression functions, and
+> has far fewer holes than never checking invariants on IN parameters
+> (and would never cause a hole unintentionally, as the expression function rule might).
+
+Right, and I like the idea that invariants are checked in "in"s by default, and
+you can specify otherwise.
+
+> No one seems to have seriously considered this idea other than me;
+> that could be because everyone hates it, but no one has said that or
+> tried to explain why. More likely it's because no one noticed the idea.
+
+I seriously considered it, and I think it's a good approach -- I just hadn't
+gotten around to replying (this thread is way too long!).
+
+> I believe whatever solution we produce should prevent infinite
+> recursion at compile-time due to type-invariant checks, in all but the
+> most obscure cases.  I don't think the programmer should have to think
+> about/worry about this problem at all, and shouldn't have to create wrappers, etc.
+> to avoid infinite recursion.  The programmer should be able to write
+> the most natural and appropriate type invariant, and it should work as
+> expected.
+
+I disagree with that.  What is "expected" is that the invariant is True. If
+certain cases are exempted from invariant checks, they should be explicit, as in
+my 'Base idea.  (Yes, I know there are all sorts of other loopholes.)
+
+As to infinite recursion, it seems similar to having a Pre on function F call
+function F.  So don't do that.  And get your friendly compiler writer to warn in
+some cases.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 9, 2012  9:25 AM
+
+>> ... I believe whatever solution we produce should prevent infinite
+>> recursion at compile-time due to type-invariant checks, in all but
+>> the most obscure cases.  I don't think the programmer should have to
+>> think about/worry about this problem at all, and shouldn't have to create wrappers, etc.
+>> to avoid infinite recursion.  The programmer should be able to write
+>> the most natural and appropriate type invariant, and it should work
+>> as expected.
+>
+> I disagree with that.  What is "expected" is that the invariant is True.
+> If certain cases are exempted from invariant checks, they should be
+> explicit, as in my 'Base idea.  (Yes, I know there are all sorts of
+> other loopholes.)
+>
+> As to infinite recursion, it seems similar to having a Pre on function
+> F call function F.  So don't do that.  And get your friendly compiler
+> writer to warn in some cases.
+
+But a Pre on F that calls F is very unlikely.  On the other hand, a
+Type_Invariant that calls a public function is very likely.
+
+How about we *require* that the Type_Invariant expression not involve a direct
+call on a function to which the Type_Invariant applies?  I.e., it is a mandatory
+check, but only one level.  This will at least make the average programmer aware
+of the issue, and then we can debate how best to make it possible to deactivate
+the Type_Invariant on a particular subprogram.  You are suggesting using a
+different type mark, Randy is suggesting a new aspect to suppress it, I was
+suggesting that you only get it if you ask for it on IN parameters, etc.  If we
+can all agree that the compiler *must* detect a direct call in a Type_Invariant
+aspect on a function to which a Type_Invariant applies, then (I think ;-) I am
+happy...
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October 9, 2012  9:43 AM
+
+> Here's an idea:  An attribute that takes away the invariant on a
+> private type.  It denotes a subtype of the private type that has no
+> invariant.  Then you can declare some parameters with the private
+> type, and they get checked (including 'in').
+> For things you call from the invariant itself, you declare the
+> parameters to be of the without-invariant subtype.  This would give
+> the per-subprogram control that Tuck wants.
+
+interesting idea!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 9, 2012  12:17 PM
+
+> How about we *require* that the Type_Invariant expression not involve
+> a direct call on a function to which the Type_Invariant applies?
+
+OK.
+
+>...  I.e., it
+> is a mandatory check, but only one level.  This will at least make the
+>average programmer aware of the issue, and then we can debate how best
+>to make it possible to deactivate the Type_Invariant on a particular
+>subprogram.  You are suggesting using a different type mark, Randy is
+>suggesting a new aspect to suppress it, I was suggesting that you only
+>get it if you ask for it on IN parameters, etc.
+
+Right.  I prefer my 'Base idea to the other two, because it seems simple, and it
+seems generally useful.  In fact, I use it all the time on scalar types with
+predicates.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 9, 2012  3:27 PM
+
+...
+> > I disagree with that.  What is "expected" is that the invariant is True.
+> > If certain cases are exempted from invariant checks, they should be
+> > explicit, as in my 'Base idea.  (Yes, I know there are all sorts of
+> > other loopholes.)
+> >
+> > As to infinite recursion, it seems similar to having a Pre on
+> > function F call function F.  So don't do that.  And get your
+> > friendly compiler writer to warn in some cases.
+>
+> But a Pre on F that calls F is very unlikely.  On the other hand, a
+> Type_Invariant that calls a public function is very likely.
+
+Almost required, in fact, for Type_Invariant'Class, which has to be public.
+
+> How about we *require* that the Type_Invariant expression not involve
+> a direct call on a function to which the Type_Invariant applies?
+> I.e., it is a mandatory check, but only one level.  This will at least
+> make the average programmer aware of the issue, and then we can debate
+> how best to make it possible to deactivate the Type_Invariant on a
+> particular subprogram.  You are suggesting using a different type
+> mark, Randy is suggesting a new aspect to suppress it, I was
+> suggesting that you only get it if you ask for it on IN parameters,
+> etc.  If we can all agree that the compiler *must* detect a direct
+> call in a Type_Invariant aspect on a function to which a
+> Type_Invariant applies, then (I think ;-) I am happy...
+
+I can agree that making this a legality rule is a good idea, so long as it can
+checked sanely (meaning that whatever trigger we use, it has to be visible on
+the specification of the routine(s) in question).
+
+I'm still partial to the
+   Do_Not_Check_Type_Invariant
+aspect. I'm a bit dubious that Bob's extra subtype adds much clarity:
+    subtype Unchecked_File_Type is File_Type
+        with No_Invariant_Check;
+but I certainly can live with it.
+
+I'm definitely against the idea of getting checking only if you ask -- that's
+not usually how Ada works. You usually get checking unless you take some action
+to stop it; that's the way to catch the most errors. I don't see any good reason
+for this case to be different.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, December 6, 2012  9:26 PM
+
+Following up on my bounded-error idea for IN parameters --
+
+Instead of a bounded error, simply make it an implementation permission to
+perform an invariant check on an IN parameter, so long as the call does not
+originate during an evaluation of the same invariant.  That is, it is
+required on IN OUT and OUT parameters, but permitted on IN parameter when
+implementation can be sure this won't result in recursion.
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Friday, December 7, 2012  3:11 AM
+
+This is a great idea, because it also gives a nice path forward with proving
+statically invariants. The issue with the original wording on invariants is
+that, since it does not say that invariants hold on entry for IN and IN OUT
+parameters, you cannot do modular proofs based on those. Which means in fact
+that you have to add these constraints to make modular proof feasible. If the
+RM states what you just said, the constraint is already in place, even if not
+checked dynamically!
 
 ****************************************************************
