@@ -1,6 +1,7 @@
 !standard E.2.1(7/1)                           12-12-31    AI12-0038-1/02
 !class binding interpretation 12-11-28
 !status Amendment 202x 12-12-31
+!status work item 13-01-04
 !status ARG Approved 5-0-4  12-12-09
 !status work item 12-11-28
 !status received 12-06-23
@@ -195,5 +196,247 @@ the declaration of such an object at library-level in a shared passive package.
 Should we reopen this AI to get *some* solution to this problem?? (I have no
 idea what to write in the AI to explain why we're ignoring this hole.) Is there
 any better ideas of a solution?
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, January  4, 2013  2:43 PM
+
+...
+> A Legality Rule would be easy if we could break privacy, but we can't.
+> Probably the best solution would to attack the function that is 
+> required to cause a problem (as it has to return the type, and take a 
+> parameter with a part of an access type). But there probably are more 
+> forms of this (for instance, a procedure with an out parameter of the 
+> type), so such a solution is likely to be fragile.
+
+There seems to be a myriad of ways to do this sort of thing other than returning
+a type that has an access component. Consider:
+
+private with Ada.Streams;
+
+package Pure_P is
+   pragma Pure;
+   
+   type T is private with Preelaborable_Initialization;
+
+   type Access_T is access all T with Storage_Size => 0;
+   
+   procedure Add (X : in out T;
+                  Val : Integer;
+                  Next : access T);  -- Anonymous Access 
+
+   procedure Add2 (X : in out T;
+                  Val : Integer;
+                  Next : Access_T);  -- Access Type
+
+   procedure Add3 (X : in out T;
+                   Val : Integer;
+                   Next : aliased in out T);  -- Aliased
+   
+   function Value (X : T) return Integer;
+      
+private
+   
+   type Array_Of_Access_T is array (1 .. 10) of Access_T;
+   type Array_Of_Anon_Access_T is array (1 .. 10) of access T;
+   
+   type T is record
+      Val : Integer := 0;
+      Count : Integer := 0;
+      Count2 : Integer := 0;
+      List : Array_Of_Anon_Access_T;
+      List2 : Array_Of_Access_T;
+   end record;
+   
+   procedure Read 
+     (Stream : not null access Ada.Streams.Root_Stream_Type'Class;
+      Item : out T);
+   for T'Read use Read;
+   
+   procedure Write
+     (Stream : not null access Ada.Streams.Root_Stream_Type'Class;
+      Item : T);
+   for T'Write use Write;
+   
+end Pure_P;
+
+package body Pure_P is
+
+   procedure Add
+     (X : in out T;
+      Val : Integer;
+      Next : access T)
+   is
+   begin
+      X.Count := X.Count + 1;
+      X.List (X.Count) := Next;
+      Next.Val := Val;
+   end Add;
+
+
+   procedure Add2
+     (X : in out T;
+      Val : Integer;
+      Next : Access_T)
+   is
+   begin
+      X.Count2 := X.Count2 + 1;
+      X.List2 (X.Count2) := Next;
+      Next.Val := Val;
+   end Add2;
+
+   procedure Add3 (X : in out T;
+                   Val : Integer;
+                   Next : aliased in out T) is
+   begin
+      X.Count2 := X.Count2 + 1;
+      X.List2 (X.Count2) := Next'Unchecked_Access;
+      Next.Val := Val;
+   end Add3;
+
+   procedure Read 
+     (Stream : not null access Ada.Streams.Root_Stream_Type'Class;
+      Item : out T) is
+   begin
+      Integer'Read (Stream, Item.Count);
+      for I in 1 .. Item.Count loop
+         ...
+      end loop;
+      
+      Integer'Read (Stream, Item.Count2);
+      for I in 1 .. Item.Count2 loop
+         ...
+      end loop;
+      
+   end Read;
+
+   function Value (X : T) return Integer is
+   begin
+      return X.Val;
+   end Value;
+
+   procedure Write
+     (Stream : not null access Ada.Streams.Root_Stream_Type'Class;
+      Item : T) is
+   begin
+      Integer'Write (Stream, Item.Count);
+      for I in 1 .. Item.Count loop
+         ...
+      end loop;
+      
+      Integer'Write (Stream, Item.Count2);
+      for I in 1 .. Item.Count2 loop
+         ...
+      end loop;
+   end Write;
+   
+end Pure_P;
+
+with Pure_P;
+package Normal_P is
+   X, Y : aliased Pure_P.T;
+end Normal_P;
+
+with Pure_P;
+
+package Passive_P is
+   pragma Shared_Passive;
+   X : Pure_P.T;   
+end Passive_P;
+
+with Normal_P;
+with Pure_P;
+with Passive_P;
+procedure Main is
+   X, Y : aliased Pure_P.T;
+begin
+   Pure_P.Add (X    => Normal_P.X,
+               Val  => 1,
+               Next => Normal_P.Y'Access);  -- Store anonymous access to Normal variables in Shared package
+   
+   Pure_P.Add2 (X    => Passive_P.X,
+               Val  => 1,
+               Next => X'Unchecked_Access);  -- Store named access to local variables in Shared package
+
+   Pure_P.Add3 (X    => Passive_P.X,
+                Val  => 1,
+                Next => Y);                   -- Store access to aliased variable in Shared package
+end Main;
+
+The proposed wording of this AI breaks privacy in these examples.
+
+Could a solution to prevent privacy breaking involve a new aspect similar to the
+way Preelaborable_Initialization works that says that the full view of a
+private type does not contain parts that involve access types?
+
+Perhaps No_Access_Components as in...
+
+package Pure_P is
+   pragma Pure;
+   
+   type T is private with Preelaborable_Initialization, No_Access_Components;
+
+   ...
+
+private
+   
+   ...   
+end Pure_P;
+
+Then the wording for Shared Passive units could be tweaked to only allow non
+limited private types that have this aspect.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, January  4, 2013  3:10 PM
+
+We don't need to protect against examples using Unchecked_Access.
+
+I would say make it a bounded error if there is no use of Unchecked_Access.
+
+If Unchecked_Access is used, then as usual execution can become erroneous if the
+designated object disappears and someone dereferences the access value stored
+in the passive partition.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January  4, 2013  7:03 PM
+
+> We don't need to protect against examples using Unchecked_Access.
+
+Right. The "original" rule that prevents these problems is an accessibility check,
+and the whole point of 'Unchecked_Access is to turn off accessibility checks.
+ 
+> I would say make it a bounded error if there is no use of 
+> Unchecked_Access.
+
+The advantage of a Bounded Error is that it is a runtime check, and thus can break
+privacy (or more accurately, privacy is not considered). The question is, exactly
+what is checked?
+
+The rule I suggested was that the *assignment* of an object that has an access part
+declared in a pure unit is a bounded error. I suppose that would also have to cover
+reference parameter passing (I forgot about this in my original message; I was
+thinking assignment covered all parameter passing, which is wrong). But the idea is
+that the check is on the assignment or parameter passing of an object declared in
+a shared passive package.
+
+I don't see how it could be on the access value or object passed in, unless we want
+to insist on full run-time accessibility checking in this case. (In which case, I
+don't think it needs to be a bounded error, it just has to be checked at run-time.)
+But that seems like it would have distributed overhead.
+ 
+> If Unchecked_Access is used, then as usual execution can become 
+> erroneous if the designated object disappears and someone dereferences 
+> the access value stored in the passive partition.
+
+Right.
+
+But in any case my original question was whether we need to reopen the AI to determine
+a solution. If we do that, then there is plenty more time for the AI author (that would
+be Tucker) to figure out a solution (we don't have to have it now).
 
 ****************************************************************
