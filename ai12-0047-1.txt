@@ -1,7 +1,7 @@
-!standard 5.5.2(6/3)                                   12-12-31    AI12-0047-1/03
-!standard 7.6.1(3/2)
+!standard 5.5.2(6/3)                                13-01-28    AI12-0047-1/04
 !class binding interpretation 12-12-01
 !status Amendment 202x 12-12-31
+!status work item 13-01-07
 !status ARG Approved 11-0-0  12-12-08
 !status work item 12-12-01
 !status received 12-11-12
@@ -10,8 +10,8 @@
 !subject Generalized iterators and finalization of the associated object
 !summary
 
-The iterable_name or iterator_name of a iterator cannot be a discriminant-dependent
-subcomponent of a mutable type.
+The iterable_name or iterator_name of a iterator cannot be a
+discriminant-dependent subcomponent of a mutable type.
 
 The iterable_name or iterator_name of a iterator is not finalized until the loop
 completes.
@@ -50,7 +50,7 @@ finalized before beginning the first iteration of the loop.
 This is not good (especially as the tampering mechanism assumes that
 this finalization happens when the loop is exited).
 
-Should something be changed? (Yes.)
+Should something be changed? (No.)
 
 !recommendation
 
@@ -63,32 +63,7 @@ Add after 5.5.2(6/3):
 The iterator_name or iterable_name of an iterator_specification shall
 not denote a subcomponent that depends on discriminants of an object
 whose nominal subtype is unconstrained, unless the object is known
-to be constrained. 
-
-Modify 7.6.1(3/2):
-
-After execution of a construct or entity is complete, it is left,
-meaning that execution continues with the next action, as defined for
-the execution that is taking place. Leaving an execution happens
-immediately after its completion, except in the case of a master: the
-execution of a body other than a package_body; the execution of a
-statement; or the evaluation of {a scalar} expression, {a scalar}
-function_call, or {a} range that is not part of an enclosing
-expression, function_call, range, or simple_statement other than a
-simple_return_statement. A master is finalized after it is complete,
-and before it is left.
-
-Add after 7.6.1(3.c/2) [continuing the existing AARM note]:
-
-The above definition states that only scalar, as opposed to all,
-expressions and function calls occurring immediately within a compound
-statement are masters. This distinction only matters in the
-case of a loop statement with an iterator_specification because other
-compound statements (e.g., case statements) can only immediately
-enclose scalar expressions. When iterating over the result of a
-function call, we want that function result to be finalized at the end
-of the loop statement, as opposed to finalizing it before executing the
-first iteration of the loop. This rule accomplishes that.
+to be constrained.
 
 !discussion
 
@@ -108,15 +83,21 @@ Ada.Containers has tampering checks to prevent this situation (the assignment
 would raise Program_Error), but user-defined packages may not. So we do not
 take this approach.
 
-Problem #2 is solved by defining function_calls are not masters if they are
-composite. This is not expected to make any change to any construct other than
-loops, as other kinds of component statement (like case statements and if
-statements) can only "consume" a scalar expression.
+Problem #2 is not a problem at all, as the master of a return object of
+a function call is that which encloses the function call; whether the
+function call is a master has no impact on that. (See AARM 7.6.1(3.c/2).)
+The fact that the function call is a master mainly is important to specify
+the lifetime of the actual parameters to be short, as in the following
+example:
 
-It's important that the treatment of scalar calls not change. We don't want the
-finalization of Function_Call in
-      for I in 1 .. Function_Call.Scalar_Field loop
-to be deferred to the end of the loop.
+   for I of Func_Returning_Array (Func_Returning_Record_With_Controlled_Components) loop
+
+In this case, the result of Func_Returning_Record_With_Controlled_Components is
+finalized before the loop begins to execute (assuming the parameter to
+Func_Returning_Array is not aliased), as the call of Func_Returning_Array is its
+master, while the result of Func_Returning_Array is not finalized until the loop
+is complete (as the loop statement is the master). This is what we want for
+generalized iterators, so no change is needed.
 
 !corrigendum 5.5.2(6/3)
 
@@ -129,30 +110,7 @@ then the Constant_Indexing aspect shall be specified for @i<T>.
 The @i<iterator_>@fa<name> or @i<iterable_>@fa<name> of an
 @fa<iterator_specification> shall not denote a subcomponent that
 depends on discriminants of an object whose nominal subtype is
-unconstrained, unless the object is known to be constrained. 
-
-!corrigendum 7.6.1(3/2)
-
-@drepl
-After execution of a construct or entity is complete, it is @i<left>, meaning
-that execution continues with the next action, as defined for the execution
-that is taking place. Leaving an execution happens immediately after its
-completion, except in the case of a @i<master>: the execution of a body other than
-a @fa<package_body>; the execution of a @fa<statement>; or
-the evaluation of an @fa<expression>, @fa<function_call>, or @fa<range>
-that is not part of an enclosing @fa<expression>, @fa<function_call>, @fa<range>, or
-@fa<simple_statement> other than a @fa<simple_return_statement>.
-A master is finalized after it is complete, and before it is left.
-@dby
-After execution of a construct or entity is complete, it is @i<left>, meaning
-that execution continues with the next action, as defined for the execution
-that is taking place. Leaving an execution happens immediately after its
-completion, except in the case of a @i<master>: the execution of a body other than
-a @fa<package_body>; the execution of a @fa<statement>; or
-the evaluation of a scalar @fa<expression>, a scalar @fa<function_call>, or a @fa<range>
-that is not part of an enclosing @fa<expression>, @fa<function_call>, @fa<range>, or
-@fa<simple_statement> other than a @fa<simple_return_statement>.
-A master is finalized after it is complete, and before it is left.
+unconstrained, unless the object is known to be constrained.
 
 
 !ACATS test
@@ -401,5 +359,167 @@ This is simpler than trying to drag in the entire mechanism of renaming
 
 I'm not going to waste time now considering the master issue...(no sensible
 solution jumps out at me).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 31, 2012  10:26 PM
+
+AI12-0047-1 changes the definition of masters to ensure that the object in an
+iterator like:
+
+       for E of Func loop
+          ...
+       end loop;
+
+is not finalized before the end of the loop.
+
+However, I think we missed something in that wording. The problem is that
+compound statements are not masters, so the completion of the loop does not
+finalize anything. That means that Func in the above could live too long (until
+whatever master encloses the loop is finalized).
+
+That's a problem as it would mean that the natural implementation of the
+tampering checks for the containers would leave the containers locks for some
+arbitrary amount of time after the loop completed. That's surely not the intent,
+nor is it a good idea.
+
+I think that we have to add loop_statement with an iterator_specification to the
+list of things that can be masters.
+
+Thoughts??
+
+P.S. I'm unconvinced that we needed to make the change to "scalar
+function_calls" in 7.6.1(3/2) that we approved, because that does not apply to
+the result of the function_call (it is whatever encloses a function call that
+determines when the function result is finalized, not the master that is the
+function call. This latter master matters for the parameters of the call, not
+the result, as is explained in the AARM notes following 7.6.1(3/2). This change
+is harmless, however, so I'm not going to worry about it further.
+
+P.P.S. The 2nd question in the AI is completely bogus because of the
+misinterpretation noted in the P.S. Should it get rewritten to explain the
+*real* problem??
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, January 7, 2013  2:25 PM
+
+> However, I think we missed something in that wording. The problem is
+> that compound statements are not masters, so the completion of the
+> loop does not finalize anything.
+
+A compound statement is a master and this "problem" therefore isn't a problem.
+
+7.6.1(3/2):
+    Leaving an execution happens immediately after its completion,
+    except in the case of a master: ...; the execution of a statement;
+    or ....
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 7, 2013  3:28 PM
+
+> However, I think we missed something in that wording. The problem is
+> that compound statements are not masters, so the completion of the
+> loop does not finalize anything. That means that Func in the above
+> could live too long (until whatever master encloses the loop is finalized).
+
+As Steve pointed out, all statements are masters.
+
+> ...
+> P.S. I'm unconvinced that we needed to make the change to "scalar
+> function_calls" in 7.6.1(3/2) that we approved, because that does not
+> apply to the result of the function_call (it is whatever encloses a
+> function call that determines when the function result is finalized,
+> not the master that is the function call. This latter master matters
+> for the parameters of the call, not the result, as is explained in the
+> AARM notes following 7.6.1(3/2). This change is harmless, however, so
+> I'm not going to worry about it further.
+
+I agree.  The 2nd question of the AI is a red herring.  We all got suckered in
+by Steve's logic! ;-)  There was never any problem, and our fix, though benign,
+was unnecessary.
+
+> P.P.S. The 2nd question in the AI is completely bogus because of the
+> misinterpretation noted in the P.S. Should it get rewritten to explain
+> the
+> *real* problem??
+
+Yes, probably.  It is unwise to leave this AI in a state where it is clearly
+misleading.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, January 7, 2013  6:12 PM
+
+>> P.S. I'm unconvinced that we needed to make the change to "scalar
+>> function_calls" in 7.6.1(3/2) that we approved, because that does not
+>> apply to the result of the function_call (it is whatever encloses a
+>> function call that determines when the function result is finalized,
+>> not the master that is the function call. This latter master matters
+>> for the parameters of the call, not the result, as is explained in the
+>> AARM notes following 7.6.1(3/2). This change is harmless, however, so
+>> I'm not going to worry about it further.
+
+> I agree.  The 2nd question of the AI is a red herring.  We all got
+> suckered in by Steve's logic! ;-)  There was never any problem, and
+> our fix, though benign, was unnecessary.
+
+The AARM wording we are talking about here is:
+   The fact that a function_call is a master does not change the
+   accessibility of the return object denoted by the function_call;
+   that depends on the use of the function_call.
+
+I agree that I overlooked this.
+
+Now you two have me worrying that the fix I thought was necessary is not benign.
+
+If we have
+
+      for I of Container_Valued_Function
+                 (Function_With_Controlled_Result) loop
+         ...;
+      end loop;
+
+then does the change we approved change the point at which we finalize the
+function result object for the call to Function_With_Controlled_Result?
+
+Without the change, the enclosing call is a master and so the controlled
+function result object is finalized before the first iteration of the loop body.
+With the change, that enclosing call is no longer a master. Doesn't that mean
+that the controlled function result object is therefore not finalized until the
+completion of the loop statement?
+
+That seems like an undesirable change. The main point here is that we want to
+avoid requiring implementations to do anything different than whatever they were
+doing before.
+
+Bob Duff wrote (on another thread):
+> I think this discussion illustrates the point that when we meddle with
+> RM wording, we're about as likely to break things as to fix things
+
+Bob, I have no idea what you might be referring to.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 7, 2013  7:33 PM
+
+> Now you two have me worrying that the fix I thought was necessary is
+> not benign. ...
+
+Sounds like we should undo this change.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 7, 2013  7:42 PM
+
+Agreed. It's unnecessary, and might change run-time behavior. No reason for
+that.
 
 ****************************************************************
