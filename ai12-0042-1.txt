@@ -1032,3 +1032,168 @@ that repeatedly because otherwise the actual points get lost.)
 
 ****************************************************************
 
+From: Randy Brukardt
+Sent: Thursday, January 24, 2013  12:20 AM
+
+During the ARG meeting discussion about inherited class-wide invariants, I
+recorded the following:
+
+We look in detail at extensions in subprograms. The inherited routines are
+checked, because the original routines are called in that case (that is the
+point of the note 7.3.2(24/3). Overridden routines aren't checked by the rules
+given here. But that should be OK, because an overridden routine cannot violate
+the original invariant - it has to call something that will check the invariant.
+Randy is skeptical of this assertion because of dispatching, especially inside
+an invariant expression. Others would like him to come up with an example
+off-line, and the discussion moves on.
+
+I was wrong that the "hole" is dispatching, but I was right that there is a
+hole. It's caused by the fact that these extensions can be in bodies (of the
+base package or its children) -- and then dispatching could make the hole
+visible outside of the subprogram. I don't think this is a critical problem at
+all, but since I was asked to provide an example, here goes:
+
+(Note: We're assuming that overriding routines don't have their invariants
+checked, as described above.)
+
+  package Root is
+     type Safe is tagged private
+        with Type_Invariant'Class => Is_Funny (Safe);
+     function Is_Funny (Obj : in Safe) return Boolean;
+     procedure Public_Proc (Obj : in out Safe); -- Invariant checked here.
+  private
+     type Safe is tagged record
+        Funny : Boolean := True;
+        ...
+     end record;
+     procedure Private_Proc (Obj : in out Safe); -- Invariant not checked for this routine.
+     function Is_Funny (Obj : in Safe) return Boolean is (Obj.Funny);
+  end Root;
+
+  package body Root is
+     procedure Public_Proc (Obj : in out Safe) is
+     begin
+         Private_Proc (Obj);
+         Obj.Funny := not Obj.Funny;
+     end Public_Proc;
+
+     procedure Private_Proc (Obj : in out Safe) is
+     begin
+         Obj.Funny := not Obj.Funny;
+         ...
+     end Private_Proc;
+
+  end Root;
+
+  package Root.Child is
+     procedure Do_Stuff;
+  end Root.Child;
+
+  package body Root.Child is
+     procedure Do_Stuff is
+         type Unsafe is new Safe with null record;
+         overriding
+         procedure Public_Proc (Obj : in out Unsafe);
+         overriding
+         procedure Private_Proc (Obj : in out Unsafe);
+
+         procedure Private_Proc (Obj : in out Unsafe) is
+         begin
+             Private_Proc (Safe(Obj));
+         end Private_Proc;
+
+         procedure Public_Proc (Obj : in out Unsafe) is
+         begin
+             ...
+             Private_Proc (Obj);
+         end Public_Proc;
+      begin
+         ...
+      end Do_Stuff;
+   end Root_Child;
+
+In this case, calls on the overriding Public_Proc (including dispatching calls),
+will never check the invariant on the Obj argument. To show how that could cause
+problems, I could have added another routine in Root that dispatches on
+Public_Proc, but that would clutter the example.
+
+This problem is mitigated somewhat by the obvious fact that you can't put
+objects of this type into long-lived structures (like a container) as the tag
+would fail the accessibility check for Safe'Class. So while it is possible for
+such objects to "leak out" to clients of Root, they can only do it while
+procedure Do_Stuff is active, so it is not a very significant problem.
+
+Note that there is rather weird effect here: if Private_Proc is inherited, the
+invariant will get checked on it (which it shouldn't, IMHO), but if we override
+it and do manually exactly the same thing that inheritance would do, we don't
+get a check. That seems inconsistent irrespective of this whole.
+
+Moreover, the entire issue of adding checks to inherited private routines
+(previously discussed in the context of private children) reappears here. (As
+previously noted, that could cause (re)dispatching calls in the body of Root to
+fail, if they are presuming that the invariants don't matter because the
+routines are private. Claw uses a pattern much like this to hide the workings of
+the message loop from programmers -- it's not just a thought experiment.) In
+addition, the same problem would occur if we do a derivation in the private part
+of a child package, or in the body of the root package or the body of any child.
+
+Anyway, more to think about for the stuckee for this AI (that would be Tucker).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, January 24, 2013   8:55 AM
+
+> We look in detail at extensions in subprograms. The inherited routines
+> are checked, because the original routines are called in that case
+> (that is the point of the note 7.3.2(24/3). Overridden routines aren't
+> checked by the rules given here. But that should be OK, because an
+> overridden routine cannot violate the original invariant - it has to
+> call something that will check the invariant. Randy is skeptical of
+> this assertion because of dispatching, especially inside an invariant
+> expression. Others would like him to come up with an example off-line, and the discussion moves on. ...
+
+The NOTE at 7.3.2(24/3) is talking about *specific* type invariants, not
+class-wide type invariants.  So does that mean the rest of this note is
+confused?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 24, 2013  10:14 AM
+
+I'm not 100% sure, but I think this is correct. Inheritance works the same
+either way (it obviously doesn't depend on invariants); the note was pointing
+out a particular ramification of the rules for specific type invariants. The
+same conclusion would be true for class-wide invariants, but it's less
+interesting because the same class-wide invariant would normally be checked for
+both the inherited routine and the original routine that it calls. So we
+probably didn't mention that case. However, in this case, the "new" routine
+isn't checked, but the original routine is. So that argues that the original
+premise was correct.
+
+OTOH, I could have misunderstood the rules such that I confused the note (and/or
+the minutes). I wasn't able to convince myself that anything that we "decided"
+during the meeting was correct (for these derivations, or for visible record
+types for that matter), so I just took them as a given and constructed an
+example accordingly. Obviously, any assumptions that I got wrong would mess up
+the example. (In particular, I can't figure out what impact, if any, the
+requirement that a subprogram "be visible outside of its scope" would have. No
+subprogram declared in a subprogram or other body is ever visible outside of its
+scope, which would imply that nothing is checked anywhere other than in package
+specifications. I'm pretty certain that would not work, because of dispatching
+and the like, and in any case, it's not the assumption that we seem to be
+making.)
+
+My example only depends on the idea that only the original routine is checked
+(not the inherited one) plus the fact that routines declared in private parts
+are never checked. That's what we decided at the meeting, and the claim (which I
+say is incorrect) is that it isn't possible to get an object that is not checked
+to "leak" out (the check must happen somewhere else).
+
+If you think there is something specifically wrong with my example, please
+explain it. And if you now believe that one or more for the assertions made at
+the meeting are incorrect, please explain *that* so we can discuss it further.
+
+****************************************************************
+
