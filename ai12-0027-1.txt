@@ -1,4 +1,4 @@
-!standard 4.6(24.17/3)                                   12-12-31    AI12-0027-1/05
+!standard 4.6(24.17/3)                               12-12-31    AI12-0027-1/05
 !standard 4.6(24.21/2)
 !standard 4.6(58)
 !standard 6.2(10/3)
@@ -173,12 +173,12 @@ deeper than that of the target type. If the operand type is declared within a ge
 the target type shall be declared within the generic body.>
 
 In addition to the places where Legality Rules normally apply (see 12.3), these
-rules apply also in the private part of an instance of a generic unit. 
+rules apply also in the private part of an instance of a generic unit.
 
 !corrigendum 4.6(58)
 
 @dinsa
-Conversion to a type is the same as conversion to an unconstrained subtype of the type. 
+Conversion to a type is the same as conversion to an unconstrained subtype of the type.
 @dinss
 Evaluation of a value conversion of a composite type either
 creates a new anonymous object (similar to the object
@@ -1945,7 +1945,7 @@ I prefer your solution #2, and just require copying when aliased-ness disagrees.
 ****************************************************************
 
 From: Steve Baird
-Sent: Saturday, December 31, 2012  2:09 AM
+Sent: Saturday, December  8, 2012  2:09 AM
 
 proposed AI12-0027 wording:
 
@@ -1954,7 +1954,7 @@ proposed AI12-0027 wording:
 ****************************************************************
 
 From: Tucker Taft
-Sent: Saturday, December 31, 2012  6:59 AM
+Sent: Saturday, December  8, 2012  6:59 AM
 
 ...
 > Append at the end of Dynamic Semantics section of 4.6:
@@ -1996,3 +1996,308 @@ This still makes me nervous.  We need to look at all places "aggregate"
 appears in 3.10.2.
 
 ****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 31, 2012  7:44 PM
+
+[Please don't stop reading just because I mentioned "accessibility"!!]
+
+AI12-0027-1 says to modify 3.10.2(10/3):
+
+The accessibility level of an aggregate that is used (in its entirety) to
+directly initialize part of an object is that of the object being initialized.
+In other contexts, the accessibility level of an aggregate is that of the
+innermost master that evaluates the aggregate. {Corresponding rules apply to a
+value conversion (see 4.6).}
+
+I have to document this as a possible incompatibility, as the accessibility in
+this case was not previously defined. If a compiler used the accessibility of
+the operand type (which would make sense for by-reference types, especially as
+accessibility is defined this way for view conversions), this will change the
+lifetime to be very short and thus most likely make the code illegal. (Of
+course, such code should be pretty rare ['Access of a component of a type
+conversion], and would most likely have created a dangling pointer if a copy
+actually was made.)
+
+The reason for this rule is that the value conversion *might* make a copy, and
+we don't want Legality Rules to depend on whether the implementation chooses to
+make a copy or not. So far so good.
+
+But what about the case where the implementation is not allowed to make a copy?
+It seems weird to insist that the implementation *not* make a copy and at the
+same time treat the conversion as if it *did* make a copy for accessibility
+purposes. Moreover, the most likely cases involve by-reference types and
+parameter passing and thus probably will not be allowed to make a copy.
+
+So, I'm wondering if we should be excepting value conversions that are required
+to not make a copy. This would look something like:
+
+{Corresponding rules apply to a value conversion (see 4.6), unless the value
+conversion is not allowed to make a new object, in which case the accessibility
+level is the same as the operand.}
+
+This would reduce (but not completely eliminate) the possible incompatibility,
+and more closely match the intuition (and view conversions). OTOH, it is more
+complicated, and we don't change the accessibility for build-in-place objects in
+similar circumstances (which I find weird, but whatever).
+
+Any thoughts??
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, January  8, 2013  10:05 AM
+
+On the basis that first reactions are often right, I'd go with your suggested
+change, since both a reduced incompatibility and more "intuitive" (not that much
+to do with accessibility is intuitive).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, January  8, 2013  12:58 PM
+
+> This would reduce (but not completely eliminate) the possible
+> incompatibility, and more closely match the intuition (and view
+> conversions). OTOH, it is more complicated, and we don't change the
+> accessibility for build-in-place objects in similar circumstances
+> (which I find weird, but whatever).
+
+Can you give a couple of simple examples to justify the added complexity? I have
+trouble buying any "match the intuition" argument when talking about
+accessibility. ;-)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, January  8, 2013  1:36 PM
+
+>
+> AI12-0027-1 says to modify 3.10.2(10/3):
+>
+> The accessibility level of an aggregate that is used (in its entirety)
+> to directly initialize part of an object is that of the object being
+> initialized. In other contexts, the accessibility level of an
+> aggregate is that of the innermost master that evaluates the
+> aggregate. {Corresponding rules apply to a value conversion (see
+> 4.6).}
+>
+...
+
+> So, I'm wondering if we should be excepting value conversions that are
+> required to not make a copy. This would look something like:
+>
+> {Corresponding rules apply to a value conversion (see 4.6), unless the
+> value conversion is not allowed to make a new object, in which case
+> the accessibility level is the same as the operand.}
+
+Wouldn't this mix static and dynamic semantics in a privacy-breaking way?
+
+As you point out, this rule could impact the legality of certain (obscure) uses
+of 'Access. Therefore we are certainly talking about static semantics here.
+
+However, the "unless the value conversion is not allowed to make a new object"
+wording presumably refers to the new (added in AI12-0027) wording in the dynamic
+semantics section of 4.6. In particular, consider a value conversion involving a
+private type which might or might not be completed as a by-reference type.
+
+Perhaps you could define some rule which would somehow make conservative
+assumptions about private types, but this wouldn't just fall out from the
+proposed wording.
+
+> This would reduce (but not completely eliminate) the possible
+> incompatibility, and more closely match the intuition (and view
+> conversions). OTOH, it is more complicated, and we don't change the
+> accessibility for build-in-place objects in similar circumstances
+> (which I find weird, but whatever).
+>
+> Any thoughts??
+
+I claim that if we want to do anything at all here, we need at least a somewhat
+more complicated solution than what you proposed. It seems like this strengthens
+the argument for doing nothing.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January  8, 2013  2:26 PM
+
+> However, the "unless the value conversion is not allowed to make a new
+> object" wording presumably refers to the new (added in AI12-0027)
+> wording in the dynamic semantics section of 4.6. In particular,
+> consider a value conversion involving a private type which might or
+> might not be completed as a by-reference type.
+
+Ugh. I think you're right.
+
+> Perhaps you could define some rule which would somehow make
+> conservative assumptions about private types, but this wouldn't just
+> fall out from the proposed wording.
+>
+> > This would reduce (but not completely eliminate) the possible
+> > incompatibility, and more closely match the intuition (and view
+> > conversions). OTOH, it is more complicated, and we don't change the
+> > accessibility for build-in-place objects in similar circumstances
+> > (which I find weird, but whatever).
+> >
+> > Any thoughts??
+>
+> I claim that if we want to do anything at all here, we need at least a
+> somewhat more complicated solution than what you proposed. It seems
+> like this strengthens the argument for doing nothing.
+
+You're probably right. It also explains the reason that we don't do this for
+build-in-place, since they too might depend on dynamic semantics.
+
+One could use "immutably limited or tagged" to get around this:
+
+{Corresponding rules apply to a value conversion (see 4.6), unless the target
+type of the value conversion has a tagged or immutably limited part, in which
+case the accessibility level is the same as the operand.}
+
+AARM Note: This is a static semantics rule, so we only consider parts that are
+visible (we don't look into private parts to determine if any parts are
+involved).
+
+I think we may need to consider this (see my response to Tucker).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January  8, 2013  2:55 PM
+
+> Can you give a couple of simple examples to justify the added
+> complexity?
+> I have trouble buying any "match the intuition" argument when talking
+> about accessibility. ;-)
+
+<Grin>
+
+Let me just give one. Not all accessibility checks are associated with 'Access,
+and I think the one associated with "aliased" parameters will be relatively
+common.
+
+Consider:
+
+    generic
+        type Elem is private;
+    package P is
+        package Vect is new Ada.Containers.Vectors (Elem, Natural);
+        type Holder is record
+            V : Vect.Vector;
+            F : aliased Float;
+            ...
+        end record;
+        function Constant_Reference (H : aliased in Holder;
+                                     I : in Natural) return Vect.Constant_Reference_Type;
+            -- Give direct reading access to the elements of H.V.
+    end P;
+
+    with P;
+    package Q is
+        package My_P is new P (Float);
+        type My_Holder is new My_P.Holder; -- A Tucker derivation.
+        Q_Hold : My_Holder;
+        Ptr : access Float;
+        ...
+    end Q;
+
+    with Q;
+    procedure Main is
+    begin
+       -- Use explicit conversion:
+       Q.Ptr := new Float'(Q.My_P.Constant_Reference(Q.My_P(Q.Q_Hold), I).all); -- Fails accessibility.
+       -- Use inherited version (which uses an implicit conversion identical to the item above)
+       Q.Ptr := new Float'(Q.Constant_Reference(Q.Q_Hold, I).all); -- ???
+       --
+       Q.Ptr := Q.My_P(Q.Q_Hold).F'access; -- Fails accessibility.
+    end Main;
+
+Without the change I'm suggesting, the first call fails the accessibility check
+for an aliased parameter. (It has to live as long as the return object, but here
+it is very short lived, while the return object might have library-level
+accessibility.) I'm not sure if the second call fails the same check, but it
+seems like it ought to (the conversion being implicit or explicit doesn't
+matter).
+
+The intuition for these calls is that Q.Q_Hold is library-level, so it lives
+long enough for the allocator, and there shouldn't be a problem. But there IS a
+problem, simply because of the value conversion, and moreover it cannot be
+worked around (the conversion is there no matter how you write the call).
+
+The last case is a similar example using 'Access rather than Constant_Reference
+(but I think this is unlikely enough to not worry about). And this case can be
+worked around (we don't have to write the conversion here). [I originally used
+Constant_Reference here because I thought the problem was more wide-spread, but
+I've convinced myself that it only can happen in an allocator as there is a
+special rule for the accessibility of actual parameters of aliased formal
+parameters.]
+
+We can at least reduce the incompatibility (which I agree is minor) by adopting
+the rule I suggested in my reply to Steve. But as that cannot cover private
+types, it's not clear that it is worth it.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, January  8, 2013  3:22 PM
+
+>         Q.Ptr := new
+> Float'(Q.My_P.Constant_Reference(Q.My_P(Q.Q_Hold),
+> I).all); -- Fails accessibility.
+
+    I think this should be:
+
+      Q.Ptr := new Float'(Q.My_P.Constant_Reference(Q.My_P.Holder(Q.Q_Hold), I).all);
+
+But Holders are tagged, and all conversions of tagged types are view
+conversions. So I don't see this issue.
+
+As far as immutably limited, an alternative approach would be to say that all
+conversions of immutably-limited types are view conversions. That seems to be
+where we are headed...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January  8, 2013  4:18 PM
+
+...
+> >          type Holder is record
+> >              V : Vect.Vector;
+> >              F : aliased Float;
+> >              ...
+> >          end record;
+...
+> >      with Q;
+> >      procedure Main is
+> >      begin
+> >         -- Use explicit conversion:
+> >         Q.Ptr := new
+> > Float'(Q.My_P.Constant_Reference(Q.My_P(Q.Q_Hold),
+I).all); -- Fails accessibility.
+>
+>     I think this should be:
+>
+>       Q.Ptr := new Float'(Q.My_P.Constant_Reference(Q.My_P.Holder(Q.Q_Hold), I).all);
+>
+> But Holders are tagged, and all conversions of tagged types are view
+> conversions. So I don't see this issue.
+
+Huh? Holder is an untagged record type that I declared (see quoted text above).
+Probably I should have called it "Bar" or "Frob" just to avoid confusion. But it
+certainly is not a tagged type (it has a *part* of a tagged type).
+
+> As far as immutably limited, an alternative approach would be to say
+> that all conversions of immutably-limited types are view conversions.
+> That seems to be where we are headed...
+
+That's not necessarily a bad idea, as it mimics the rule for tagged types.
+They're always by-reference, so why not treat them that way? It doesn't help
+examples like the one above (these have "parts" that are tagged or immutably
+limited), but it would reduce the incompatibility a bit more and it's pretty
+hard to create these examples in any case (this example was a lot harder to
+write than I expected at the start).
+
+****************************************************************
+
