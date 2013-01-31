@@ -1,0 +1,1056 @@
+!standard 13.03 (58)                              13-01-30    AI12-0059-1/01
+!class Amendment 13-01-30
+!status work item 13-01-30
+!status received 12-09-21
+!priority Medium
+!difficulty Medium
+!subject Object_Size attribute
+!summary
+
+[Editor's note: The bulk of this AI is made up of the final version of AI05-00319-1,
+which eventually was voted No Action. There is some additional discussion at the end,
+based on the recent e-mail on this topic.]
+
+The new attribute S'Object_Size denotes the size of most objects of subtype S.
+
+!problem
+
+The 'Size attribute for a (sub)type only gives a lower bound on the size of
+objects and components of the type. For aliased objects and components, the
+size of the object or component is usually larger than the default value of
+'Size. Moreover, even when specified, there is no guarantee that the size
+specified will actually be used for objects. (And 'Size can only be specified
+for first subtypes, for other subtypes, the compiler is free to do whatever
+it likes.)
+
+This can be a problem when positioning components. It is not possible, in
+general, to write a truly portable representation clause for a record with
+aliased components:
+
+    type Test_Rec is record
+        A : aliased Natural;
+        B : Boolean;
+    end record;
+    for Test_Rec use record
+        A at 0 range 0 .. Natural'Size-1; -- Error, wrong size.
+        B at 0 range Natural'Size .. Natural'Size; -- Error, overlapping.
+    end record;
+
+Since 'Size for scalar types represents the size of a value of the type, it
+in general is *not* the size of an object of the type. Thus, specifying the
+size of a (sub)type causes a number of unusual effects (such as the size
+being forgotten for some derviations).
+
+What is needed is a way to specify the default size of an object of a type,
+such as the facility provided in GNAT.
+
+[Editor's note: This presentation of the problem is not the best. The
+root of the problem is that Subtype'Size specifies the minimum size that
+a component can be packed to; that's a pretty useless thing to specify.
+What you usually want to specify is the *default* size of an object or
+component (especially component). I'll rewrite this if there is some
+agreement on the problem beyond the e-mail discussion.]
+
+!proposal
+
+(See Wording.)
+
+!wording
+
+[Editor's note: The below wording needs updating for aspect clauses and the
+notion of "confirming" representation clauses.]
+
+Add Object_Size to 13.3(9/1):
+The following representation attributes are defined, Address, Alignment,
+Size, Object_Size, Storage_Size, and Component_Size.
+
+Insert the following after 13.3(58):
+
+For every subtype S:
+
+S'Object_Size	If S is definite, denotes the size (in bits) that the
+implementation would choose for a stand-alone aliased object of subtype S.
+If S is indefinite, the meaning is implementation-defined. The value of this
+attribute is of the type universal_integer. The Object_Size of a subtype is at
+least as large as the Size of the subtype. Object_Size may be specified via
+an attribute_definition_clause; the expression of such a clause shall be static
+and its value nonnegative. If Object_Size is specified, all aliased objects
+of the subtype shall have the specified Size.
+
+
+Implementation Advice
+
+If S is a definite first subtype and S'Object_Size is not specified,
+S'Object_Size should be the smallest multiple of the storage element size
+larger than S'Size which is consistent with the alignment of S.
+
+AARM Note
+    Reason: Many implementations "round up" allocations to the nearest multiple
+    of the alignment. For instance, this example appears in the GNAT
+    documentation:
+
+    [Given] a record containing an integer and a character:
+        type Rec is record
+           I : Integer;
+           C : Character;
+        end record;
+    will have a size of 40 (that is Rec'Size will be 40. The alignment will be
+    4, because of the integer field, and so the default size of record objects
+    for this type will be 64 (8 bytes).
+
+    We purposely used the vague phrase "consistent with the alignment of S" so
+    that implementations that do not round up allocations (just using padding
+    to provide alignment) are not required to do any rounding up.
+
+If X denotes an object (including components) of subtype S, X'Size should
+equal S'Object_Size, unless:
+    X'Size is specified; or
+    The size of X is determined by a component_clause or Component_Size clause; or
+    Pragma Pack applies to the type containing component X.
+
+An Object_Size clause on a composite type should not affect the internal
+layout of components.
+
+The recommended level of support for the Object_Size attribute of subtypes is:
+
+    The implementation should allow S'Object_Size to be specified if S
+    is a first subtype.
+
+    If S is a static signed integer subtype, the implementation should support
+    specifying S'Object_Size to be the size of any signed integer
+    base type provided by the implementation that is at least as large
+    as S'Size.
+
+    If S is a static modular subtype, the implementation should support
+    specifying S'Object_Size to be the size of any modular
+    base type provided by the implementation that is at least as large
+    as S'Size.
+
+    If S is a static enumeration subtype, the implementation should support
+    specifying S'Object_Size to be the size of any modular
+    base type provided by the implementation that is at least as large
+    as S'Size.
+
+    If S is a static fixed point subtype, the implementation should support
+    specifying S'Object_Size to be the size of any signed integer
+    base type provided by the implementation that is at least as large
+    as S'Size.
+
+    If S is a floating point, access, or composite subtype, the implementation
+    need allow only the specification of S'Object_Size to be the same as what
+    the implementation would choose by default.
+
+AARM Note
+    Ramification: An implementation need not support Object_Size on non-first
+    subtypes. We allow this freedom, as Rational^H^H^H^H^H^H^H^H some
+    implementations may have trouble with static matching if the Object_Sizes
+    of subtypes can be different (see 4.9.1). We will let the market decide
+    whether subtype specification of Object_Size is necessary.
+
+Change 13.3(50) to:
+
+If the Object_Size of a subtype is not specified, the Size of the subtype is
+specified, and allows for efficient independent addressability (see 9.10) on
+the target architecture, then the Size of the following objects of the subtype
+should equal the Size of the subtype:
+
+AARM Note:
+    Ramification: If Object_Size is specified, this rule does not apply; the
+    rules for Object_Size apply instead. If Object_Size is not specified,
+    this rule implies that the default Object_Size is the same as the
+    specified Size if the Size allows for efficient independent addressability
+    (which, BTW, is not defined in 9.10).
+
+    Reason: We need to specify what happens if both Object_Size and Size are
+    specified incompatibly.
+
+Change the first sentence of 4.9.1(2) to:
+
+A subtype statically matches another subtype of the same type if they have
+statically matching constraints and their Object_Sizes (see 13.3) are the
+same.
+
+AARM note:
+
+    Ramification: If one of the subtypes is not yet frozen, an implementation
+    may have to repeat the check when the subtypes are both frozen. This
+    can only make to previously statically matching subtype fail to match;
+    it cannot make a match legal. This deferred check is only necessary if
+    the implementation chooses to allow subtypes to have different Object_Size
+    values. (This is not required, but will be possible if the implementation
+    allows specification of Object_Size for non-first subtypes.)
+
+
+!discussion
+
+Object_Size covers the cases that are not specified by Size. Size is only
+constraining for components of packed arrays and records. Other representation
+items ('Component_Size, component_clauses) override Size for components. And
+the only requirement on normal objects is that they be the same size or larger.
+
+13.9(6) should require that S'Object_Size = Target'Object_Size, as many more
+conversions would then be well-defined. However, this could be incompatible on
+some implementations, and the change does not seem critical.
+
+The recommended level of support for integer and fixed point subtypes is
+defined to only require object sizes matching the native integer sizes of
+the machine. Other sizes are unlikely to be selected (by default) for
+stand-alone objects.
+
+This attribute was originally defined by the GNAT compiler. This definition is
+intended to be compatible with their existing implementation.
+
+One problem with Size is that it is possible to define subtypes that have a
+larger size value than their base type.
+
+    type T is range 0..255;
+    for T'Size use 8; -- Confirming in Ada 95, allowed in Ada 83.
+    subtype S is T'Base range -255..255; -- S'Size = 9
+
+The point here is that S'Size has to be larger than T'Size; it cannot be
+required to be the same.
+
+This also can occur for Object_Size. It is not as likely as with Size
+(Object_Size has only a weakly suggested value, so it is likely that
+T'Object_Size = T'Base'Object_Size in the absense of a specification for
+T'Object_Size). Moreover, this behavior is not really a problem. An
+implementation that wants to avoid checking Object_Size when
+static matching merely has to avoid selecting different Object_Sizes for
+subtypes that statically match. (Such an implementation cannot allow
+specification of Object_Size for non-first subtypes anyway.) There is no
+problem with using a different Object_Size for an "expanding" subtype,
+as it cannot statically match the base type.
+
+
+============================
+
+2013 discussion:
+
+The root of the problem with (Sub)type'Size is that it was intended to
+specify the minimum size of a packed component. That's a pretty useless thing
+to specify (why would you want to specify that a subtype CANNOT be packed?)
+
+Moreover, that does not apply to other representation clauses.
+Specifically, there is no rule that makes it illegal to pack or give a
+component_clause that is smaller than a specified Size; only 13.1(12/3) applies,
+and it just requires that all values can be stored. So a compiler can completely
+ignore Size when a representation aspect other than Pack applies to a component;
+and since the 'Size is rarely defined to be a whole number of storage elements,
+it is essentially ignored for components that don't of a representation item.)
+
+What we really want to specify is the size of a component or stand-alone object
+when there is no representation clauses given for the object: meaning no Pack,
+no Component_Size, and no record representation clause.
+
+That is the primary purpose of 'Object_Size.
+
+Note that (Sub)type'Size is not a significant problem for composite types; the
+language there does not require bizarre values for 'Size. So a solution only
+really needs to apply to scalar types.
+
+An alternative (if 'Object_Size would become incompatible with the existing
+implementation) would be to extend 'Component_Size to scalar types, with
+the meaning that is specifies the size to be used for components in the
+absence of representation clauses. Note that the size of stand-alone objects
+is rarely relevant; the size of a subtype is sually an issue to when
+it is used in components in a number of composite types (and giving
+representation clauses on all of them is painful). Doing so would eliminate
+the need to provide subtype specifiability for the aspect, and would ensure
+that there would be no conflicts with existing implementations. (They are not
+allowed to use a language-defined attribute in a different way.)
+
+Note that in both cases, we have a problem with the rules about "confirming"
+representation clauses. Like Pack, we want 'Object_Size (or 'Component_Size,
+should we go that way) to *never* be confirming. Specifically, we don't want
+implementations to be be required to allocate all components of a subtype the
+same way unless a specification for the aspect Object_Size is given. After
+all, if the user doesn't care about the size of the components, the compiler
+should be free to do anything it wants. OTOH, if the user *does* care, then
+the wishes need to be respected (in the absence of other representation
+items).
+
+The problem is that this is not the way that other representation aspects work.
+Those allow "confirming" the value of any aspect without changing the sematics.
+That doesn't seem possible in this case without putting significant restrictions
+on an implementation. If this can't be resolved, we'll have to drop the idea
+(and it would be a *really* sad reason for killing the idea!).
+
+!example
+
+(* TBD. *)
+
+!ACATS test
+
+
+
+
+!ASIS
+
+!ACATS test
+
+
+!appendix
+
+!topic 'Size attribute of stand-alone objects
+!reference 13.3(39-42)
+!from Adam Beneschan 12-09-21
+!discussion
+
+Suppose X is a non-aliased standalone object, and the program refers
+to X'Size.  What should the value of the attribute be?
+
+For an aliased standalone object, the answer is pretty clear, I
+think.  X'Size denotes the size in bits of the representation of the
+object (13.3(40)), and 13.1(7) says the representation of an object
+consists of a certain number of bits, and "For an object of an
+elementary type, these are the bits that are normally read or updated
+by the machine code when loading, storing, or operating-on the value
+of the object".  One can assume that this is well-defined for all
+aliased objects of the same subtype, since it must be possible for the
+same machine operations to work the same way on all such objects
+(since the operations could be done through an access value).
+
+However, I'm not clear on what 13.1(7) should mean for non-aliased
+objects in cases such as:
+
+(1) The object size is 8 or smaller on a byte-addressable machine, but
+    the compiler decides that the object will live in a 32-bit
+    register, and use only 32-bit operations to work with the object.
+    Does this mean that the size is 32, since that's the number of
+    bits that the code will access when working with the object's
+    value?
+(2) A similar small object will have its value in memory part of the
+    time and in a register part of the time.
+(3) The compiler determines that the object's value has no effect on
+    the program and therefore eliminates it.  Now, since there is no
+    code that loads, stores, or operates on the value, how does this
+    affect the size of the representation as defined by 13.1(7)?
+
+A practical problem is that in our implementation, the first phase of
+the compiler will not know what variables will get assigned to
+registers or eliminated altogether.  That happens in later stages.  If
+the meaning of X'Size depends on those decisions made in later stages
+of compilation, this creates complications for the implementation that
+are certainly not worth while.
+
+Since I think 13.1(7) is (in my opinion) unclear on what the size
+should be, I'd like to propose that something like this be added after
+13.3(42):
+
+    Implementation Permission
+
+    If X is a non-aliased standalone object whose Size has not been
+    specified, or X is a by-copy parameter, an implementation may
+    return the same value for X'Size that it would return for an
+    aliased standalone object with the same subtype, without regard to
+    how X is actually represented.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, September 21, 2012  3:13 PM
+
+> Suppose X is a non-aliased standalone object, and the program refers
+> to X'Size.  What should the value of the attribute be?
+
+Implementation dependent.
+
+> For an aliased standalone object, the answer is pretty clear, I think.
+> X'Size denotes the size in bits of the representation of the object
+> (13.3(40)), and 13.1(7) says the representation of an object consists
+> of a certain number of bits, and "For an object of an elementary type,
+> these are the bits that are normally read or updated by the machine
+> code when loading, storing, or operating-on the value of the object".
+
+I think I wrote that, and I admit it's pretty ill-defined.
+
+> Since I think 13.1(7) is (in my opinion) unclear on what the size
+> should be, ...
+
+Agreed.
+
+>...I'd like to propose that something like this be added after
+> 13.3(42):
+
+I don't think there's any need to change the RM, here.
+13.1(7) is vague, so you can do what you like in your compiler.
+
+How can the user even tell?  I mean, if they try to copy X'Size bits at a
+certain address, they'd have to say X'Address, which typically isn't well
+defined if X is in a register.
+
+I think it's a waste of time for ARG to spend time on this issue -- I suggest
+you just do whatever you think is right in your compiler.
+
+****************************************************************
+
+From: Micronian
+Sent: Sunday, September 30, 2012  12:56 AM
+
+Wouldn't it be better to avoid the user from having to worry with yet more
+implementation dependent details, especially for something that should be
+intuitive? It's already difficult enough trying to convince people about using
+Ada, but little details like this just looks bad ("What? Type'Size is different
+than Object'Size? But wait! Object'Size is different if I have it aliased or
+non-aliased? Why do I have to make something aliased to take a pointer to it?
+And why is Ada better than C again?). This reminds me about the issue with
+portability involving how many storage elements is used just to store a numeric
+value. Thankfully, the ARG came in to clear things up so that Ada code can be
+more portable. I realize a lot of people don't need to write code with such low
+level details, but in the industry I'm in that is what we deal with a lot, so it
+matters to people like me.
+
+Just my 2 cents.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October  2, 2012  9:54 AM
+
+> Wouldn't it be better to avoid the user from having to worry with yet
+> more implementation dependent details, ...
+
+Pretty much everything in chapter 13, including 'Size, is inherently
+implementation dependent.
+
+>...especially for something that should be  intuitive?
+
+'Size has always been unintuitive.  That's unfortunate, but it's not fixable
+now.
+
+>...It's already difficult enough trying to convince people about  using
+>Ada, but little details like this just looks bad ("What? Type'Size is
+>different than Object'Size?
+
+That's necessarily true, given that different objects of a type can have
+different sizes.
+
+>...But wait! Object'Size is different if I have it  aliased or
+>non-aliased?
+
+That shouldn't be surprising.  Aliased objects have to be allocated at an
+addressable and properly-aligned location, or else 'Access wouldn't work.
+Non-aliased objects can be allocated anywhere the compiler likes, and that's
+important for efficiency.
+
+>...Why do I have to make something aliased to take a  pointer to it?
+>And why is Ada better than C again?
+
+Ada is better than C because you have to make something aliased to take a
+pointer to it.  ;-)  Or more precisely, because "aliased" makes the code more
+readable -- it tells you it might be modified via other names.
+
+Ada is also better than C because Ada has pragma Pack, and C does not.  Pragma
+Pack wouldn't work very well without having "aliased" in the language.
+
+>...). This reminds me about
+> the issue with portability involving how many storage elements is used
+>just  to store a numeric value. Thankfully, the ARG came in to clear
+>things up so  that Ada code can be more portable. I realize a lot of
+>people don't need to  write code with such low level details, but in
+>the industry I'm in that is  what we deal with a lot, so it matters to people like me.
+
+ARG is all in favor of portability, but ARG is also constrained by
+compatibility, and anyway, I don't see how answering Adam's original question in
+the RM would make programs more portable.
+
+****************************************************************
+
+From: Micronian
+Sent: Wednesday, October  3, 2012  2:03 AM
+
+>> Wouldn't it be better to avoid the user from having to worry with yet more
+>> implementation dependent details, ...
+>
+>Pretty much everything in chapter 13, including 'Size, is
+>inherently implementation dependent.
+
+True, but it just doesn't feel comfortable, to me anyway, to have the issue Adam
+raised to be yet another "gotcha" when writing Ada code.
+
+>>...especially for something that should be
+>> intuitive?
+>
+>'Size has always been unintuitive.  That's unfortunate,
+>but it's not fixable now.
+
+Yeah, it is quite different if you come from other languages that usually has
+size in terms of bytes. Hmmm, has the ARG every considered a 'Num_Storage_Units
+attribute?
+
+>>...It's already difficult enough trying to convince people about
+>> using Ada, but little details like this just looks bad ("What? Type'Size is
+>> different than Object'Size?
+>
+>That's necessarily true, given that different objects of a type
+>can have different sizes.
+
+Yeah, I forgot that you can specify the size of an object at it's declaration
+(e.g. for My_Variable'Size use ???).
+
+>>...But wait! Object'Size is different if I have it
+>> aliased or non-aliased?
+>
+>That shouldn't be surprising.  Aliased objects have to be
+>allocated at an addressable and properly-aligned location,
+>or else 'Access wouldn't work.  Non-aliased objects can be
+>allocated anywhere the compiler likes, and that's important
+>for efficiency.
+
+Hmm, have you actually run into cases where it is more efficient to have an
+object *not* be at an addressable and properly-aligned location? I would think
+for efficiency sake a compiler would normally have the item be at a good
+alignment that is addressable. I normally write C code for a living, so I
+haven't come across what you have mentioned.
+
+...
+>>...). This reminds me about
+>> the issue with portability involving how many storage elements is used just
+>> to store a numeric value. Thankfully, the ARG came in to clear things up so
+>> that Ada code can be more portable. I realize a lot of people don't need to
+>> write code with such low level details, but in the industry I'm in that is
+>> what we deal with a lot, so it matters to people like me.
+>
+>ARG is all in favor of portability, but ARG is also constrained by
+>compatibility, and anyway, I don't see how answering Adam's
+>original question in the RM would make programs more portable.
+
+Because the more consistent the details are across compilers, the less difficult
+it is to write portable code that deals with such low level details. Again, like
+the issue with number of storage elements for a basic numeric type. Maybe
+another example to mention is how Bit_Order was finally ironed out so that it's
+easier to write code that will work across different targets, but still use the
+same representation specification**
+
+**OK, it's only an "implementation advice" in the RM, but at least it can nudge
+an implementer to do it.
+
+Thanks for responding!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October  5, 2012  10:19 PM
+
+>>'Size has always been unintuitive.  That's unfortunate, but it's not
+>>fixable now.
+
+>Yeah, it is quite different if you come from other languages that
+>usually has size in terms of bytes.
+
+That's not the part that's unintuitive. The fact is that Type'Size is just about
+meaningless, as a compiler chooses the object size without paying much attention
+to the type size. Moreover, the definition of Type'Size almost never corresponds
+to a "usual" allocation size, so the compiler has no real choice. This is
+something that the Ada 95 team got horribly wrong -- Ada 83 was very vague about
+what 'Size meant, so the Ada 95 team nailed it down to work like their compiler.
+But their compiler had a very unusual interpretation of the meaning of 'Size for
+types, and a not very useful one at that. Unfortunately, no one really realized
+how bad the situation was, and it wasn't fixed. Now it's too late to make it
+make any sense.
+
+GNAT has the 'Object_Size attribute to fix this situation (it corresponds to the
+size that a stand-alone object will have), but attempts to standardize that for
+Ada 2005 failed. (See AI95-0319-1 for a fairly complete definition of the
+attribute.)
+
+Note that the only way to make 'Size or something like it useful is to make it
+*more* implementation-defined, not less. The more specified the value of 'Size
+is, the more likely that the compiler will have to ignore it when allocating
+objects.
+
+>>...It's already difficult enough trying to convince people about
+>>using Ada, but little details like this just looks bad ("What?
+>>Type'Size is
+>> different than Object'Size?
+
+Type'Size is useless. Don't even think about it; only use Object'Size (and
+'Object_Size if you have GNAT).
+
+>>...But wait! Object'Size is different if I have it  aliased or
+>>non-aliased?
+>
+>That shouldn't be surprising.  Aliased objects have to be allocated at
+>an addressable and properly-aligned location, or else 'Access wouldn't
+>work.  Non-aliased objects can be allocated anywhere the compiler
+>likes, and that's important for efficiency.
+
+>Hmm, have you actually run into cases where it is more efficient to
+>have an object *not* be at
+>an addressable and properly-aligned location?
+
+I'm not sure about "efficiency", but any time you have a specified
+representation, you can get non-aligned objects. Think aspect pack or a record
+representation clause - I use the latter a lot.
+
+Also, there is no reason that a non-aliased (and non-volatile) object even be
+allocated memory - it might be completely evaluated by code or stored in one or
+more registers. (For loop indices are often implemented this way.) In that case,
+talking about size or alignment is meaningless. We really don't want to be
+forcing memory writes that aren't needed by the program logic - that IS an
+efficiency issue.
+
+If you really find this important, I think you should lobby for the
+standardization of Subtype'Object_Size. Type'Size is a lost cause, it will never
+make any sense. (Natural'Size = 15 or 31 or 63 -- almost no object will ever be
+allocated at that size; 'Size is not usually inherited, even if it was specified
+for some parent type -- but there are cases where it is inherited. Hopeless
+nonsense.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, October  6, 2012  7:39 AM
+
+>> Yeah, it is quite different if you come from other languages that
+>> usually has size in terms of bytes.
+>
+> That's not the part that's unintuitive. The fact is that Type'Size is
+> just about meaningless, as a compiler chooses the object size without
+> paying much attention to the type size. Moreover, the definition of
+> Type'Size almost never corresponds to a "usual" allocation size, so
+> the compiler has no real choice. This is something that the Ada 95
+> team got horribly wrong -- Ada 83 was very vague about what 'Size
+> meant, so the Ada 95 team nailed it down to work like their compiler....
+
+The Ada 83 reference manual said that Boolean'Size = 1, and that 'Size must be
+sufficient to cover all bit patterns. From that you get the sense that 'Size
+represents the fewest number of bits required to represent all values.
+
+In my view, there wasn't really any other choice consistent with the
+Boolean'Size requirement.
+
+[Editor's note: This is wrong, see Bob's message of Oct 8, 6:18 PM]
+
+****************************************************************
+
+From: Micronian
+Sent: Monday, October  8, 2012   2:38 AM
+
+...
+>I don't see any gotcha here.  If you want to pursue this, I think
+>you should show examples of code that actually cause a problem,
+>and write up the exact RM wording you would suggest.  Without
+>exact wording, it's hard to know whether there would be compatibility
+>or other issues.
+
+I gave it some thought and I don't think I can come up with a convincing example
+:P. I normally write C code at work and when we deal with creating buffers for
+various objects, we often just use the sizeof operator to determine this. We
+either take the size of the type or the object interchangeably because we know
+they are always the same in standard C. We often create #defines for size
+constants that are based on the size of multiple types (e.g. #define MAX_BYTES
+(sizeof( My_Struct ) + sizeof(My_Struct_2) ). It was mainly from this experience
+which led me to suspect there can be a portability issue if writing in Ada,
+namely doing the equivalent with the Ada type without knowing that Type'Size and
+Object'Size can be different. If a team were to use a compiler that happens to
+have Type'Size and Object'Size the same, then it would not be obvious that this
+may not hold true if a different compiler is used later on. If someone doesn't
+know the difference between Type'Size and Object'Size (example: First few years
+of writing Ada, I didn't know), I suspect that even after finally learning this,
+he will still not know that Object'Size can be different if an object is aliased
+or not (example: me again :D ).  It just make one wonder if it is really
+necessary for 'Size to be this confusing.
+
+...
+>> Yeah, it is quite different if you come from other languages that usually
+>> has size in terms of bytes. Hmmm, has the ARG every considered a
+>> 'Num_Storage_Units attribute?
+>
+>Well, there's the 'Max_Size_In_Storage_Elements attribute.
+
+Ah, I didn't know this one (or I may have forgotten. It's been way too long
+since I've done serious Ada coding :P ).
+
+>> Hmm, have you actually run into cases where it is more efficient to have an
+>> object *not* be at an addressable and properly-aligned location?
+>
+>Yes.  Storing an object in a register is one example -- unless you're
+>on a PDP-10, registers are not addressable, and alignment of them
+>is meaningless.  Another example is pragma Pack.
+
+Ah, right. I see this all the time, but it didn't occur to me that that is a
+perfect example of what you were referring to :P
+
+>> > ARG is all in favor of portability, but ARG is also constrained by
+>> > compatibility, ...
+>
+>My point here is that compatibility usually trumps portability.  For
+>example, suppose ARG ruled that Standard.Integer has exactly the 32-bit
+>2's complement range.  That would increase portability, but it would
+>force some compiler vendors to change their compiler in an incompatible
+>way.  (It would also force compilers to generate inefficient code on
+>some machines.)
+
+Hmmm, I guess I tend to lump the two together as "portability". It's about time
+I adjust my way of thinking :D
+
+Have a nice day!
+
+****************************************************************
+
+From: Micronian
+Sent: Monday, October  8, 2012   3:24 AM
+
+>That's not the part that's unintuitive. The fact is that Type'Size is just
+>about meaningless, as a compiler chooses the object size without paying much
+>attention to the type size. Moreover, the definition of Type'Size almost
+>never corresponds to a "usual" allocation size, so the compiler has no real
+>choice. This is something that the Ada 95 team got horribly wrong -- Ada 83
+>was very vague about what 'Size meant, so the Ada 95 team nailed it down to
+>work like their compiler. But their compiler had a very unusual
+>interpretation of the meaning of 'Size for types, and a not very useful one
+>at that. Unfortunately, no one really realized how bad the situation was,
+>and it wasn't fixed. Now it's too late to make it make any sense.
+
+But when a programmer wants to control the size of every instance of a
+particular type, he will often use a Type'Size clause, which only gives the
+impression that Type'Size = Object'Size.
+
+>GNAT has the 'Object_Size attribute to fix this situation (it corresponds to
+>the size that a stand-alone object will have), but attempts to standardize
+>that for Ada 2005 failed. (See AI95-0319-1 for a fairly complete definition
+>of the attribute.)
+
+Yes, I saw that it didn't survive, although I didn't read the entire discussion
+to find out why. I assumed something like that would have had a definite chance
+of being in the standard. What a shame :( I'll probably go back and read the
+entire discussion to see why it didn't make it.
+
+...
+>Also, there is no reason that a non-aliased (and non-volatile) object even
+>be allocated memory - it might be completely evaluated by code or stored in
+>one or more registers. (For loop indices are often implemented this way.) In
+>that case, talking about size or alignment is meaningless. We really don't
+>want to be forcing memory writes that aren't needed by the program logic -
+>that IS an efficiency issue.
+
+But in C, even if the object were allocated in a register, you can still take
+"sizeof  object" and get the same result as if it were in memory. I have not yet
+encountered a case where a C compiler stores entire structures in multiple
+registers, but even in that case I would expect a C compiler to still give be
+the same size as if it were in memory.
+
+>If you really find this important, I think you should lobby for the
+>standardization of Subtype'Object_Size. Type'Size is a lost cause, it will
+>never make any sense. (Natural'Size = 15 or 31 or 63 -- almost no object
+>will ever be allocated at that size; 'Size is not usually inherited, even if
+>it was specified for some parent type -- but there are cases where it is
+>inherited. Hopeless nonsense.)
+
+>Do you mean resurrect AI95-0319-1? Yeah, Type'Size is confusing :P
+
+>Have a nice day!
+
+****************************************************************
+
+From: Gautier de Montmollin
+Sent: Monday, October  8, 2012  4:11 AM
+
+>I gave it some thought and I don't think I can come up with a convincing
+>example :P. I normally write C code at work and when we deal with creating
+>buffers for various objects, we often just use the sizeof operator to
+>determine this. We either take the size of the type or the object
+>interchangeably because we know they are always the same in standard C. We
+>often create #defines for size constants that are based on the size of
+>multiple types (e.g. #define MAX_BYTES  (sizeof( My_Struct ) +
+>sizeof(My_Struct_2) ).
+
+Perhaps the point is that for that kind of things (creating buffers), you never
+need 'Size or whatever attribute in Ada...
+
+****************************************************************
+
+From: Micronian
+Sent: Monday, October  8, 2012  11:02 AM
+
+Yes, I think if I were writing in Ada, I probably would have used other means of
+creating a buffer (e.g. maybe use Max_Storage_Elements, overriding Stream
+attributes, rep specs, etc).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October  8, 2012   9:13 AM
+
+> I gave it some thought and I don't think I can come up with a
+> convincing example :P.
+
+OK, thanks for trying.  I couldn't either.  I can come up with all sorts of
+examples showing that 'Size is confusing, but nothing specifically related to
+Adam's question.
+
+>... I normally write C code at work and when we deal with creating
+>buffers for various objects, we often just use the sizeof operator to
+>determine this. We either take the size of the type or the object
+>interchangeably because we know they are always the same in standard C.
+>We  often create #defines for size constants that are based on the size
+>of  multiple types (e.g. #define MAX_BYTES  (sizeof( My_Struct ) +
+> sizeof(My_Struct_2) ).
+
+Right, in Ada you would be using things like 'Length, 'First, 'Last, etc.
+
+Normally, you don't have to care about sizes of things in Ada, and when you do
+care, you can _set_ the size.
+
+> It just make one wonder if it is really necessary for 'Size to be this
+> confusing.
+
+It is possible to design a language in which a 'Size-like feature is not
+confusing.  It is not possible to modify Ada to make 'Size not confusing,
+because compatibility trumps not-confusing.
+
+For example, Boolean'Size = 1 in Ada -- that's required of all Ada compilers,
+and changing it would break programs that depend on it.  But Boolean variables
+are typically allocated 8 bits or 32 bits or whatever is efficient on some
+machine -- unless you say something like pragma Pack on a record or array, in
+which case the Boolean components will typically have 'Size = 1. (Note that
+components are objects, too, and you can query their 'Size.)
+
+The idea that all objects of the same subtype have the same 'Size sounds simple,
+but it just won't fly in a language with packed bit-fields. (Well, C "solves"
+that problem by outlawing sizeof on bitfields -- which is a good thing, because
+it's not measured in bits.  And it doesn't even have bit-packed array
+components.)
+
+****************************************************************
+
+From: Micronian
+Sent: Monday, October  8, 2012  11:09 AM
+
+>> I gave it some thought and I don't think I can come up with a convincing
+>> example :P.
+
+>OK, thanks for trying.  I couldn't either.  I can come up with
+>all sorts of examples showing that 'Size is confusing, but
+>nothing specifically related to Adam's question.
+
+Maybe if I were more clever like Steve Baird I'd be able to find a few :D
+
+>Right, in Ada you would be using things like 'Length, 'First,
+>'Last, etc.
+>
+>Normally, you don't have to care about sizes of things in Ada,
+>and when you do care, you can _set_ the size.
+
+Right, if I were writing in Ada, there would be a lot of things I would do
+differently that I think are much cleaner, clearer, and easier to maintain.
+Every day I wonder to myself, "Why are we writing in "C"rap?" Anyhow....
+
+>The idea that all objects of the same subtype have the same 'Size sounds
+>simple, but it just won't fly in a language with packed bit-fields.
+>(Well, C "solves" that problem by outlawing sizeof on bitfields -- which
+>is a good thing, because it's not measured in bits.  And it doesn't even
+>have bit-packed array components.)
+
+I haven't yet read the discussion involving the 'Object_Size AI, but I take it
+what you mentioned gives a hint as to why it didn't make it through.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  8, 2012  5:20 PM
+
+>> The idea that all objects of the same subtype have the same 'Size
+>> sounds simple, but it just won't fly in a language with packed bit-fields.
+>> (Well, C "solves" that problem by outlawing sizeof on bitfields --
+>> which is a good thing, because it's not measured in bits.  And it
+>> doesn't even have bit-packed array components.)
+
+> I haven't yet read the discussion involving the 'Object_Size AI, but I
+> take it what you mentioned gives a hint as to why it didn't make it through.
+
+That had nothing to do with it. 'Object_Size gives the *default* size of
+allocation, which isn't used for bit-packed components or the like -- there is
+no requirement that all objects have that size.
+
+The problems mostly came from objections from the Rational folks, whose compiler
+processed representation items very late and could  not use them in semantic
+information. But it's necessary for 'Object_Size to be subtype-specific and to
+be involved in static matching.
+
+There also was disagreement about what 'Object_Size actually should mean. I
+presumed that 'Object_Size would be used both for stand-alone objects and for
+components in the absence of other representation clauses. There was strong
+objections to using the same size for both (although I recall no examples that
+made any sense where it ought to differ).
+
+Janus/Ada will implement 'Object_Size as written in that AI if I ever change
+Type'Size to match the Ada 95 standard (this is something I never did, since it
+helps no one, and breaks user's code). Whether other compilers ever do that, I
+don't know.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  8, 2012  5:34 PM
+
+>But when a programmer wants to control the size of every instance of a particular
+>type, he will often use a Type'Size clause, which only gives the impression
+>that Type'Size = Object'Size.
+
+That's my point: giving Type'Size means almost nothing at all; it doesn't
+control the size of anything other than the subtype it is given on. Other
+subtypes of the type probably have a different 'Size value; it doesn't do the
+job that is intended or is wanted. Compilers try to work around this situation
+to come closer to the likely intent, but that can only be done by ignoring the
+subtype's 'Size. It is a huge mess.
+
+For example:
+
+    type My_Int is range 0 .. 200;
+    for My_Int'Size use 16;
+    subtype Short_Int is My_Int range 0 .. 7;
+
+Here, My_Int'Size = 16, but Short_Int'Size = 3. But the compiler probably would
+make the size of an object of Short_Int 16 to respect the user's wishes -- but
+it certainly wouldn't have to. Moreover, Ada doesn't allow specifying the Size
+of Short_Int, so you can't even fix this situation.
+
+>>Also, there is no reason that a non-aliased (and non-volatile) object
+>>even be allocated memory - it might be completely evaluated by code or
+>>stored in
+>>one or more registers. (For loop indices are often implemented this
+>>way.) In
+>>that case, talking about size or alignment is meaningless. We really
+>>don't want to be forcing memory writes that aren't needed by the
+>>program logic - that IS an efficiency issue.
+
+>But in C, even if the object were allocated in a register, you can still take
+>"sizeof  object" and get the same result as if it were in memory. I have not
+>yet encountered a case where a C compiler stores entire structures in multiple
+>registers, but even in that case I would expect a C compiler to still give be
+>the same size as if it were in memory.
+
+The whole problem with Type'Size (in any form) is that it doesn't "tell the
+truth" about the actual size of the object. It seems like a bad thing to extend
+that lying about the size to sizes of objects -- what happens if you take the
+address of it and pass it to a file write routine? You really want that size of
+the object to reflect reality in that case (or any case where you need to mess
+with sizes). So this sounds like the worst possible solution. And Ada definitely
+doesn't require all objects to be allocated in the same way -- that's
+certainly not something we would or could change (for compatibility reasons at
+the very least). [As Bob mentioned, components ARE objects in Ada, so bit-packed
+components are treated the same as aliased stand-alone objects as far as being
+able to use Obj'Size.]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October  8, 2012  5:38 PM
+
+> ... This is something that the Ada 95 team got horribly wrong -- Ada
+> 83 was very vague about what 'Size meant, so the Ada 95 team nailed it
+> down to work like their compiler. ...
+
+For what it is worth, this had nothing to do with our compiler.
+It was just an attempt to make sense of the Ada 83 (plus AI) requirements that
+Boolean'Size be 1, and that Obj'Size be >= Subtype'Size. We did then attempt to
+implement our compiler so that it conformed to the Ada 95 rules ;-).
+
+It is not as confusing if you interpret is as meaning the size to use in a
+packed record.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  8, 2012  6:02 PM
+
+> > ... This is something that the Ada 95 team got horribly wrong -- Ada
+> > 83 was very vague about what 'Size meant, so the Ada 95 team nailed
+> > it down to work like their compiler. ...
+>
+> For what it is worth, this had nothing to do with our compiler.
+> It was just an attempt to make sense of the Ada 83 (plus AI)
+> requirements that Boolean'Size be 1, and that Obj'Size be >=
+> Subtype'Size.
+
+I don't think there was any real requirement that Boolean'Size = 1 (it surely
+never was = 1 in Janus/Ada 83!). Definitely not in the Ada 83 language. I recall
+there was pressure to ensure that packed arrays of Boolean used 1 bit per
+component, but that has nothing to do with 'Size.
+
+And of course, that's the root of the problem: Boolean'Size = 1 makes no sense
+(you'd never allocate that size in the vast majority of compilers in the absence
+of packing or other rep clause), and following from that is all of the other
+madness.
+
+> We did then attempt to implement our compiler so that it conformed to
+> the Ada 95 rules ;-).
+>
+> It is not as confusing if you interpret is as meaning the size to use
+> in a packed record.
+
+Sure, but that's almost never what you want to specify. Why would you want to
+specify the size of a subtype such that it can't be packed?
+
+The only thing a programmer is going to care about specifying is the *default*
+allocation size for a type, while Type'Size really specifies the *minimum*
+allocation size (which only depends on the properties of the subtype, and
+probably shouldn't be specified at all). Mixing those things led to a mass of
+confusion (and very complicated rules in a compiler trying to undo the damage).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October  8, 2012  6:18 PM
+
+> I don't think there was any real requirement that Boolean'Size = 1 (it
+> surely never = 1 in Janus/Ada 83!). Definitely not in the Ada 83 language.
+
+It was not in the original text of the Ada 83 RM.  It was added to Ada 83 by an
+AI that specifically said Boolean'Size = 1, with little explanation of why/how
+that makes sense.
+
+>...I
+> recall there was pressure to ensure that packed arrays of Boolean used
+>1 bit  per component, but that has nothing to do with 'Size.
+
+It has everything to do with 'Size, because the Ada 83 RM (IIRC) required 'Size
+of every object to be >= 'Size of its subtype. Maybe they meant "except
+components of packed records" or something, but that's not what it said.
+
+> Sure, but that's almost never what you want to specify. Why would you
+> want to specify the size of a subtype such that it can't be packed?
+
+You are absolutely right about that!
+
+'Size in Ada 83 never made much sense.  I wanted to add something like GNAT's
+'Object_Size in Ada 9X, but that was during the No New Taxes^H^H^H^H^Hfeatures
+era, and I would have been tarred and feathered.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October  8, 2012   6:28 PM
+
+> > ... This is something that the Ada 95 team got horribly wrong -- Ada
+> > 83 was very vague about what 'Size meant, so the Ada 95 team nailed
+> > it down to work like their compiler. ...
+>
+> For what it is worth, this had nothing to do with our compiler.
+
+Right, thanks for mentioning that fact.
+
+I was the main author of chapter 13 during Ada 9X, and I was not an employee of
+Intermetrics at the time, and I had no idea how any Intermetrics Ada compiler(s)
+treated 'Size.  I based my decisions on careful reading of the Ada 83 RM and the
+various 'Size-related AI's that had been issued, trying to resolve all sorts of
+contradictions.
+
+> It was just an attempt to make sense of the Ada 83 (plus AI)
+> requirements that Boolean'Size be 1, and that Obj'Size be >= Subtype'Size.
+
+Right.  I certainly made no attempt to bias the rules toward any particular
+implementation of Ada.
+
+> We did then attempt to implement our compiler so that it conformed to
+> the Ada 95 rules ;-).
+>
+> It is not as confusing if you interpret is as meaning the size to use
+> in a packed record.
+
+Right, although as Randy pointed out, that's not a particularly useful feature.
+
+****************************************************************
+
