@@ -1,0 +1,400 @@
+!standard 8.3.1(3/2)                                13-01-31    AI12-0060-1/00
+!class Amendment 13-01-22
+!status work item 13-01-22
+!status received 12-07-01
+!priority Low
+!difficulty Medium
+!subject Overriding indicators on protected subprogram bodies
+!summary
+
+** TBD.
+
+!problem
+
+Overriding indicators are illegal on protected subprogram bodies, even though
+they are allowed on regular subprogram bodies, according to RM 8.3.1 (3/2). Not
+all Ada implementations currently enforce this restriction.
+
+It seems inconsistent that we allow them on regular subprogram bodies, but
+not on protected subprogram bodies. If one is looking at the body of a package,
+it is helpful to see whether a particular subprogram is overriding a primitive
+of an interface, without having to go to the spec to determine this. A common
+style is to only use overriding indicators if the primitive is overriding (and
+omit the overriding indicator if the primitive is not overriding). If overriding
+indicators are disallowed in the body, this could give the false impression that
+a primitive is not overriding, when in fact it actually is overriding, if one
+follows this programming style.
+
+Overriding indicators should be consistently allowed on subprogram bodies.
+
+!proposal
+
+** TBD.
+
+!wording
+
+** TBD.
+
+!discussion
+
+Ada 2005 designed overriding indicators with the intention that they not be
+repeated on subprogram bodies. Indicators are allowed on bodies solely for
+cases where the subprogram body is acting as a declaration, or where the
+declaration cannot have an indicator. The expection was that no other
+indicators would be given.
+
+This is reenforced by the requirement that indicators only be given on
+subprograms that are primitive subprograms.
+
+Given this, it's clearly a bug in Ada 2005 that it allows repeating overriding
+indicators on subprogram bodies at all. However, it's clearly too late to
+impose such a requirement.
+
+The primary advantage of allowing indicators on bodies is that they can
+match those in the specification. However, there are two problems with that:
+(1) It's not always possible to put an indicator on a subprogram declaration,
+and in such cases the indicators on the declaration and body cannot be the same;
+and (2) Ada 2012 has added many more things that cannot be repeated on the body.
+Specifically, aspects, including Pre and Post, cannot be repeated on bodies.
+(Of course, Ada has never allowed repeating generic parameters on generic
+subprogram bodies, so this never has been globally allowed by the language.)
+Ada 2012 programmers are going to have to get used to the idea that not
+everything can be repeated.
+
+One could imagine eliminating all of the restrictions on where indicators can
+be given. In that case, the rules in 8.3.1 and elsewhere would need updating
+to ensure that they make sense for non-primitive routines, generic subprograms,
+and the like. We also would want to consider allowing indicators on entry
+bodies (maybe OK) and on accept bodies (downright weird).
+
+Note that the "common style" mentioned in the problem statement is misguided.
+It is not always possible to put indicators on routines that ultimately are
+overriding (thus was the main reason for allowing any indicators on bodies),
+and thus the absence of an indicator does not mean that the routine is not
+overriding. The Ada language is not in the business of supporting misguided
+styles.
+
+For example:
+    private with Ada.Finalization;
+    package Z is
+       type S is tagged private;
+
+       -- No indicator allowed here (neither "overriding" nor "not overriding" would be legal)
+       procedure Finalize (Obj : in out S);
+    private
+       type S is new Ada.Finalization.Controlled with null record;
+       -- procedure Finalize is overriding here.
+    end Z;
+
+!example
+
+package P is
+
+    type I is limited interface;
+
+    function Get (From : I) return Natural is abstract;
+    procedure Set (To   : in out I; Val : Natural) is abstract;
+    function "=" (Left, Right : I) return Boolean is abstract;
+    procedure Assign (Target : in out I; Source : I) is abstract;
+
+end P;
+
+with P;
+package C is
+
+    protected type T (Maximum_Capacity : Natural) is new P.I with
+
+       not overriding
+       procedure Clear;
+       overriding
+       function Get return Natural;
+       overriding
+       procedure Set (Item : Natural);
+
+    private
+       Data : Natural;
+    end T2;
+
+    overriding
+    function "=" (Left, Right : T) return Boolean;
+    overriding
+    procedure Assign (Target : in out T; Source : T);
+
+end C;
+
+package body C is
+
+    protected body T is
+
+       not overriding            -- Not allowed by Ada 2005 and 2012
+       procedure Clear is
+       begin
+          Data := 0;
+       end Clear;
+
+       overriding                -- Not allowed by Ada 2005 and 2012
+       function Get return Natural is
+       begin
+          return Data;
+       end Get;
+
+       overriding                -- Not allowed by Ada 2005 and 2012
+       procedure Set (Item : Natural) is
+       begin
+          Data := Item;
+       end Set;
+
+    end T;
+
+    overriding -- Allowed by Ada 2005 and 2012, but bad style
+    function "=" (Left, Right : T) return Boolean is
+    begin
+       return Left.Get = Right.Get;
+    end "=";
+
+    overriding -- Allowed by Ada 2005 and 2012, but bad style
+    procedure Assign (Target : in out T; Source : T) is
+    begin
+       Target.Set (Source.Get);
+    end Assign;
+
+end C;
+
+!ASIS
+
+** TBD.
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Brad Moore
+Sent: Sunday, July  1, 2012  10:00 AM
+
+Currently in Ada 2005, Overriding indicators are illegal on protected subprogram
+bodies, even though they are allowed on regular subprogram bodies, according to
+RM 8.3.1 (3/2). Not all Ada 2005 implementations currently enforce this
+restriction.
+
+It seems inconsistent to me that we allow them on regular subprogram bodies, but
+not on protected subprogram bodies. If one is looking at the body of a package,
+it is helpful to see whether a particular subprogram is overriding a primitive
+of an interface, without having to go to the spec to determine this. A common
+style is to only use overriding indicators if the primitive is overriding (and
+omit the overriding indicator if the primitive is not overriding). If overriding
+indicators are disallowed in the body, this could give the false impression that
+a primitive is not overriding, when in fact it actually is overriding, if one
+follows this programming style.
+
+I'd like to get a sense of how others feel about this idea.
+
+Consider;
+
+
+package P is
+
+    type I is limited interface;
+
+    function Get (From : I) return Natural is abstract;
+    procedure Set (To   : in out I; Val : Natural) is abstract;
+    function "=" (Left, Right : I) return Boolean is abstract;
+    procedure Assign (Target : in out I; Source : I) is abstract;
+
+end P;
+
+with P;
+package C is
+
+    protected type T (Maximum_Capacity : Natural) is new P.I with
+
+       not overriding procedure Clear;
+       overriding function Get return Natural;
+       overriding procedure Set (Item : Natural);
+
+    private
+       Data : Natural;
+    end T2;
+
+    overriding function "=" (Left, Right : T) return Boolean;
+    overriding procedure Assign (Target : in out T; Source : T);
+
+end C;
+
+package body C is
+
+    protected body T is
+
+       not overriding procedure Clear is   -- Allow?
+       begin
+          Data := 0;
+       end Clear;
+
+       overriding function Get return Natural is -- Allow?
+       begin
+          return Data;
+       end Get;
+
+       overriding procedure Set (Item : Natural) is -- Allow?
+       begin
+          Data := Item;
+       end Set;
+
+    end T;
+
+    overriding function "=" (Left, Right : T) return Boolean is
+    begin
+       return Left.Get = Right.Get;
+    end "=";
+
+    overriding procedure Assign (Target : in out T; Source : T) is
+    begin
+       Target.Set (Source.Get);
+    end Assign;
+
+end C;
+
+
+Also, if we were to allow overriding indicators on protected subprograms, I
+think it would also make sense to allow them on protected entries.
+
+We probably would still not want to allow them on accept statements for tasks.
+
+Note, this topic was previously raised by Adam Beneschan as AC 213.
+
+See:
+
+    http://www.ada-auth.org/cgi-bin/cvsweb.cgi/acs/ac-00213.txt?rev=1.1
+
+If there is support for this idea, the next question would be whether this
+should be a binding interpretation for Ada 2005, or if this is something we
+would apply to Ada 2012.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July  2, 2012  4:16 PM
+
+> Currently in Ada 2005, Overriding indicators are illegal on protected
+> subprogram bodies, even though they are allowed on regular subprogram
+> bodies, according to RM 8.3.1 (3/2). Not all Ada 2005 implementations
+> currently enforce this restriction.
+...
+> Note, this topic was previously raised by Adam Beneschan as AC 213.
+> http://www.ada-auth.org/cgi-bin/cvsweb.cgi/acs/ac-00213.txt?rev=1.1
+
+It was definitely not intended that overriding indicators be given on subprogram
+bodies other than those acting as declarations or those for which an indicator
+was not allowed on the declaration. In particular, we disallowed putting
+indicators on any subprograms that are not primitive operations, and that holds
+for the majority of subprogram bodies.
+
+My responses in that AC explain this in detail.
+
+There might be reasons to reconsider this decision (see below), but if we were
+to do that, I think we would have to revisit all of the rules (and in
+particular, the banning of indicators on non-primitive subprograms).
+
+> It seems inconsistent to me that we allow them on regular subprogram
+> bodies, but not on protected subprogram bodies.
+
+I think allowing them on regular subprogram bodies was a bug - but one that it
+is too late to fix (it would be incompatible). The model was that they are *not*
+repeated on bodies, so they should only have been allowed if the specification
+did not have an indicator (or there was no specification). That would have been
+consistent with the banning of indicators on routines that are not primitive.
+
+> If one is looking at the body of a package, it is helpful to see
+> whether a particular subprogram is overriding a primitive of an
+> interface, without having to go to the spec to determine this.
+
+That does not work in general in Ada 2012 (see below).
+
+> A common style is to only use overriding indicators if the primitive
+> is overriding (and omit the overriding indicator if the primitive is
+> not overriding).
+> If overriding indicators are disallowed in the body, this could give
+> the false impression that a primitive is not overriding, when in fact
+> it actually is overriding, if one follows this programming style.
+
+Such a style is broken (whether or not we change the language here), and people
+using misguided styles is no reason to consider changing the language.
+
+Specifically, not giving an indicator means either "don't care about overriding"
+or "not primitive so cannot be overriding". (And I still think that having it
+mean that latter was a mistake.) It definitely does *not* mean "not overriding",
+and it is impossible to have a style in which that is the case (unless you are
+willing to ban using any tagged generic formal types as well as any tagged
+private types where the full type has a different ancestor type -- that seems
+draconian at best).
+
+I suppose that people might gravitate to such a broken style because they are
+not allowed to put "not overriding" on non-primitive operations. It is not
+obvious to the casual reader whether an operation is primitive or not, so they
+should be able to write all operations the same. That's why I thought it was so
+important to allow writing "not overriding" on all operations. But absolutely no
+one supported that position, so now we have people asking to totally destroy the
+mechanism because it is too hard to use. Grumble, grumble.
+
+> I'd like to get a sense of how others feel about this idea.
+
+It sucks. :-)
+
+Still, there are three possibly sensible reasons for supporting a change
+here:
+
+(1) GNAT gets this wrong, so there is lots of incorrect code out there.
+Perhaps we should simply change the language to match the broken compiler.
+
+(2) Lots of people are used to looking only at the header of the subprogram body
+to get information about the subprogram. We should  design the language to allow
+that.
+
+(3) Fixing the model is incompatible (it should not have been allowed to repeat
+indicators on subprogram bodies other than when there is no indicator on the
+spec), so lets throw it out instead.
+
+The problem with (1) is that it doesn't make much sense to change the language
+to accommodate every bug of one implementation. That's especially true when we
+are not doing that for other implementations.
+
+The problem with (2) is that it isn't possible in Ada 2012 even if we changed
+this rule, because we don't allow repeating aspect clauses (specifically Pre and
+Post). Indeed, given that Pre and Post are much more important than the
+overriding indicator ever could be, I don't see much point in changing the usage
+of the indicators on bodies (it's not something that you are likely to care
+about when you are writing a body).
+
+(3) is kinda silly on its face. Just because we can't make it better does not
+mean we have to make it worse.
+
+...
+> If there is support for this idea, the next question would be whether
+> this should be a binding interpretation for Ada 2005, or if this is
+> something we would apply to Ada 2012.
+
+This is not a question, no matter what we might want to do. WG 9 has
+consistently rejected any attempts by the ARG to talk about previous standards;
+we cannot adopt "Binding Interpretations" for Ada 95 even if we wanted to (and
+we have wanted to). Similarly, unless Ada 2012 fails standardization, it will be
+the operative standard by the time your question could be formally considered,
+and as such we will only be able to adopt "binding interpretations" on Ada 2012
+at that time.
+
+Of course, some interpretations should apply to older versions of Ada, but those
+are completely implementation-defined at this point and it is up to vendors (and
+vendors alone) whether to apply fixes to those older versions.
+
+Finally, one could imagine informally saying that a BI applied to an older
+version of the language. But we've never done that in the past (even though
+there have been many important AIs that probably should be applied to Ada 95
+compilers and even Ada 83 implementations), and I cannot imagine why this minor
+issue should get special treatment. On top of that, this is going to be a fairly
+significant change (given the consistency need to add these to entries, entry
+bodies, accept statements, and allowing "not overriding" in more places, plus
+potentially weakening the rules for indicators and probably adding a restriction
+requiring a matching indicator on bodies), and it seems wrong to consider it a
+BI at all in that case.
+
+****************************************************************
