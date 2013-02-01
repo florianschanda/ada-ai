@@ -1,0 +1,280 @@
+!standard 4.3.3(5/2)                                13-01-31    AI12-0061-1/01
+!standard 4.3.3(23)
+!standard 3.1(6/3)
+!standard 3.3.1(23/3)
+!standard 8.6(4.1/3)
+!class Amendment 13-01-31
+!status work item 13-01-31
+!status received 13-01-24
+!priority Medium
+!difficulty Easy
+!subject Index parameters in array aggregates
+!summary
+
+Add parameterized_array_component_associations to array aggregates.
+
+!problem
+
+When the element type of an array is limited, it is not possible to
+create an aggregate that gives a different value, defined value to each
+component.
+
+For instance, to call a function to initialize each element based on
+the index value, you would have use a for loop after the declaration
+of the array object. But this isn't possible if the type is limited.
+
+   (for I in 1 .. Count => Function_Returning_Lim (I))
+
+where Function_Returning_Lim returns a limited type, would provide a
+way to create an aggregate that would be difficult to create otherwise. 
+
+Ada 9x team noted this problem in giving different discriminants to
+an array of tasks, see the example.
+
+!proposal
+
+Add a for-loop-like syntax to array aggregates. This syntax is for named
+array aggregates (it cannot be used in positional aggregates).
+
+!wording
+
+Change 4.3.3(5/2) to:
+
+array_component_association ::=
+   discrete_choice_list => expression
+ | discrete_choice_list => <>
+ | parameterized_array_component_association
+
+Add after 4.3.3(5/2):
+
+parameterized_array_component_association ::=
+  for defining_identifier in discrete_choice_list => expression
+
+A parameterized_array_component_association declares an index
+parameter, which is an object whose type is the corresponding index
+type.  If the discrete_choice_list is a single nonstatic
+choice_expression or range, the constraint of the object's subtype is
+the single value given by the choice_expression, or it is defined by
+the range; otherwise, the bounds of the subtype's constraint are the
+smallest and largest values covered by the discrete_choice_list.
+
+Change 4.3.3(23) to:
+
+2.  The array component expressions of the aggregate are evaluated in an
+arbitrary order and their values are converted to the component
+subtype of the array type; an array component expression is evaluated
+once for each associated component.  For a
+parameterized_array_component_association, before an array component
+expression is evaluated for an associated component, the index of that
+component is assigned to the index parameter.
+
+Add to the end of 3.1(6/3):
+
+In addition, a parameterized_array_component_association is a
+declaration of its defining_identifier.
+
+Add after in 8.1(4.1/3):
+
+* a parameterized_array_component_association;
+
+Change the last sentence of 3.3.1(23/3) to:
+
+An object declared by a loop_parameter_specification,
+iterator_specification, parameter_specification,
+entry_index_specification, choice_parameter_specification,
+parameterized_array_component_association,
+extended_return_statement, or a formal_object_declaration of mode in
+out is not considered a stand-alone object.
+
+** We also need conformance wording similar to that for quantified
+expressions in AI12-0050-1. The editor did not add such wording because
+AI12-0050-1 does not yet have a wording proposal.
+
+** The proposer suggests a note to point out this is not a for loop; the
+order of evaluation of the array component expressions is unspecified.
+The editor did not try to create such a note.
+
+!discussion
+
+We don't need to change 4.3.3(17), since the wording for applies to
+all forms of array_component_associations, including these new ones.
+
+Similarly, 4.3.3(18) and 4.3.3(27) still work as the new syntax includes	
+discrete_choice_list.
+
+Note that this proposal allows iterating on a discrete_choice_list, so
+aggregates like:
+
+   (for I in 1 .. 3 | 5 .. 9 => I * I, 4 => 666)
+
+are allowed. The rule about dynamic named choices still applies, so
+either the syntax is a regular for loop, or it can be expanded at compile
+time (as in the above example). So the extra implementation burden of
+allowing a list should be minimal.
+
+!example
+
+Using this feature to create an array of tasks that "know" their index
+within the array:
+
+    subtype Worker_Indexes is Natural range 1 .. 20;
+
+    task type Worker (Index : Worker_Indexes := 1) is ...
+
+    type Task_Array (Worker_Indexes) of Worker;
+
+    function Creator (Index : Worker_Indexes) return Worker is
+    begin
+        return Result : Worker (Index);
+    end Creator;
+
+    Worker_Tasks : Task_Array :=
+       (for Index in Worker_Indexes => Creator (Index));
+
+All of these tasks will be activated together, and they will know
+their position in the array (so that they can communicate directly
+with the neighbors) without needing an initialization entry call
+(which necessarily would serialize the starting of the tasks).
+
+!ASIS
+
+** ASIS queries needed **
+
+!ACATS test
+
+ACATS B-Tests (to test 4.3.3(17-18) and the new rules) and C-Tests.
+
+!appendix
+
+!topic Index parameters in array aggregates
+!reference 4.3.3
+!from Adam Beneschan 13-01-24
+!discussion
+
+This is a proposal to allow "for <index_parameter> in
+<discrete_choice_list>" in place of a <discrete_choice_list> in a
+named array aggregate, where the expression on the right may refer to
+the index parameter.  For instance:
+
+   (for I in 1 .. 5 => I * I)
+
+would be equivalent to the array aggregate
+
+   (1 => 1, 2 => 4, 3 => 9, 4 => 16, 5 => 25)
+
+This has been proposed in the past; Dan Eilers made a similar
+suggestion before Ada 95 was adopted.  More recently, Phil Clayton
+suggested the above syntax in July 2010; see the thread in
+comp.lang.ada at
+
+http://groups.google.com/group/comp.lang.ada/browse_thread/thread/334f9012742e58fc
+
+(scroll down to Phil's first post in the thread).  Although the
+proposal would be syntactic sugar in a case like the above, since you
+can declare an array object and use a FOR loop to assign to each
+element, it was pointed out in the comp.lang.ada thread that this
+can't be done when the element type is limited.  In that case, a
+syntax like
+
+   (for I in 1 .. Count => Function_Returning_Lim (I))
+
+where Function_Returning_Lim returns a limited type, might provide a
+way to create an aggregate that would be difficult to create
+otherwise. 
+
+I've decided to try to come up with the RM changes myself, in the hope
+that I might save someone else some work if this idea is pursued
+(although I'm sure some editing would still be needed).
+
+!wording
+
+Change 4.3.3(5/2) to:
+
+array_component_association ::=
+   discrete_choice_list => expression
+ | discrete_choice_list => <>
+ | parameterized_array_component_association
+
+Add after 4.3.3(5/2):
+
+parameterized_array_component_association ::=
+  for defining_identifier in discrete_choice_list => expression
+
+A parameterized_array_component_association declares an index
+parameter, which is an object whose type is the corresponding index
+type.  If the discrete_choice_list is a single nonstatic
+choice_expression or range, the constraint of the object's subtype is
+the single value given by the choice_expression, or it is defined by
+the range; otherwise, the bounds of the subtype's constraint are the
+smallest and largest values covered by the discrete_choice_list.
+
+Change 4.3.3(23) to:
+
+2.  The array component expressions of the aggregate are evaluated in an
+arbitrary order and their values are converted to the component
+subtype of the array type; an array component expression is evaluated
+once for each associated component.  For a
+parameterized_array_component_association, before an array component
+expression is evaluated for an associated component, the index of that
+component is assigned to the index parameter.
+
+Add to the end of 3.1(6/3):
+
+In addition, a parameterized_array_component_association is a
+declaration of its defining_identifier.
+
+Add somewhere in 8.1(2-6):
+
+. a parameterized_array_component_association;
+
+Change the last sentence of 3.3.1(23/3) to:
+
+An object declared by a loop_parameter_specification,
+iterator_specification, parameter_specification,
+entry_index_specification, choice_parameter_specification,
+parameterized_array_component_association,
+extended_return_statement, or a formal_object_declaration of mode in
+out is not considered a stand-alone object.
+
+
+NOTE on 4.3.3(17/3):
+
+I don't think any change is required here; for the legality rules, a
+discrete_choice_list in a parameterized_array_component_association
+has the same effect as a discrete_choice_list in the other two types
+of array_component_associations.  I don't think any wording change is
+necessary, but for clarity it might be useful to change the first
+phrase to
+
+The discrete_choice_list of an array_component_association (including
+the discrete_choice_list of a
+parameterized_array_component_association) is allowed ...
+
+Similarly for 4.3.3(27).
+
+
+NOTE: In the aggregate 
+
+   (1 .. 10 => Func_Call)
+
+the component expressions are evaluated in an arbitrary order (by
+4.3.3(23)), which means that if Func_Call has side effects and
+returns a different value each time, you can't count on which result
+of Func_Call will be assigned to which component.  I'm assuming that
+the same would be true for 
+
+   (for I in 1 .. 10 => Func_Call (I))
+
+i.e. you can't tell which value will be passed to Func_Call first.
+I'm assuming that no additional language is necessary, but a note in
+the NOTES section could be helpful to avoid confusion, since people
+could assume it would iterate like a for_loop_statement.
+
+Note that this proposal allows anything that would be allowed in a
+discrete_choice_list, e.g.
+
+   Arr : Int_Array (1 .. 15) := 
+            (for I in 1 | 3 | 6 | 10 .. 15 => I, 
+             for J in others => -J);
+
+****************************************************************
