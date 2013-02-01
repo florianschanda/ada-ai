@@ -1,0 +1,400 @@
+!standard 11.3(4/3)                              13-01-31    AI12-0062-1/01
+!class ramification 13-01-31
+!status work item 13-01-31
+!status received 13-01-27
+!priority Low
+!difficulty Easy
+!subject Raise exception with failing string function
+!summary
+
+If the string expression in a raise_statement or raise_expression itself raises
+an exception, that exception is propagated (rather than the one named in
+the raise_statement or expression).
+
+!question
+
+What happens when the string expression in a "raise Excep with String_Func(...)"
+propagates an exception?  Which exception is raised? (The one propagated by
+String_Func).
+
+!response
+
+11.3(4/3) says:
+
+"If a string_expression is present, the expression is evaluated and its value
+is associated with the exception occurrence."
+
+Note: This sentence is marked as Redundant, but it's not completely redundant
+because it is the only text that talks about when the string_expression is
+evaluated. In any case, "Redundant" is not normative, so this wording controls
+the effect whether we intended it to or not.
+
+When an expression is evaluated, any exceptions that it might cause are
+propagated (of course). The above sentence says that happens before the
+string_expression is associated with the exception occurrence. And that
+association has to happen before the exception occurrence created by
+raise statement (or expression) is propagated, because that occurrence
+isn't fully defined until the value of the message is "associated", and
+because an occurrence cannot meet the requirements on the exception
+message of 11.4.1(10.4/3) until the association has happened. In any case,
+propagating an occurrence that isn't fully initialized is nonsense.
+
+Thus we conclude that the exception raised by string_expression has priority.
+
+This is the preferred response in any case, as it means that a raise_statement
+and the equivalent call to Ada.Exceptions.Raise_Exception have precisely the
+same semantics.
+
+For the case of the special rule added by AI12-0054-1, the string_expression
+is not evaluated, and thus it cannot propagate any exceptions.
+
+!wording
+
+Add an AARM Ramification after 11.3(4.a):
+
+    If the evaluation of a string_expression raises an exception, that exception
+    is propagated rather than the one denoted by the exception_name of the
+    raise_statement or raise_expression.
+
+Add an AARM Ramification after 11.3(4.d/4): [From AI12-0054-1]
+
+    Note that this means that the optional string_expression of the
+    raise_expression is not evaluated (thus it cannot propagate any exceptions).
+
+!discussion
+
+None needed.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test could be created to check this, but it would be of low value.
+
+
+!appendix
+
+From: Tucker Taft
+Sent: Sunday, January 27, 2013  5:37 PM
+
+What happens when the string expression in a "raise Excep with String_Func()"
+propagates an exception?  Which exception is raised?
+The RM doesn't mention this case.
+
+My instinct is to say that we treat the "String_Func()" like an actual parameter
+in a hypothetical call on the "Raise_Exception" operation, and follow the normal
+rule that if the evaluation of an actual parameter raises an exception, that
+that gets propagated, and you never make the enclosing call.
+
+So in this case, I would assume you would not necessarily raise "Excep"
+but rather you would propagate whatever exception String_Func() propagates.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, January 27, 2013  5:48 PM
+
+I think we should test what existing compilers do, no point in requiring a
+change in implementations for this marginal case.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Monday, January 28, 2013  10:17 AM
+
+> So in this case, I would assume you would not necessarily raise "Excep"
+> but rather you would propagate whatever exception String_Func()
+> propagates.
+
+I agree. (In particular, what would the exception message be, if Excep were
+raised instead?)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, January 28, 2013  11:18 AM
+
+> So in this case, I would assume you would not necessarily raise "Excep"
+> but rather you would propagate whatever exception String_Func()
+> propagates.
+
+I agree with your instinct.
+Even more strongly, I do not see this as a good-arguments-for-both-sides
+judgment call (at least after everyone fully understands the issues). I think
+there is clearly only one right answer.
+
+As you pointed out in discussing the other alternative (i.e., raising Excep in
+the case of the above example),
+> Not obvious what happens when you ask for the associated message.
+
+To me, that removes any doubt about how this construct should be handled.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  11:49 PM
+
+One special case, if we have in a predicate expression
+
+    raise Program_Error with bad-string-raises-constraint-error
+
+and we convert this to "return false" in a membership test, then I don't think
+we should be forced to raise CE in this case.
+
+BTW, I would have FAR preferred to say for membership predicates that ANY
+exception means the predicate is false, it's really HORRIBLE to have a
+difference between an explicit raise and a call to a function that does nothing
+but a raise. It also has a very simple implementation (the current rule is quite
+tricky to implement!)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, January 28, 2013 12:04 PM
+
+> One special case, if we have in a predicate expression
+>
+>     raise Program_Error with bad-string-raises-constraint-error
+>
+> and we convert this to "return false" in a membership test, then I
+> don't think we should be forced to raise CE in this case.
+
+Agreed.
+
+
+> BTW, I would have FAR preferred to say for membership predicates that
+> ANY exception means the predicate is false, it's really HORRIBLE to
+> have a difference between an explicit raise and a call to a function
+> that does nothing but a raise. It also has a very simple
+> implementation (the current rule is quite tricky to implement!)
+
+I agree with your objections to the solution that was chosen.
+
+I'm a big fan of semantics-preserving transformations. I don't like the idea
+that a raise expression of type T is not equivalent to a call to a T-valued
+no-separate-spec function which raises the same exception. In the context of a
+predicate expression, these two constructs are not equivalent and I don't like
+that.
+
+The alternative you describe, however, introduces the possibility of
+"swallowing" an exception which was really unintended (and which is raised "far
+away"), thereby masking a real error.
+
+The ARG discussed this alternative and viewed it as unacceptable for this
+reason.
+
+This one, IMO, is a "good-arguments-on-both-sides" judgment call.
+
+[Editor's note: Discussion on this topic continues in AI12-0063-1.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 28, 2013  7:26 PM
+
+To get back to the original question for a moment:
+
+...
+> What happens when the string expression in a "raise Excep with
+String_Func()"
+> propagates an exception?  Which exception is raised?
+> The RM doesn't mention this case.
+
+I disagree with the premise that RM doesn't define this case. It's not laid out
+with specific wording, but there is no sensible alternative meaning that meets
+the requirements of the RM.
+
+Specifically, 11.3 says:
+
+"If a string_expression is present, the expression is evaluated and its value is
+associated with the exception occurrence."
+
+[Aside: This sentence is marked as Redundant, but it's not completely redundant
+because it is the only text that talks about when the string_expression is
+evaluated. In any case, "Redundant" is not normative, so this wording controls
+the effect whether we expected it to or not.]
+
+When an expression is evaluated, any exceptions that it might cause are
+propagated (of course). But the above sentence, that happens before the
+string_expression is associated with the exception occurrence. And that
+association has to happen before the exception occurrence created by raise
+statement (or expression) is propagated, because that occurrence isn't fully
+defined until the value of the message is "associated". Propagating an
+incompletely initialized occurrence is nonsense (certainly the Dewar rule would
+apply to that), and in any case would violate 11.4.1(10.1/3) (which says that
+the message of a raise statement with a string_expression is that of the
+provided string -- no exceptions [pun intended] allowed).
+
+Ergo, the language already defines what happens. (Steve noted the problem with
+propagating an undefined string but failed to note that the language already has
+enough wording to prevent such an outcome -- assuming you don't think that the
+language intends to raise an exception with an uninitialized message string
+[which is nonsense].)
+
+As a practical matter, I'd be surprised if there are any compilers that do
+anything different. In Ada 95, we have the Ada.Exceptions.Raise_Exception
+routine, which of course is a normal subprogram call where the parameters
+(including the message string) are clearly evaluated first. I'd be stunned if
+any Ada 2005 implementation did anything other than use this existing routine to
+implement raise statement with string_expression (certainly Janus/Ada does
+exactly that). So I think compilers already do what the language says.
+
+Thus, I think this is at most a Ramification; perhaps adding an AARM note would
+be of value, but there is absolutely no need to make any normative changes. (And
+as Bob often says, we're just as likely to introduce new bugs when we change
+wording; we ought to avoid that when there is nothing clearly wrong.)
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, January 29, 2013  6:38 AM
+
+> To get back to the original question for a moment:
+
+Thanks, Randy, for bringing the discussion back from the deep end of
+non-returning functions of unspecified result type causing Beaujolais and
+general Upchuck. :-)
+
+[Editor's note: He's referring to the discussion filed in AI12-0063-1. I'm
+sure all of you readers are now rushing to that AI to see what he was
+talking about.]
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, January 29, 2013  11:06 AM
+
+I'm not disagreeing that the exception propagated should be that from
+String_Func, but the obvious exception message if Excep were to be raised would
+be an empty string.  It's quite common for a fault reporting utility to have an
+additional information field that is blanked if it fails to obtain any useful
+additional information pertaining to the fault. For some one debugging a crash
+it would be more useful to propagate Excep than that from String_Func since
+closer to identifying the root problem (any exception from String_Func is just
+consequential), but it is probably up to the implementor of String_Func to
+provide a local exception handler that returns an empty string (maybe saving the
+exception occurrence from the internal exception for reporting in a second fault
+report) rather than for the language to do anything special.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, January 29, 2013  11:26 AM
+
+> I disagree with the premise that RM doesn't define this case. It's not
+> laid out with specific wording, but there is no sensible alternative
+> meaning that meets the requirements of the RM.
+
+I agree with Randy's analysis.  Whenever we say so-and-so expression is
+evaluated, that always means "and it might raise an exception".
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January 29, 2013  1:44 PM
+
+> I'm not disagreeing that the exception propagated should be that from
+> String_Func, but the obvious exception message if Excep were to be
+> raised would be an empty string.
+
+Perhaps, but there is absolutely no indication in the RM that that would be an
+acceptable result and it would differ from the behavior of the procedure
+Raise_Exception. OTOH, the existing wording of the standard seems to confirm
+that the exception raised by the message would be propagated. In any case, this
+issue is easily solved: don't propagate an exception from a message string! This
+isn't something anyone is going to do on purpose; it's caused by a bug in an
+error handler and as such the most important thing is that it is well-defined,
+not specifically how it is defined.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 31, 2013  9:55 PM
+
+In writing up this AI, I had a cross-AI moment that led me to consider a very
+Bairdian scenario: what happens if the string expression in a raise_expression
+of a predicate raises an exception when it is evaluated in a membership
+operation? (Thus combining AI12-0062-1 and AI12-0054-1.)
+
+Having studied the issue, I've concluded that the wording of AI12-0054-1 is
+sufficient to define this case:
+
+"...if a raise_expression [statically] within the predicate of S is evaluated,
+then the exception is not raised; instead, the entire predicate immediately
+evaluates to False."
+
+I read this to say that the string_expression is not evaluated (it's not going
+to be used), and thus any exception that it would have propagated will not
+occur.
+
+I added an AARM note to this effect to AI12-0062-1 to go along with the other
+ramification note.
+
+One could make a case that whether the string gets evaluated is unspecified in
+the wording above, but I can't imagine any compiler writer wanting to evaluate
+something dead, such an exception represents a bug in the string (no one will do
+this on purpose), and as such trying to nail it down further is a waste of time
+[it's not going to change any user or implementer behavior]. (And I don't want
+to risk the wrath of Bob. ;-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, January 31, 2013  9:58 PM
+
+> One could make a case that whether the string gets evaluated is
+> unspecified in the wording above, but I can't imagine any compiler
+> writer wanting to evaluate something dead, such an exception
+> represents a bug in the string (no one will do this on purpose), and
+> as such trying to nail it down further is a waste of time [it's not
+> going to change any user or implementer behavior]. (And I don't want
+> to risk the wrath of Bob. ;-)
+
+IMO, the optimization conditions allow the string to be skipped in any case:
+
+> 5     * An implementation need not always raise an exception when a
+>         language-defined check fails. Instead, the operation that failed the
+>         check can simply yield an undefined result. The exception need be
+>         raised by the implementation only if, in the absence of raising it,
+>         the value of this undefined result would have some effect on the
+>         external interactions of the program. In determining this, the
+>         implementation shall not presume that an undefined result has a value
+>         that belongs to its subtype, nor even to the base range of its type,
+>         if scalar. Having removed the raise of the exception, the canonical
+>         semantics will in general allow the implementation to omit the code
+>         for the check, and some or all of the operation itself.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 31, 2013  10:14 PM
+
+Quite right. The interesting question really is whether an exception CAN be
+raised in such a case. I'm inclined to say no, but it isn't worth putting into
+normative wording -- an implementer that prefers to generate dead code even in
+the face of an AARM note that says they don't have to is not any more likely to
+pay attention to normative wording saying the same. And the case just isn't
+important enough to worry about (no one is likely to complain if their buggy
+code does something odd).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, January 31, 2013  10:15 PM
+
+> ... I read this to say that the string_expression is not evaluated
+> (it's not going to be used), and thus any exception that it would have
+> propagated will not occur.
+
+I agree, we do not want the string expression evaluated at all when a predicate
+is used for a membership test.
+
+> I added an AARM note to this effect to AI12-0062-1 to go along with
+> the other ramification note.
+
+That seems adequate, but we might be able to adjust the normative wording a bit
+to make it clearer.
+
+****************************************************************
