@@ -1,0 +1,964 @@
+!standard 6.5.1                                  13-01-31    AI12-0063-1/01
+!class Amendment 13-01-31
+!status work item 13-01-31
+!status received 13-01-28
+!priority Medium
+!difficulty Easy
+!subject No_Return functions
+!summary
+
+A function can be defined as No_Return; such a function acts similarly to
+a raise_expression in a membership test.
+
+!problem
+
+AI12-0054-1 provides special semantics for raise_expressions that occur in
+predicates that are evaluated in membership tests. It is unfortunate that
+one cannot convert such a raise_expression into a function. Typically,
+in Ada, an expression of type T can be replaced by a function that returns
+type T without changing any semantics. That's not true in this case.
+
+!proposal
+
+Allow aspect No_Return to be specified for functions. Such a function must
+raise an exception. The use of such a function in a predicate expression
+acts in the same way as a raise_expression.
+
+!wording
+
+Change the title of 6.5.1 to "Nonreturning Subprograms".
+
+In 6.5.1(1/3), 6.5.1(3.1/3), 6.5.1(3.4/3), 6.5.1(6/2), 6.5.1(7/2),
+change "procedure" to "subprogram".
+
+Add after 6.5.1(5/2):
+
+Any return statement in a nonreturning function or generic function shall have
+an expression that is solely a return_expression or a call on a nonreturning
+function.
+
+AARM Ramification: We still require at least one return statement in a function;
+we just require that all such return statements don't actually return a value.
+
+[Editor's note: We don't need an analog of 6.5.1(9/2) for functions; all functions
+have this semantics.]
+
+Add after 6.5.1(9/2):
+
+For an individual membership test (see 4.5.2) of the form "X in S", if a
+call on a nonreturning function [statically] within the predicate of S is evaluated,
+then the function is not called; instead, the entire predicate immediately
+evaluates to False. This includes nonreturning functions [statically] within the
+default_expression for a formal parameter used in a call [statically] within
+the predicate.
+
+AARM Note: This mirrors the rule for raise_expression, see 11.3.
+
+[Question: Extend pragma No_Return to work on functions? That would just require
+changing "procedure" to "subprogram" in J.15.2(2/3) and J.15.2(3/3).]
+
+!discussion
+
+We considered allowing No_Return procedures in this context, but allowing
+that introduces ambiguities (and thus incompatibilities) that don't currently
+exist. For example:
+
+    package P1 is
+        procedure Foo with No_Return => True;
+    end P1;
+    package P2 is
+        function Foo return Integer;
+    end P2;
+    use P1, P2;
+    X : Integer := Foo; -- ambiguous if procedure Foo can be used here.
+
+The use of functions instead has no new problems. This is slightly less
+convinient, in that multiple versions of such a function might need to be
+defined for various return types. However, the vast majority of such functions
+would be used in logical expressions in assertions, and for those the result
+type Boolean is all that would be needed.
+
+!example
+
+    function Raise_Mode_Error (File : in File_Type) return Boolean
+        with No_Return => True is
+    begin
+        return raise Mode_Error with "from file " & Name (File);
+    end Raise_Mode_Error;
+
+!ASIS
+
+** ASIS queries needed **
+
+!ACATS test
+
+Create ACATS B and C-Tests for this feature.
+
+!appendix
+
+[Editor's note: This discussion was split from the discussion in AI12-0062-1.]
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  11:49 PM
+
+...
+
+BTW, I would have FAR preferred to say for membership predicates that ANY
+exception means the predicate is false, it's really HORRIBLE to have a
+difference between an explicit raise and a call to a function that does nothing
+but a raise. It also has a very simple implementation (the current rule is quite
+tricky to implement!)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, January 28, 2013 12:04 PM
+
+I agree with your objections to the solution that was chosen.
+
+I'm a big fan of semantics-preserving transformations. I don't like the idea
+that a raise expression of type T is not equivalent to a call to a T-valued
+no-separate-spec function which raises the same exception. In the context of a
+predicate expression, these two constructs are not equivalent and I don't like
+that.
+
+The alternative you describe, however, introduces the possibility of
+"swallowing" an exception which was really unintended (and which is raised "far
+away"), thereby masking a real error.
+
+The ARG discussed this alternative and viewed it as unacceptable for this
+reason.
+
+This one, IMO, is a "good-arguments-on-both-sides" judgment call.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  12:35 PM
+
+> I'm a big fan of semantics-preserving transformations.
+
+Me too.  Another one is that you ought to be able to convert a "raise ..." into
+a call to a No_Return procedure.
+
+Perhaps we should have another AI:
+
+    - Allow a call to a No_Return procedure as an expression
+      of any type.
+
+    - Treat such calls as "return False from the Predicate"
+      in the membership case.
+
+The "accidentally swallow exceptions" concern doesn't apply to No_Return
+procedures.
+
+> The ARG discussed this alternative and viewed it as unacceptable for
+> this reason.
+
+It also seems rather heavy to be putting in exception handlers all over.
+
+> This one, IMO, is a "good-arguments-on-both-sides" judgment call.
+
+Yup.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 28, 2013 12:47 PM
+
+> ... Perhaps we should have another AI:
+>
+>      - Allow a call to a No_Return procedure as an expression
+>        of any type.
+>
+>      - Treat such calls as "return False from the Predicate"
+>        in the membership case.
+>
+> The "accidentally swallow exceptions" concern doesn't apply to
+> No_Return procedures.
+
+You suggested this before, and I realize I discouraged us from trying to include
+it in the initial "raise-expression" AI. But I agree this would be a good AI to
+discuss.
+
+The difference between calling a function that raises an exception and an
+explicit "raise" is that you know at compile-time an exception will be raised.
+A call on a No_Return procedure is a better equivalent to an explicit raise, and
+we might want to try to make them as equivalent as possible "before the law" ...
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  12:54 PM
+
+> The difference between calling a function that raises an exception and
+> an explicit "raise" is that you know at compile-time an exception will
+> be raised.  A call on a No_Return procedure is a better equivalent to
+> an explicit raise, and we might want to try to make them as equivalent
+> as possible "before the law" ...
+
+I like this idea, and it does not sound hard to implement
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  12:56 PM
+
+> > The "accidentally swallow exceptions" concern doesn't apply to
+> > No_Return procedures.
+>
+> You suggested this before, ...
+
+I suggested the first bullet above before.
+I just now thought of the second bullet.
+
+>...and I realize I discouraged us from
+> trying to include it in the initial "raise-expression" AI.
+
+Right, at first I thought you thought it was a dumb idea, but then you clarified
+that you just didn't want to do it NOW (as a binding interpretation for Ada
+2012) -- it should be for Ada 202X (if at all).
+
+> But I agree this would be a good AI to discuss.
+>
+> The difference between calling a function that raises an exception and
+> an explicit "raise" is that you know at compile-time an exception will
+> be raised.  A call on a No_Return procedure is a better equivalent to
+> an explicit raise, and we might want to try to make them as equivalent
+> as possible "before the law" ...
+
+I wonder if it makes any sense to allow No_Return functions?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 28, 2013  1:09 PM
+
+> I wonder if it makes any sense to allow No_Return functions?
+
+Probably not if you allow calls on No_Return procedures to be used anywhere an
+expression of any type is needed.
+
+I suppose we could go further and allow a No_Return procedure to match a generic
+formal function with any result type...  Maybe too weird.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  1:09 PM
+
+> I wonder if it makes any sense to allow No_Return functions?
+
+Requires no language extension to allow such calls in expressions, which means
+less implementation headache. A function whose only purpose is to raise an
+exception if called makes good sense to me. Actually that's what is really
+equivalent to a raise expression :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  1:19 PM
+
+An interesting note is that "geerts trick" for changing the exception raised by
+a failing precondition precisely relies on functions that always raise an
+exception, and by allowing No_Return on such functions, the technique extends to
+dealing with the membership case :-)
+
+I worry that allowing procedure calls within expressions may be a bit of an
+earthquake implementation mess.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, January 28, 2013  1:20 PM
+
+>      - Allow a call to a No_Return procedure as an expression
+>        of any type.
+
+If this were defined in the most straightforward way, previously legal function
+calls could become ambiguous in some cases.
+
+    package P1 is
+        procedure Foo with No_Return => True;
+    end P1;
+    package P2 is
+        function Foo return Integer;
+    end P2;
+    use P1, P2;
+    X : Integer := Foo; -- ambiguous?
+
+We would have to decide how we want to handle this case (perhaps by deciding
+that this is an unimportant corner case and the incompatibility is therefore
+acceptable).
+
+I'll concede that worrying about such details at this point is premature.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  1:26 PM
+
+I like the idea of doing this with No_Return functions since it can't cause any
+mysterious problems of the kind that Steve brings up, and it will be
+straightforward to implement.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 28, 2013  1:40 PM
+
+> I worry that allowing procedure calls within expressions may be a bit
+> of an earthquake implementation mess.
+
+Agreed, and there is the potential for incompatibilities as well. A No_Return
+function makes more sense (and could be added to any compiler for any version of
+Ada as we're just talking about implementation-defined aspects and/or pragmas,
+which eventually would become language-defined).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  1:47 PM
+
+Strictly we are not allowed to add No_Return for functions, but we could
+probably overlook that. Personally I think now we have the No_Implementation
+restrictions, it is over harsh not to allow compilers to extend existing pragmas
+and aspects, just so long as these extensions are forbidden by the restrictions.
+
+Why is it better to ahve to add No_Return_Function to your implentation, than to
+allow No_Return on a function?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  1:56 PM
+
+> I like the idea of doing this with No_Return functions since it can't
+> cause any mysterious problems of the kind that Steve brings up, and it
+> will be straightforward to implement.
+
+Doing it with functions has the drawback that you have to declare a whole bunch
+of functions that all do the same thing, one for each return type of interest.
+And you have to scatter them all over your program, so they can see those types.
+
+I was thinking of having a central logging package, containing:
+
+    procedure Notify_Error (Log_Message : String) with No_Return;
+
+that logs something to a file and then raises an exception.
+Maybe it takes the Exception_Id to raise as a param.
+Maybe it takes a verbosity level.
+
+If I had to do it with functions, I'd probably say, "Never mind, I didn't really
+want logging after all."
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  2:01 PM
+
+> > I wonder if it makes any sense to allow No_Return functions?
+>
+> Requires no language extension to allow such calls in expressions,
+> which means less implementation headache.
+> A function whose only purpose is to raise an exception if called makes
+> good sense to me. Actually that's what is really equivalent to a raise
+> expression :-)
+
+I don't see that equivalence.  A raise_expression has no type, and magically
+matches any expected type.  My procedure proposal would be like that.  In
+contrast, a function has a particular type, which has to match the expected
+type.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  2:21 PM
+
+> I don't see that equivalence.  A raise_expression has no type, and
+> magically matches any expected type.  My procedure proposal would be
+> like that.  In contrast, a function has a particular type, which has
+> to match the expected type.
+
+Well for the record I strongly oppose the procedure proposal, it would be very
+hard to implement IMO, and is certainly not something we would implement in GNAT
+before 2020, unless I see some magic way of doing it :-) I have thought about
+this!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  1:59 PM
+
+>     X : Integer := Foo; -- ambiguous?
+
+I think it's a choice between "ambiguous" and "Beaujolais".
+
+By the way, this is another case where my "mandated warning"
+idea could give us the best of both worlds.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  2:20 PM
+
+> By the way, this is another case where my "mandated warning"
+> idea could give us the best of both worlds.
+
+I would not favor messing with mandated warnings, it's really just a total waste
+of time to try to formalize that and will have precisely no effect. Just the
+kind of thing that the ARG should not waste it's time on.
+
+I think it's fine to have implementaiton advice that the compiler should issue a
+warning. That requires no special thinking.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 28, 2013  2:25 PM
+
+> I think it's a choice between "ambiguous" and "Beaujolais".
+>
+> By the way, this is another case where my "mandated warning"
+> idea could give us the best of both worlds.
+
+"Best"? Neither "ambiguous" or "Beaujolais" sounds like "best" in my mind. And I
+don't see how a warning would help in the Beaujolais case, because the compiler
+can't see both the before and after meanings (that is, it can't see that the
+meaning changed). If you had a warning that Beaujolais was possible, it would
+appear so often to be a "cried wolf" scenario. Especially as the problem isn't
+the possible presence of Beaujolais, it's the change of meaning when it happens.
+(I can easily imagine a scenario where a Beaujolais warning appeared, the
+programmer determined that there was no problem and suppressed the warning, and
+then future maintenance silently changed the meaning of the call -- while the
+warning is suppressed.)
+
+I understand your concern about return types, but I think it is unlikely to be a
+problem in practice. 98% of such functions are going to return Boolean, because
+they're going to be used in a logical expression of some sort. And many of the
+rest are going to be used as the return value in assertion expressions. The
+cases where you'll need some other return type will be rare enough ("others" in
+case expressions, for instance) that you can add the needed return types as
+needed.
+
+My use case for this is the predicate for a file that will be read:
+
+     subtype Read_File_Type is File_Type
+        with Dynamic_Predicate =>
+            (Is_Open (Read_File_Type) or else (raise Status_Error with "File Not Open")) and then
+            (Mode (Read_File_Type) /= Out_File or else Raise_Mode_Error (Read_File_Type));
+
+I want to use a function to raise the Mode_Error exception because this has to
+tie into the existing (Ada83-vintage) file exception reporting scheme (it's
+special in that the exception message isn't created until its needed), and that
+requires calling a special routine in the core I/O library. (Generating the
+message at the raise would mean making the expensive call to find out the file
+name even if the exception will be handled and the message never used. This is
+not a huge deal, of course, but I'd like to make as few changes as possible to
+the runtime while still being able to use predicates in language-defined
+packages.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  3:39 PM
+
+> > By the way, this is another case where my "mandated warning"
+> > idea could give us the best of both worlds.
+>
+> I would not favor messing with mandated warnings, it's really just a
+> total waste of time to try to formalize that and will have precisely
+> no effect. Just the kind of thing that the ARG should not waste it's
+> time on.
+
+Well, I have no problem with mandating things without formalizing them.
+I agree we can't really formalize what "warning" means.
+
+> I think it's fine to have implementaiton advice that the compiler
+> should issue a warning. That requires no special thinking.
+
+Impl Advice is fine with me, so long as it has the desired psychological effect
+on the language designers.  I want the ARG to stop introducing so many
+incompatibilities.  Many times, ARG has added a nifty new feature, but some
+interaction with old features is error prone.  So ARG feels obligated to make
+something illegal, despite incompatibility.
+
+Perhaps I'm confusing people by calling this idea "warning".
+
+The idea is:
+
+    - Require implementations to accept and run the programs in question.
+      This provides compatibility.
+
+    - Require (or, if you insist, Advise) implementations to print some
+      sort of diagnostic message for the programs in question.  This
+      eliminates the error-pronedness.  (And I don't care about people
+      who put pennies in fuseboxes -- they have been warned.)
+
+In this thread, the "program in question" is Steve's example, and similar ones.
+Assuming we go ahead with the suggested feature (which is questionable), we want
+to make it ambiguous, because Beaujolais effects are error prone. But we do NOT
+want to make it ambiguous, because that would be incompatible. We're stuck.  My
+idea unsticks us -- we get the best of both worlds in the sense of being
+compatible, yet still requiring (or advising!) implementations to detect the
+error.
+
+If Impl Advice is sufficient to make ARG members accept otherwise-error-prone
+features, I'm OK with that.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  3:47 PM
+
+> In this thread, the "program in question" is Steve's example, and similar ones.
+> Assuming we go ahead with the suggested feature (which is
+> questionable), we want to make it ambiguous, because Beaujolais effects are error prone.
+> But we do NOT want to make it ambiguous, because that would be incompatible.
+> We're stuck.  My idea unsticks us -- we get the best of both worlds in
+> the sense of being compatible, yet still requiring (or advising!)
+> implementations to detect the error.
+>
+> If Impl Advice is sufficient to make ARG members accept
+> otherwise-error-prone features, I'm OK with that.
+
+OK, all I am saying is this has zero effect on compiler writers, so it's just
+the ARG talking to themselves :-)
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Monday, January 28, 2013  3:54 PM
+
+> OK, all I am saying is this has zero effect on compiler writers, so
+> it's just the ARG talking to themselves :-)
+
+????  "Compiler writers" and "the ARG" are not exactly disjoint sets....
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  3:58 PM
+
+You would think so, but it still seems that once compiler writers get into the
+ARG room, they start worrying about things that are not exactly critical :-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  3:55 PM
+
+> > >     X : Integer := Foo; -- ambiguous?
+> >
+> > I think it's a choice between "ambiguous" and "Beaujolais".
+> >
+> > By the way, this is another case where my "mandated warning"
+> > idea could give us the best of both worlds.
+>
+> "Best"? Neither "ambiguous" or "Beaujolais" sounds like "best" in my mind.
+
+You misunderstand my idea (my fault, no doubt). The "two worlds" are
+"compatible" and "not error prone".
+
+> And I don't see how a warning would help in the Beaujolais case,
+> because the compiler can't see both the before and after meanings
+> (that is, it can't see that the meaning changed). If you had a warning
+> that Beaujolais was possible, it would appear so often to be a "cried
+> wolf" scenario. Especially as the problem isn't the possible presence
+> of Beaujolais, it's the change of meaning when it happens. (I can
+> easily imagine a scenario where a Beaujolais warning appeared, the
+> programmer determined that there was no problem and suppressed the
+> warning, and then future maintenance silently changed the meaning of
+> the call -- while the warning is suppressed.)
+
+No, no, no.  I'm suggesting Steve's example would be legal, AND compilers would
+issue a diagnostic message for it. Best of both worlds.
+
+It's not a new idea:  An implementation is required to run programs that contain
+"pragma No_Such_Pragma_Name;".  And they are also required (by Implementation
+Requirement) to give a warning message. I'm just suggesting that ARG should
+consider doing that on a more routine basis -- whenever we get stuck between an
+incompatible rock and a hard place that ought to be illegal.
+
+The term "warning message" is never formally defined, and that fact has not yet
+caused the sky to fall.
+
+> I understand your concern about return types, but I think it is
+> unlikely to be a problem in practice. 98% of such functions are going
+> to return Boolean, because they're going to be used in a logical
+> expression of some sort. And many of the rest are going to be used as
+> the return value in assertion expressions. The cases where you'll need
+> some other return type will be rare enough ("others" in case
+> expressions, for instance) that you can add the needed return types as needed.
+
+OK, I'll buy that argument.
+
+> My use case for this is the predicate for a file that will be read:
+>
+>      subtype Read_File_Type is File_Type
+>         with Dynamic_Predicate =>
+>             (Is_Open (Read_File_Type) or else (raise Status_Error with
+> "File Not Open")) and then
+>             (Mode (Read_File_Type) /= Out_File or else
+> Raise_Mode_Error (Read_File_Type));
+>
+> I want to use a function to raise the Mode_Error exception because
+> this has to tie into the existing (Ada83-vintage) file exception
+> reporting scheme (it's special in that the exception message isn't
+> created until its needed), and that requires calling a special routine in the core I/O library.
+> (Generating the message at the raise would mean making the expensive
+> call to find out the file name even if the exception will be handled
+> and the message never used. This is not a huge deal, of course, but
+> I'd like to make as few changes as possible to the runtime while still
+> being able to use predicates in language-defined packages.)
+
+Well, in a properly-designed exception system, exception occurrences could
+contain arbitrary (typed!) information, and Exception_Message would be a
+dispatching call that constructs the string on the fly, and is called only when
+needed.  Oh well, that's water under the dam.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 28, 2013  3:58 PM
+
+...
+> In this thread, the "program in question" is Steve's example, and
+> similar ones.
+> Assuming we go ahead with the suggested feature (which is
+> questionable), we want to make it ambiguous, because Beaujolais
+> effects are error prone.
+> But we do NOT want to make it ambiguous, because that would be
+> incompatible.
+> We're stuck.  My idea unsticks us -- we get the best of both worlds in
+> the sense of being compatible, yet still requiring (or advising!)
+> implementations to detect the error.
+
+As I previously said, I strongly disagree that this has any useful effect
+whatsoever. And that's because you are ignoring the nature of Beaujolais
+effects. Beaujolais is *not* bad *unless* the declarations in a program change;
+the danger is all because of the possibility that someone will change the
+declarations at some later point. As such, a warning about possible Beaujolais
+would simply turn into noise: it would have to be suppressed in 99% of the uses,
+and once that's done, the problematic cases would not show up.
+
+I think your idea has some merit, but that merit comes when talking about
+regular Legality Rules. For instance, we can't make compile-time out of range
+values illegal, because they often occur in code that is conditionally compiled.
+Some sort of mandated warning would reduce the scope of this problem without
+making conditionally compiled code illegal.
+
+(An example of what I'm talking about:
+
+          Count : constant := 0;
+
+          if Count /= 0 then
+              Average := Sum / Count; -- Always will raise Constraint_Error, but will never be executed.
+          else
+              ...
+          end if;
+)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  4:00 PM
+
+> The term "warning message" is never formally defined, and that fact
+> has not yet caused the sky to fall.
+
+The great thing about IA is that you can speak plain english there and you do
+not have to define terms which everyone understands. If we read "documentation"
+in the normative section of the RM, we have no clue what that means, but if we
+say "documentation" in an IA section, we know perfectly well what it means.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  4:07 PM
+
+> > The term "warning message" is never formally defined, and that fact
+> > has not yet caused the sky to fall.
+>
+> The great thing about IA
+
+This case (warn on unknown pragmas) is IR, not IA.
+
+>...is that you can speak plain english there  and you do not have to
+>define terms which everyone understands. If  we read "documentation" in
+>the normative section of the RM, we have  no clue what that means, but
+>if we say "documentation" in an IA  section, we know perfectly well
+>what it means.
+
+Agreed.
+
+What you say is true for both IA and IR.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  4:03 PM
+
+> OK, all I am saying is this has zero effect on compiler writers, so
+> it's just the ARG talking to themselves :-)
+
+Nonsense!  ;-)
+
+AdaCore, for one, tries hard to follow Implementation Advice and Implementation
+Requirements.  Even in the face of informality.
+
+If compiler writers ignored such Advice/Requirements (or if ARG thinks that's
+the case), then my idea won't work; ARG will continue to insist on introducing
+incompatibilities to avoid error-prone language features.
+
+I know you don't like incompatibilities, so I think you should be supporting my
+idea!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 28, 2013  4:07 PM
+
+> No, no, no.  I'm suggesting Steve's example would be legal, AND
+> compilers would issue a diagnostic message for it.
+> Best of both worlds.
+
+I still think that is a terrible idea (and I have no idea what "no, no, no."
+is referring to, because I was talking about your idea exactly in the above).
+
+The problem is simply that 99% of the time, there is no problem with allowing
+this to be legal, so users will get into the habit of ignoring the warning
+message (either by suppressing it outright, or just ignoring it mentally). In
+the rare case where declarations change such that Beaujolais actually harms the
+program, users will be completely used to ignoring the message. Ergo, I think
+this is actually the worst of both worlds (you have the compiler crying "Wolf!"
+most of the time, and when there is a real problem, no one will see it). That's
+in large part because Beaujolais is only a problem when maintenance changes the
+meaning of a program, and that is not something that compilers can warn about
+(since they may not have visibility into previous versions of the declarations).
+Beaujolais is unlikely to be a problem in a static set of source code, as the
+programmer probably has checked and tested that it does what they intend.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  4:29 PM
+
+>> OK, all I am saying is this has zero effect on compiler writers, so
+>> it's just the ARG talking to themselves :-)
+>
+> Nonsense!  ;-)
+>
+> AdaCore, for one, tries hard to follow Implementation Advice and
+> Implementation Requirements.  Even in the face of informality.
+
+I am telling you that advice to give a warning would be ignored in the following
+sense. If we think the warning is a good idea, we will be giving it anyway, long
+before the ARG has word smithed the exact requirement. If we think the warning
+is a bad idea, we won't give it. As compiler writers and vendors catering to our
+customers, we think we are a better arbiter of what makes sense in warnings than
+the ARG :-)
+
+> If compiler writers ignored such Advice/Requirements (or if ARG thinks
+> that's the case), then my idea won't work; ARG will continue to insist
+> on introducing incompatibilities to avoid error-prone language features.
+>
+> I know you don't like incompatibilities, so I think you should be
+> supporting my idea!
+
+I don't like incopmatibilities period, under any circumstances, and I don't see
+what warnings have to do with that!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  4:33 PM
+
+>>> The term "warning message" is never formally defined, and that fact
+>>> has not yet caused the sky to fall.
+
+There is lots of nonsene in the RM that is undefined, e.g. the documentation
+requirements in Annex D. The sky does not fall since people simply ignore this
+nonsense :-)
+
+>> The great thing about IA
+>
+> This case (warn on unknown pragmas) is IR, not IA.
+>
+>> ...is that you can speak plain english there and you do not have to
+>> define terms which everyone understands. If we read "documentation"
+>> in the normative section of the RM, we have no clue what that means,
+>> but if we say "documentation" in an IA section, we know perfectly
+>> well what it means.
+>
+> Agreed.
+>
+> What you say is true for both IA and IR.
+
+I disagree, the IR is normative, that means it must be formally defined, the
+statement:
+
+> 13  The implementation shall give a warning message for an
+> unrecognized pragma name.
+
+Is semantic nonsense, since "warning message" is undefined and thus the above is
+meaningless as far as I am concerned.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  5:29 PM
+
+> I am telling you that advice to give a warning would be ignored in the
+> following sense. If we think the warning is a good idea, we will be
+> giving it anyway, long before the ARG has word smithed the exact
+> requirement. If we think the warning is a bad idea, we won't give it.
+
+True.  But if the RM requires/advises a particular warning, compiler writers
+will think about whether it's a good idea.  Otherwise, in many cases, it would
+never even occur to them to wonder whether it's a good idea.
+
+> If you are saying that the ARG would be less likely to make things
+> incompatible if they knew that compiler writers would generate useful
+> warnings, ...
+
+Not "useful warnings" in general.  I'm talking about a particular warning
+specifically related to some new potentially-incompatible feature.
+
+There have definitely been times when ARG reasoned like this:
+
+    If you do X, it's error prone.
+    Therefore, we MUST make X illegal. <-- [*]
+    But that would be incompatible.
+    Oh, well, too bad, we can't have errors going unnoticed
+        causing nuclear power plants to go haywire blah blah blah,
+        so we'll just have to tolerate the incompatibility.
+    Anyway, we can convince ourselves that the incompatibility
+        isn't THAT likely to occur in real programs.
+
+The [*] part proves that ARG wants to be confident that a particular potential
+error will be flagged at compile time by all Ada compilers. And they're willing
+to tolerate incompatibilities to get that. Historically, the fact that "compiler
+writers give miscellaneous useful warnings" has not negated [*].
+
+I'm trying to get people to see that "flagged at compile time"
+does not necessarily mean "you can't run your program".
+
+>...that seems nonsense to me! They already know  for example, that all
+>Ada 2012 implementors pay huge attention  to outputting all the useful
+>warnings they can :-)
+
+I'm not talking about generally useful warnings.  I'm talking about a specific
+warning that attacks the insistence on [*] above, for a particular new language
+feature.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  5:33 PM
+
+> Not "useful warnings" in general.  I'm talking about a particular
+> warning specifically related to some new potentially-incompatible feature.
+
+which may or may not be useful to users, that is the ONLY criterion that
+matters.
+
+> And they're willing to tolerate incompatibilities to get that.
+> Historically, the fact that "compiler writers give miscellaneous
+> useful warnings" has not negated [*].
+
+Well I don't think AdaCore is paying to make any more incompatibilies in Ada. It
+is questinoable whether they are willing to pay or invest their people's time in
+any continued activity at all wrt the RM :-)
+
+> I'm not talking about generally useful warnings.  I'm talking about a
+> specific warning that attacks the insistence on [*] above, for a
+> particular new language feature.
+
+But is it useful to users, if not, it doesn't go in, no matter what the ARG says
+:-)
+
+If it is useful to users, it goes in, no matter what the ARG says :-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 28, 2013  5:39 PM
+
+> >>> The term "warning message" is never formally defined, and that
+> >>> fact has not yet caused the sky to fall.
+>
+> There is lots of nonsene in the RM that is undefined, e.g. the
+> documentation requirements in Annex D. The sky does not fall since
+> people simply ignore this nonsense :-)
+
+They certainly do not!  The GNAT docs contain documentation addressing those
+bogus "requirements" point-by-point.  So do the AdaMagic docs.
+
+> > What you say is true for both IA and IR.
+>
+> I disagree, the IR is normative, that means it must be formally
+> defined, the statement:
+>
+> > 13  The implementation shall give a warning message for an
+> > unrecognized pragma name.
+>
+> Is semantic nonsense, since "warning message" is undefined and thus
+> the above is meaningless as far as I am concerned.
+
+And yet you have obeyed that "meaningless" requirement.
+
+You might reply, "Yeah, but I was going to do that anyway."
+
+Probably true.  But the fact is that including thie formally-meaningless
+requirement in the RM assuaged the concerns of people who were outraged that
+bogus pragmas might go unnoticed.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 28, 2013  5:46 PM
+
+> > I'm not talking about generally useful warnings.  I'm talking about
+> > a specific warning that attacks the insistence on [*] above, for a
+> > particular new language feature.
+>
+> But is it useful to users, if not, it doesn't go in, no matter what
+> the ARG says :-)
+>
+> If it is useful to users, it goes in, no matter what the ARG says :-)
+
+And I contend that the particular case in question would not be useful to users
+(indeed, it would be harmful as crying "wolf" too often) - a point Bob hasn't
+seen fit to address (and one that's highly relevant).
+
+...
+> > And they're willing to tolerate incompatibilities to get that.
+> > Historically, the fact that "compiler writers give miscellaneous
+> > useful warnings" has not negated [*].
+>
+> Well I don't think AdaCore is paying to make any more incompatibilies
+> in Ada. It is questinoable whether they are willing to pay or invest
+> their people's time in any continued activity at all wrt the RM :-)
+
+In which case it would be helpful to terminate this wildly off-topic discussion,
+because it will waste some of my time (and thus budget) to deal with it and that
+time could be better used on something that will progress Ada (and the RM).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 28, 2013  5:51 PM
+
+> In which case it would be helpful to terminate this wildly off-topic
+> discussion, because it will waste some of my time (and thus budget) to
+> deal with it and that time could be better used on something that will
+> progress Ada (and the RM).
+
+Sounds good to me! My comment was a bit toungue-in-cheek, but I do think the
+underlying message is important and to be taken to heart by all of us, that we
+need to take care to use what for sure is limited resources as effectively as
+possible when it comes to continued work on Ada, ACATS, and the RM!
+
+****************************************************************
+
