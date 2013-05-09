@@ -1,4 +1,4 @@
-!standard 9.5.1(18)                                13-04-22    AI12-0064-1/01
+!standard 9.5.1(18)                                13-05-09    AI12-0064-1/01
 !class Amendment 13-04-22
 !status work item 13-04-22
 !status received 13-04-22
@@ -11,7 +11,13 @@ Aspect Nonblocking is added.
 
 !problem
 
-** Steve needs to provide one ***
+During a protected action, it is a bounded error to invoke an operation that
+is potentially blocking. There is currently no mechanism (other than a comment)
+to specify that a given subprogram is intended to be safely callable during a
+protected action (i.e., that the subprogram will not invoke an operation that
+is potentially blocking). This seems like a useful part of a subprogram's
+"contract" that should be (optionally) specifiable at the point of a
+subprogram's declaration.
 
 !proposal
 
@@ -21,28 +27,59 @@ Add an aspect Nonblocking.
 
 Add at the end of 9.5.1 (as continuation of bounded error section?)
 
-    For a callable entity or a generic subprogram, the following
-    language-defined representation aspect may be specified:
+  For a callable entity or a generic subprogram, the following
+  language-defined representation aspect may be specified:
  
-     Nonblocking
-      The type of aspect Nonblocking is Boolean. When aspect
-      Nonblocking is True for a callable entity, a call to the
+      The type of aspect Nonblocking is Boolean. When aspect Nonblocking is
+      True for an entity, the entity is said to be nonblocking.
+      If directly specified, the aspect_definition shall be a static
+      expression. [This aspect is never inherited;] if not directly
+      specified, the aspect is False.
+
+      When a callable entity is nonblocking, a call to the
       entity is considered to be within a protected operation for
       purposes of the check described above that is associated
       with invoking an operation that is potentially blocking
       (including interactions with pragma Detect_Blocking (see H.5)).
+      In addition, a call to an entity that is not a nonblocking
+      entity is considered potentially blocking for the purposes of the
+      check.
+
+        AARM Ramification: This implies, if Detect_Blocking is set, that
+        calling a potentially blocking operation from the body of Nonblocking
+        subprogram raises Program_Error. That includes calling any
+        non-nonblocking subprograms.
+
+        AARM Implementation Note: We make calling non-nonblocking subprograms
+        from the body of a nonblocking subprogram a bounded error so that
+        the check can be made statically in the case that pragma Detect_Blocking
+        is in force. We certainly do not want distributed overhead in the
+        case where pragma Detect_Blocking is in force, a nonblocking subprogram
+        that is called from outside of a protected action then calls a normal
+        subprogram that uses a potentially blocking operation (this case would
+        require an extra TCB flag or the like to be reliably detected, which
+        is required in the presence of the pragma).
+
+      A subprogram shall be nonblocking if it overrides a dispatching
+      nonblocking procedure. In addition to the places where Legality
+      Rules normally apply (see 12.3), this rule applies also in the
+      private part of an instance of a generic unit.
 
 !discussion
 
-  1) Interactions with dispatching ops and overriding?
-  2) Interactions with access to subprogram types?
+We've modeled this aspect after No_Return, which has a similar purpose
+and presumably has already worked out the needed rules.
 
-Proposal: keep it simple; all that matters is the aspect 
-value for the callee and it doesn't matter how you got there.
+For this reason, we don't have nonblocking access-to-subprogram types.
+One could imagine such a thing, but it would take a number of additional
+rules and certainly it wouldn't be "keeping it simple".
 
-Following example of Inline pragma, we don't bother to 
-disallow useless specification of this aspect for an abstract 
-subprogram.
+The rules do not allow calling "normal" subprograms from a nonblocking
+subprogram. This allows detecting any potentially blocking operations used
+in a nonblocking subprogram statically. This is important if pragma
+Detect_Blocking is used, as such detection is required. (Otherwise, this
+is just a bounded error and the "mistake" can be ignored with the usual
+consequences.)
 
 !example
 
