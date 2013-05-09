@@ -19,32 +19,32 @@ trying to create such an abstraction.
 
 A better idea would be to make Ada.Streams.Root_Stream_Type into an interface.
 
-There are two known flavors to a solution to this problem. The first is a 
-minimal solution that involves introducing a backwards compatibility problem for 
-a case that is not very likely to occur in practice, and the other extends the 
-first solution to solve the problem without introducing any backward 
-compatibility issue. 
+There are two known flavors to a solution to this problem. The first is a
+minimal solution that involves introducing a backwards compatibility problem for
+a case that is not very likely to occur in practice, and the other extends the
+first solution to solve the problem without introducing any backward
+compatibility issue.
 
-The minimal solution involves adding a new aspect to the language, 
+The minimal solution involves adding a new aspect to the language,
 Limited_Derivation which may be applied to a limited interface declaration.
 
 e.g.
    type Root_Stream_Type is limited interface
-            with Limited_Derivation; 
+            with Limited_Derivation;
 
 Such a declaration only would imply that any types derived from the interface
 are limited types, even if the derived declaration does not explitly use the
-limited keyword. 
+limited keyword.
 
 In the following declaration, type T would be a limited type.
 
-   type T is new Root_Stream_Type with -- no "limited" here 
-      record 
-	     X: Some_Limited_Type; 
+   type T is new Root_Stream_Type with -- no "limited" here
+      record
+	     X: Some_Limited_Type;
 	  end record;
 
 The full solution also introduces the notion of hidable interfaces. Such
-interfaces may be used in the completion of a private type or private 
+interfaces may be used in the completion of a private type or private
 extension, without having to be named in the partial view of the type, so long
 as the type does not have any ancestors that have non-visible parts. This is an
 assume the worst rule, where any ancestor types with private, non-visible parts
@@ -99,12 +99,12 @@ inherit it from abstract types. Thus:
             X: Some_Limited_Type; -- (A)
         end record;
 
-   (A) is legal in Ada now, but would be illegal if Root_Stream_Type is an 
+   (A) is legal in Ada now, but would be illegal if Root_Stream_Type is an
        interface.
 
-(1) is not very likely to occur in practice (why hide streamability?), but (2) 
-is quite likely to happen (indeed, the GNAT runtime has several instances of 
-it). At the very least, we would need to do something to eliminate (2) before 
+(1) is not very likely to occur in practice (why hide streamability?), but (2)
+is quite likely to happen (indeed, the GNAT runtime has several instances of
+it). At the very least, we would need to do something to eliminate (2) before
 making this change.
 
 (2) Can be solved by adding a new aspect to the language, Limited_Derivation
@@ -116,7 +116,7 @@ To solve (1), the notion of hidden interfaces is needed. Such an interface
 could be added to the private completion of a private type or private extension,
 so long as the declaration does not involve any ancestors that have non-visible
 private parts. A hideable interface would not need to be specified in the
-partial view of the private type, which is not currently the case for interfaces 
+partial view of the private type, which is not currently the case for interfaces
 in the 2012 standard.
 
 In order to gain support for adding hideable interfaces to the language, there
@@ -127,9 +127,9 @@ The problem space applies to cases where a hidden interface can be used to
 facilitate the implementation, but otherwise is too low level in the abstraction
 to be exposed to clients of the abstraction.
 
-As an example of another use of this feature consider a Newtonian physics 
-problem involving finding the center of the universe, an average based on the 
-mass and the location of the particles: 
+As an example of another use of this feature consider a Newtonian physics
+problem involving finding the center of the universe, an average based on the
+mass and the location of the particles:
 Such a problem might involve millions or billions of data points, so the goal
 would be to perform the calculation in parallel using some parallelism library.
 The problem is essentially a divide and conquer problem involving a parallel
@@ -139,7 +139,7 @@ end to produce the final result. This involves a Reducing function that takes
 two results and combines them into a single result. An identity function is
 also needed to specify the initial value of the local copy of the result used by
 each worker. The parallelism functions are too low level to be exposed in the
-Particle abstraction. 
+Particle abstraction.
 
 package Point_3D is
 
@@ -229,14 +229,14 @@ package body Universe is
 
    function Reducer (L, R : Particle) return Particle is
    begin
-   --  Compute a weighed sum based on the mass of the particles and the 
+   --  Compute a weighed sum based on the mass of the particles and the
    --  location.
       return (Position => ...,
               Mass => <>);
    end Reducer;
 
 end Universe;
- 
+
 !ACATS test
 
 ** TBD.
@@ -1798,7 +1798,7 @@ The part that fully solves the backward compatibility issue involves also adding
 hidable interfaces. I have not touched on the details for this feature yet, as there
 are two approaches in the email thread, one I suggested solves the backward compatiblity
 issue, and one based on Tuckers suggestion that doesn't solve the compatibility issue,
-but does have some nice features from a language syntax point of view. 
+but does have some nice features from a language syntax point of view.
 
 Independent on whether the Root_Stream_Type issue is worth fixing, Hidable interfaces
 might be worth having in Ada on its own, in which case, we would need to decide which
@@ -1810,5 +1810,289 @@ worthwhile. The main point of this is to look at the example, and think about wh
 such a feature is useful enough for proceeding further.
 
 [Editor's note: this is version /02 of the AI.]
+
+****************************************************************
+
+From: Alan Copeland
+Sent: Monday, May  6, 2013  3:39 PM
+
+!topic Unidirectional Streams
+!reference Ada 2012 RM13.13.1
+!discussion
+
+Stream-oriented attributes require an instance of
+Ada.Streams.Root_Stream_Type'Class to operate, however Root_Stream_Type requires
+an implementation override both the Read and Write subprograms, effectively
+requiring all Ada streams to be bidirectional.  This is often inappropriate,
+such as when dealing with a read-only file or a broadcast-only UDP socket, which
+only support unidirectional data transfer.  Consequently, implementations must
+override the operation to raise an exception at runtime, when a compile-time
+error is more appropriate.
+
+For instance, a solution using the interface mechanism would allow
+unidirectional user-defined abstractions, while still allowing the convenience
+of stream-oriented attributes and mitigating backwards compatibility concerns:
+
+package Ada.Streams is
+
+    type Stream_Element is mod implementation-defined;
+
+    type Stream_Element_Offset is range implementation-defined;
+
+    subtype Stream_Element_Count is
+        Stream_Element_Offset range 0..Stream_Element_Offset'Last;
+
+    type Stream_Element_Array is
+        array(Stream_Element_Offset range <>) of aliased Stream_Element;
+    type Root_Stream_Input_Interface is limited interface;
+
+    procedure Read(
+       Stream : in out Root_Stream_Input_Interface;
+       Item   : out Stream_Element_Array;
+       Last   : out Stream_Element_Offset) is abstract;
+
+    type Root_Stream_Output_Interface is limited interface;
+
+    procedure Write(
+       Stream : in out Root_Stream_Output_Interface;
+       Item   : in Stream_Element_Array) is abstract;
+
+    type Root_Stream_Type is abstract limited new
+       Root_Stream_Input_Interface and Root_Stream_Output_Interface with private
+
+end Ada.Streams;
+Similarly, the attributes could be redefined accordingly, e.g.
+
+procedure S'Write(
+    Stream : not null access Ada.Streams.Root_Stream_Output_Interface'Class;
+    Item : in T)
+
+This would allow new abstractions to use only the appropriate attributes, while
+retaining backwards compatibility with the existing Root_Stream_Type.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Monday, May  6, 2013  5:18 PM
+
+> This would allow new abstractions to use only the appropriate
+> attributes, while retaining backwards compatibility with the existing
+> Root_Stream_Type.
+
+It wouldn't be entirely backward compatible.  Any existing user-defined
+read/write/input/output routine that is used in an attribute clause would have
+to change.  For example:
+
+   procedure Read
+     (S : access Ada.Streams.Root_Stream_Type'Class;
+      X : out Instance);
+
+   for Instance'Read  use Read;
+
+would no longer be legal, since the profile wouldn't match that of the
+attribute.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May  6, 2013  7:18 PM
+
+...
+> > This would allow new abstractions to use only the appropriate
+> > attributes, while retaining backwards compatibility with
+> the existing Root_Stream_Type.
+>
+> It wouldn't be entirely backward compatible.  Any existing
+> user-defined read/write/input/output routine that is used in an
+> attribute clause would have to change.  For example:
+>
+>    procedure Read
+>      (S : access Ada.Streams.Root_Stream_Type'Class;
+>       X : out Instance);
+>
+>    for Instance'Read  use Read;
+>
+> would no longer be legal, since the profile wouldn't match that of the
+> attribute.
+
+Not to mention that making Root_Stream_Type an interface is not compatible, for
+two reasons: (1) the no-hidden interfaces rule; and (2) the fact that derived
+types do not inherit limitedness from an interface, while it is inherited from
+an abstract tagged type.
+
+The proposed solution sort-of mitigates the second problem, but it has no effect
+on the first (no interface can ever be hidden in Ada). I say "sort-of" because
+it leaves the original problem of being unable to add full streaming to a
+hierarchy intact.
+
+AI12-0023-1 (and the associated e-mail and meeting minutes) has an extensive
+discussion of these problems and possible changes to the language to mitigate
+them. One could consider language changes to eliminate Adam's incompatibility as
+well. But the one thing that ever solution that we've looked at has in common is
+that they're all highly complex. And none of them are remotely natural --
+they're all about a "hack" to allow existing things to be changed and used
+compatibly. It would take fairly significant problems to justify their inclusion
+in the standard.
+
+In all honesty, the problem you lay out here is not very important (or common),
+IMHO. I've never run into a read-only UDP library; all of the sockets libraries
+I'm familiar with support two-way communications (not that you have to use both
+ways). And I don't think this is because of the Ada requirements; it's because
+the underlying libraries support both input and output and it makes no sense to
+support only one.
+
+Moreover, there is nothing wrong with unconditionally raising an exception from
+a routine that you can't implement. It's necessary all of the time with any
+reasonably-sized class hierarchy, and, for statically bound calls, it can be
+detected at compile-time with the use of contract assertions (preconditions and
+postconditions). IMHO, that's better than cluttering your programs with dozens
+of interfaces anyway.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, May  7, 2013  11:37 AM
+
+> In all honesty, the problem you lay out here is not very important (or
+> common), IMHO.
+
+I agree with Alan Copeland that separating input and output would have been a
+good idea, but I also agree with Randy's comment quoted above.  Certainly not
+important enough to allow incompatibilities, nor additional language complexity.
+
+****************************************************************
+
+From: Alan Copeland
+Sent: Tuesday, May  7, 2013  4:20 PM
+
+Thank you for including me in your response, and for illustrating the
+compatibility problems with the interface mechanism (which was, of course,
+merely to illustrate what a solution might achieve and not a recommendation).
+However, I disagree with the assertion that this is not very common; in fact,
+the majority of problems do indeed access a stream unidirectionally, and
+bidirectional access seems more the exception than the rule.  For instance, a
+compiler would open the source file as read only and output the executable in a
+write-only fashion, many applications have read-only data files for graphics,
+sounds, etc, system utilities often have write-only logging abilities, and
+countless others.  While its true at a library-level most files, sockets, and
+other stream implementations would be bi-directional, the intent is to
+illustrate how the problem-domain application could benefit from the increased
+compile-time safety (e.g. presumably by wrapping a general 'reasonably sized'
+bidirectional stream provided by the standard library object inside an
+application specific, unidirectional one).
+
+In any case, thank you for your consideration and continued support.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May  7, 2013  5:31 PM
+
+...
+> However,
+> I disagree with the assertion that this is not very common; in fact, the
+> majority of problems do indeed access a stream unidirectionally, and
+> bidirectional access seems more the exception than the rule.  For instance,
+> a compiler would open the source file as read only and output the executable
+> in a write-only fashion, many applications have read-only data files for
+> graphics, sounds, etc, system utilities often have write-only logging
+> abilities, and countless others.
+
+I still disagree, and the reason is one of perspective. Certainly, a single
+program might only access a file a single way, but this is rarely true for an
+entire system. For instance, a program might only read a configuration file, but
+somewhere in the system you also have a program to write the configuration file.
+
+You could write two separate libraries to manage the configuration file, but in
+my experience doing so is a guarenteed path to a never-ending series of mismatch
+bugs. (The few places in our compiler where we separated the I and O, mainly for
+size reasons, have been a constant source of problems.)
+
+It's much better to use a shared library that does both the reading and the
+writing, so both can be changed in synchronization.
+
+This applies to most situations, where even if some other system is going is
+actually going to be on the other end, you still need the other version of the
+code to write test harnesses and/or simulators.
+
+And even if you do truly have a uni-directional I/O case, it is very rare that
+the facilities you are proposing would be relevant:
+
+(1) Most modern files are in text form, as this eliminates many of the security
+    problems inherent in binary forms. (Think XML.) Text files are going to be
+    read with Text_IO or something similar; streaming does not come into the
+    picture at all.
+
+(2) Most users are going to build their I/O on top of the existing system
+    facilities. As you note in text quoted below, the library-level
+    implementations are going to be bi-directional. So, if the users use the
+    system facilities directly, their I/O will be bi-directional and they can
+    get no use of any uni-directional facilities.
+
+    Even if they derive their own facilities on top of the existing system ones,
+    their I/O still will be bi-directional. That's because inheritance in Ada is
+    always additive, never subtractive. So, while they can change some of the
+    routines to raise exceptions, they cannot eliminate them at compile-time.
+    Moreover, this is inherent in the design of dispatching; it could not
+    usefully be changed for dispatching calls (if there is a routine in the root
+    type that doesn't exist in a child type, the only thing that could be done
+    is to raise an exception; it can't be detected at compile-time). You could
+    detect statically bound routines, but that's not relevant to streaming (all
+    of the uses inside of stream attributes are dispatching).
+
+(3) Other users are going to build high-level I/O packages that encapsulate the
+    entire mechanism. Such packages have no reason to (and should not) expose
+    the streaming mechanism. Obviously, such a package can support as little or
+    as many facilities as they need; what streams provide is not relevant to the
+    client view.
+
+(4) So the only users that could get any benefit from this are users that (A) do
+    not build a high-level I/O abstraction; (B) do not use a implementor or
+    language-provided streaming package directly or via inheritance; and (C)
+    create their own stream I/O package. Such a user could create such a package
+    by calling some system package, but doing so is error-prone as every
+    parameter has to be copied for every operation to be supported. This is
+    clearly the worst option for most users; I would expect it only to be used
+    for projects needing some custom I/O that doesn't use any of the standard
+    facilities (TCP/IP, files, etc.) This ought to be pretty rare, especially
+    today when networks are mostly using TCP/IP.
+
+> While its true at a library-level most files, sockets, and other
+> stream implementations would be bi-directional, the intent is to
+> illustrate how the problem-domain application could benefit from the
+> increased compile-time safety (e.g. presumably by wrapping a general
+> 'reasonably sized' bidirectional stream provided by the standard library
+> object inside an application  pecific, unidirectional one).
+
+As noted above, this does not work unless you are willing to create a very
+fragile package containing hand-written calls for every operation. This is the
+worst possible way to create Ada code. Moreover, most projects would be better
+off creating high-level abstractions that don't expose streaming at all (much
+less chance of misuse this way), so at most the benefits of the change would be
+limited to a single package body.
+
+I would not argue that Ada does not provide very good mechanisms for getting
+language-defined compile-time checking of unused routines in O-O programs.
+That's because of the additive inheritance that Ada users. We had similar
+problems in Claw, and eventually we simply gave up. (For instance, we wanted the
+root window types to be non-limited, but many of the extensions to be limited.
+Ada doesn't support this. Eventually, we settled on raising Program_Error in
+Adjust.)
+
+Truthfully, compile-time checking within the language is too coarse to be of
+much use. Modern specification languages make it possible to statically check
+every call for adherence to contracts that are much more complex than simple
+type checking can provide. Perhaps some new language will add such checking as a
+requirement, but that's unlikely to happen for Ada. Still, Ada implementations
+can and do go far beyond the language in detecting probable errors.
+
+Essentially, I think you're trying to solve this minor problem using the
+mechanisms of the 2000's, while we're looking at a language that won't appear
+until the 2020's. One hopes that we can use the increased power of machines to
+require more checking without necessarily having to add more language mechanism.
+That is, I think it is the power of contracts, not type checking per se, that
+shows the way forward -- and those will decrease the importance of inheritance
+and other O-O techniques (compared to just plain modular programming as
+pioneered by Ada 83 and Modula II).
 
 ****************************************************************
