@@ -1,7 +1,10 @@
-!standard 13.2(6.1/2)                                      12-07-05    AI12-0001-1/02
+!standard 13.2(6.1/2)                               13-02-03    AI12-0001-1/03
 !standard 13.2(7)
+!standard 13.2(8)
+!standard 13.2(9/3)
 !standard C.6(10)
 !standard C.6(11)
+!standard C.6(13.2/3)
 !standard C.6(21)
 !class binding interpretation 06-03-31
 !status work item 06-03-31
@@ -15,17 +18,14 @@
 
 [Editor's note: This AI was carried over from Ada 2005.]
 
-This action item resolves the difference in recommended level of support
-for atomic and volatile objects by making the alignment implementation
-advice recommended support and adding a rejection statement for those
-array objects that are packed to a different alignment than that of
-the component's subtype.
+Pack doesn't not require tight packing in infeasible cases (atomic, volatile,
+aliased, by-reference types, independent addressability).
 
 !question
 
 The Recommended Level of Support implies that it is required to support pragma
 Pack on types that have Atomic_Components, even to the bit level. Is this the
-intent? (No.) 
+intent? (No.)
 
 !recommendation
 
@@ -42,38 +42,100 @@ Delete C.6 (21) as it is no longer required.
 
 !wording
 
-13.2 (6.1/2) is moved after 13.2 (7) and changed to:
+Modify AARM 9.10(1.d/3):
 
-For a packed type that has a component that is aliased, volatile, atomic, or is
-of a by-reference type, the component shall be aligned according to
-the alignment of its subtype; in particular it shall be aligned on a
-storage element boundary.
+     Ramification: An atomic object
+     (including atomic components) is always independently addressable
+     from any other nonoverlapping object. {Aspect_specifications and
+     representation items cannot change that fact.}
+     [Any aspect_specification or
+     representation item which would prevent this from being true
+     should be rejected, notwithstanding what this Standard says
+     elsewhere.] Note, however, that the components of an atomic object
+     are not necessarily atomic.
 
-13.2 (9) append:
+Delete 13.2(6.1/2) which currently says:
 
-If the array component is required to be aligned according to its subtype
-and the results of packing are not so aligned, the pack aspect should be rejected.
+  If a packed type has a component that is not of a by-reference type and has no
+  aliased part, then such a component need not be aligned according to the
+  Alignment of its subtype; in particular it need not be allocated on a storage
+  element boundary.
 
-C.6 (10-11)
+Add a new bullet after 13.2(7/3) (replacing the above deleted paragraph):
 
-Add "and independent" after indivisible.
+    * For a packed type that has a component that has an aliased part,
+      or is of a by-reference type, or is volatile, atomic or
+      independently addressable, the component shall be aligned
+      according to the alignment of its subtype. Any other component need
+      not be aligned.
 
-C.6 (21, AARM 21.a) Delete.
+Modify 13.2(8):
+
+    * For a packed record type, the components should be packed as tightly
+      as possible subject to {the above alignment requirements},
+      the Sizes of the component subtypes, and [subject to]
+      any record_representation_clause that applies to the type;
+      the implementation may, but need not, reorder components or cross
+      aligned word boundaries to improve the packing. A component whose Size
+      is greater than the word size may be allocated an integral number of
+      words.
+
+Modify 13.2(9/3):
+
+    * For a packed array type, if the Size of the component
+      subtype is less than or equal to the word size, Component_Size should
+      be less than or equal to the Size of the component subtype, rounded up
+      to the nearest factor of the word size
+      {, unless this would violate the above alignment requirements}.
+
+Delete AARM 13.2(9.a), because the new alignment requirement above makes it
+clear:
+
+     Ramification: If a component subtype is aliased, its Size will
+     generally be a multiple of Storage_Unit, so it probably won't get
+     packed very tightly.
+
+Add "and independent" to C.6(10/3-11), twice:
+
+  It is illegal to specify either of the aspects Atomic or Atomic_Components to
+  have the value True for an object or type if the implementation cannot support
+  the indivisible {and independent} reads and updates required by the aspect
+  (see below).
+
+  It is illegal to specify the Size attribute of an atomic object, the
+  Component_Size attribute for an array type with atomic components, or the
+  layout attributes of an atomic component, in a way that prevents the
+  implementation from performing the required indivisible {and independent}
+  reads and updates.
+
+Modify C.6(13.2/3):
+
+It is illegal to specify a representation aspect {other than Pack} for a
+component, object or type for which the aspect Independent or
+Independent_Components is True, in a way that prevents the implementation from
+providing the independent addressability required by the aspect.
+
+Delete C.6(21/3) and the associated AARM note, because the new alignment
+requirement above covers this case:
+
+   If the Pack aspect is True for a type any of whose subcomponents are atomic,
+   the implementation shall not pack the atomic subcomponents more tightly than
+   that for which it can support indivisible reads and updates.
+
+   Implementation Note: Usually, specifying aspect Pack for such a type will be
+   illegal as the Recommended Level of Support cannot be achieved; otherwise, a
+   warning might be appropriate if no packing whatsoever can be achieved.
+
 
 !discussion
 
-Addition of atomic (and volatile) to 13.1 (24-26) was discarded because
-neither aspect is confirming.
+The idea of Pack is that if it's infeasible to pack a given component tightly
+(because it is atomic, volatile, aliased, of a by-reference type, or has
+independent addressability), then Pack is not illegal; it just doesn't pack as
+tightly as it might without the atomic, volatile, etc.
 
-Making 13.2 (6.1/2) a Recommended Level of Support makes it a requirement
-when Annex C is supported. This covers volatile and atomic and eliminates
-the conflict between the Recommended Level of Support and this rule.
-
-Similarly, C.6(21) conflicts with the Recommended Level of Support. We don't want
-the representation of a packed array of Boolean to depend on other keywords
-(like aliased) or pragmas/aspects that apply to the type. (That could cause
-silent representation changes during maintenance.) Thus, this rule is deleted.
-
+This was always the intent, but the Recommended Level of Support contradicted
+it.
 
 !corrigendum 13.2(6.1/2)
 
@@ -88,12 +150,29 @@ a storage element boundary.
 @dinst
 The recommended level of support for pragma Pack is:
 @dinsa
-@xindent<For a packed type that has a component that is of a by-reference type,
-aliased, volatile, or atomic, the component shall be aligned according to
-the alignment of its subtype; in particular it shall be aligned on a
-storage element boundary.>
+@xindent<For a packed type that has a component that has an aliased part, or is
+of a by-reference type, or is volatile, atomic or independently addressable, the
+component shall be aligned according to the alignment of its subtype. Any other
+component need not be aligned.>
 
-!corrigendum 13.2(9)
+!corrigendum 13.2(8)
+
+@drepl
+@xbullet<For a packed record type, the components should be packed as tightly as
+possible subject to, the Sizes of the
+component subtypes, and subject to any @fa<record_representation_clause> that
+applies to the type; the implementation may, but need not, reorder components or
+cross aligned word boundaries to improve the packing. A component whose Size is
+greater than the word size may be allocated an integral number of words.>
+@dby
+@xbullet<For a packed record type, the components should be packed as tightly as
+possible subject to {the above alignment requirements}, the Sizes of the
+component subtypes, and any @fa<record_representation_clause> that
+applies to the type; the implementation may, but need not, reorder components or
+cross aligned word boundaries to improve the packing. A component whose Size is
+greater than the word size may be allocated an integral number of words.>
+
+!corrigendum 13.2(9/3)
 
 @drepl
 @xbullet<For a packed array type, if the component subtype's Size is less than
@@ -104,9 +183,8 @@ rounded up to the nearest factor of the word size.>
 @xbullet<For a packed array type, if the component subtype's Size is less than
 or equal to the word size, and Component_Size is not specified for the type,
 Component_Size should be less than or equal to the Size of the component subtype,
-rounded up to the nearest factor of the word size. If the array component is
-required to be aligned according to its subtype and the results of packing are
-not so aligned, pragma pack should be rejected.>
+rounded up to the nearest factor of the word size, unless this would violate the
+above alignment requirements.>
 
 !corrigendum C.6(10)
 
@@ -115,9 +193,9 @@ It is illegal to apply either an Atomic or Atomic_Components pragma to an object
 if the implementation cannot support the indivisible reads and updates required by the
 pragma (see below).
 @dby
-It is illegal to apply either an Atomic or Atomic_Components pragma to an object or type
-if the implementation cannot support the indivisible and independent reads and updates
-required by the pragma (see below).
+It is illegal to apply either an Atomic or Atomic_Components pragma to an object
+or type if the implementation cannot support the indivisible and independent
+reads and updates required by the pragma (see below).
 
 !corrigendum C.6(11)
 
@@ -127,11 +205,23 @@ attribute for an array type with atomic components, or the layout attributes of 
 atomic component, in a way that prevents the implementation from performing the
 required indivisible reads and updates.
 @dby
-It is illegal to specify the Size attribute of an atomic object, the Component_Size
-attribute for an array type with atomic components, or the layout attributes of an
-atomic component, in a way that prevents the implementation from performing the
-required indivisible and independent reads and updates.
+It is illegal to specify the Size attribute of an atomic object, the
+Component_Size attribute for an array type with atomic components, or the layout
+attributes of an atomic component, in a way that prevents the implementation
+from performing the required indivisible and independent reads and updates.
 
+!corrigendum C.6(13.2/3)
+
+@drepl
+It is illegal to specify a representation aspect for a
+component, object or type for which the aspect Independent or
+Independent_Components is True, in a way that prevents the implementation from
+providing the independent addressability required by the aspect.
+@dby
+It is illegal to specify a representation aspect other than Pack for a
+component, object or type for which the aspect Independent or
+Independent_Components is True, in a way that prevents the implementation from
+providing the independent addressability required by the aspect.
 
 !corrigendum C.6(21)
 
@@ -142,34 +232,36 @@ for which it can support indivisible reads and updates.
 
 !ACATS test
 
-ACATS tests confirming rejection of aspect Pack combined with Atomic_Components
-for small types like Boolean on all targets but bit addressable targets should
-be implemented. (Test CXC6003 included such a case; this case has been removed
-from the test.)
+There might be value in checking that Pack is allowed in all cases, even when
+it has no effect on the representation. For instance, combining aspect Pack
+combined with Atomic_Components for small types like Boolean should always
+work (but do nothing on most targets). (Test CXC6003 included such a case;
+this case has been removed from the test pending the outcome of this AI, and
+most likely this should be a separate test.)
 
 !appendix
 
 From: Jean-Pierre Rosen
 Sent: Friday, February 17, 2006  6:34 AM
 
-A question that arose while designing a rule for AdaControl about shared 
+A question that arose while designing a rule for AdaControl about shared
 variables.
 
-If a variable is subject to a pragma Atomic_Components, is it safe for 
+If a variable is subject to a pragma Atomic_Components, is it safe for
 two tasks to update *different* components without synchronization?
 
-C.6 talks only about indivisibility, not independent addressing. Of 
+C.6 talks only about indivisibility, not independent addressing. Of
 course, you have to throw 9.10 in...
 
-The whole issue is with the "(or of a neighboring object if the two are 
-not independently addressable)" in 9.10(11), while C.6 (17) says that 
-"Two actions are sequential (see 9.10) if each is the read or update of 
+The whole issue is with the "(or of a neighboring object if the two are
+not independently addressable)" in 9.10(11), while C.6 (17) says that
+"Two actions are sequential (see 9.10) if each is the read or update of
 the same atomic object", but doesn't mention neighboring objects.
 
-In a sense, indivisibility guarantees only that there cannot be 
-temporary incorrect values in a variable due to the fact that the 
-variable is written by more than one memory cycle. The issue *is* 
-different from independent addressability. OTOH, Atomic_Components 
+In a sense, indivisibility guarantees only that there cannot be
+temporary incorrect values in a variable due to the fact that the
+variable is written by more than one memory cycle. The issue *is*
+different from independent addressability. OTOH, Atomic_Components
 without independent addressability seems pretty much useless...
 
 ****************************************************************
@@ -192,7 +284,7 @@ it seems reasonable to reject it.
 From: Pascal Leroy
 Sent: Thursday, March 30, 2006  6:07 AM
 
-> If a variable is subject to a pragma Atomic_Components, is it safe for 
+> If a variable is subject to a pragma Atomic_Components, is it safe for
 > two tasks to update *different* components without synchronization?
 
 I think that 9.10(1) is quite clear: distinct objects are independently
@@ -211,7 +303,7 @@ Sent: Thursday, March 30, 2006  6:17 AM
 
 Of course, my question was in the case of the presence of packing etc.
 
-The answer seems to be no, there is no *additional* implication on 
+The answer seems to be no, there is no *additional* implication on
 addressability due to atomic_components. Correct?
 
 ****************************************************************
@@ -225,7 +317,7 @@ In the presence of packing, 9.10(1) says that independent addressability
 is "implementation defined", which is not too helpful.  (This topic was
 discussed a few weeks ago as part of another thread, btw.)
 
-> The answer seems to be no, there is no *additional* implication on 
+> The answer seems to be no, there is no *additional* implication on
 > addressability due to atomic_components. Correct?
 
 Right.
@@ -304,8 +396,8 @@ is that behavior OK? forbidden? mandated?
 From: Pascal Leroy
 Sent: Thursday, March 30, 2006  8:17 AM
 
-> It seems *really* nasty to make this implementation defined, 
-> I hate erroneousness being imp defined. Is this a new change, 
+> It seems *really* nasty to make this implementation defined,
+> I hate erroneousness being imp defined. Is this a new change,
 > I missed it.
 
 This is not new, it has been like that since Ada 95, and the last time
@@ -350,7 +442,7 @@ Sent: Thursday, March 30, 2006  8:41 AM
 > comply with Annex C.
 
 Yes, but it is impossible to comply on virtually all machines
- 
+
 > On a machine that could independently address bits, the two pragmas could
 > well coexist, so there is some amount of implementation dependence here.
 
@@ -591,7 +683,7 @@ Sent: Thursday, March 30, 2006  4:32 PM
 Well you can interpret it that way if you like, but it is not
 the definition in the language, which says that for arrays with
 1,2,4 bit components, pragma Pack works as expected!
- 
+
 > I agree it is friendly to inform the user if the pack has *no*
 > effect, but I wouldn't want to disallow pragma Pack completely
 > in the above example, because array of Boolean might use
@@ -766,32 +858,32 @@ small.)
 From: Robert I. Eachus
 Sent: Thursday, March 30, 2006  7:27 PM
 
->> On a machine that could independently address bits, the two pragmas 
+>> On a machine that could independently address bits, the two pragmas
 >> could
 >> well coexist, so there is some amount of implementation dependence here.
 >
 >
 > There are almost no such machines!
 
-I totally agree with the language part of this discussion, but many 
-hardware ISAs allow read-modify-write access.  If you can do an AND or 
-an OR as an RMW isntruction, then ORing16#EF# sets the fourth bit of the 
-byte, and ANDing of 16#EF# resets it.  (There are often advantages to 
-doing 32 or 64-bit wide operations instead of byte wide operations, 
-especially with modern CPUs, but that is a detail.) Is the RMW 
-instruction atomic?  The most interesting case is in the x86 case.  If 
-you have a single CPU (or today CPU core) the retirement rules make the 
-instructions atomic from the CPUs point of view.  (If an interrupt 
-occurs, either the write has completed, or the instruction will be 
-restarted.)  What if you have multiple CPUs, multiple cores, or are 
-interfacing with an I/O device?  Better mark the memory as UC 
-(uncacheable) and use the LOCK prefix on the AND or OR instruction, but 
+I totally agree with the language part of this discussion, but many
+hardware ISAs allow read-modify-write access.  If you can do an AND or
+an OR as an RMW isntruction, then ORing16#EF# sets the fourth bit of the
+byte, and ANDing of 16#EF# resets it.  (There are often advantages to
+doing 32 or 64-bit wide operations instead of byte wide operations,
+especially with modern CPUs, but that is a detail.) Is the RMW
+instruction atomic?  The most interesting case is in the x86 case.  If
+you have a single CPU (or today CPU core) the retirement rules make the
+instructions atomic from the CPUs point of view.  (If an interrupt
+occurs, either the write has completed, or the instruction will be
+restarted.)  What if you have multiple CPUs, multiple cores, or are
+interfacing with an I/O device?  Better mark the memory as UC
+(uncacheable) and use the LOCK prefix on the AND or OR instruction, but
 then it is guaranteed to work.
 
-So I would say that the majority of  computers in use do support  
-bit-addressable atomic access support--as long as the component values 
-don't cross quad-word boundaries. (There are lots of other CISC CPU 
-designs where this works as well.  The first microprocessor I used it on 
+So I would say that the majority of  computers in use do support
+bit-addressable atomic access support--as long as the component values
+don't cross quad-word boundaries. (There are lots of other CISC CPU
+designs where this works as well.  The first microprocessor I used it on
 was the M68000, but I had used this trick on many mainframes before then.)
 
 ****************************************************************
@@ -799,18 +891,18 @@ was the M68000, but I had used this trick on many mainframes before then.)
 From: Robert I. Eachus
 Sent: Thursday, March 30, 2006  7:53 PM
 
-> So I would say that the majority of  computers in use do support  
-> bit-addressable atomic access support--as long as the component values 
+> So I would say that the majority of  computers in use do support
+> bit-addressable atomic access support--as long as the component values
 > don't cross quad-word boundaries.
 
-Whoops! I got a bit carried away.  In the x86 ISA you can only do atomic 
-loads and stores of a set of all one bits or all zero bits.  Some other 
-ISAs do allow arbitrary bit patterns to be substituted.  You can always 
-use a locked XOR iff each entry in an array is 'owned' by a different 
+Whoops! I got a bit carried away.  In the x86 ISA you can only do atomic
+loads and stores of a set of all one bits or all zero bits.  Some other
+ISAs do allow arbitrary bit patterns to be substituted.  You can always
+use a locked XOR iff each entry in an array is 'owned' by a different
 thread.
 
-So the changes being discussed are needed for the non-boolean cases.  
-However, I would hope that at least the AARM should explain the special 
+So the changes being discussed are needed for the non-boolean cases.
+However, I would hope that at least the AARM should explain the special
 nature of atomic bit arrays.
 
 ****************************************************************
@@ -833,7 +925,7 @@ This is a molecular operation, not an atomic operation for:
     1) RMW assumes that the contents on read are the same as write.  When
        dealing with I/O interfaces, this is not always true.
 
-    2)  Without a data source for the other bits, the operation is not 
+    2)  Without a data source for the other bits, the operation is not
         atomic.
 
 > Probably would want to change "indivisible" to
@@ -855,7 +947,7 @@ pragma pack (Tab);
 X : Tab (1 ..32);
 pragma Atomic_Components (X);
 
-i.e. when a *type* is packed, but an individual *variable* has atomic 
+i.e. when a *type* is packed, but an individual *variable* has atomic
 components?
 
 ****************************************************************
@@ -885,41 +977,41 @@ Sent: Friday, March 31, 2006 11:27 AM
 >    1) RMW assumes that the contents on read are the same as write.  When
 > dealing with I/O interfaces, this is not always true.
 
-No, you have to follow the prescription exactly.  And although it is 
-possible that some chipsets get this wrong, the ISA specifies what is 
-done exactly because it is used in interfacing between multiple CPUs and 
-CPUs and I/O devices.  Oh, and it is about 50 times faster on a Hammer 
-(AMD Athlon64, Turion, or Opteron) CPU because all memory access goes 
-through CPU caches.  So if the memory is local to the CPU, it just has 
-to do the RMW in cache, and any other writes to the location can't 
-interrupt.  Teechnically the cache line containing the array is Owned by 
-the thread that executes the locked RMW instruction.  This means that 
-the data migrates to the local cache, and the CPU connected to the 
-memory has a Shared copy in cache.  (Reads are not an issue, they either 
+No, you have to follow the prescription exactly.  And although it is
+possible that some chipsets get this wrong, the ISA specifies what is
+done exactly because it is used in interfacing between multiple CPUs and
+CPUs and I/O devices.  Oh, and it is about 50 times faster on a Hammer
+(AMD Athlon64, Turion, or Opteron) CPU because all memory access goes
+through CPU caches.  So if the memory is local to the CPU, it just has
+to do the RMW in cache, and any other writes to the location can't
+interrupt.  Teechnically the cache line containing the array is Owned by
+the thread that executes the locked RMW instruction.  This means that
+the data migrates to the local cache, and the CPU connected to the
+memory has a Shared copy in cache.  (Reads are not an issue, they either
 see the previous  state of the array, or the final state.)
 
-To repeat, on x86, you must use an AND or OR instruction where the first 
-argument is the bit array you want treated as atomic.  (The second 
-argument--the mask--can be a register or an immediate constant.) You 
-must use the LOCK prefix byte, and the page containing the array must be 
-marked as uncacheable.  (Yes, Hammer chips cache them anyway, but 
-enforce the atomicity rules.  In fact they go a bit further, and don't 
-even allow other reads during the few CPU clocks the cycle takes.  If 
-you read a Shared cache line, the read causes a cache snoop that can 
+To repeat, on x86, you must use an AND or OR instruction where the first
+argument is the bit array you want treated as atomic.  (The second
+argument--the mask--can be a register or an immediate constant.) You
+must use the LOCK prefix byte, and the page containing the array must be
+marked as uncacheable.  (Yes, Hammer chips cache them anyway, but
+enforce the atomicity rules.  In fact they go a bit further, and don't
+even allow other reads during the few CPU clocks the cycle takes.  If
+you read a Shared cache line, the read causes a cache snoop that can
 invalidate the read, and cause the instruction to be retried.)
 
->    2)  Without a data source for the other bits, the operation is not 
-> atomic. 
+>    2)  Without a data source for the other bits, the operation is not
+> atomic.
 
-Did you miss the fact that you have to use an AND or OR instruction with 
+Did you miss the fact that you have to use an AND or OR instruction with
 a memory address as the first argument to
-use the LOCK prefix?   This insures that the read and write are seen as 
-atomic by the CPU.  Marking the memory as uncacheable is necessary if 
-there are other CPUs and/or I/O devices involved.  This ensures that the 
+use the LOCK prefix?   This insures that the read and write are seen as
+atomic by the CPU.  Marking the memory as uncacheable is necessary if
+there are other CPUs and/or I/O devices involved.  This ensures that the
 memory line is locked with Intel CPUs and must be locally Owned by AMD CPUs.
 
-If you really think this doesn't work, look at some driver code.  I''ve 
-avoided giving example programs, because I'd also need to supply 
+If you really think this doesn't work, look at some driver code.  I''ve
+avoided giving example programs, because I'd also need to supply
 hardware to test the code.
 
 ****************************************************************
@@ -928,26 +1020,26 @@ From: Bibb Latting
 Sent: Friday, March 31, 2006  4:44 PM
 
 > If you really think this doesn't work, look at some driver code.  I''ve
-> avoided giving example programs, because I'd also need to supply hardware 
+> avoided giving example programs, because I'd also need to supply hardware
 > to test the code.
 
-I *really* think that this doesn't *always* work.  I understand the 
-mechanization of memory access that you describe: indeed today there are 
-usually adequate means to obtain exclusive access to a memory element, which 
-when combined with suitable cache management allows implementation of 
+I *really* think that this doesn't *always* work.  I understand the
+mechanization of memory access that you describe: indeed today there are
+usually adequate means to obtain exclusive access to a memory element, which
+when combined with suitable cache management allows implementation of
 volatile/atomic accesses.
 
-However, the underlying assumption is that the address  referenced returns 
-the last value written.  I'm saying that this isn't always true for memory 
-mapped I/O.  An example I encountered was the SCC2692 a number of years ago. 
-It was a really *cheap* chip with 16 bytes of address space.  The problem is 
-that the chip doesn't have enough address space to provide both read-back of 
-control registers and adequate status.  To work around the problem, the 
-Read/Write line was multiplexed: when you write to the chip you're accessing 
-one register; when you read, you're accessing a different register.  So, 
-there are two objects, one for write and another for read, at the *same 
-address*.  In terms of C.6, I'm treating (perhaps incorrectly) every 
-addressable element as a variable, which becomes "shared" by application of 
+However, the underlying assumption is that the address  referenced returns
+the last value written.  I'm saying that this isn't always true for memory
+mapped I/O.  An example I encountered was the SCC2692 a number of years ago.
+It was a really *cheap* chip with 16 bytes of address space.  The problem is
+that the chip doesn't have enough address space to provide both read-back of
+control registers and adequate status.  To work around the problem, the
+Read/Write line was multiplexed: when you write to the chip you're accessing
+one register; when you read, you're accessing a different register.  So,
+there are two objects, one for write and another for read, at the *same
+address*.  In terms of C.6, I'm treating (perhaps incorrectly) every
+addressable element as a variable, which becomes "shared" by application of
 volatile/atomic.
 
 ****************************************************************
@@ -955,38 +1047,38 @@ volatile/atomic.
 From: Robert I. Eachus
 Sent: Friday, March 31, 2006  7:59 PM
 
-Ah!  I guess I mixed you up by going from the general to the specific 
-case.  The Intel 8086, 8088, and 80186, were not designed to support 
-(demand paged) virtual memory, although it could be done. The Intel 
-80286 was designed to do so, but to call the support a kludge is an 
-insult to most kludges.  Since the 80386, and in chip years that is a 
-long time ago, the mechanism I described has been supported as part of 
-the ISA.  Right now the AMD and Intel implementations are very 
+Ah!  I guess I mixed you up by going from the general to the specific
+case.  The Intel 8086, 8088, and 80186, were not designed to support
+(demand paged) virtual memory, although it could be done. The Intel
+80286 was designed to do so, but to call the support a kludge is an
+insult to most kludges.  Since the 80386, and in chip years that is a
+long time ago, the mechanism I described has been supported as part of
+the ISA.  Right now the AMD and Intel implementations are very
 different, but the same code will work on all PC compatible CPUs.
 
-There may be non-x86 compatible hardware out there that is not capable 
-of correctly doing the (single) bit flipping.  But I think that from a 
-language design point of view, we should realize that most CPUs out 
-there will support the packed array of Boolean special.case.  I would 
-rather have the RM require it for Real-Time Annex support, and allow 
-compilers for non-conforming hardware to document that. For example, 
-there is an errata for the Itanium2 IA-32 execution layer (#14 on page 
-67 of  http://download.intel.com/design/Itanium2/specupdt/25114140.pdf)  
-But that just means you shouldn't try to run real-time code in IA-32 
+There may be non-x86 compatible hardware out there that is not capable
+of correctly doing the (single) bit flipping.  But I think that from a
+language design point of view, we should realize that most CPUs out
+there will support the packed array of Boolean special.case.  I would
+rather have the RM require it for Real-Time Annex support, and allow
+compilers for non-conforming hardware to document that. For example,
+there is an errata for the Itanium2 IA-32 execution layer (#14 on page
+67 of  http://download.intel.com/design/Itanium2/specupdt/25114140.pdf)
+But that just means you shouldn't try to run real-time code in IA-32
 emulation mode on an Itanium2 CPU.  ;-)
 
-Incidently notice that there is a lot of magic that goes on in operating 
-systems that may prevent a program from doing this bit-twiddling.  
-That's fine.  If a program that uses the Real-Time Annex needs special 
-permissions, document them and move on.  I personally think that there 
-is no reason for an OS not to satisfy a user request for an uncacheable 
-(UC) page.  It is necessary for real-time code, and harmless otherwise.  
-Especially on the AMD Hammer CPUs, there is no reason to restrict user 
-access to UC pages and/or the LOCK prefix.  The actual locking lasts a 
-few nanoseconds. (The memory location will be read, ownership, if 
-necessary transferred to the correct CPU and process.  Then the locked 
-RMW cycle takes place in the L1 data cache. Unlocked writes to the bit 
-array can occur during the change of ownership, but the copy used in the 
+Incidently notice that there is a lot of magic that goes on in operating
+systems that may prevent a program from doing this bit-twiddling.
+That's fine.  If a program that uses the Real-Time Annex needs special
+permissions, document them and move on.  I personally think that there
+is no reason for an OS not to satisfy a user request for an uncacheable
+(UC) page.  It is necessary for real-time code, and harmless otherwise.
+Especially on the AMD Hammer CPUs, there is no reason to restrict user
+access to UC pages and/or the LOCK prefix.  The actual locking lasts a
+few nanoseconds. (The memory location will be read, ownership, if
+necessary transferred to the correct CPU and process.  Then the locked
+RMW cycle takes place in the L1 data cache. Unlocked writes to the bit
+array can occur during the change of ownership, but the copy used in the
 RMW cycle is the latest version.)
 
 ****************************************************************
@@ -1036,10 +1128,10 @@ could read two bytes instead of one word), we have to recognize that.
 From: Robert Dewar
 Sent: Saturday, April  1, 2006  3:05 AM
 
-> There may be non-x86 compatible hardware out there that is not capable 
-> of correctly doing the (single) bit flipping.  But I think that from a 
-> language design point of view, we should realize that most CPUs out 
-> there will support the packed array of Boolean special.case. 
+> There may be non-x86 compatible hardware out there that is not capable
+> of correctly doing the (single) bit flipping.  But I think that from a
+> language design point of view, we should realize that most CPUs out
+> there will support the packed array of Boolean special.case.
 
 I must say I am puzzled, what code do you have in mind for
 supporting
@@ -1187,9 +1279,9 @@ Sent: Saturday, April  1, 2006  10:13 AM
 
 >> If C.6(20) requires volatile bit-fields, it is just junk. Implementors
 >> don't pay attention to junk :-)
-> 
+>
 > Well, it's apparently the intent, given this AARM annotation:
-> 
+>
 >     22.b/2 Reason: Since any object can be a volatile object, including packed
 >           array components and bit-mapped record components, we require the
 >           above only when it is reasonable to assume that the machine can
@@ -1288,7 +1380,7 @@ you don't have to do anything if it's not practical to do so.
 > and the model is that compilers do their best to implement it, whatever that is.
 
 I find that model absurd
- 
+
 > We added Implementation Advice (in Ada 2005) to avoid reading/writing extra
 > bits,
 
@@ -1337,31 +1429,31 @@ Sent: Sunday, April  2, 2006  3:32 AM
 > See Norm Shulman's PhD thesis for a very thorough treatment of
 > this subject.
 
-I seem to have missed a day of strum und drang.  But Robert Dewar put 
-his finger on the semantic disconnects.  With modern hardware Bit 
-vectors can be* atomic*--updated with a single, uninterruptable CPU 
-instruction, that is also atomic from the point of view of the memory 
-system.   Note that the cache manipulations that go on to cause this to 
-occur may be complex, but from our language lawyer point of view, all 
-that matters is the result.  On modern hardware, a read may result in 
-256 bytes being loaded into cache.  Not an issue for atomic, as long as 
-changes to the object are atomic from the point of view of the 
-programmer.  That means that the meaning of atomic may be diffferent in 
-a compiler that supports Annex D.  Of course, now that dual-core CPUs 
-are becomming more common, all compilers may have to insure that atomic 
-works in the presence of multiple CPUs or CPU cores.  (And I/O devices 
+I seem to have missed a day of strum und drang.  But Robert Dewar put
+his finger on the semantic disconnects.  With modern hardware Bit
+vectors can be* atomic*--updated with a single, uninterruptable CPU
+instruction, that is also atomic from the point of view of the memory
+system.   Note that the cache manipulations that go on to cause this to
+occur may be complex, but from our language lawyer point of view, all
+that matters is the result.  On modern hardware, a read may result in
+256 bytes being loaded into cache.  Not an issue for atomic, as long as
+changes to the object are atomic from the point of view of the
+programmer.  That means that the meaning of atomic may be diffferent in
+a compiler that supports Annex D.  Of course, now that dual-core CPUs
+are becomming more common, all compilers may have to insure that atomic
+works in the presence of multiple CPUs or CPU cores.  (And I/O devices
 as well.)
 
-I may have started the confusion by saying that to get atomic behavior 
-in any x86 multiple core environment, you have to ensure that the bit 
-array is stored in UC (incacheable) memory.  But in this case, that has 
-nothing to do with volitile--and on the AMD Hammer processors nothing to 
-do with whether or not the bit array can be cached!  It is just that the 
-ISA only requires uninterruptable semantics for UC memory.  Or to turn 
-that around, not all memory need support atomic updates, but memory must 
-be marked UC for the LOCK prefix to have the expected semantics.  (Well, 
-there are circumstances where the OS will handle the exception and 
-provide the expected sematics, but that is more likely to involve server 
+I may have started the confusion by saying that to get atomic behavior
+in any x86 multiple core environment, you have to ensure that the bit
+array is stored in UC (incacheable) memory.  But in this case, that has
+nothing to do with volitile--and on the AMD Hammer processors nothing to
+do with whether or not the bit array can be cached!  It is just that the
+ISA only requires uninterruptable semantics for UC memory.  Or to turn
+that around, not all memory need support atomic updates, but memory must
+be marked UC for the LOCK prefix to have the expected semantics.  (Well,
+there are circumstances where the OS will handle the exception and
+provide the expected sematics, but that is more likely to involve server
 virtualization than memory that is actually unlockable.)
 
 > So for example, an array of ten integers can be volatile, but it
@@ -1374,70 +1466,70 @@ virtualization than memory that is actually unlockable.)
 > algorithm fails because of race conditions). These two needs
 > are quite quite different.
 
-I hope everyone now understands atomic, because this example shows how 
-complex volitile has become!  There is the type of hardware volitile 
-memory that Bibb Latting was talking about.  However, modern hardware 
-doesn't do single-bit reads and writes.  Hardware switches and status 
-bits are collected into registers.  A particular register may have bits 
-that are not writeable, and when you write a (32-bit?) word to that 
-location, only the setable bits are changed.  Where these registers are 
-internal to the CPU, they usually require special instructions to read 
-or write them. With I/O devices, the registers will be addressable as 
-memory, but again the semantics of reading from and/or writing to those 
-locations is going to be hardware specific.  In a perfect world, these 
-operations will all be provided as well documented code-inserts or 
+I hope everyone now understands atomic, because this example shows how
+complex volitile has become!  There is the type of hardware volitile
+memory that Bibb Latting was talking about.  However, modern hardware
+doesn't do single-bit reads and writes.  Hardware switches and status
+bits are collected into registers.  A particular register may have bits
+that are not writeable, and when you write a (32-bit?) word to that
+location, only the setable bits are changed.  Where these registers are
+internal to the CPU, they usually require special instructions to read
+or write them. With I/O devices, the registers will be addressable as
+memory, but again the semantics of reading from and/or writing to those
+locations is going to be hardware specific.  In a perfect world, these
+operations will all be provided as well documented code-inserts or
 intrinsic functions.
 
-In the case above, volitile has a much different--but also 
-necessary--meaning.  Whether or not the data is cached is not 
-important--well it is important if you need speed.  What is important is 
-that all CPU cores, (Ada tasks. and) hardware processes see the same 
-data.  At this point I really need to talk about cache coherency 
-strategies.  AMD uses MOESI (Modified, Owned, Exclusive, Shared, 
-Invalid), while Intel uses MESI (skip the Owner state).  What Robert 
-Dewar's example above needs (in the MESI case) is that the bounded 
-buffer *and* the.head and tail pointers must be marked as Shared, or as 
-Modified in one cache, and Invalid in all others.  The MOESI protocol 
-allows one copy to be marked as Owned, and the others to be either 
+In the case above, volitile has a much different--but also
+necessary--meaning.  Whether or not the data is cached is not
+important--well it is important if you need speed.  What is important is
+that all CPU cores, (Ada tasks. and) hardware processes see the same
+data.  At this point I really need to talk about cache coherency
+strategies.  AMD uses MOESI (Modified, Owned, Exclusive, Shared,
+Invalid), while Intel uses MESI (skip the Owner state).  What Robert
+Dewar's example above needs (in the MESI case) is that the bounded
+buffer *and* the.head and tail pointers must be marked as Shared, or as
+Modified in one cache, and Invalid in all others.  The MOESI protocol
+allows one copy to be marked as Owned, and the others to be either
 Shared or Invalid.
 
-In the AMD MOESI implementation, updating the owner's copy causes any 
-other copies to first be marked Invalid before the write to the Owned 
-copy completes, then the new value will be broadcast to the other chips 
-and cores.  Those that have a (now Invalid) cached copy will update it 
-and mark it again Shared.  What if you want to write to a Shared copy?  
-You must first take Ownership. MESI is faster if the next CPU to update 
-the Shared data is random, MOESI Owner state is much, much faster if 
-most updates are localized.  (In other words, the CPU (core) that last 
+In the AMD MOESI implementation, updating the owner's copy causes any
+other copies to first be marked Invalid before the write to the Owned
+copy completes, then the new value will be broadcast to the other chips
+and cores.  Those that have a (now Invalid) cached copy will update it
+and mark it again Shared.  What if you want to write to a Shared copy?
+You must first take Ownership. MESI is faster if the next CPU to update
+the Shared data is random, MOESI Owner state is much, much faster if
+most updates are localized.  (In other words, the CPU (core) that last
 updated the object is most likely to be the next updater.)
 
-Maybe we need to resurrect pragma Shared for this case, and use Volitile 
-to imply the hardware case.  Notice that with modern hardware, if all 
-you need is the Shared cache state, then you will often get much better 
-performance, if you write the code that way.  (Using Volitile where 
-Shared is appropriate will generate correct but pessimistic code.)  This 
-is a case where the hardware is evolving and we need the language to 
-evolve to match.  Right now, you need an AMD Hammer CPU to get major 
-speedups, but Intel's Conroe will have a shared L2 cache between cores, 
-and each core will be able to access data in the L1 data cache of the 
-other core.  In fact, it may be worthwhile to create real code for 
-Robert Dewar's example, and time it in various hardware configurations.  
+Maybe we need to resurrect pragma Shared for this case, and use Volitile
+to imply the hardware case.  Notice that with modern hardware, if all
+you need is the Shared cache state, then you will often get much better
+performance, if you write the code that way.  (Using Volitile where
+Shared is appropriate will generate correct but pessimistic code.)  This
+is a case where the hardware is evolving and we need the language to
+evolve to match.  Right now, you need an AMD Hammer CPU to get major
+speedups, but Intel's Conroe will have a shared L2 cache between cores,
+and each core will be able to access data in the L1 data cache of the
+other core.  In fact, it may be worthwhile to create real code for
+Robert Dewar's example, and time it in various hardware configurations.
 The difference can be a factor of thirty or more.
 
-And by the way, since modern CPUs manage data in cache lines, it is 
-worth knowing the sizes of those lines.  Intel uses 256 byte lines in 
-their L2 and L3 caches, but some Intel CPUs have 64-byte L1 data cache 
-lines.  AMD uses 64 byte cache lines throughout.  However, in practice 
-there is little if any difference.  AMD's CPUs typically request two 
-cache lines (128 bytes) and only terminate the request after the first 
-line if there is another pending request.  Intel requests 256 bytes, but 
-will stop after 128 bytes if there is a pending request.  (Intel's L2 
+And by the way, since modern CPUs manage data in cache lines, it is
+worth knowing the sizes of those lines.  Intel uses 256 byte lines in
+their L2 and L3 caches, but some Intel CPUs have 64-byte L1 data cache
+lines.  AMD uses 64 byte cache lines throughout.  However, in practice
+there is little if any difference.  AMD's CPUs typically request two
+cache lines (128 bytes) and only terminate the request after the first
+line if there is another pending request.  Intel requests 256 bytes, but
+will stop after 128 bytes if there is a pending request.  (Intel's L2
 cache lines can store a half-line, with the other half empty.)
 
-Both AMD and Intel support 'uncached' reads and writes intended to avoid 
-cache pollution.  But the smallest guaranteed read or write amount is 
-128 bits (16 bytes). So any x86 compiler that allows pragma Volitile for 
-in memory objects smaller than 16 bytes is probably living in a state of 
+Both AMD and Intel support 'uncached' reads and writes intended to avoid
+cache pollution.  But the smallest guaranteed read or write amount is
+128 bits (16 bytes). So any x86 compiler that allows pragma Volitile for
+in memory objects smaller than 16 bytes is probably living in a state of
 sin. ;-)
 
 ****************************************************************
@@ -1446,14 +1538,14 @@ From: Jean-Pierre Rosen
 Sent: Sunday, April  2, 2006  4:25 PM
 
 > I also just noticed:
-> 
+>
 > 21    If a pragma Pack applies to a type any of whose subcomponents are
 > atomic, the implementation shall not pack the atomic subcomponents more
 > tightly than that for which it can support indivisible reads and updates.
-> 
-> which seems to answer the original question.  
+>
+> which seems to answer the original question.
 Not really.
-The question was about independent addressability. You can have 
+The question was about independent addressability. You can have
 indivisible updates without independent addressability.
 
 ****************************************************************
@@ -1471,9 +1563,9 @@ shall use "shall not" or you might use
 
 > ...
 > !wording
-> 
+>
 > 13.2 (6.1/2) is renumbered 13.2 (7.1/3) and reads:
-> 
+>
 > For a packed type that has a component that is of a by-reference type,
 > aliased, volatile or atomic, the component must be aligned according to
 
@@ -1486,9 +1578,9 @@ Please fully "comma-ize" lists of more than two elements.  Hence,
 Why does this last part follow?  Can't a subtype have an alignment
 of zero?
 
-> 
+>
 > 13.2 (9) append:
-> 
+>
 > If the array component must be aligned according to its subtype and the
 > results of packing are not so aligned, pragma pack should be rejected.
 
@@ -1498,6 +1590,91 @@ some other word would make more sense.
 
 [Editor's note: These editorial changes were made in version /02 of the AI05;
 this is version /01 of the AI12.]
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, February  3, 2013  3:47 PM
+
+Here's a new version of AI12-0001-1,
+"Independence and Representation clauses for atomic objects". [This is version
+/03 of the AI - Editor.] This completes my homework.
+
+Meta comment:  The term "reject" as in "reject a compilation unit because it's
+illegal" is Ada-83-speak.  But this term keeps creeping into wording in
+AIs/RM/AARM.  I ask that people please try to remember to quit doing that.
+Instead, say something like "so and so is illegal" or "an implementation may
+make so-and-so illegal".
+
+You know who you are, Steve.  ;-)
+
+See AARM-1.1.3:
+
+4     * Identify all programs or program units that contain errors whose
+        detection is required by this International Standard;
+
+4.a         Discussion: Note that we no longer use the term "rejection" of
+            programs or program units. We require that programs or program
+            units with errors or that exceed some capacity limit be "
+            identified". The way in which errors or capacity problems are
+            reported is not specified.
+
+Here's the draft minutes, with some of my comments:
+
+> AI12-0001-1/02 Independence and Representation Clauses for atomic
+> objects (Other AI versions) Bob and Tuck argue that the Recommended
+> Level of Support is wrong as it does not match the AARM Ramifications.
+> [Editor's note: I didn't record what
+> ramification(s) they referred to. I can't find any that clearly
+> conflict with the Recommended Level of Support; the only one that
+> might be read that way is 13.2(9.a), which says that an aliased
+> component won't get packed very tightly because "its Size will
+> generally be a multiple of Storage_Unit". But this statement appears
+> to be circular, as the Size of a component is determined by the amount
+> of packing applied, so essentially says that an aliased component
+> won't get packed tightly because it won't get packed tightly. It would
+> make some logical sense if was meant to refer to the Size of the
+> subtype of the component, but then it is just wrong because the Size
+> of a subtype is not affected by aliasedness.]
+
+Yes, that's the one.  Never mind the above circularity, what it's trying to say
+is that if you have a aliased component of type Boolean, the Pack isn't illegal
+-- it just doesn't pack that component tightly.  It might pack other components.
+
+> Geert notes that Pack indicates that the components are not
+> independent; that makes no sense with Atomic. We scurry to the
+> Standard to see what it actually says.
+> 9.10(1/3) discusses independence, and it says that specified
+> independence wins over representation aspects, so there is no problem there.
+
+Agreed.
+
+> C.6(8.1/3) should include aliased in things that cause ``specified as
+> independent''.
+
+I don't think so.  "Aliased" has nothing to do with task safety. It just means
+the thing can have access values pointing to it. Consider early versions of the
+Alpha 20164.  An address points at an 8-bit byte, but you can't load and store
+bytes; you have to load a 64-bit words and do shifting and masking.  If you have
+a packed array of bytes on that machine, you want it packed; you don't want
+64-bits per byte.  If you want independence, you should specify Independent (or
+Atomic, or...).
+
+> Tucker thinks C.6(13.2/3) is misleading, as it seems to imply packing
+> is not allowed when independence is specified.
+
+Check.
+
+> The Recommended Level of Support for Pack needs to be weakened to
+> allow atomic, aliased, and so on to make the packing less than otherwise
+> required.
+
+Check.
+
+> Bob will take this AI.
+> Approve intent: 9-0-1.
+
+[Followed by version /03 of the AI - Editor.]
 
 ****************************************************************
 
