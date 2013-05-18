@@ -1678,3 +1678,1503 @@ Check.
 
 ****************************************************************
 
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  2:37 PM
+
+...
+> > C.6(8.1/3) should include aliased in things that cause
+> ``specified as
+> > independent''.
+>
+> I don't think so.  "Aliased" has nothing to do with task safety.
+> It just means the thing can have access values pointing to it.
+> Consider early versions of the Alpha 20164.  An address points at an
+> 8-bit byte, but you can't load and store bytes; you have to load a
+> 64-bit words and do shifting and masking.
+> If you have a packed array of bytes on that machine, you want it
+> packed; you don't want 64-bits per byte.  If you want independence,
+> you should specify Independent (or Atomic, or...).
+
+[I presume you are missing the word "aliased" in your "If you have a package array of {aliased} bytes...", because otherwise the example has nothing to do with the issue at hand.]
+
+The problem with this is then there is no guarantee that designated objects are independent. And worse, there is no language means to make such a guarantee. One could add one by allowing Independent to apply to access types, and then requiring 'Access to check that the aliased objects are independent, but that seems like a lot of language mechanism to solve a problem of our own creation (allowing pack and other rep clauses to kill independence of aliased components, something that has never been true in Ada so far as I can tell), especially as I doubt anyone is clamoring for this capability (who needs aliased bytes anyway, much less packed arrays of them).
+
+I didn't look in detail at the body of the AI, I just wanted to point out that this is clearly misguided.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  2:42 PM
+
+> The problem with this is then there is no guarantee that designated
+> objects are independent. And worse, there is no language means to make
+> such a guarantee.
+
+Don't worry too much, of COURSE all designated objects are independent in
+practice, no matter what the language has to say about it.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:17 PM
+
+> ...
+> > > C.6(8.1/3) should include aliased in things that cause ``specified as
+> > > independent''.
+> >
+> > I don't think so.  "Aliased" has nothing to do with task safety.
+> > It just means the thing can have access values pointing to it.
+> > Consider early versions of the Alpha 20164.  An address points at an
+> > 8-bit byte, but you can't load and store bytes; you have to load a
+> > 64-bit words and do shifting and masking.
+> > If you have a packed array of bytes on that machine, you want it
+> > packed; you don't want 64-bits per byte.  If you want independence,
+> > you should specify Independent (or Atomic, or...).
+>
+> [I presume you are missing the word "aliased" in your "If you have a package
+                                                                       ^^^^^^^
+                                                 I can't spell "packed" either.
+
+> array of {aliased} bytes...", because otherwise the example has
+> nothing to do with the issue at hand.]
+
+Right, my claim is that you want 'Component_Size = 8, whether or not the
+components are aliased.
+
+> The problem with this is then there is no guarantee that designated
+> objects are independent. And worse, there is no language means to make
+> such a guarantee.
+
+What sort of designated objects do you mean?  Distinct heap objects are always
+independently addressable (see 9.10).  The only way two (nonoverlapping) objects
+can fail to be independently addressable is if they're both subcomponents of the
+same object.  And you control independence of those using pragmas
+Independent[_Components].
+
+>...One could add one by allowing Independent to apply to access  types,
+>and then requiring 'Access to check that the aliased objects are
+>independent, but that seems like a lot of language mechanism to solve a
+>problem of our own creation (allowing pack and other rep clauses to
+>kill  independence of aliased components, something that has never been
+>true in  Ada so far as I can tell), ...
+
+My understanding is the opposite:  'aliased' never was intended to imply
+independent addressability -- just plain old addressability.
+
+If 'aliased' implies independent addressability, then why were pragmas
+Independent[_Components] added?
+
+What do others think?
+
+>...especially as I doubt anyone is clamoring for  this capability (who
+>needs aliased bytes anyway, much less packed arrays of  them).
+
+I find "who needs aliased bytes anyway" to be a strange attitude.
+Why shouldn't bytes be aliased?
+
+And on the Alpha 21064 (admittedly obsolete), you'd want to pack such a thing so
+you don't get Component_Size = 64 (unless you're sharing the array across
+tasks).
+
+> I didn't look in detail at the body of the AI, I just wanted to point
+> out that this is clearly misguided.
+
+I strongly disagree -- it's not clearly anything (guided nor misguided).  ;-)
+
+I'm not sure I fully understand pragmas Independent[_Components].
+Correct me if I'm wrong:  If you give these pragmas for a type that has a record
+rep clause, a Component_Size clause, or a Convention, then the only possible
+effect is to make the program illegal.  If you give these pragmas for a packed
+type, the only possible effect is to reduce the amount of packing. For any other
+type (which is 99.9% of all types), these pragmas have no effect.
+
+Am I right?  If so, Independent[_Components] seems like a pretty marginally
+useful feature.  I don't understand why it was added, and AI05-0009-1 does not
+enlighten me.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, February  4, 2013  3:37 PM
+
+> My understanding is the opposite:  'aliased' never was intended to
+> imply independent addressability -- just plain old addressability.
+>
+> If 'aliased' implies independent addressability, then why were pragmas
+> Independent[_Components] added?
+
+For unaliased components.
+
+You have an array of 32 (unaliased) Booleans.
+You also have 32 tasks and you want to allow each of them to manipulate one of
+the array elements.
+
+It is a bit odd that we never state that "aliased" implies "independent
+addressability" for components.
+
+I can imagine an array with aliased-but-not-independently-addressable
+components (e.g., a bit packed array of aliased booleans for an implementation
+which implements access-to-boolean types as bit pointers), but this seems pretty
+contrived.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  3:45 PM
+
+...
+> > The problem with this is then there is no guarantee that designated
+> > objects are independent. And worse, there is no language means to
+> > make such a guarantee.
+>
+> What sort of designated objects do you mean?  Distinct heap objects
+> are always independently addressable (see 9.10).  The only way two
+> (nonoverlapping) objects can fail to be independently addressable is
+> if they're both subcomponents of the same object.  And you control
+> independence of those using pragmas Independent[_Components].
+
+The designated object of a general access type, of course. The client of such a
+type cannot know where the designated objects come from. And you're suggesting
+to eliminate the guarantee that these designated objects are independent.
+
+In your hypothetical array of bytes, some components are not going to be
+independent. Thus, you can also have designated objects that are not
+independent. That's something new; there is no possibility of that in current
+Ada (especially if you believe 13.2(9.a)).
+
+> >...One could add one by allowing Independent to apply to access
+> >types, and then requiring 'Access to check that the aliased objects
+> >are independent, but that seems like a lot of language mechanism to
+> >solve a problem of our own creation (allowing pack and other rep
+> >clauses to kill  independence of aliased components, something that
+> >has never been true in  Ada so far as I can tell), ...
+>
+> My understanding is the opposite:  'aliased' never was intended to
+> imply independent addressability -- just plain old addressability.
+
+The two are intimately linked (except on some broken obsolete hardware - I
+wouldn't have guessed that any such hardware could have existed -- indeed, I
+can't quite figure out how that machine is supposed to have worked -- not that
+relevant anyway).
+
+> If 'aliased' implies independent addressability, then why were pragmas
+> Independent[_Components] added?
+
+Something can be independent without being addressable, and in any case,
+"aliased" turns off a lot of optimizations, which isn't necessary if all you
+need is independent.
+
+> What do others think?
+>
+> >...especially as I doubt anyone is clamoring for  this capability
+> >(who needs aliased bytes anyway, much less packed arrays of  them).
+>
+> I find "who needs aliased bytes anyway" to be a strange attitude.
+> Why shouldn't bytes be aliased?
+
+Why should the language guarantees be broken for something that no one needs?
+
+> And on the Alpha 21064 (admittedly obsolete), you'd want to pack such
+> a thing so you don't get Component_Size = 64 (unless you're sharing
+> the array across tasks).
+
+Read Robert's response to see that no implementation would ever take advantage
+of this ability, so why even contemplate it?
+
+> > I didn't look in detail at the body of the AI, I just wanted to
+> > point out that this is clearly misguided.
+>
+> I strongly disagree -- it's not clearly anything (guided nor
+> misguided).  ;-)
+
+Heck, there is a lot misguided about this discussion. Precisely *who* is
+misguided is a matter of opinion. :-)
+
+> I'm not sure I fully understand pragmas Independent[_Components].
+> Correct me if I'm wrong:  If you give these pragmas for a type that
+> has a record rep clause, a Component_Size clause, or a Convention,
+> then the only possible effect is to make the program illegal.  If you
+> give these pragmas for a packed type, the only possible effect is to
+> reduce the amount of packing.
+> For any other type (which is 99.9% of all types), these pragmas have
+> no effect.
+>
+> Am I right?  If so, Independent[_Components] seems like a pretty
+> marginally useful feature.  I don't understand why it was added, and
+> AI05-0009-1 does not enlighten me.
+
+The whole point is that you can give this aspect to ensure that items are
+independently addressable (when you are depending on that), without invoking the
+other costs of Volatile or aliased. Yes, it's marginal in that it hardly ever is
+going to have an effect (and hardly anyone will understand it enough to use it),
+but it's part of the Ada pattern of declaring exactly what you need and no more.
+In that sense, it is similar to declaring a range of -32768..32767 on a 16-bit
+integer type -- this won't change anything but it makes it even more clear what
+the expectations are.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  3:47 PM
+
+...
+> It is a bit odd that we never state that "aliased" implies
+> "independent addressability" for components.
+
+Bob was supposed to add that statement into the AI he is working on (that's what
+we decided in Boston), but he's resisting. For very marginal capabilities.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  4:06 PM
+
+> The designated object of a general access type, of course. The client
+> of such a type cannot know where the designated objects come from. And
+> you're suggesting to eliminate the guarantee that these designated
+> objects are independent.
+
+I'm not eliminating a guarantee -- such a guarantee doesn't exist, and I'm
+trying to understand why we want to add it.
+
+> In your hypothetical array of bytes, some components are not going to
+> be independent. Thus, you can also have designated objects that are
+> not independent. That's something new; there is no possibility of that
+> in current Ada (especially if you believe 13.2(9.a)).
+
+13.2(9.a) doesn't say anything about independent addressability.
+(I assume in these discussions, "independent" is being used as an abbreviation
+for the official RM term, "independent addressability", right?)
+
+> Something can be independent without being addressable, and in any
+> case,
+
+So you're saying something can be independently addressable without being
+addressable.  Yet another case where the RM reads like Alice in Wonderland.  ;-)
+
+> "aliased" turns off a lot of optimizations, which isn't necessary if
+> all you need is independent.
+
+I suppose, but that seems pretty marginal.  Remember, we're only talking about
+components of packed types.
+
+> > I'm not sure I fully understand pragmas Independent[_Components].
+> > Correct me if I'm wrong:  If you give these pragmas for a type that
+> > has a record rep clause, a Component_Size clause, or a Convention,
+> > then the only possible effect is to make the program illegal.  If
+> > you give these pragmas for a packed type, the only possible effect
+> > is to reduce the amount of packing.
+> > For any other type (which is 99.9% of all types), these pragmas have
+> > no effect.
+> >
+> > Am I right?  If so, Independent[_Components] seems like a pretty
+> > marginally useful feature.  I don't understand why it was added, and
+> > AI05-0009-1 does not enlighten me.
+
+Please answer my question, "Am I right?".  Then we can discuss "The whole
+point...".
+
+> The whole point is that you can give this aspect to ensure that items
+> are independently addressable (when you are depending on that),
+> without invoking the other costs of Volatile or aliased. Yes, it's
+> marginal in that it hardly ever is going to have an effect (and hardly
+> anyone will understand it enough to use it), but it's part of the Ada
+> pattern of declaring exactly what you need and no more. In that sense,
+> it is similar to declaring a range of
+> -32768..32767 on a 16-bit integer type -- this won't change anything
+> but it makes it even more clear what the expectations are.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:55 PM
+
+> > My understanding is the opposite:  'aliased' never was intended to
+> > imply independent addressability -- just plain old addressability.
+> >
+> > If 'aliased' implies independent addressability, then why were
+> > pragmas Independent[_Components] added?
+>
+> For unaliased components.
+
+You can always add "aliased".
+
+> You have an array of 32 (unaliased) Booleans.
+> You also have 32 tasks and you want to allow each of them to
+> manipulate one of the array elements.
+
+If the array is not packed, then Independent_Components has no effect.  If it's
+packed, the Independent_Components turns off the packing.  I don't get it.
+
+Perhaps if somebody answered the later part of my previous email, the part
+starting "Correct me if I'm wrong"...
+
+> It is a bit odd that we never state that "aliased" implies
+> "independent addressability" for components.
+
+So you agree with Randy.  But I don't understand this -- "independent
+addressability" is about tasking, whereas aliasedness is about allowing access
+values.  Why should one have anything to do with the other?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  4:10 PM
+
+> ...
+> > It is a bit odd that we never state that "aliased" implies
+> > "independent addressability" for components.
+>
+> Bob was supposed to add that statement into the AI he is working on
+> (that's what we decided in Boston), but he's resisting. For very
+> marginal capabilities.
+
+Please don't make this into a battle, Randy.  I'm not "resisting"
+anything; I'm just trying to understand why we should add this implication.
+
+And please stop accusing me of REMOVING this implication.  It's not there now,
+and ARG wants to ADD it to the RM, and I want to know why.  The minutes don't
+say.
+
+Robert's comment (about the way hardware behaves in practice) argues against
+making any change, because it won't actually change anything.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  4:18 PM
+
+If you say:
+
+    pragma Independent_Components (Some_Array);
+
+is there some implication that the compiler should allocate the components of
+Some_Array on separate cache lines (and align it to a cache line boundary)?
+That would make more sense than what I've heard so far.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  4:22 PM
+
+...
+> > "aliased" turns off a lot of optimizations, which isn't necessary if
+> > all you need is independent.
+>
+> I suppose, but that seems pretty marginal.  Remember, we're only
+> talking about components of packed types.
+
+Well, we're also talking about other representation clauses. It would be pretty
+silly if you could get non-independent aliased components via packing but not
+via other representation clauses. (And I worry much more about other clauses,
+because only the slightly insane use Pack.)
+
+> > > I'm not sure I fully understand pragmas Independent[_Components].
+> > > Correct me if I'm wrong:  If you give these pragmas for a type
+> > > that has a record rep clause, a Component_Size clause, or a
+> > > Convention, then the only possible effect is to make the program
+> > > illegal.  If you give these pragmas for a packed type, the only
+> > > possible effect is to reduce the amount of packing.
+> > > For any other type (which is 99.9% of all types), these pragmas
+> > > have no effect.
+> > >
+> > > Am I right?  If so, Independent[_Components] seems like a pretty
+> > > marginally useful feature.  I don't understand why it was  added,
+> > > and
+> > > AI05-0009-1 does not enlighten me.
+>
+> Please answer my question, "Am I right?".  Then we can discuss "The
+> whole point...".
+
+Probably, but I don't know for sure (I'd have to go back and re-read all of the
+rules). But why is it relevant? There are lots of pragmas in Ada that have no
+effect most of the time (Pack immediately comes to mind, and you want to make
+that more likely). The only thing that matters is the intent expressed.
+
+This strikes me as the setup for a bait-and-switch argument. I would hope we're
+more adults than that...
+
+> > The whole point is that you can give this aspect to ensure that
+> > items are independently addressable (when you are depending on
+> > that), without invoking the other costs of Volatile or aliased. Yes,
+> > it's marginal in that it hardly ever is going to have an effect (and
+> > hardly anyone will understand it enough to use it), but it's part of
+> > the Ada pattern of declaring exactly what you need and no more. In
+> > that sense, it is similar to declaring a range of
+> > -32768..32767 on a 16-bit integer type -- this won't change anything
+> > but it makes it even more clear what the expectations are.
+
+The above is the only thing relevant, not the detailed effects or lack thereof.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  4:38 PM
+
+> > > My understanding is the opposite:  'aliased' never was intended to
+> > > imply independent addressability -- just plain old addressability.
+> > >
+> > > If 'aliased' implies independent addressability, then why were
+> > > pragmas Independent[_Components] added?
+> >
+> > For unaliased components.
+>
+> You can always add "aliased".
+
+Not without performance implications. You could have also said "you can always
+add Volatile_Components", with the same caveat.
+
+> > You have an array of 32 (unaliased) Booleans.
+> > You also have 32 tasks and you want to allow each of them to
+> > manipulate one of the array elements.
+>
+> If the array is not packed, then Independent_Components has no effect.
+> If it's packed, the Independent_Components turns off the packing.  I
+> don't get it.
+
+"Clearly", pack should be illegal in this case. Tucker once proposed having pack
+be illegal if it does nothing at all, which would certainly go a ways toward
+eliminating my opposition to this change.
+
+> Perhaps if somebody answered the later part of my previous email, the
+> part starting "Correct me if I'm wrong"...
+
+It's irrelevant has to precisely what happens, it's about declaring your
+intentions. If you can't see the value of declaring your intentions, we don't
+have much to talk about.
+
+> > It is a bit odd that we never state that "aliased" implies
+> > "independent addressability" for components.
+>
+> So you agree with Randy.  But I don't understand this -- "independent
+> addressability" is about tasking, whereas aliasedness is about
+> allowing access values.  Why should one have anything to do with the
+> other?
+
+Because there is a presumption that designated objects are always independently
+addressable. We didn't think there was a need to be able to declare that an
+access type has only independently addressable designated objects because it
+wasn't necessary, but you claim that it is not true in general and thus such a
+thing needs to be added.
+
+> > I can imagine an array with
+> > aliased-but-not-independently-addressable
+> > components (e.g., a bit packed array of aliased booleans for an
+> > implementation which implements access-to-boolean types as bit
+> > pointers), but this seems pretty contrived.
+
+And this is the real objection: any such examples seem contrived, and to support
+such examples you want to eliminate the existing guarantee that designated
+objects are always independently addressable. (Whether that guarantee is a
+ramification or direct result of the wording is a separate issue - as Robert
+says, no one ever has or likely will invalidate that.)
+
+The only alternative would be to extend Independent to cover access types, and
+then have a check on 'Access that the object actually has Independent specified
+(or must be by 9.10). Which seems like too much mechanism.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, February  4, 2013  4:40 PM
+
+> If you say:
+>
+>      pragma Independent_Components (Some_Array);
+>
+> is there some implication that the compiler should allocate the
+> components of Some_Array on separate cache lines (and align it to a
+> cache line boundary)?  That would make more sense than what I've heard
+> so far.
+
+No, I think the only point was to avoid erroneousness due to simultaneous
+access, which the presence of other representation items might imply.
+
+Efficiency is a different issue.
+
+I will admit I have lost track of the issue.  Is it whether "aliased" implies
+"independent"?  I would say yes that should be true.
+
+Does independent imply aliased?  Clearly not.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  4:44 PM
+
+> Robert's comment (about the way hardware behaves in practice) argues
+> against making any change, because it won't actually change anything.
+
+90% of the delicate arguments about wording also have this property (they won't
+actually change anything), but there is still an inclination to get the words
+right :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  4:49 PM
+
+> If you say:
+>
+>      pragma Independent_Components (Some_Array);
+>
+> is there some implication that the compiler should allocate the
+> components of Some_Array on separate cache lines (and align it to a
+> cache line boundary)?  That would make more sense than what I've heard
+> so far.
+
+Absolutely no such implication, and indeed this would be disastrous for two
+reasons:
+
+Data representation would depend on the particular target configuration, since
+cache line size is part of that
+
+Cache lines are huge in many machines, e.g. 256 bytes.
+
+No, that's not the idea of independence (a concept I think I can take at least
+partial credit for since I had my PhD student Norman Schulman study this in
+detail) at all. The idea is that separate tasks can operate independently on
+separate elements.
+
+Whether this includes the case of separate tasks on separate processors being
+able to access independent objects depends on the target, but in practice
+virtually all systems implement full cache coherence with cache snooping (where
+you watch bus traffic to make sure your cached view is current).
+
+Allocating on separate cache lines in a system with cache coherence would make
+no sense at all!
+
+To see a practical effect of
+
+ >      type Some_Array is array (1 .. 10) of Character;
+ >      pragma Independent_Components (Some_Array);
+
+Consider the old Alpha, which did not have byte load/store instructions. On one
+of these old Alpha's, you had to do 32-bit loads and stores, so the above
+declarations would require (on that machine) Some_Array'Component_Size = 32.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  4:50 PM
+
+> If you say:
+>
+>      pragma Independent_Components (Some_Array);
+
+By the way in Ada 83, you were required to provide independence for all
+composites, including packed bit arrays.
+
+Nonsense of course, but a consequence of the infamous "big change at the last
+minute" to chapter 9 of the RM :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  4:49 PM
+
+> > ...
+> > > It is a bit odd that we never state that "aliased" implies
+> > > "independent addressability" for components.
+> >
+> > Bob was supposed to add that statement into the AI he is working on
+> > (that's what we decided in Boston), but he's resisting. For very
+> > marginal capabilities.
+>
+> Please don't make this into a battle, Randy.  I'm not "resisting"
+> anything; I'm just trying to understand why we should add this
+> implication.
+
+The reason is obvious: non-independent designated objects is nonsense that
+cannot be allowed (unless we add an additional ways to declare independent
+addressability of designated objects).
+
+> And please stop accusing me of REMOVING this implication.
+> It's not there now, and ARG wants to ADD it to the RM, and I want to
+> know why.  The minutes don't say.
+
+Because we all have assumed for decades that it IS there; the design of
+Independent makes that clear (it would make no sense without such an
+implication). If one can't read that between the lines of 9.10, then it needs to
+be made explicit somehow (either with extra wording or an expansion of
+Independent).
+
+> Robert's comment (about the way hardware behaves in practice) argues
+> against making any change, because it won't actually change anything.
+
+If you mean about the behavior of Pack, I would agree. It appears to be illegal
+to pack aliased components, and that's a good thing (as pack would have no
+effect, and that's almost certainly some sort of mistake).
+
+If you want to change Pack so that it is not illegal for aliased components, and
+then "make no change" to aliased, that I don't understand, because we need some
+rule to allow aliased components to be packed less tightly. (There is no
+exception for aliased in the Recommended Level of Support.) And once you add
+such an exception, you need to describe what it means.
+
+I still think the previous version of the AI is closer to what we want (I
+believe it mostly matches GNAT, as well). But YMMV.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, February  4, 2013  4:49 PM
+
+>> ...
+>> If the array is not packed, then Independent_Components has no
+>> effect.  If it's packed, the Independent_Components turns off the
+>> packing.  I don't get it.
+>
+> "Clearly", pack should be illegal in this case. Tucker once proposed
+> having pack be illegal if it does nothing at all, which would
+> certainly go a ways toward eliminating my opposition to this change.
+
+That must have been Tucker # 42.  I don't remember this suggestion.  My feeling
+has generally been that "pack" means use space optimization over time
+optimization, subject to all of the other representation requirements.  It
+should never be illegal to say "pack," though in the absence of an "independent"
+(or aliased) specification, it can create erroneousness.
+
+In my view, pragma Pack is really just a special case of "pragma
+Optimize(Space)" which is a pretty non-specific request.  The only extra bit of
+semantics for Pack is the pesky "non-independence" implication, and
+pragma/aspect Independent/Independent_Components can be used to overcome that
+bit.
+
+If you really want to control representation, Component_Size or a record rep
+clause are the way to go.  Pack is not really for controlling representation, it
+is for establishing a space bias in the default representation selection
+mechanism.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  4:51 PM
+
+> ...
+>>> "aliased" turns off a lot of optimizations, which isn't necessary if
+>>> all you need is independent.
+>>
+>> I suppose, but that seems pretty marginal.  Remember, we're only
+>> talking about components of packed types.
+>
+> Well, we're also talking about other representation clauses. It would
+> be pretty silly if you could get non-independent aliased components
+> via packing but not via other representation clauses. (And I worry
+> much more about other clauses, because only the slightly insane use
+> Pack.)
+
+I don't believe in the tooth fairy
+And I don't believe in non-independent aliased components
+
+:-)
+
+This is independent of whatever wording you come up with!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  4:58 PM
+
+> > If you say:
+> >
+> >      pragma Independent_Components (Some_Array);
+> >
+> > is there some implication that the compiler should allocate the
+> > components of Some_Array on separate cache lines (and align it to a
+> > cache line boundary)?  That would make more sense than what I've
+> > heard so far.
+>
+> No, I think the only point was to avoid erroneousness due to
+> simultaneous access, which the presence of other representation items
+> might imply.
+>
+> Efficiency is a different issue.
+
+OK.  A feature that provided such an efficiency hint would be useful, IMHO. (No,
+I'm not proposing to add one.)
+
+> I will admit I have lost track of the issue.  Is it whether "aliased"
+> implies "independent"?
+
+Yes, that's the main issue.  The minutes say "yes, we should add such an
+implication", and I'm wondering why.
+
+A side issue is that if we added such an implication, the pragmas Indep[_Comp]
+seem VERY marginally useful, so I wonder why they were added.  Randy says "to
+declare one's intentions".  Well, that's nice, I suppose, but if you just
+declare normal arrays without any Pack or 'Component_Size clauses, you get
+independent addressability, and that was good enough for the first decades of
+Ada's life.
+
+>...I would say yes that should
+> be true.
+
+And Randy and Steve agree with you.
+But I still don't understand why.
+Sorry if I'm being dense.
+
+> Does independent imply aliased?  Clearly not.
+
+Yes, I think we all agree on that.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, February  4, 2013  5:02 PM
+
+>>> If 'aliased' implies independent addressability, then why were
+>>> pragmas Independent[_Components] added?
+>>
+>> For unaliased components.
+>
+> You can always add "aliased".
+
+> So you agree with Randy.  But I don't understand this -- "independent
+> addressability" is about tasking, whereas aliasedness is about
+> allowing access values.  Why should one have anything to do with the
+> other?
+>
+
+The bugs associated with concurrent access to non-independent components are a
+case of the implementation showing through in an ugly way, exposing a low-level
+detail that a high-level language would ideally hide.
+
+I want this to happen as infrequently as possible.
+
+Anytime I can define a component to be independently addressable without giving
+up something useful (and without forcing existing compilers to change), I want
+to do so.
+
+My point is that in the case of an aliased component, I don't see that I am
+giving up anything useful (e.g., the freedom to have it share a byte with a
+neighboring component) by adding an "aliasing => I.A." rule.
+
+Although I think this rule would be a good thing, I'd agree that it is not a big
+deal (which is why I don't feel strongly about it) because we already have I.A.
+most of the time.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  5:07 PM
+
+> To see a practical effect of
+>
+>  >      type Some_Array is array (1 .. 10) of Character;
+>  >      pragma Independent_Components (Some_Array);
+
+Sorry, now I'm getting MORE confused.  There's no Pack or "for
+Some_Array'Component_Size use..." above. So Ada requires the components of
+Some_Array to be independently addressable even without that pragma. So I fail
+to see any "practical effect" of the pragma.
+
+> Consider the old Alpha, which did not have byte load/store
+> instructions. On one of these old Alpha's, you had to do 32-bit loads
+> and stores, so the above declarations would require (on that machine)
+> Some_Array'Component_Size = 32.
+
+I stated earlier in this thread that you had to do 64-bit loads and stores on
+that machine, but you're right -- you could do 32.
+
+By the way, type String has pragma Pack, which I always thought was so
+String'Component_Size can be 8 even on such weird machines as the old Alpha!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  5:08 PM
+
+> I can imagine an array with aliased-but-not-independently-addressable
+> components (e.g., a bit packed array of aliased booleans for an
+> implementation which implements access-to-boolean types as bit
+> pointers), but this seems pretty contrived.
+
+Imagine away, because Ada implementations that implement access-to-boolean types
+as bit pointers are likely to be about as common as Loch Ness Monsters :-)
+
+Seriously, it is not worth spending much time worrying about bizarre
+implementation possibilities.
+
+If you did have such an implementation, then it could do all sorts of peculiar
+things (if necessary under control of a switch).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  5:14 PM
+
+...
+> I will admit I have lost track of the issue.  Is it whether "aliased"
+> implies "independent"?  I would say yes that should be true.
+
+That's the issue. And Bob wants to know why. I've tried to explain, but probably
+not very well. Perhaps you can take a stab at it.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, February  4, 2013  5:17 PM
+
+>>> If you say:
+>>>
+>>>       pragma Independent_Components (Some_Array);
+>>>
+>>> is there some implication that the compiler should allocate the
+>>> components of Some_Array on separate cache lines (and align it to a
+>>> cache line boundary)?  That would make more sense than what I've
+>>> heard so far.
+>>
+>> No, I think the only point was to avoid erroneousness due to
+>> simultaneous access, which the presence of other representation items
+>> might imply.
+>>
+>> Efficiency is a different issue.
+>
+> OK.  A feature that provided such an efficiency hint would be useful,
+> IMHO. (No, I'm not proposing to add one.)
+>
+>> I will admit I have lost track of the issue.  Is it whether "aliased"
+>> implies "independent"?
+>> ...I would say yes that should
+>> be true.
+>
+> And Randy and Steve agree with you.
+> But I still don't understand why.
+> Sorry if I'm being dense.
+
+My sense is that in ARG meetings over the past several years, we have all agreed
+we need something like Independent to overcome the slightly odd rule about
+erroneousness coming from any non-confirming rep clause.  And of course there is
+nothing in the source that says "this is a confirming rep clause" so pragma
+Independent is one way to ensure that whether or not a rep-clause is confirming,
+it doesn't cause the loss of independence.
+
+Aliased seems to serve a completely different purpose, namely the ability to use
+'Access.
+
+The argument for making "aliased" imply independence is simply that once you
+create an access value, it is pretty much impossible to keep track of where it
+came from.  And clearly independence is guaranteed for distinct
+dynamically-allocated objects.
+
+But I think it would be odd to tell someone that if they want to overcome the
+loss of independence due to a rep-clause, they should add "aliased." That seems
+non-intuitive and somewhat user unfriendly.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  5:16 PM
+
+>> My understanding is the opposite:  'aliased' never was intended to
+>> imply independent addressability -- just plain old addressability.
+>>
+>> If 'aliased' implies independent addressability, then why were
+>> pragmas Independent[_Components] added?
+
+Independent Components is weaker than aliased
+
+Aliased means you can have a pointer to the object
+
+Independent Components means you can access them independently
+
+Example:
+
+On the x86, you can test, set, and clear individual bits, so a bit packed array
+can have independent comonents (if your code generator can handle this, GNAT for
+one cannot, so we can't allow that).
+
+But that does not mean you can have a pointer to an individual bit!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  5:19 PM
+
+> The reason is obvious: non-independent designated objects is nonsense
+> that cannot be allowed (unless we add an additional ways to declare
+> independent addressability of designated objects).
+
+I really don't think it matters two hoots whether the language allows
+non-independent designated objects. The semantics is clear, though peculiar, and
+on 100% of targets you can't have such things, so they wouldn't be imlemented
+anyway!
+
+> Because we all have assumed for decades that it IS there; the design
+> of Independent makes that clear (it would make no sense without such
+> an implication). If one can't read that between the lines of 9.10,
+> then it needs to be made explicit somehow (either with extra wording
+> or an expansion of Independent).
+>
+>> Robert's comment (about the way hardware behaves in practice) argues
+>> against making any change, because it won't actually change anything.
+
+> If you want to change Pack so that it is not illegal for aliased
+> components, and then "make no change" to aliased, that I don't
+> understand, because we need some rule to allow aliased components to
+> be packed less tightly. (There is no exception for aliased in the
+> Recommended Level of Support.) And once you add such an exception, you need to describe what it means.
+
+I don't see any reason to disallow pack for a record that has some aliased
+components. I agree that pack for an array of aliased components is unlikely to
+do anything!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  5:24 PM
+
+> In my view, pragma Pack is really just a special case of "pragma
+> Optimize(Space)" which is a pretty non-specific request.  The only
+> extra bit of semantics for Pack is the pesky "non-independence"
+> implication, and pragma/aspect Independent/Independent_Components can
+> be used to overcome that bit.
+
+Not quite, packed arrays of boolean are guaranteed to work as expected.
+
+> If you really want to control representation, Component_Size or a
+> record rep clause are the way to go.  Pack is not really for
+> controlling representation, it is for establishing a space bias in the
+> default representation selection mechanism.
+
+Well in practice everyone uses it for boolean arrays to control repreentation
+
+type B is array (0 .. 31) of Boolean;
+pragma Pack (B);
+
+is *VERY* standard Ada, and even advising, let alone insisting that people use
+Component_Size of 1 in such a case seems bgus to me
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  5:43 PM
+
+>> To see a practical effect of
+>>
+>>   >      type Some_Array is array (1 .. 10) of Character;
+>>   >      pragma Independent_Components (Some_Array);
+>
+> Sorry, now I'm getting MORE confused.  There's no Pack or "for
+> Some_Array'Component_Size use..." above.
+> So Ada requires the components of Some_Array to be independently
+> addressable even without that pragma.
+> So I fail to see any "practical effect" of the pragma.
+
+OK, add the pragma Pack to the example
+
+> By the way, type String has pragma Pack, which I always thought was so
+> String'Component_Size can be 8 even on such weird machines as the old
+> Alpha!
+
+That's exactly right
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February  4, 2013  5:45 PM
+
+I have an idea, how about we make sure that whatever we say makes sense on 8-bit
+byte addressable machines, with independent 8-bit bytes, and byte pointers.
+
+That covers almost all machines on which Ada is used or likely to be used. On
+machines that do not meet these criteria, you simply appeal to the normal
+argument that you can't do things if the architecture does not permit
+
+It really is a silly waste of time to try to write rules that cover all such
+possible weird machines.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  7:18 PM
+
+> My sense is that in ARG meetings over the past several years, we have
+> all agreed we need something like Independent to overcome the slightly
+> odd rule about erroneousness coming from any non-confirming rep
+> clause.
+
+Well, it doesn't really say "erroneous", it says it's implementation-defined
+whether there is erroneousness. To me, that means that on "normal" machines, it
+won't be erroneous, and that should be good enough.
+
+But I'm willing to just give in on this point. I'm not entirely convinced, but
+everybody seems against me on this, and it's just not important enough to keep
+arguing about.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  7:41 PM
+
+> That must have been Tucker # 42.
+
+Never heard of that Tucker.
+
+>...I don't remember this
+> suggestion.  My feeling has generally been that "pack" means  use
+>space optimization over time optimization, subject to  all of the other
+>representation requirements.
+
+I think I understand what you mean, but I think that's a wrong (or obsolete) way
+to express it.
+
+Bit-level packing improves the speed of whole-object operations like "=" and
+":=" and parameter passing.  And it improves speed by making things smaller and
+therefore more cache-friendly. It damages the speed of operating on individual
+components. So Pack tells the compiler how to make that speed trade-off.
+
+On a small-memory embedded system, Pack might be about space efficiency, but on
+a 64-bit computer, it's purely about time efficiency -- it means "reduce space
+of this data structure in order to improve time overall" (as opposed to "reduce
+space because I might run out of memory").
+
+It's not "space versus speed", it's "speed of these operations versus speed of
+those operations".
+
+>..It should never be illegal to say "pack,"...
+
+Yes, that's the important point about this AI.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  7:54 PM
+
+> > My sense is that in ARG meetings over the past several years, we
+> > have all agreed we need something like Independent to overcome the
+> > slightly odd rule about erroneousness coming from any non-confirming
+> > rep clause.
+>
+> Well, it doesn't really say "erroneous", it says it's
+> implementation-defined whether there is erroneousness.
+> To me, that means that on "normal" machines, it won't be erroneous,
+> and that should be good enough.
+
+I don't follow. One expects packed array of Boolean to pack to bits on a
+"normal" machine, and that surely would cause the potential for erroneousness.
+Moreover, this is a particularly nasty kind of erroneousness, as the failure
+doesn't happen unless two tasks happen to access two components in the same word
+at the same time, something that is unlikely even when an obvious mistake
+happens. It's unlikely that one would find this erroneous case by testing, and
+that leads to the possibility of the problem not happening until the application
+is fielded -- which is not good. By having a declaration of Independence ;-), we
+can more easily write tools to check that in fact no such accesses are possible.
+
+I suppose what you say might be true for aliased components, perhaps you meant
+that (but Tucker was clearly talking about this in general). Even then, it seems
+dangerous because this is a problem that can't reasonably be tested away, and we
+don't want tools to be making checks just for "normal" machines (nor complaining
+too much about cases that can't happen on the machine's that the user is using).
+
+> But I'm willing to just give in on this point. I'm not entirely
+> convinced, but everybody seems against me on this, and it's just not
+> important enough to keep arguing about.
+
+Glad you are seeing reason. ;-) I'm happy to stop discussing this as well.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February  4, 2013  8:04 PM
+
+...
+> Bit-level packing improves the speed of whole-object operations like
+> "=" and ":=" and parameter passing.  And it improves speed by making
+> things smaller and therefore more cache-friendly.
+> It damages the speed of operating on individual components.
+> So Pack tells the compiler how to make that speed trade-off.
+>
+> On a small-memory embedded system, Pack might be about space
+> efficiency, but on a 64-bit computer, it's purely about time
+> efficiency -- it means "reduce space of this data structure in order
+> to improve time overall" (as opposed to "reduce space because I might
+> run out of memory").
+>
+> It's not "space versus speed", it's "speed of these operations versus
+> speed of those operations".
+
+I think it is *just* about reducing the space (and should almost never be used
+in a modern system as a consequence).
+
+If it was really about reducing the time, why don't we have a counterpart that
+goes in the other direction ("use as much space as you want to maximize the
+performance of accessing individual components")? Given cache pressure concerns,
+the normal case is usually somewhere in the middle (particularly on machines
+with somewhat irregular access instructions like the x86). Occasionally, you
+want to go all one way or the other.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February  5, 2013  4:58 AM
+
+> I don't follow. One expects packed array of Boolean to pack to bits on
+> a "normal" machine, and that surely would cause the potential for
+> erroneousness.
+
+Actualy this is a good example. If we are on the x86, and we
+write:
+
+    type R is array (0 .. 31) of Boolean;
+    pragma Pack (R);
+    for R'Size use 32;
+
+a very typical set of declarations, then it is really a tossup whether we can
+rely on separate tasks being able to fiddle with different bits. There are three
+cases
+
+a) the code generator always uses the memory bit instructions to access the
+   bits. Probably a bad choice, but would assure independence for the above
+   case.
+
+b) the code generator is incapable of using these memory bit instructions, in
+   which case such simultaneous access is not possible, and a pragma
+   Independent_Components would be rejected.
+
+c) the code generator can generate these instructions, but only if told to do
+   so. In this case the pragma Independent_Components is a perfect way of
+   providing this instruction.
+
+Really a perfect example of the value of the pragma!
+
+> Moreover, this is a particularly nasty kind of erroneousness, as the
+> failure doesn't happen unless two tasks happen to access two
+> components in the same word at the same time, something that is
+> unlikely even when an obvious mistake happens. It's unlikely that one
+> would find this erroneous case by testing, and that leads to the
+> possibility of the problem not happening until the application is
+> fielded -- which is not good. By having a declaration of Independence
+> ;-), we can more easily write tools to check that in fact no such accesses are
+> possible.
+
+Well really just a special case of shared variable erroneousness, and indeed
+this is a nasty case. Shared variables are always risky.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February  5, 2013  5:11 AM
+
+> On a small-memory embedded system, Pack might be about space
+> efficiency, but on a 64-bit computer, it's purely about time
+> efficiency -- it means "reduce space of this data structure in order
+> to improve time overall" (as opposed to "reduce space because I might
+> run out of memory").
+
+No, it's about space efficiency too. Even on a 64-bit machine, it's just
+impractical to have programs with giant working sets. Yes, one can see this as a
+time issue, but really most people would think of it as a space issue.
+
+Randy's view that pragma Pack makes no sense on such machines is just
+incomprehensible!
+
+Let me give an example.
+
+The GNAT compiler allocate a 192-byte block for entities.
+We recently increased this from 160 bytes to add more fields and flags for Ada
+2012 and new pragmas etc, and we saw a significant but tolerable effect on
+compiler space and time.
+
+Now these entities include space for about 325 boolean flags (taking up 40 of
+those 192 bytes, packed of course.
+
+Randy thinks we should remove the pragma Pack on modern machines. This would
+increase the size of entities by 280 bytes, giving a total of nearly 500 byte.
+
+The impact on compiler space and time would be completley disastrous! Makes no
+sense at all.
+
+And gains nothing! Most access tto flags is reads, and the extra cost of reading
+packed bits is negligible.
+
+I think a lot of people underestimate cache effects.
+Again you can consider these as space or time issues, but it is more reasonable
+to think of them as space issues, you need to have things small to keep things
+in cache.
+
+With modern processors, out of cache memory references are disastrously slow,
+and many programs are memory bound.
+
+If you want to get maximum performance, you have to really think about cache
+effects.
+
+For example, if you do matrix multiplication with the familiar three nested
+loops, you get absolutely disastrous performance if the matrix does not fit in
+the primary cache (a huge proportion of the references will be out of cache in
+this case). Instead you have to tile, adjusting the tiling parameters to match
+the size of the primary cache. The difference in performance is staggering.
+
+So once again, packed bit arrays are a really important aspect of Ada (another
+familiar use of such bit arrays is in optimization in a compiler, I assume I
+don't need to give details to this audience! the space taken up by these
+representations of sets can be huge even when they are packed.
+
+And of course we have not even talked of the use of bit packing to match
+external data structures, a common situation.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February  6, 2013  1:45 PM
+
+> No, it's about space efficiency too. Even on a 64-bit machine, it's
+> just impractical to have programs with giant working sets. Yes, one
+> can see this as a time issue, but really most people would think of it
+> as a space issue.
+>
+> Randy's view that pragma Pack makes no sense on such machines is just
+> incomprehensible!
+
+I don't think I said anything about "no sense". I said that Pack was solely
+about space management (which you agree with above), and I said that as a
+consequence it would "almost never" be used in systems where execution time is
+the primary criteria. "Almost never" is probably a bit stronger than I meant
+("rarely" would have been a better choice), but I stand by my comment.
+
+> Let me give an example.
+>
+> The GNAT compiler allocate a 192-byte block for entities.
+> We recently increased this from 160 bytes to add more fields and flags
+> for Ada 2012 and new pragmas etc, and we saw a significant but
+> tolerable effect on compiler space and time.
+>
+> Now these entities include space for about 325 boolean flags (taking
+> up 40 of those 192 bytes, packed of course.
+>
+> Randy thinks we should remove the pragma Pack on modern machines. This
+> would increase the size of entities by 280 bytes, giving a total of
+> nearly 500 byte.
+
+Not at all. You most likely don't want to manage such a situation with aspect
+Pack, because it is such a blunt instrument.
+
+In the example you gave (and I expect most similar cases), using pragma Pack
+indiscriminately would increase the execution time more than using
+representation clauses carefully.
+
+I don't know exactly how GNAT organizes that "block", but in Janus/Ada it is a
+large variant record. The effect of applying Pack to that record would be to
+force all components to their minimum size, potentially including forcing
+pointers and large integers to be misaligned. But that doesn't make much sense,
+because all that you are trying to do is fit the data into a particularly sized
+space. You don't want to shrink components that aren't part of the "critical
+path" for that space -- for instance, the smaller variant limbs. And you
+probably don't want to pack components that are very commonly used, either, even
+if you could (the overall discriminant that controls this record is an example;
+it gets used in lots of discriminant checks even when it isn't explicitly
+referenced).
+
+So in this case, Pack just does too much. You have to use a record rep. clause
+to shrink just the components that matter and leave the rest of them alone. [We
+also need to keep binary compatibility as much as possible, so we don't want
+components moving around unnecessarily -- but that's not the primary reason to
+avoid Pack in the general case.]
+
+Now, I realize you can restructure your data structures with sub-records and
+sub-arrays so that those parts can use Pack (that would be the "rare" case I was
+referring to originally), but unless that happened for other reasons, I think
+that is putting the cart before the horse: your program structure shouldn't be
+determined by what representation clauses you want to apply!
+
+(And using arrays of Booleans rather than records or Booleans makes little sense
+in the absence of outside considerations; these bits had better be named, and
+once they are, record components are easier to read and write.)
+
+> The impact on compiler space and time would be completely disastrous!
+> Makes no sense at all.
+>
+> And gains nothing! Most access tto flags is reads, and the extra cost
+> of reading packed bits is negligible.
+
+I agree that reading packed Booleans (if they're in records or the array index
+is static) isn't much, mainly because they're almost always immediately tested,
+and you can combine the bit extract and the test so that you can eliminate the
+shift step. That's less true for other enumerations, though, and they too take
+up a lot of extra space.
+
+> I think a lot of people underestimate cache effects.
+> Again you can consider these as space or time issues, but it is more
+> reasonable to think of them as space issues, you need to have things
+> small to keep things in cache.
+>
+> With modern processors, out of cache memory references are
+> disastrously slow, and many programs are memory bound.
+>
+> If you want to get maximum performance, you have to really think about
+> cache effects.
+>
+> For example, if you do matrix multiplication with the familiar three
+> nested loops, you get absolutely disastrous performance if the matrix
+> does not fit in the primary cache (a huge proportion of the references
+> will be out of cache in this case).
+> Instead you have to tile, adjusting the tiling parameters to match the
+> size of the primary cache.
+> The difference in performance is staggering.
+>
+> So once again, packed bit arrays are a really important aspect of Ada
+> (another familiar use of such bit arrays is in optimization in a
+> compiler, I assume I don't need to give details to this audience! the
+> space taken up by these representations of sets can be huge even when
+> they are packed.
+
+We didn't use bit arrays in our optimizer specifically because the sets get too
+large to be practical. (Especially when your original host was MS-DOS with 640K
+RAM). Instead we used property lists (with a very compact representation for the
+properties).
+
+> And of course we have not even talked of the use of bit packing to
+> match external data structures, a common situation.
+
+Huh? Pack does whatever it does, if you have to match some specific data
+structure, you have to be more specific, using 'Component_Size and record
+representation clauses. I'm only talking about aspect Pack (capital P), not the
+general idea of bit packing!! If you have to match something with
+'Component_Size = 1, write that, don't assume that Pack will do the right thing
+(especially as Bob and Tucker want to weaken those guarantees; if the component
+turns out to be aliased or atomic, no packing will happen and that's probably
+not what was meant).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February  4, 2013  3:47 PM
+
+****************************************************************
+
