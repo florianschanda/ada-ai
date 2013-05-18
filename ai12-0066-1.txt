@@ -1,0 +1,190 @@
+!standard 4.4 (7/3)                                 13-05-17  AI05-0066-1/00
+!class confirmation 13-05-17
+!status received 13-03-27
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject If it ain't broke...
+
+!summary
+
+This AI serves as a holder for questions that are not answered by the RM,
+but for which no one doubts the intent.
+
+!question
+
+(1) What are the rules for a parenthesized expression? The syntax is
+defined in 4.4(7/3), but there aren't any resolution or dynamic
+semantics rules defined in 4.4 or anywhere else.
+
+(2) What is the meaning of the name of a component being used as a
+direct_name (that is, without a prefix)? There does not seem to be
+any rule that specifies that it is the current instance (although that
+has been assumed by all since Ada 83).
+
+!response
+
+For these questions, we believe that adding proper wording to the Standard
+would be much more likely to introduce bugs than to clarify anything. These
+issues date to Ada 83, yet they've never been addressed.
+
+(1) There are some rules that say parenthesized expressions have no effect in
+specific cases (6.2(10/3) and 7.5(2.1/3) are examples of such rules). But
+there is no general rule that says how the expression of a parenthesized
+expression is resolved nor what the value of it is. While this ought to be
+fixed in an ideal world, no one doubts what a parenthesized expression means
+and adding the missing wording probably would introduce bugs and questions
+(what is the accessibility of a parenthesized expression? [Well, Ada 2005
+answered that question by adding 3.10.2(16.1/2).]), and would have absolutely
+no effect on implementations.
+
+(2) For example:
+
+     type Acc is access all Some_Type;
+     protected Stack is
+         procedure Push (Item : in Acc);
+         function Pop return Acc;
+     private
+         Stack_Head : Acc := null;
+     end Stack;
+
+     protected body Stack is
+         function Pop return Acc is
+             Temp : Acc := Stack_Head;
+         begin
+             Stack_Head := Stack_Head.Next; -- Illegal.
+             return Temp;
+         end Pop;
+         procedure Push (Item : in Acc) is
+	   begin
+             Item.Next := Stack_Head;
+             Stack_Head := Item; -- OK.
+         end Push;
+     end Stack;
+
+Everyone "knows" that the line marked Illegal isn't allowed because Stack_Head
+refers to the protected component of the current instance of Stack, and the
+current instance is a constant inside a protected function.
+
+But there is no rule in the Standard that says that Stack_Head refers to the
+component of the current instance.
+
+Similarly, in
+     type Rec (D : Natural) is record
+        S : String (1 .. D); -- D here is that of the current instance.
+     end record;
+we ought to know that D refers to the discriminant of the current instance.
+
+Of course, everyone "knows" this is the meaning, so adding explicit wording
+simply would more likely get this wrong and it wouldn't have any effect on
+implementations.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, March 27, 2013  11:22 PM
+
+Here's a fine Adam-style question for you guys.
+
+We all "know" that you can't modify a protected component inside a protected
+function. For instance:
+
+     type Acc is access all Some_Type;
+     protected Stack is
+         procedure Push (Item : in Acc);
+         function Pop return Acc;
+     private
+         Stack_Head : Acc := null;
+     end Stack;
+
+     protected body Stack is
+         function Pop return Acc is
+             Temp : Acc := Stack_Head;
+         begin
+             Stack_Head := Stack_Head.Next; -- Illegal.
+             return Temp;
+         end Pop;
+         procedure Push (Item : in Acc) is
+	   begin
+             Item.Next := Stack_Head;
+             Stack_Head := Item; -- OK.
+         end Push;
+     end Stack;
+
+Why is this so?
+
+3.3(21.2/3) says that the current instance of a protected type is a constant
+within a protected function. 9.5.1(2) (which supposedly is "redundant"),
+repeats that and parenthetically says that implies that components cannot be
+updated.
+
+So far so good. All we have to prove is that the current instance is somehow
+involved with writing "Stack_Head" in the example above. But I can't find
+anything like that. Component_Definitions are defined in 3.8, and there are
+various rules which allow them to be used as direct_names. But there doesn't
+seem to be any rule that says "when a name that denotes a component_declaration
+or discriminant_declaration is used as a direct_name (without a prefix), the
+component or discriminant is that of the current instance of the type (including
+within a task or protected body)."
+
+There's no such rule in 3.8, 4.1, 4.1.3, 8.2, 8.3, or 8.6. So where the heck
+is it? I find it hard to believe that there isn't any definition of this in
+ the RM; it's been the rule since the beginning of time.
+
+Note that this also is necessary to define the meaning of the use of
+discriminants directly within type declarations (although there is no legality
+component to that as a discriminant is always a constant):
+
+         type Rec (D : Natural) is record
+             S : String (1 .. D); -- D here is that of the current instance.
+         end record;
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, March 28, 2013  2:38 PM
+
+> All we have to prove is that the current instance is somehow involved 
+> with writing "Stack_Head" in the example above.
+
+I think you are right that the rule you are looking for is missing, and that
+it would have been good if it had been stated explicitly. At this point,
+however, I'd say that at most an AARM note is needed (and the need for that
+is debatable).
+
+As far as I know, we still don't have a rule defining the value of a
+parenthesized expression (at least in the case where the associated object of
+the expression is undefined).
+
+I think the issue you raise falls in the same "we would have fixed it if we
+had noticed it earlier, but now we give more weight to the if-it-ain't-broke
+rule" category.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, March 28, 2013  3:14 PM
+
+...
+> I think you are right that the rule you are looking for is missing, 
+> and that it would have been good if it had been stated explicitly. ...
+
+I agree, it seems to be missing.  There are some places where we come close
+to saying something about it, but don't quite do so.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 28, 2013  4:24 PM
+
+Thanks guys, it's good to know that I'm not nuts. Hopefully no one will be
+disputing ACATS tests on the basis that this isn't defined.
+
+I think I'll write up an AI with these two issues with the intent that we'll
+vote it no action ultimately (on the basis that a fix would be more likely to
+introduce bugs than clarify the semantics for a reader); that way, the issues
+will be on-the-record somewhere in case others are searching for the
+information.
+
+****************************************************************
+
