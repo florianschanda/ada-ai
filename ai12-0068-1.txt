@@ -1,0 +1,367 @@
+!standard 3.10.2(7/3)                              13-05-30    AI12-0068-1/00
+!class binding interpretation
+!status work item 13-05-30
+!status received 13-04-20
+!priority Medium
+!difficulty Medium
+!qualifier Omission
+!subject Predicates and the current instance of a subtype
+
+!summary
+
+The current instance of a subtype acts like an in-mode parameter during
+the specification of a predicate aspect.
+
+!question
+
+For a predicate, is the current instance of the subtype an object or a
+value? This matters in unusual cases. Consider:
+
+     type T (Kind : T_Kind := Zoofle) is ... ;
+
+     -- A variable is in this subtype if and only if it
+     -- is ok to assign it a value whose Kind is Zoofle
+     subtype Zoofleable is T with
+       Dynamic_Predicate =>
+         Zoofleable.Kind = Zoofle
+         or else not Zoofleable'Constrained;
+
+     procedure Zoofalize (X : out Zoofleable) is
+     begin
+         X := (Kind => Zoofle, ...);
+         -- Assignment's discriminant check guaranteed to pass
+     end;
+
+     Y : T := (Foozle, ...); -- unconstrained, Kind /= Zoofle
+     Z : T (Foozle) := Y; -- constrained, Kind /= Zoofle
+   begin
+     Zoofalize (Y); -- Works
+     Zoofalize (Z); -- Fails predicate check (??)
+
+Is it expected that the value of 'Constrained reflects that of the actual
+object, or is this check on a value and the properties of the object aren't
+querable? (Something. :-)
+
+!recommendation
+
+(See !summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+Note that a current instance of a type and a subtype is a variable, since
+it is not in the list of things that denote constant views in 3.3. That list
+is supposed to be exhaustive (and we keep adding to it as things are missed).
+Moreover, it is clear a variable by practice, as the Rosen trick depends on
+that fact:
+
+     type Outer;
+     type Inner (Ref : access Outer) is limited null record;
+       -- discriminant's type is access-to-variable
+
+     type Outer is limited record
+       Self : Inner (Outer'Access);
+     end record;
+
+This would not be legal if Outer was a constant view (as converting
+an access-to-constant value to an access-to-variable value is illegal).
+
+---
+
+We select the model that the current instance of a subtype acts like an
+in-mode parameter for the purposes of use in a predicate definition.
+
+This is the most information that a predicate should be allowed to use, as
+we want to allow compilers to implement a predicate as a Boolean function
+with a parameter of the base type of the subtype. If the semantics diverges
+too far from the parameter model, such an implementation would become
+difficult.
+
+An alternative semantics would be to define it as a constant value. In that
+case, even using object attributes within a predicate would be illegal.
+For instance, 'Size, 'Alignment, 'Access, and 'Address would all be illegal
+as their prefix would not denote an object.
+
+[Editor's note: Actually, the above sounds appealing, as "tricky" predicates
+would then be statically illegal and no one would get caught expecting some
+an example like the one in the question to work. OTOH, this is more work
+and might make some sensible predicates illegal (can't pass as an in out
+or out parameter, for instance). More thought required.]
+
+!ACATS Test
+
+The examples discussed in the mail (see !appendix) should be made into
+ACATS tests (some will be legality rules and some will be determinable at
+runtime).
+
+!ASIS
+
+No ASIS effect.
+
+
+!appendix
+
+From: Steve Baird
+Sent: Saturday, April 20, 2013  4:54 PM
+
+Randy and I were discussing whether predicates really work on values or on
+objects.
+
+The manual is not clear on this point:
+   the current instance of a type is the object or value of
+   the type that is associated with the execution that
+   evaluates the usage name.
+
+The following example illustrates the difference:
+
+     type T (Kind : T_Kind := Zoofle) is ... ;
+
+     -- A variable is in this subtype if and only if it
+     -- is ok to assign it a value whose Kind is Zoofle
+     --
+     subtype Zoofleable is T with
+       Dynamic_Predicate =>
+         Zoofleable.Kind = Zoofle
+         or else not Zoofleable'Constrained;
+
+     procedure Zoofalize (X : out Zoofleable) is
+     begin
+         X := (Kind => Zoofle, ...);
+         -- assignment's discrim check guaranteed to pass
+     end;
+
+     Y : T := (Foozle, ...); -- unconstrained, Kind /= Zoofle
+     Z : T (Foozle) := Y; -- constrained, Kind /= Zoofle
+   begin
+     Zoofalize (Y); -- works
+     Zoofalize (Z); -- fails predicate check
+
+Is this supposed to work as the comments suggest (because the current instance
+is the object), or should the use of Zoofleable'Constrained always return False
+(because the current instance is a value)?
+
+Randy suggests a more nuanced approach: a name denoting the current instance in
+a predicate should behave as though it denotes an in-mode parameter where the
+corresponding actual parameter is the current instance of the type.
+
+This means that attributes such as Size, Address, and Alignment can be queried,
+but they might not yield useful results in some cases.
+Current_Instance'Constrained would then always yield True. This model also works
+well with by-reference types. And like any equivalence rule, it has the
+advantage of providing a clear implementation model.
+
+Sounds right to me; this is probably how a predicate would be implemented anyway
+so this model is probably consistent with existing practice.
+
+However, note the use of "in-mode" above.
+
+The current instance of a type is variable, not constant.
+
+This is at the heart of the well established "Rosen trick", which allows
+modification of a limited constant via a self-referential access-to-variable
+discriminant.
+
+A strict reading of the current wording
+would allow the following (absurd) example:
+
+      X : constant Integer := 123;
+
+      function Is_456 (Y : out Integer) return Boolean is
+      begin
+         Y := 456; -- even if it wasn't 456 before, it is now
+         return True;
+      end;
+
+      subtype S is Integer with Dynamic_Predicate =>
+        Is_456 (S); -- should be illegal, but is legal because
+                    -- name "S" denotes a variable
+
+      pragma Assert (X = 123 and then (X in S) and then X = 456);
+
+Do not waste your time trying to figure out what this ought to do at runtime; it
+should be rejected at compile time. This is just a minor language hole that
+needs to be plugged.
+
+I think we need wording something like
+
+    In an aspect specification for a type or subtype, a name
+    denoting the current instance of the type or subtype denotes
+    a constant view.
+
+It seems to me that
+    1) Randy's "treat the current instance like a parameter"
+       model is right.
+    2) The mode of that parameter needs to be In in the case of
+       an aspect specification.
+
+Do folks agree with these general ideas?
+
+Wording, of course, is a separate question.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, April 20, 2013  8:50 PM
+
+> ... It seems to me that
+>     1) Randy's "treat the current instance like a parameter"
+>        model is right.
+>     2) The mode of that parameter needs to be In in the case of
+>        an aspect specification.
+>
+> Do folks agree with these general ideas?
+
+Yes.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, April 21, 2013  4:26 AM
+
+>     Zoofalize (Y); -- works
+>     Zoofalize (Z); -- fails predicate check
+
+At first, I had some sympathy with this. However, I think a precondition is more
+appropriate for someone who wants to express that. And we don't have the same
+problem in preconditions, have we?
+
+[...]
+> Randy suggests a more nuanced approach: a name denoting the current
+> instance in a predicate should behave as though it denotes an in-mode
+> parameter where the corresponding actual parameter is the current
+> instance of the type.
+>
+> This means that attributes such as Size, Address, and Alignment can be
+> queried, but they might not yield useful results in some cases.
+> Current_Instance'Constrained would then always yield True. This model
+> also works well with by-reference types. And like any equivalence
+> rule, it has the advantage of providing a clear implementation model.
+>
+> Sounds right to me; this is probably how a predicate would be
+> implemented anyway so this model is probably consistent with existing
+> practice.
+>
+> However, note the use of "in-mode" above.
+>
+> The current instance of a type is variable, not constant.
+
+You lost me here. Is the sentence above about the current wording, or the new
+one? AFAIK, an in-parameter is a constant view.
+
+> This is at the heart of the well established "Rosen trick", which
+> allows modification of a limited constant via a self-referential
+> access-to-variable discriminant.
+
+I'd rather say that it is a constant view that carries an access to a variable
+view of the same object.
+
+> I think we need wording something like
+>
+>    In an aspect specification for a type or subtype, a name
+>    denoting the current instance of the type or subtype denotes
+>    a constant view.
+>
+> It seems to me that
+>    1) Randy's "treat the current instance like a parameter"
+>       model is right.
+>    2) The mode of that parameter needs to be In in the case of
+>       an aspect specification.
+
+Are you proposing to say that it "denotes a constant view", or "it is an
+in-parameter", or is it really equivalent?
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, April 22, 2013  1:29 PM
+
+...
+>>      Zoofalize (Y); -- works
+>>      Zoofalize (Z); -- fails predicate check
+> At first, I had some sympathy with this. However, I think a
+> precondition is more appropriate for someone who wants to express
+> that. And we don't have the same problem in preconditions, have we?
+
+Right, because preconditions don't use the "current instance"
+mechanism.
+
+>> The current instance of a type is variable, not constant.
+>
+> You lost me here. Is the sentence above about the current wording, or
+> the new one? AFAIK, an in-parameter is a constant view.
+
+The above sentence is about the current wording (or really about the
+well-established interpretation of the RM's lack of explicit wording about the
+constancy of the current instance of a type).
+
+If this were not the case, then this example would be illegal:
+
+     type Outer;
+     type Inner (Ref : access Outer) is limited null record;
+       -- discriminant's type is access-to-variable
+
+     type Outer is limited record
+       Self : Inner (Outer'Access);
+     end record;
+
+> I'd rather say that it is a constant view that carries an access to a
+> variable view of the same object.
+
+Maybe it should work that way and that is a good way to think about it.
+Strictly speaking, however, I think you are mistaken.
+
+I think the current language definition allows, for example, passing the current
+instance of a type as an out-mode actual parameter in default initialization
+expression for a component (not something that I would recommend. although I
+don't see that this introduces any definitional problems). One could argue that
+the language should be changed to prevent this. Alternatively, one could argue
+that disallowing something which is useless but well defined and unlikely to
+occur accidentally is not worth the bother.
+
+Note that we still have problems in this area even if the current instance
+denotes a constant view. Given
+
+     type T is
+        record
+           F, G : Component_Type := Some_Func (T);
+        end record;
+
+one of those two calls (whichever is evaluated first) is going to be passed a
+value with an uninitialized component. Note that Component_Type could be an
+access type, a task type, or anything.
+
+>> I think we need wording something like
+>>
+>>     In an aspect specification for a type or subtype, a name
+>>     denoting the current instance of the type or subtype denotes
+>>     a constant view.
+>>
+>> It seems to me that
+>>     1) Randy's "treat the current instance like a parameter"
+>>        model is right.
+>>     2) The mode of that parameter needs to be In in the case of
+>>        an aspect specification.
+>
+> Are you proposing to say that it "denotes a constant view", or "it is
+> an in-parameter", or is it really equivalent?
+
+Constant view and in-parameter are not equivalent because of things like 'Size
+and 'Alignment. Consider the current instance of a type T when declaring X of
+type T where X'Alignment /= T'Alignment. What is Current_Instance'Allignment? If
+we require it to be X'Alignment, then we are imposing distributed overhead on
+any implementation which wants to use the reasonable implementation strategy of
+implementing predicates via a compiler-generated boolean-valued function. Let's
+not do that.
+
+I didn't propose wording for the "it behaves like a parameter" approach.
+The wording we end up with to get constancy right might depend on how that goes.
+
+One possibility is that we define the "it behaves like a parameter" rule without
+reference to the mode of the parameter; in that case we might need something
+like the wording I proposed.
+
+****************************************************************
+
