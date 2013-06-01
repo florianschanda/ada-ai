@@ -1,0 +1,2576 @@
+!standard 3.2.4(14/3)                              13-05-31    AI12-0054-2/01
+!standard 3.2.4(30/3)
+!class binding interpretation
+!status work item 13-05-31
+!status received 13-05-02
+!priority High
+!difficulty Medium
+!qualifier Omission
+!subject Aspect Predicate_Failure
+
+!summary
+
+The aspect Predicate_Failure defines what happens when a predicate check fails.
+It does NOT apply when evaluating memberships and the Valid attribute.
+
+!question
+
+AI12-0022-1, "Raise expressions for specifying the exception raised for an
+assertion" added the ability to control which exception is raised by failure of
+various assertions. This is an important capability, because it allows to change
+interfaces to use assertions while preserving compatibility.
+
+However, this feature doesn't work properly for predicates, because predicates
+are evaluated by membership tests, so we would get spurious failures. Should
+these spurious failures be removed from the language, so that there is a mechanism
+for specifying the exception raised by a predicate failure? (Yes.)
+
+!recommendation
+
+(See !summary.)
+
+!wording
+
+Add after 3.2.4(14/3):
+
+For a subtype, the following language-defined aspect may be specified with an
+aspect_specification (see 13.1.1):
+
+Predicate_Failure
+   This aspect specifies an expression that will be evaluated if a predicate check
+   for the subtype fails; it shall be specified by an expression, called the
+   predicate failure expression. If not specified for a subtype, the
+   predicate failure expression for the subtype is a raise_expression that
+   raises Assertion_Error.
+
+Name Resolution Rules
+
+The expected type for a precondition or postcondition expression is Boolean.
+
+[Editor's note: We need to specify the type so that the expression can be resolved (a
+raise_expression has "any type", so we need a specific type here). I considered
+restricting these expressions to a single raise_expression via a Legality Rule,
+but I can't think of any particularly good reason to do so. Note that the current
+instance of the subtype is visible in the Predicate_Failure expression -- this is
+useful in the exception message part of a raise_expression. So one could imagine
+calling a function on that value to log the bad value before raising a failure
+exception. As such, the value of allowing any expression seems to be non-zero,
+and it doesn't seem to cost anything extra. In any case, the Boolean result
+is discarded.]
+
+Remove "Assertion_Error is raised if any of these checks fail." from 3.2.4(30/3).
+
+Add after 3.2.4(30/3):
+
+If any of these checks fail, the Predicate_Failure expression of the subtype that
+includes the specification of the predicate that failed (returned False) is evaluated,
+and the result (if any) is discarded. Redundant[If none is specified, Assertion_Error
+is raised.]
+
+[Editor's note: I don't know if the above is sufficiently detailed. Probably we would
+want to define the details of a predicate check more tightly, possibly similarly
+to the way it is described in AI12-0071-1. Note that we're assuming some solution to
+the problems noted in that AI is adopted, else this problem is not really solved.
+I'm also a bit worried about 11.6 effects with this wording; we don't want compilers
+optimizing away this evaluation unless it truly has no effect (exceptions should
+always be raised here) -- but as the actual returned result has no effect on the
+program, it would seem that 11.6 would allow the entire expression to be ignored.
+I'd hate to put a "notwithstanding" into this wording, but if we have to do that
+to effectively delete 11.6.]
+
+!discussion
+
+Note that Predicate_Failure is not involved when a predicate is evaluated in a membership
+or Valid attribute. This is how we get our cake and eat it too in this case.
+
+If it is necessary to raise multiple exceptions for different failures, it is necessary
+to define multiple subtypes. For instance, Text_IO could define subtypes like:
+
+   subtype Open_File_Type is File_Type
+      with Dynamic_Predicate => Is_Open (Open_File_Type),
+           Predicate_Failure => raise Status_Error;
+   subtype Read_File_Type is Open_File_Type
+      with Dynamic_Predicate => Mode (Read_File_Type) = In_File;
+           Predicate_Failure => raise Mode_Error with "Can't read file: " & Name (Read_File_Type);
+
+One could imagine defining similar aspects for the other kinds of contract
+assertions. We didn't do that because those aspects generally aren't combinable,
+so such an aspect would be of limited utility and probably not be worth the
+implementation cost. Moreover, there is no counterpart to the membership that
+causes all of the trouble with predicates. But defining such an aspect would not
+be hard.
+
+A simpler alternative would be to simply have a Predicate_Failure_Exception
+aspect, which just specifies the exception. In that case, however, we've
+lost the ability to give an exception message. Thus we prefer the given
+solution (possibly with a Legality Rule to limit it to raise_expressions only).
+
+!ACATS Test
+
+An extra C-Test is needed to test that this aspect works as specified.
+
+!ASIS
+
+No ASIS effect.
+
+
+!appendix
+
+From: Jean-Pierre Rosen
+Sent: Friday, February  8, 2013  8:49 AM
+
+...
+> AI12-0054-1/04   2013-01-30 --  A raise_expression does not cause membership failure
+...
+> Approve __________   Oppose _X__           Abstain _________
+>
+Justification:
+
+I think this whole business is simply going out of control. I find the idea of
+having "raise" not raising an exception, depending on context, "disgusting" (as
+John would put it). Not counting the endless discussions about what happens if
+an exception is propagated for other reasons during the evaluation of a
+condition.
+
+The !discussion section in AI12-0022-1/03 proposes alternative possibilities,
+and concludes "Thus the selected alternative seems clearly to be the best
+option." However, this was stated at a time where we didn't consider the
+consequences for membership tests and the like. Now that we have discovered more
+issues, I think we should reconsider alternative solutions before commiting to
+this one.
+
+For example, the only counter argument I see for alternatives #1 and #2 is the
+case of complicated preconditions that would raise different exceptions. I have
+a feeling that there will always be conditions that cannot be expressed as
+formal pre-conditions, and that it might be better to accept this. This would be
+cleaner than the raise-which-does-not-raise-it-depends expression.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February  8, 2013  1:55 PM
+
+...
+> > Approve __________   Oppose _X__           Abstain _________
+
+Just to make sure everyone is clear on this, with an Oppose vote during a letter
+ballot, our procedures require that the AI is discussed and revoted at the next
+meeting. So, unless J-P can be convinced to change his vote, the ballot on
+AI12-0054-1 has effectively failed.
+
+J-P does not say what he intends to vote on AI12-0022-1 at WG 9, but his
+justification suggests that he would reject that, too. I think that would be a
+mistake (see below), but it might make sense to pull it as well.
+
+> Justification:
+> I think this whole business is simply going out of control. I find the
+> idea of having "raise" not raising an exception, depending on context,
+> "disgusting" (as John would put it).
+> Not counting the endless discussions about what happens if an
+> exception is propagated for other reasons during the evaluation of a
+> condition.
+>
+> The !discussion section in AI12-0022-1/03 proposes alternative
+> possibilities, and concludes "Thus the selected alternative seems
+> clearly to be the best option." However, this was stated at a time
+> where we didn't consider the consequences for membership tests and the
+> like.
+> Now that we have discovered more issues, I think we should reconsider
+> alternative solutions before commiting to this one.
+>
+> For example, the only counter argument I see for alternatives
+> #1 and #2 is the case of complicated preconditions that would raise
+> different exceptions. I have a feeling that there will always be
+> conditions that cannot be expressed as formal pre-conditions, and that
+> it might be better to accept this.
+> This would be cleaner than the
+> raise-which-does-not-raise-it-depends expression.
+
+This is throwing out the baby with the bathwater: we have a small problem with
+one contract item, so we shouldn't solve a major problem for all contract items.
+That's insane!
+
+You are essentially saying that we should never try to use preconditions and/or
+predicates with well-designed reusable libraries (including ones like Text_IO
+and Ada.Containers.Vectors). A well-designed library will raise different
+exceptions in response to different classes of major errors. That's critical for
+debugging, especially in the absence of static analysis tools. I know Robert
+says that they have some sort of clever message that identifies the error in a
+predicate without having to raise different exceptions, but truly reusable,
+portable code cannot depend on the features of a single implementation.
+
+So, in my view at least, using proposals #1 or #2 alone would essentially make
+contracts useless except in toy programs. (Alternatively, we would just have to
+resort to Geert's trick everywhere, and there would be no use of proposals #1 or
+#2, plus the membership bug would be back.)
+
+It also should be noted that AI12-0022-1 also solves other problems (most
+notably, the problem of the required return statement). I don't think that we
+should make any change to AI12-0022-1 and it should be approved as is. I feel
+*very* strongly about this.
+
+So let's look at your objection to AI12-0054-1 *by itself*. The problem we have
+is that predicates are fundamentally (but subtly) different than other
+contracts. Perhaps the solution lies in admitting that and treating them
+differently. That sort of was the idea behind AI12-0054-1, but I can agree that
+it is a screwy solution, and one that we didn't try very hard to look at
+alternatives to.
+
+One obvious alternative is to forget AI12-0054-1, and adopt a new aspect for
+predicates only:
+
+     Predicate_Exception => <exception_name>
+
+which of course would change the exception raised by a predicate.
+
+This also would have eliminated most of the need for the discussion about which
+exception to raise by default, as it would be easy to change it without changing
+memberships.
+
+Note that this would increase implementation complexity a bit, because multiple
+predicates can apply to a subtype, and they all could raise different
+exceptions:
+
+    subtype Open_File_Type is File_Type
+       with Dynamic_Predicate => Is_Open (Open_File_Type), Predicate_Exception => Status_Error;
+    subtype Read_File_Type is Open_File_Type
+       with Dynamic_Predicate => Mode(Read_File_Type) /= Out_File, Predicate_Exception => Mode_Error;
+
+Also, this solution is suboptimal because there is no way to add an exception
+message in the latter case (to display the file name along with the exception).
+This is one important reason why the raise_expression is much preferred as a
+solution for the other contracts. (Another is that other contracts cannot be
+combined, and in particular we don't want to get into automatic combination of
+preconditions, so only one exception could be raised for it.)
+
+The advantage here of course is that memberships would work right without
+unusual rules.
+
+I could see adding a requirement that all predicates for a particular subtype
+raise the same exception (which would make the above code illegal), if the added
+implementation complexity is considered too much.
+
+I could also see adding similar aspects for the other contracts just for
+consistency, although we would not expect them to be used.
+
+To summarize, I think that we definitely need raise_expressions (they work best
+in complicated preconditions), but perhaps we need to have two solutions so that
+simple predicates also work properly. Rather than having a bizarre and
+incomplete exception. (And if someone doesn't care that memberships work, they
+can use raise_expressions in their predicates as well.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, February  8, 2013  2:14 PM
+
+> Also, this solution is suboptimal because there is no way to add an
+> exception message in the latter case (to display the file name along
+> with the exception). This is one important reason why the
+> raise_expression is much preferred as a solution for the other
+> contracts. (Another is that other contracts cannot be combined, and in
+> particular we don't want to get into automatic combination of
+> preconditions, so only one exception could be raised for it.)
+
+I think it's important that predicates and preconditions be interchangeable in
+the case where the precondition is a property of one parameter.  For example, I
+often have something like:
+
+    function F(X: T) ... with Pre => not Is_Empty(X);
+    function G(X: T) ... with Pre => not Is_Empty(X);
+    ...
+
+which I realize would be better expressed as:
+
+    subtype Non_Empty_T is T with Dynamic_Predicate => not Is_Empty(X);
+    function F(X: Non_Empty_T) ...;
+    function G(X: Non_Empty_T) ...;
+    ...
+
+And then I end up declaring local variables of subtype Non_Empty_T.
+I want any raise expressions to be moved into the predicate when such
+refactoring is done.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February  8, 2013  7:49 PM
+
+...
+> I think it's important that predicates and preconditions be
+> interchangeable in the case where the precondition is a property of
+> one parameter.
+...
+
+There is nothing particularly optimal about the solution I suggested.
+
+But I'm very worried that we're about to get into a situation similar to that
+which we have had repeatedly for "unreserved keywords". The ARG (most of whose
+members are in the US delagation) vote for a solution, and WG 9 (where the US
+only gets one vote) rejects it. The effect is that we'll end up with no solution
+to this problem -- and I can easily imagine that we would quickly reach a point
+where further work on the Ada standard has become pointless. (I won't care about
+an Ada standard that can't solve this problem, that's for sure.)
+
+I'm trying to find a way to cut the gordian knot here. I'm almost certain that
+the solution we have is the best one possible for preconditions, postconditions,
+and invariants (not to mention function returns and probably a variety of other
+instances). It's not optimal for predicates, but I don't want to lose the
+solution for all of those other uses just because we can't agree on how to fix
+it for a marginal use in predicates.
+
+Rather than gunking up the language as in AI12-0054-1, perhaps providing an
+alternative mechanism for the problematic case would be better.
+
+And please note that nothing about AI12-0054-1 really meets your premise: if the
+exception is raised by a function, a precondition will work fine, but a
+predicate will fail. AI12-0054-1 only applies to raise_expressions directly in
+the predicate, and that surely isn't the only way that preconditions will be
+structured.
+
+After all, early Ada 2012 code using Geert's trick will *not* be interchangeable
+in this way. And that will be true no matter *what* solution is invented to
+solve this problem or the original one. (The closest we could get is adding
+No_Return functions and applying AI12-0054-1-like rules to them, but of course
+that isn't in Ada 2012, so existing Geert trick code will not have the needed
+aspect.)
+
+So while this principle seems important, I don't think there will ever be a rule
+which would make it true all of the time. I wouldn't want to lose *any* solution
+over a principle that can't be absolute in any event.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, February 10, 2013  3:58 AM
+
+> Just to make sure everyone is clear on this, with an Oppose vote
+> during a letter ballot, our procedures require that the AI is
+> discussed and revoted at the next meeting. So, unless J-P can be
+> convinced to change his vote, the ballot on AI12-0054-1 has effectively failed.
+
+If everybody else is perfectly happy with AI12-0054, I can change my vote to
+avoid blocking the process. But I want to raise a flag that further
+consideration is still needed (see below).
+
+> J-P does not say what he intends to vote on AI12-0022-1 at WG 9, but
+> his justification suggests that he would reject that, too.
+
+Not necessarilly. I have nothing against raise expressions, just to the weird
+notion that their effect depends on the context in which they are used -
+including the effect that sometimes writing "raise" means "return false". If the
+/only/ justification for raise expressions is for chosing the exception raised
+by a precondition (as the title indicates - but that can be changed), they would
+logically go away. But if it can be showed (as I think) that they are useful in
+other contexts, why not?
+
+----
+
+Back to AI12-0054. The root of the problem is that it mixes the detection of a
+failure with the choice of the exception being raised. If these can be separated
+(as in alternatives #1-3), the problem would go away. So here is an outline for
+an alternative#4. If I can get a seconder, I'll turn it into an AI.
+
+A "secondary exception" can be attached to the raising of an exception, similar
+to the way a message is attached. Precise syntax TBD, but the following would be
+added to package Ada.Exceptions:
+
+procedure Raise_Exception(E : in Exception_Id;
+                          Message : in String := "";
+                          Secondary : in Exception_ID)
+        with No_Return;
+
+and/or:
+
+function Raise_Exception(E : in Exception_Id;
+                         Message : in String := "";
+                         Secondary : in Exception_ID)
+         return Boolean
+        with No_Return;
+
+Any code that wants the failure of an assertion to raise something different
+would raise Assertion_Error, with the desired exception as a secondary
+exception.
+
+Then the rules would become (just the intent, wording would need
+improvements):
+- For a predicate: if the predicate evaluates to false, Assertion_Error is
+  raised. If Assertion_Error is propagated by the evaluation of the predicate
+  and there is a secondary exception, the secondary exception is raised with the
+  same message as associated to Assertion_Error. Any other exception (as well as
+  Assertion_Error without a secondary exception) propagates normally.
+
+- For a membership test: if evaluation of the predicate raises Assertion_Error,
+  then the membership test evaluates to False (and the exception is not
+  propagated). Any other exception is propagated normally.
+
+----
+Much less magic to my taste, and presumably easier to implement...
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, February 10, 2013  5:35 AM
+
+> If everybody else is perfectly happy with AI12-0054, I can change my
+> vote to avoid blocking the process.
+
+I think that would be best.  It's not that everybody is "perfectly happy".  I
+think it's the best solution, not perfect.
+
+>...But I want to raise a flag that
+> further consideration is still needed (see below).
+
+OK.
+
+> > J-P does not say what he intends to vote on AI12-0022-1 at WG 9, but
+> > his justification suggests that he would reject that, too.
+> Not necessarilly. I have nothing against raise expressions, just to
+> the weird notion that their effect depends on the context in which
+> they are used - including the effect that sometimes writing "raise"
+> means "return false".
+
+I agree it's a little bit weird.  But I still think it's the best solution (see
+below).
+
+>...If the /only/ justification for raise expressions is for chosing
+>the exception raised by a precondition
+
+That's the main use, but not the only one.  It could also be useful for
+assertions other than preconditions.  And it could be useful to specify 'with
+"useful message"'.
+
+>...(as the title indicates - but
+> that can be changed), they would logically go away. But if it can be
+>showed (as I think) that they are useful in other contexts, why not?
+
+Another context in which they are useful is a function that always raises an
+exception:
+
+    function F (...) return ... is
+    begin
+        raise Not_Yet_Implemented; -- Illegal!
+    end F;
+
+You have to write a bogus return statement:
+
+    function F (...) return ... is
+    begin
+        raise Not_Yet_Implemented;
+        return F (...); -- Can't get here
+    end F;
+
+We just had a customer complaining about this, and he didn't know about the
+bogus-recursion trick, which makes it worse (e.g., if the return subtype is
+limited or indefinite, then there's no handy value to return).
+
+Anyway, with raise expressions, you can say:
+
+    function F (...) return ... is
+    begin
+        return raise Not_Yet_Implemented;
+    end F;
+
+I can't think of any other use for raise expressions, but that doesn't mean
+there are none.
+
+> ----
+>
+> Back to AI12-0054. The root of the problem is that it mixes the
+> detection of a failure with the choice of the exception being raised.
+> If these can be separated (as in alternatives #1-3), the problem would
+> go away. So here is an outline for an alternative#4. If I can get a
+> seconder, I'll turn it into an AI.
+
+Sorry, no "second" from me.  ;-)
+
+For one thing, I don't fully understand it.  Currently you say, "Pre => not
+End_Of_File (File)".  With AI12-0022-1, you can say
+
+    Pre => not End_Of_File (File) or else raise End_Error
+
+You seem to be suggesting something like:
+
+    Pre => not End_Of_File (File) or else
+        raise Assertion_Error with Secondary_Exception => End_Error
+
+I'm puzzled by that.  I'm unclear how that connects up with the Raise_Exception
+subprograms below.
+
+> A "secondary exception" can be attached to the raising of an
+> exception, similar to the way a message is attached. Precise syntax
+> TBD, but the following would be added to package Ada.Exceptions:
+>
+> procedure Raise_Exception(E : in Exception_Id;
+>                           Message : in String := "";
+>                           Secondary : in Exception_ID)
+>         with No_Return;
+>
+> and/or:
+>
+> function Raise_Exception(E : in Exception_Id;
+>                          Message : in String := "";
+>                          Secondary : in Exception_ID)
+>          return Boolean
+>         with No_Return;
+>
+> Any code that wants the failure of an assertion to raise something
+> different would raise Assertion_Error, with the desired exception as a
+> secondary exception.
+
+So to raise End_Error, you have to raise Assertion_Error with End_Error as a
+"secondary exception"?  I don't see how that works.
+
+> Then the rules would become (just the intent, wording would need
+> improvements):
+> - For a predicate: if the predicate evaluates to false,
+> Assertion_Error is raised. If Assertion_Error is propagated by the
+> evaluation of the predicate and there is a secondary exception, the
+> secondary exception is raised with the same message as associated to
+> Assertion_Error. Any other exception (as well as Assertion_Error
+> without a secondary exception) propagates normally.
+>
+> - For a membership test: if evaluation of the predicate raises
+> Assertion_Error, then the membership test evaluates to False (and the
+> exception is not propagated). Any other exception is propagated normally.
+
+That has the problem we discussed at the Boston meeting: it hides bugs.  If I
+say "Static_Predicate => F(...)", and F calls procedure P, and P says "Assert
+(something);", and 'something' is False, then that's a bug, and I want an
+exception even when we're dynamically within a membership test.
+
+The only time you want an exception to be turned into "return False"
+is when the exception is syntactically within the predicate expression -- where
+you can see it.  Not within some callee.
+
+> ----
+> Much less magic to my taste, and presumably easier to implement...
+
+Well, for AdaCore, the easiest to implement at this point is AI12-0054-1 as
+written, because Robert already implemented it a week or two ago.
+
+Anyway, I'm not sure what your implementation model is.
+Does it involve wrapping things with exception handlers?
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, February 10, 2013  6:15 AM
+
+> Not necessarilly. I have nothing against raise expressions, just to
+> the weird notion that their effect depends on the context in which
+> they are used - including the effect that sometimes writing "raise"
+> means "return false". If the /only/ justification for raise
+> expressions is for chosing the exception raised by a precondition (as
+> the title indicates - but that can be changed), they would logically
+> go away. But if it can be showed (as I think) that they are useful in other
+> contexts, why not?
+
+I think they are generally useful, it seems quite useful to be able to translate
+
+    if x = 4 then
+       return 42;
+    elsif x > y then
+       return 84;
+    else
+       raise constraint_error;
+    end if;
+
+as
+
+    return
+     (if x = 4 then 42 elsif x > y then 84 else raise constraint_error);
+
+I am certainly finding this applicable now that it is available in GNAT.
+
+as for the special behavior in membership, I think this is reasonable
+
+basically the feeling is
+
+    if expression in B then
+
+means if the value of the expression meets all the criteria for being in B, i.e.
+that the test for membership is true, then the IN returns True, otherwise the IN
+returns False.
+
+If you write a predicate where the only use of the raise expression is to change
+the exception that is issued, then in the case of IN, no exception would be
+issued in the normal case (you don't get an assert failure), so it seems
+reasonable not to get one for the raise.
+
+Or another way of looking at it. Normally if a predicate fails, we get an
+exception raised. But not in the case where the predicate fails in an IN. In
+other words, we already in a sense special case predicate behavior in an IN
+context.
+
+> weird notion that their effect depends on the context in which they
+> are used - including the effect that sometimes writing "raise" means
+> "return false"
+
+So this is not a weird notion. The appearence of raise bla in a predicate means
+the predicate fails. Normally a failing predicate raises an exception (and if
+use raise to give the failure, rather than False, you are simply saying what
+exception should be raised). But in an IN, a failing predicate does not raise an
+exception.
+
+I think you could better argue that raising the exception in the IN context
+would be the wierd behavior.
+
+> Back to AI12-0054. The root of the problem is that it mixes the
+> detection of a failure with the choice of the exception being raised.
+> If these can be separated (as in alternatives #1-3), the problem would
+> go away. So here is an outline for an alternative#4. If I can get a
+> seconder, I'll turn it into an AI.
+
+I don't like this at all, I think it is clutter that provides no advantages over
+the raise exception approach, which is generally useful, unlike this very
+specialized gizmo.
+
+> A "secondary exception" can be attached to the raising of an
+> exception, similar to the way a message is attached. Precise syntax
+> TBD, but the following would be added to package Ada.Exceptions:
+>
+> procedure Raise_Exception(E : in Exception_Id;
+>                            Message : in String := "";
+>                            Secondary : in Exception_ID)
+>          with No_Return;
+>
+> and/or:
+>
+> function Raise_Exception(E : in Exception_Id;
+>                           Message : in String := "";
+>                           Secondary : in Exception_ID)
+>           return Boolean
+>          with No_Return;
+>
+> Any code that wants the failure of an assertion to raise something
+> different would raise Assertion_Error, with the desired exception as a
+> secondary exception.
+
+> Much less magic to my taste, and presumably easier to implement...
+
+I don't think it is any easier to implement, anyway, it was only two days work
+to implement both the AI's as they stand in GNAT. In the unlikely event that the
+ARG changed its mind and did in raise expressions, we would definitely keep them
+in GNAT (presumably under the extension flag). Actually I think the above would
+be much harder to implement. Adding gizmos to Raise_Exception would be really
+rather tricky to implement. And unlike JPR, I find this much *more* magic :-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, February 10, 2013  7:29 AM
+
+>     return
+>      (if x = 4 then 42 elsif x > y then 84 else raise constraint_error);
+
+Agreed.  And this reminds me of another case: the case expression.
+In a case statement, if you're unable to obey the full coverage rules, you can
+say "when others => raise ...;".  Raise expressions allow this to be done in
+case expressions.  I have already run into this in my own coding (using case
+exprs, but before raise exprs were implemented).
+
+Which reminds me of the meta-reminder:  If I say, "I can't think of any reason
+to do X other than Y", that doesn't prove that "there is no reason to do X other
+than Y".  It could just as well be that I lack imagination.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, February 11, 2013  7:57 AM
+
+> I think they are generally useful, it seems quite useful to be able to
+> translate
+[...]
+So do I. I have nothing against raise expressions, it's Randy who assumed that. And I don't see anything in alternative#4 that contradicts your view of how predicates and membership tests relate.
+
+> as for the special behavior in membership, I think this is reasonable
+> basically the feeling is
+>
+> if expression in B then
+>
+> means if the value of the expression meets all the criteria for being
+> in B, i.e. that the test for membership is true, then the IN returns
+> True, otherwise the IN returns False.
+
+Yes, sure, but that's where the devil is in the details. If an exception is
+raised anywhere else in the evaluation of the predicate (or even in the
+evaluation of the message of the raise exception), then it is propagated, it
+does not make the predicate false. That's what I find weird: the AI says "well,
+when we say "raise" in that context, we don't really mean "raise", we just
+indicate the exception associated with the failure of the predicate.
+
+Moreover, if you have a complicated expression in your predicate and want to
+make it simpler by moving parts of it into an expression function, the "raise"
+will return to its regular meaning, and the predicate won't be usable in
+membership tests. I'm afraid this will cause a lot of surprises for casual
+users.
+
+Here is my line of reasoning:
+The need is to indicate the failing of a predicate, and this is different from a
+regular exception (I considered adding a "failed" expression, but it didn't seem
+to go anywhere). The less disruptive solution I found was to have a special
+exception to indicate failure, and Assert_Error seemed perfectly fit for that.
+That made a simple rule: in a predicate, if Assert_Error is raised, the
+predicate fails; if any other exception is raised, it is propagated normally.
+
+The only drawback with this approach is that you still can't chose the
+exception. Hence, by attaching an (extra) Exception_ID to the occurrence, you
+can  fix that. It requires two Exception_ID in the exception occurrence
+structure instead of one, which does not look like a big deal.
+
+A typical call sequence would be (assuming you can have an exception handler for
+an expression, just to make it simpler to read):
+
+For a predicate:
+begin
+   if not <predicate expression> then
+      raise Assert_Error;
+   end if;
+exception
+   when Occur: Assert_Error =>
+      raise Secondary_Exception (Occur) with Exception_Message (Occur); end;
+
+For a membership test:
+begin
+   <predicate expression>
+exception
+   when Assert_Error =>
+      False;
+end;
+
+(Yes, I forgot to mention the function Secondary_Exception in my previous
+message)
+
+This way, the decision of what to make with a failed predicate is at the proper
+place: on the caller's side.
+
+--
+
+Note that I can see other cases where this feature can be useful.
+Imagine you have a rule to always report the raising of an exception by having a
+call to a logging procedure in every handler in every subprogram (Eurocontrol
+has something like that). You get a lot of cascading messages as you go down the
+call stack. But the first logging procedure can raise a "Failure" exception
+(which is not logged) with the original exception attached. This way, only the
+first subprogram logs the exception, and the bottom of stack of calls can
+resurect the original exception.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  8:54 AM
+
+> Moreover, if you have a complicated expression in your predicate and
+> want to make it simpler by moving parts of it into an expression
+> function, the "raise" will return to its regular meaning, and the
+> predicate won't be usable in membership tests. I'm afraid this will
+> cause a lot of surprises for casual users.
+
+I agree this is odd (see my earlier messages). I doubt it will cause a lot of
+surprises for casual users in practice, since I expect most predicates to be
+pretty simple!
+
+> Here is my line of reasoning:
+> The need is to indicate the failing of a predicate, and this is
+> different from a regular exception (I considered adding a "failed"
+> expression, but it didn't seem to go anywhere). The less disruptive
+> solution I found was to have a special exception to indicate failure,
+> and Assert_Error seemed perfectly fit for that. That made a simple rule:
+> in a predicate, if Assert_Error is raised, the predicate fails; if any
+> other exception is raised, it is propagated normally.
+>
+> The only drawback with this approach is that you still can't chose the
+> exception. Hence, by attaching an (extra) Exception_ID to the
+> occurrence, you can  fix that. It requires two Exception_ID in the
+> exception occurrence structure instead of one, which does not look
+> like a big deal.
+
+A fairly big deal, because this structure is pervasive across tools (e.g. the
+debugger), but doable (certainly more work than the current AI!)
+
+But an interesting idea indeed!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 11, 2013  11:30 AM
+
+> Yes, sure, but that's where the devil is in the details. If an
+> exception is raised anywhere else in the evaluation of the predicate
+> (or even in the evaluation of the message of the raise exception),
+> then it is propagated, it does not make the predicate false. That's
+> what I find
+> weird: the AI says "well, when we say "raise" in that context, we
+> don't really mean "raise", we just indicate the exception associated
+> with the failure of the predicate.
+
+Yes, it's a little weird, but it's the least error prone of all the
+alternatives.  If "raise" always raises, then there's a gotcha -- "in" and
+'Valid go around raising exceptions for no good reason, which is a surprise.
+
+The other alternative is that exceptions propagating from callees get turned
+into "return False".  I'm opposed to that because it hides bugs. Also, inserting
+implicit exception handlers seems heavy, and confuses debuggers.
+
+> Moreover, if you have a complicated expression in your predicate and
+> want to make it simpler by moving parts of it into an expression
+> function, the "raise" will return to its regular meaning, and the
+> predicate won't be usable in membership tests. I'm afraid this will
+> cause a lot of surprises for casual users.
+
+Yes, if you want to encapsulate a predicate in a function, you must learn to NOT
+encapsulate the "or else raise ..." part.
+
+> Here is my line of reasoning:
+> The need is to indicate the failing of a predicate, ...
+
+Well, there are two ways a predicate can fail:  It can be False, or some
+constituent can raise an exception.  The former case should return False for
+'in'.  The latter case is likely a bug, and should always raise.
+
+I consider "Predicate => X > 0 or else raise Something"
+to be the FORMER case, conceptually.  It's exactly the same as "Predicate => X >
+0", except to override Assertion_Error.
+
+"Predicate => X / Y" (where Y happens to be zero) is cleaerly the LATTER case --
+divide by zero shouldn't get turned into "return False". The same applies to
+"Predicate => F(X)", where F fails a pre/postcondition or some internal pragma
+Assert, or calls a procedure that fails a postcondition, or...
+
+>...and this is
+> different from a regular exception (I considered adding a "failed"
+> expression, but it didn't seem to go anywhere). The less disruptive
+>solution I found was to have a special exception to indicate failure,
+>and Assert_Error seemed perfectly fit for that. That made a simple rule:
+> in a predicate, if Assert_Error is raised, the predicate fails; if any
+>other exception is raised, it is propagated normally.
+>
+> The only drawback with this approach is that you still can't chose the
+> exception. Hence, by attaching an (extra) Exception_ID to the
+> occurrence, you can  fix that. It requires two Exception_ID in the
+> exception occurrence structure instead of one, which does not look
+> like a big deal.
+>
+> A typical call sequence would be (assuming you can have an exception
+> handler for an expression, just to make it simpler to read):
+>
+> For a predicate:
+> begin
+>    if not <predicate expression> then
+>       raise Assert_Error;
+>    end if;
+> exception
+>    when Occur: Assert_Error =>
+>       raise Secondary_Exception (Occur) with Exception_Message
+> (Occur); end;
+>
+> For a membership test:
+> begin
+>    <predicate expression>
+> exception
+>    when Assert_Error =>
+>       False;
+> end;
+>
+> (Yes, I forgot to mention the function Secondary_Exception in my
+> previous message)
+
+Without wording, I'm not sure I fully understand the above, but it sure seems
+like a lot of mechanism -- rather more complicated than the solution agreed upon
+in Boston.
+
+And it is a variation on the schemes that hide bugs; that seems unreasonable to
+me.
+
+> This way, the decision of what to make with a failed predicate is at
+> the proper place: on the caller's side.
+
+I don't understand what you mean by that.  The decision of what to do about a
+failed predicate lies with us, the language designers. The programmer has no
+control over these rules, neither at caller's or callee's side.
+
+> Note that I can see other cases where this feature can be useful.
+> Imagine you have a rule to always report the raising of an exception
+> by having a call to a logging procedure in every handler in every
+> subprogram (Eurocontrol has something like that). You get a lot of
+> cascading messages as you go down the call stack. But the first
+> logging procedure can raise a "Failure" exception (which is not
+> logged) with the original exception attached. This way, only the first
+> subprogram logs the exception, and the bottom of stack of calls can
+> resurect the original exception.
+
+Well, that's one of the many things one could do if exceptions were objects, as
+they should be, and as they are in most other languages that have exceptions.
+But we lost that battle in Ada 9X.
+
+J.P., I really think you're letting "perfect" be the enemy of "good enough".  I
+understand why you're uncomfortable with the solution you called "weird".  It is
+indeed imperfect. But now we're going around in circles searching for a better
+solution that does not exist.
+
+Other solutions either hide bugs, or have even worse "weirdness"
+for "in" and 'Valid.
+
+Therefore, my suggestion is to withdraw your "No" vote (change it to "abstain").
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 11, 2013  11:41 AM
+
+> Therefore, my suggestion is to withdraw your "No" vote (change it to
+> "abstain").
+
+By the way, I don't much like the rule that says a single "No"
+vote has veto power in letter ballots.  (I'd prefer "two No's" or "three No's".)
+
+But anyway, there is no such veto power in meetings, so this rule only serves to
+delay things.  Unless of course you can convince someone to change their mind;
+in that case it does make sense to defer the decision to the next meeting.
+
+But I haven't seen that, yet.  If anybody is convinced by J.P. that there is a
+better solution than the one in the AI, I suggest they should speak up!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  11:50 AM
+
+> But I haven't seen that, yet.  If anybody is convinced by J.P. that
+> there is a better solution than the one in the AI, I suggest they
+> should speak up!
+
+I do like the fact that JPR's solution avoids this nasty abstraction glitch
+(raise expression means something different if abstracted into a function).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 11, 2013 12:19 PM
+
+Yes, but it introduces the "hide bugs" problem (among other things), which seems
+far worse to me.
+
+If you're not prepared to argue that the "abstraction glitch" is so bad that
+hiding bugs (and other things) is acceptable, then I don't think you can support
+JP's proposal.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, February 11, 2013 12:32 PM
+
+My proposal doesn't "hide bugs". If you raise Assertion_Error, you signal a
+failure of the predicate. If you raise anything else, it propagates. The
+difference looks clear to me.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 11, 2013 12:45 PM
+
+> > Yes, but it introduces the "hide bugs" problem (among other things),
+> > which seems far worse to me.
+> My proposal doesn't "hide bugs".
+
+It does hide bugs.  Consider a type T with a predicate that calls function F.  F
+calls procedure P, which calls Q, which calls R.  Now suppose R fails its
+postcondition.  That's a bug.  Failing a postcondition is (almost?) always a
+bug.  Your proposal, if I understand it correctly, hides that bug -- that is,
+when somebody says "if X in T then", instead of raising Assertion_Error as it
+should, it silently returns False from the 'in'.
+
+(Sorry if I have misunderstood your proposal!)
+
+>... If you raise Assertion_Error, you
+> signal a failure of the predicate. If you raise anything else, it
+>propagates. The difference looks clear to me.
+
+Not at all.  Assertion_Error almost always indicates a bug.
+
+In the above example, R doesn't know it was called (indirectly!) from a
+predicate.  A failure in R does not and should not mean "If I was called from an
+'in', then I want that 'in' to be False." That would be a huge hole in the
+abstraction.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  1:10 PM
+
+>> Yes, but it introduces the "hide bugs" problem (among other things),
+>> which seems far worse to me.
+> My proposal doesn't "hide bugs". If you raise Assertion_Error, you
+> signal a failure of the predicate. If you raise anything else, it
+> propagates. The difference looks clear to me.
+
+Well I think the hide bugs thing comes from the scenario where you call a
+screwed up function, which fails an assertion, and the failure is hidden by a
+membership test failing, swalling up the assert_error.
+
+This is a real issue I would say!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  1:12 PM
+
+I am convinced by Bob's reargument of his position, and withdraw any feeling of
+support for the JPR alternative.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, February 11, 2013  1:26 PM
+
+> I have nothing against raise expressions, just to the weird notion
+> that their effect depends on the context in which they are used -
+> including the effect that sometimes writing "raise" means "return
+> false".
+
+I am very sympathetic. I don't think anyone ever argued that this is elegant;
+only that it was the best of the alternatives that were identified.
+
+In particular, there is a consensus (which I agree with) that implicitly
+wrapping a "when others" exception handler around a membership test (or around
+the predicate-evaluation part of a membership test) is a bad idea because of
+bug-hiding problems.
+
+If I understand your proposal, its merit depends (at least in a
+necessary-but-not-sufficient way) on whether the reduction in bug hiding
+associated with wrapping only a "when Assertion_Error" exception handler
+(instead of a "when others =>") reduces the bug hiding enough to make this
+proposal more palatable than the current "raise sometimes means return false"
+wart.
+
+I agree with Bob that this is still too much bug hiding; it is better than the
+"when others ="" proposal, but still not good enough.
+
+This is a strong statement because (like you) I strongly dislike changing the
+meaning of a raise expression by moving it from a predicate expression into a
+function.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  1:34 PM
+
+Add a new exception Predicate_Error
+used to indicate that a predicate is failing.
+
+The exception gets changed to
+
+   Assert_Error if it is signalled within a normal predicate test.
+
+   return False if it is signalled within a membership
+
+And then we rig up some way of signalling some other exception (if this is
+really needed for predicates, I am not convinced, we do need it for
+preconditions and postconditions, but I am not that convinced we need it for
+predicates).
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, February 11, 2013  1:52 PM
+
+What if we treated them as two unrelated exceptions except for a rule that a
+handler for Assertion_Error which lacks an explicit handler for Predicate_Error
+also handles Predicate_Error?
+
+Membership tests could then have an implicit "when Predicate_Error"
+handler.
+
+One could still construct examples where this leads to bug hiding, but this
+becomes less likely.
+
+One could think of Predicate_Error as a "flavor" of Assertion_Error (I think the
+Apex compiler supports this idea of "flavored" exceptions - we could go
+whole-hog and add Apex-style flavored exceptions to the language, but that seems
+like overkill).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 11, 2013  5:06 PM
+
+> > If everybody else is perfectly happy with AI12-0054, I can change my
+> > vote to avoid blocking the process.
+>
+> I think that would be best.  It's not that everybody is "perfectly
+> happy".  I think it's the best solution, not perfect.
+> ...
+
+The above got delivered way late, which explains why you didn't understand what I was talking about when I said "hide bugs".
+I hope it's clear now what I meant.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 11, 2013  5:26 PM
+
+> So here is a refeinment of JPR's idea
+>
+> Add a new exception Predicate_Error
+> used to indicate that a predicate is failing.
+>
+> The exception gets changed to
+>
+>    Assert_Error if it is signalled within a normal predicate test.
+>
+>    return False if it is signalled within a membership
+
+OK, that fixes my "hide bugs" complaint, I think.
+
+> And then we rig up some way of signalling some other exception
+
+There's the rub.  "Rig up some way?"  Well, we already have a way, which is
+raise expressions.  I wouldn't want to have a different way for preconditions
+versus predicates.
+
+I think the idea that a raise expression that is sitting right there
+(statically) in the text of a predicate is different from a raise exp in some
+callee,, is reasonable.  I admit this idea takes some getting used to.  ;-)
+
+> (if this is really needed for predicates, I am not convinced, we do
+> need it for preconditions and postconditions, but I am not that
+> convinced we need it for predicates).
+
+It's most important for preconditions, where the client might care what
+exception is raised.
+
+But (as I've said before) I've found that it's very useful to encode what might
+be preconditions as predicates:
+
+    procedure P(X : T);
+    procedure Q(X : T);
+    procedure R(X : T);
+
+P, Q, and R all share the same "precondition" -- that X must be in subtype T,
+which includes the predicate of T.
+
+Therefore, I think it's important that predicates, as well as preconditions,
+have the capability of controlling which exception gets raised on failure.
+
+Think about:
+
+    function First_Element (X : Non_Empty_List) return Element;
+
+We might want that to raise Empty_List_Error if X is empty.
+But we want "X in Non_Empty_List" to return True or False (absent some bugs in
+the body of Is_Empty).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  5:35 PM
+
+>> I think they are generally useful, it seems quite useful to be able
+>> to translate
+[...]
+>So do I. I have nothing against raise expressions, it's Randy who
+>assumed that.
+>And I don't see anything in alternative#4 that contradicts your view of
+>how predicates and membership tests relate.
+
+You said that we needed to reconsider how we change the exception in assertion
+expressions, suggesting using a different alternative than raise_exceptions. It
+was hard for me to imagine how you could support raise_expressions without using
+them for their defining purpose. I wouldn't think we'd want two ways to do this.
+
+...
+> A typical call sequence would be (assuming you can have an exception
+> handler for an expression, just to make it simpler to read):
+>
+> For a predicate:
+> begin
+>    if not <predicate expression> then
+>       raise Assert_Error;
+>    end if;
+> exception
+>    when Occur: Assert_Error =>
+>       raise Secondary_Exception (Occur) with Exception_Message (Occur);
+> end;
+
+This would be far too expensive for any implementation that does not have
+zero-cost exeception handling. (Including implementations that use target
+exceptions, as Windows has.) I think it is critical that predicate checking be
+fast enough (for reasonable expressions) that there is little performance need
+to Ignore them (in the same way that there is little performance need to
+Suppress constraint checks).
+
+Perhaps there is some way to work around this expense without changing the
+overall exception mechanism (the ideas that I have are limited and require
+wide-spread use of classification aspects on functions), but in the absense of
+such an idea this is not acceptable.
+
+(The "hide bugs" issue of course is related to this; any time you have a general
+exception handler, you have the risk of handling an exception not intended for
+this purpose.)
+
+> For a membership test:
+> begin
+>    <predicate expression>
+> exception
+>    when Assert_Error =>
+>       False;
+> end;
+
+I'm somewhat less concerned about the cost here (memberships are rather rare in
+my code), but the bug hiding remains.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 11, 2013  5:38 PM
+
+> What if we treated them as two unrelated exceptions except for a rule
+> that a handler for Assertion_Error which lacks an explicit handler for
+> Predicate_Error also handles Predicate_Error?
+>
+> Membership tests could then have an implicit "when Predicate_Error"
+> handler.
+
+The above seems at least as kludgy as the rules agreed to in Boston.
+I mean, that's a pretty "magical" exception you just invented.
+
+> One could still construct examples where this leads to bug hiding, but
+> this becomes less likely.
+
+I'm not convinced it's less likely enough.  There are predicate checks all over
+the place.  Any one of those might raise Predicate_Error, which would be a bug,
+and would be hidden in subtle cases.
+
+> One could think of Predicate_Error as a "flavor" of Assertion_Error (I
+> think the Apex compiler supports this idea of "flavored"
+> exceptions - we could go whole-hog and add Apex-style flavored
+> exceptions to the language, but that seems like overkill).
+
+Well, if we did exceptions right, then an exception would just be an object of
+type Exception'Class, whose 'Tag indicates which particular type of exception it
+is.  I've got no problem with "type Predicate_Error is new Assertion_Error".
+But that ain't gonna happen, and wouldn't really solve the current issue anyway,
+IMHO.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  5:42 PM
+
+...
+> And then we rig up some way of signalling some other exception (if
+> this is really needed for predicates, I am not convinced, we do need
+> it for preconditions and postconditions, but I am not that convinced
+> we need it for predicates).
+
+We surely need this for predicates, otherwise one has to duplicate the predicate
+as a precondition on many common subprograms.
+
+As I suggested the other day:
+
+    subtype Read_File_Type is File_Type
+       with Dynamic_Predicate =>
+          (Is_Open (Read_File_Type) or else raise Status_Error) and then
+          (Mode(Read_File_Type) /= Out_File or else raise Mode_Error with "Cannot read " & Name(Read_File_Type);
+
+for Text_IO; then use this subtype as the parameter subtype for all of the Get
+and Get_Line routines. This eliminates having to duplicate this complex
+condition on every Get subprogram.
+
+Some of us (like Bob) are going to use this sort of construction a lot. We don't
+want Predicates to be a second-class citizen in this regard.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  5:48 PM
+
+> > So here is a refeinment of JPR's idea
+> >
+> > Add a new exception Predicate_Error
+> > used to indicate that a predicate is failing.
+> >
+> > The exception gets changed to
+> >
+> >    Assert_Error if it is signalled within a normal predicate test.
+> >
+> >    return False if it is signalled within a membership
+>
+> OK, that fixes my "hide bugs" complaint, I think.
+
+Does it? If you write a lot of your preconditions as predicates, predicate
+failures could happen inside of nested calls in a predicate expression. And
+those failures still represent bugs, not "failures". And we'd still have to have
+extra exception handlers in predicate checks, which is too expensive for a
+marginal case.
+
+OTOH, if you *don't* handle propogations from nested calls (which would be more
+efficient), then this is just a more complex description of the standard
+semantics. What have we gained??
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, February 11, 2013  5:57 PM
+
+> Does it?
+
+No, I guess you're right -- it doesn't quite solve the "hide bugs"
+problem, as you explain below (and I think I said something similar in my
+response to Steve).
+
+>... If you write a lot of your preconditions as predicates, predicate
+>failures could happen inside of nested calls in a predicate expression.
+>And  those failures still represent bugs, not "failures". And we'd
+>still have to  have extra exception handlers in predicate checks, which
+>is too expensive  for a marginal case.
+>
+> OTOH, if you *don't* handle propogations from nested calls (which
+> would be more efficient), then this is just a more complex description
+> of the standard semantics. What have we gained??
+
+I'm thinking that any approach that involves automatic wrapping with exception
+handlers is a wrong approach.  As always, I could be wrong.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  6:00 PM
+
+> So here is a refeinment of JPR's idea
+>
+> Add a new exception Predicate_Error
+> used to indicate that a predicate is failing.
+
+It strikes me here that we're going about this the wrong way. This is not about
+an exception at all. The issue is to specify when a predicate fails and what
+happens. The use of a raise_expression for that is uncomfortable, because it
+doesn't mean raise an exception when it appears in a predicate.
+
+So perhaps we should consider directly saying that an assertion expression has
+failed.
+
+One way to do that would be to have an Ada.Exceptions function to that effect:
+
+     function Failed (E : Exception_Id := Assertion_Error'Identity;
+                      Msg : String := "") return Boolean;
+
+Then, the semantics of a call of this routine would be as described in
+AI12-0054-1. Raise_expressions then would only raise.
+
+Even better would be to have a "failed_expression" (which would need a new
+keyword, I think):
+
+     failed_expression ::= failed exception_name [with string_expression];
+
+A failed_expression would have the semantics described in AI12-0054-1 for a
+raise_expression. Moreover, it would be illegal to write it outside of an
+assertion expression. So if someone mistakenly wrapped it in a function, the
+function would be illegal. That would eliminate most of the risk of accidentally
+raising exceptions. (And giving a raise_expression in a predicate would give a
+warning, because it almost certainly is not what you meant, perhaps we could
+even require that a-la pragmas.)
+
+The problem with this idea is that it needs a new keyword -- which prevents us
+from using it as a fix to Ada 2012 (new syntax is uncomfortable enough, a new
+keyword is over the top). (I thought about proposing this reusing "abort" or
+"terminate", but I think that would have the same problem of confusion that we
+have with "raise".)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  6:05 PM
+
+...
+> That would eliminate most of the risk of accidentally raising
+> exceptions.
+
+"when you meant to fail the predicate".
+
+I noticed that we keep talking about the predicate "failing". What if we
+elevated that idea to first-class semantics? There seems to be a solution there,
+not sure if it is worth the complexity.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, February 11, 2013  6:07 PM
+
+> But that ain't gonna
+> happen, and wouldn't really solve the current issue anyway, IMHO.
+
+Agreed on both points.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  6:22 PM
+
+A bit too little context here, methinks. Usually I complain about quoting too
+much, but it's possible to quote too little, as well, and this is a classic
+example. What isn't gonna happen?? No clue from the message.
+
+The PST timestamp didn't help (I looked at a bunch of other messages Bob sent
+around 3:40 CST). I had to search my entire ARG mail repository (now approaching
+17000 messages) to find the phrase in question.
+
+In case any one else cares, the full quote above would be:
+
+> Well, if we did exceptions right, then an exception would just be an object
+> of type Exception'Class, whose 'Tag indicates which particular type of exception
+> it is.  I've got no problem with "type Predicate_Error is new Assertion_Error".
+> But that ain't gonna happen, and wouldn't really solve the current issue
+> anyway, IMHO.
+
+And now I know what Steve is agreeing with...
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  7:25 PM
+
+>> So here is a refeinment of JPR's idea
+>>
+>> Add a new exception Predicate_Error
+>> used to indicate that a predicate is failing.
+>>
+>> The exception gets changed to
+>>
+>>     Assert_Error if it is signalled within a normal predicate test.
+>>
+>>     return False if it is signalled within a membership
+>>
+>> And then we rig up some way of signalling some other exception (if
+>> this is really needed for predicates, I am not convinced, we do need
+>> it for preconditions and postconditions, but I am not that convinced
+>> we need it for predicates).
+
+No, that doesn't work! You have to make sure that an inner predicate failure (in
+the middle of evaluating an outer one) is properly signalled and not swallowed.
+The below proposal does not achieve this, my form does.
+
+> What if we treated them as two unrelated exceptions except for a rule
+> that a handler for Assertion_Error which lacks an explicit handler for
+> Predicate_Error also handles Predicate_Error?
+>
+> Membership tests could then have an implicit "when Predicate_Error"
+> handler.
+>
+> One could still construct examples where this leads to bug hiding, but
+> this becomes less likely.
+>
+> One could think of Predicate_Error as a "flavor" of Assertion_Error (I
+> think the Apex compiler supports this idea of "flavored"
+> exceptions - we could go whole-hog and add Apex-style flavored
+> exceptions to the language, but that seems like overkill).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  7:43 PM
+
+> You said that we needed to reconsider how we change the exception in
+> assertion expressions, suggesting using a different alternative than
+> raise_exceptions. It was hard for me to imagine how you could support
+> raise_expressions without using them for their defining purpose. I
+> wouldn't think we'd want two ways to do this.
+
+Please improve your imagination :-)
+
+I find raise expressions a very nice feature, quite independent of the "defining
+purpose", and if that "defining purpose" goes away, I would still support the
+presence of raise expression in the language. After all the "defining purpose"
+of conditional expressions is for assertions, but I have used them FAR more
+often outside assertions.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  7:48 PM
+
+> This would be far too expensive for any implementation that does not
+> have zero-cost exeception handling. (Including implementations that
+> use target exceptions, as Windows has.) I think it is critical that
+> predicate checking be fast enough (for reasonable expressions) that
+> there is little performance need to Ignore them (in the same way that
+> there is little performance need to Suppress constraint checks).
+
+I don't see this! For the case where the exception is raised locally (remember
+that's the ONLY case the AI allows currently), the local exception is a simple
+goto.
+
+And as for implementations which do not have zero cost exception handling (in
+the sense of incurring overhead even if the exception is not raised), that's a
+broken implementation IMO (or one that simply does not care that much about
+efficiency!)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  7:56 PM
+
+OK, making my thought a bit more concrete
+
+We introduce the exception Predicate_Error
+
+We add an aspect Predicate_Exception which says what exception to raise if the
+predicate fails in other than a membership situation.
+
+For the normal ca,se where no exception is explicitly raised, we can just write
+e.g.
+
+     with Predicate => Val > 4,
+          Predicate_Exception => Constraint_Error;
+
+that's equivalent to what we have now as
+
+     with Predicate => Val > 4 or else raise Constraint_Error;
+
+If you write an explicit raise that you want treated as a predicate failure, you
+use Predicate_Exception
+
+     with Predicate => Gunk (Val),
+          Predicate_Exception => Constraint_Error,
+
+where Gunk (Val) either returns False or raises Predicate_Error to make the
+predicate fail, and either of these results in Constraint_Error being raised.
+
+Then if a predicate fails in a membership test (returns False or raises
+Predicate_Exception) then you get no exception, instead the membership test is
+False.
+
+I think this works, allows the flexibility of defining what exception is needed
+with the same granularity, and avoids the bug hiding.
+
+I am not sure I like it :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  8:00 PM
+
+>> OK, that fixes my "hide bugs" complaint, I think.
+>
+> Does it? If you write a lot of your preconditions as predicates,
+> predicate failures could happen inside of nested calls in a predicate
+> expression. And those failures still represent bugs, not "failures".
+> And we'd still have to have extra exception handlers in predicate
+> checks, which is too expensive for a marginal case.
+
+No, you don't hide bugs, if a Predicate_Exception is raised which causes an
+inner predicate check to fail (the bug), then it is converted to and propagated
+as Assertion_Error, which does not cause the outer predicate to fail, but just
+gets propagated, that's the whole point!
+
+The expense argument seems bogus. It's only expensive in the cases which the
+current proposal does not provdie anyway of handling!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  8:03 PM
+
+> > This would be far too expensive for any implementation that does not
+> > have zero-cost exeception handling. (Including implementations that
+> > use target exceptions, as Windows has.) I think it is critical that
+> > predicate checking be fast enough (for reasonable expressions) that
+> > there is little performance need to Ignore them (in the same way
+> > that there is little performance need to Suppress constraint checks).
+>
+> I don't see this! For the case where the exception is raised locally
+> (remember that's the ONLY case the AI allows currently), the local
+> exception is a simple goto.
+
+But the compiler cannot know this. The semantics as J-P proposed (and you seemed
+to be advocating) involved changing any Assertion_Error that propagates (no
+matter from where). Unless the predicate has no function calls at all (rare with
+dynamic predicates), the compiler cannot know whether any such exception will
+propagate, thus it has to provide a handler (and probably one that will never be
+triggered). In the case where there are no function calls, the compiler ought to
+generate the code as described in AI12-0054-1 and never use any exceptions at
+all. So I don't see any benefit to this proposal, just complications.
+
+> And as for implementations which do not have zero cost exception
+> handling (in the sense of incurring overhead even if the exception is
+> not raised), that's a broken implementation IMO (or one that simply
+> does not care that much about efficiency!)
+
+I don't see this at all; matching your environment is important, and the
+efficiency of handlers doesn't matter much because modern code has very few of
+them. (Mostly last chance handlers and debugging aids.) I would think you would
+have a much better case if we were discussing finalization. Anyway, this is
+getting way off topic.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  8:07 PM
+
+Regarding Randy's complaint about too little context, don't people use
+threading? I find far too much context quoted in most ARG messages!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  8:16 PM
+
+> Regarding Randy's complaint about too little context, don't people use
+> threading? I find far too much context quoted in most ARG messages!
+
+I have to post these more-or-less linearly in the AIs (because threads always
+cross-fertilize, we can't have people talking about something that a reader
+doesn't see for 5 pages). Thus I read the mail linearly as well.
+
+I agree that most people quote way too much. But it is possible to quote too
+little, as in this example. And others have complained about too little context
+as well.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  9:53 PM
+
+> I agree that most people quote way too much. But it is possible to
+> quote too little, as in this example. And others have complained about
+> too little context as well.
+
+But if you ever DO have trouble figuring out what something is replying to,
+learn how to use threading to easily answer this question (you complained that
+it was difficult to figure out!)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  8:11 PM
+
+> OK, making my thought a bit more concrete
+>
+> We introduce the exception Predicate_Error
+
+What does this buy us?
+
+> We add an aspect Predicate_Exception which says what exception to
+> raise if the predicate fails in other than a membership situation.
+
+I proposed that on Friday, without the extra exception. I don't see any value to
+the extra exception in this case, because you will simply return False to
+represent failure from any nested routines. And that's enough to get the
+exception you want raised, so long as all failures raise the same exception (or
+you use multiple subtypes, as I explained on Friday).
+
+> For the normal ca,se where no exception is explicitly raised, we can
+> just write e.g.
+>
+>      with Predicate => Val > 4,
+>           Predicate_Exception => Constraint_Error;
+>
+> that's equivalent to what we have now as
+>
+>      with Predicate => Val > 4 or else raise Constraint_Error;
+>
+> If you write an explicit raise that you want treated as a predicate
+> failure, you use Predicate_Exception
+>
+>      with Predicate => Gunk (Val),
+>           Predicate_Exception => Constraint_Error,
+>
+> where Gunk (Val) either returns False or raises Predicate_Error to
+> make the predicate fail, and either of these results in
+> Constraint_Error being raised.
+
+Why would you want a *raise* to be treated as predicate failure? All you have to
+do is return False to get that to happen! It's a lot simpler and doesn't require
+any changes at all.
+
+> Then if a predicate fails in a membership test (returns False or
+> raises Predicate_Exception) then you get no exception, instead the
+> membership test is False.
+>
+> I think this works, allows the flexibility of defining what exception
+> is needed with the same granularity, and avoids the bug hiding.
+>
+> I am not sure I like it :-)
+
+I think the Predicate_Error part is pointless, at least unless you add J-P
+"secondary exception" idea into the mix.
+
+And the other part is what I suggested on Friday, which was rejected (although
+mostly by Bob).
+
+I think this way has been thoroughly explored and nothing new is going to be
+found here. And I now think we're addressing the wrong problem anyway. I think
+we need to directly specify that the (predicate) assertion failed, but so far
+that idea hasn't gained any interest (or brickbats, for that matter).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  8:20 PM
+
+>> I don't see this! For the case where the exception is raised locally
+>> (remember that's the ONLY case the AI allows currently), the local
+>> exception is a simple goto.
+>
+> But the compiler cannot know this. The semantics as J-P proposed (and
+> you seemed to be advocating) involved changing any Assertion_Error
+> that propagates (no matter from where). Unless the predicate has no
+> function calls at all (rare with dynamic predicates), the compiler
+> cannot know whether any such exception will propagate, thus it has to
+> provide a handler (and probably one that will never be triggered). In
+> the case where there are no function calls, the compiler ought to
+> generate the code as described in
+> AI12-0054-1 and never use any exceptions at all. So I don't see any
+> benefit to this proposal, just complications.
+
+There are two cases
+
+a) it's an error. I don't think we worry too much about efficiency in this case,
+   where an exception is being propagated anyway.
+
+b) it's in a membership test. Here, if it is local (the only case that the
+   current proposal allows), you can still convert it into raise false, though
+   note with this new proposal, the local use of raise expression in predicates
+   will be rarer, since it is not needed,
+
+    e.g. if we now write a predicate
+
+       X > 4 or else raise constraint_error;
+
+    we would now write simply
+
+       X > 4
+
+    and the membership test would just fail without any
+    issue of exceptions.
+
+If the exception is not local (a case we can't handle at all in the current
+proposal), then yes, there is an expense in handling the exception int he
+membership case, but that's compared to not allowing it at all.
+
+Note that if we reduce the use of raise expression in predicates, the issue of
+abstraction does not involve exceptions anyway.
+
+As I think about this more, I think it might be just fine to just implement the
+
+    Predicate_Exception => ...
+
+aspect and leave it at that, and abandone the idea of using raise expressions in
+predicates as a way of making predicates fail.
+
+The approach of raise expression is still fine for other assertions, but
+abandoning it for predicates makes a lot of sense to me, and eliminates 90% of
+this discussion!
+
+>> And as for implementations which do not have zero cost exception
+>> handling (in the sense of incurring overhead even if the exception is
+>> not raised), that's a broken implementation IMO (or one that simply
+>> does not care that much about efficiency!)
+>
+> I don't see this at all; matching your environment is important, and
+> the efficiency of handlers doesn't matter much because modern code has
+> very few of them. (Mostly last chance handlers and debugging aids.)
+
+Randy you make all kinds of claims about coding style which strike me as plain
+bizarre. You are cerrtainly entitled to choose your own style, however weird,
+but PLEASE do not try to impose this on the world, or on the language design.
+The claim that exception handlers is rare in modern code is complete nonsense. I
+say this with some certainty since I read code written by lots of different
+people.
+
+So if you choose to implement a compiler which is only acceptably efficient for
+your coding style in which exceptions are not used, fine, it will be fine for
+your use, but I can assure you that it will not be generally fine. We initially
+used non-zero-cost exception handling for all GNAT implementations, and were
+forced to change (we nearly always use ZCX now) by lost of instances of customer
+code that was just too slow with non-ZCX.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  9:35 PM
+
+...
+> Randy you make all kinds of claims about coding style which strike me
+> as plain bizarre. You are cerrtainly entitled to choose your own
+> style, however weird, but PLEASE do not try to impose this on the
+> world, or on the language design. The claim that exception handlers is
+> rare in modern code is complete nonsense. I say this with some
+> certainty since I read code written by lots of different people.
+
+There are lots of people out there that write badly structured code. I don't
+think the language or implementations ought to get bent into knots to make their
+life easier for them.
+
+> So if you choose to implement a compiler which is only acceptably
+> efficient for your coding style in which exceptions are not used,
+> fine, it will be fine for your use, but I can assure you that it will
+> not be generally fine. We initially used non-zero-cost exception
+> handling for all GNAT implementations, and were forced to change (we
+> nearly always use ZCX now) by lost of instances of customer code that
+> was just too slow with non-ZCX.
+
+Obviously, our experiences vary wildly here. Even with our decidedly non-ZCX
+implementation, I can only recall a couple instances where anyone had a
+performance issue with exception handling. And every such case was easily
+fixable by a minor change in the code (usually, moving the handler to a slightly
+wider scope).
+
+Moreover, the majority of these handlers involved last-chance handling that
+would be better dealt with using finalization (which is impossible to forget,
+unlike last-chance handlers), or even something like the At_End that GNAT has.
+Exception handling would be the last choice in these cases in new code.
+
+It's possible that other performance concerns vis-a-vis Janus/Ada masked
+exception performance. Janus/Ada was never designed to have the absolute best
+runtime performance anyway; it was designed primarily to save space, time
+optimization has always been a distant second. So that difference in philosophy
+may have changed the details.
+
+In any case, your experience is wildly different than mine, this is wildly
+off-topic for this list, and it's irrelevant to any reasonable rule that we're
+going to adopt here, so we should either drop the topic or take it private.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  10:20 PM
+
+> There are lots of people out there that write badly structured code. I
+> don't think the language or implementations ought to get bent into
+> knots to make their life easier for them.
+
+But your ideas of well structured code are far too odd for me to let you use
+them as a guiding principle in the language design.
+
+> Obviously, our experiences vary wildly here. Even with our decidedly
+> non-ZCX implementation, I can only recall a couple instances where
+> anyone had a performance issue with exception handling. And every such
+> case was easily fixable by a minor change in the code (usually, moving
+> the handler to a slightly wider scope).
+
+Well making such "minor changes" in systems with millions of lines of code is
+hardly practical.
+
+> Moreover, the majority of these handlers involved last-chance handling
+> that would be better dealt with using finalization (which is
+> impossible to forget, unlike last-chance handlers), or even something
+> like the At_End that GNAT has. Exception handling would be the last
+> choice in these cases in new code.
+
+That's just wrong, the majority of handlers are NOT in this category.
+A grep for raise in the Ada hierarchy of GNAT yields well over 3000 raise
+statements, which are almost all in the business of generating required
+exceptions from these routines, and have nothing to do with "last chance
+handling".
+
+> In any case, your experience is wildly different than mine, this is
+> wildly off-topic for this list, and it's irrelevant to any reasonable
+> rule that we're going to adopt here, so we should either drop the
+> topic or take it private.
+
+Not so wildly off-topic, because you were using your experience to guide the
+language design, and I object to this even if the experience were IMO valid, and
+in this case I don't think the experience is valid. I do not think efficiency
+concerns (and certainly not misguided efficiency concerns) should be our primary
+focus or even *A* primary focus, in addressing this problem
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 11, 2013  10:37 PM
+
+...
+> > In any case, your experience is wildly different than mine, this is
+> > wildly off-topic for this list, and it's irrelevant to any
+> > reasonable rule that we're going to adopt here, so we should either
+> > drop the topic or take it private.
+>
+> Not so wildly off-topic, because you were using your experience to
+> guide the language design, and I object to this even if the experience
+> were IMO valid, and in this case I don't think the experience is
+> valid.
+
+Huh? What else would I use to guide my opinion of the language design? A dart
+board? Experience in using the language has to be one of the most important
+criteria. It doesn't always get the same answer for different people, which is
+expected, but to deny it altogether makes no sense. Especially as you are using
+your experience to claim mine is misguided.
+
+> I do not think
+> efficiency concerns (and certainly not misguided efficiency
+> concerns) should be our primary focus or even *A* primary focus, in
+> addressing this problem
+
+I was mostly concerned about adding overhead in the case where no exception will
+ultimately be raised (especially in assertion checks). Beyond that, I agree with
+you. But in any case it's irrelevant here because any proposal that has this
+performance issue would necessarily also have the "hide-a-bug" property, and I
+can't see us adopting a rule that hides bugs. And none of the serious proposals
+at this point have this property (sorry, J-P).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 12, 2013  7:53 AM
+
+> Huh? What else would I use to guide my opinion of the language design?
+> A dart board? Experience in using the language has to be one of the
+> most important criteria. It doesn't always get the same answer for
+> different people, which is expected, but to deny it altogether makes no sense.
+> Especially as you are using your experience to claim mine is misguided.
+
+I disagree when it comes to style issues, and declarations that such and such a
+feature is rarely used, or used only for some purpose. Next you will be saying
+that no one uses USE clauses!
+
+> I was mostly concerned about adding overhead in the case where no
+> exception will ultimately be raised (especially in assertion checks).
+> Beyond that, I agree with you. But in any case it's irrelevant here
+> because any proposal that has this performance issue would necessarily also have the "hide-a-bug"
+> property, and I can't see us adopting a rule that hides bugs. And none
+> of the serious proposals at this point have this property (sorry, J-P).
+
+Well that's false, the proposal I made for the special exception would
+completely avoid the hide-a-bug issue (because in the case of an inner predicate
+failure Predicate_Error would get transformed at that inner level to
+Assertion_Error, and thus be propagated through a membership test at a higher
+level.
+
+But if we follow the line of thinking that I have, and which I think you mostly
+share, we don't need the capability of dealing with exceptions in membership
+tests at all!
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Monday, February 11, 2013  8:55 PM
+
+>> So here is a refeinment of JPR's idea
+>>
+>> Add a new exception Predicate_Error
+>> used to indicate that a predicate is failing.
+>
+> It strikes me here that we're going about this the wrong way. This is
+> not about an exception at all. The issue is to specify when a
+> predicate fails and what happens. The use of a raise_expression for
+> that is uncomfortable, because it doesn't mean raise an exception when it appears in a predicate.
+
+I agree with Randy. In essence, we'd like the return type of predicates to be
+Boolean_Or_Exception_Id, with values True, False, Assertion_Error, xxx_Error.
+When evaluating the predicate in an iterator, the expected type would be the
+same BOEI, and we would check for Predicate = True. In other cases, where the
+expected type is Boolean, the conversion of Boolean_or_Exception_Id would lead
+to raising the exception for values other than True or False.
+
+This would be very similar to normal expression semantics, where intermediate
+values can be of a larger base type. The only difference is that a value other
+than True or False would not raise Constraint_Error but rather the exception
+indicated by the value of the expression.
+
+In a way, one could argue that exceptions resulting from language defined checks
+are always part of the expression value. The same issue that shows up with raise
+expressions is present with ordinary arithmetic. A compiler may compute (X + Y)
+/ 2 without overflow, even when X + Y would overflow.
+
+Similarly Boolean'Pos (Condition) * (X + Y) is not required to exceptions
+resulting from language defined checks if Condition is False. I don't see raise
+expressions as being fundamentally different. They are just exceptional values
+that will propagate if they occur in a context that isn't ready to handle them.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  9:52 PM
+
+>> We add an aspect Predicate_Exception which says what exception to
+>> raise if the predicate fails in other than a membership situation.
+>
+> I proposed that on Friday, without the extra exception. I don't see
+> any value to the extra exception in this case, because you will simply
+> return False to represent failure from any nested routines. And that's
+> enough to get the exception you want raised, so long as all failures
+> raise the same exception (or you use multiple subtypes, as I explained on Friday).
+
+I agree that the extra exception is not worth the effort and I agree with your
+Friday proposal. See my next message.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 11, 2013  10:15 PM
+
+I hereby change my vote to negative on this AI. I have decided that it's just
+too odd to be tolerable. For example, I find it really awkward that with checks
+on:
+
+      if A = 0 then raise Constraint_Error else (10 / A) = 0 end if;
+
+is not equivalent to
+
+      (10 / A) = 0
+
+which of course raises Constraint_Error if A is zero. And we have the nasty
+abstraction problem that a call to a function that raises an exception (e.g.
+Raise_Exception itself) is not equivalent to a raise expression that raises the
+same exception).
+
+Here is my thinking about what to do
+
+We motivate the use of Raise_Expression's in assertions to change the exception
+raised.
+
+Now we point out that this approach has a problem in the case of a predicate.
+
+We point out that if a predicate is used sometimes in a context where we want an
+exception if the predicate fails, and sometimes in membership tests, the raise
+expression approach to changing the assertion doesn't work because we would get
+an exception in the membership case which is almost certainly not what is
+wanted.
+
+So what's the solution?
+
+Well we have two paths, either is acceptable to me.
+
+Approach A: Do nothing special
+
+   In this case, we note that it really is not a good
+   idea to try to use the same predicated subtype in
+   both these situations:
+
+     a) if the predicate fails, you want an exception
+     other than an assertion_error.
+
+     b) the predicate is used in membership tests
+
+   The solution is to use separate predicated subtypes
+   for the two cases. The one for case a) can use
+   raise expressions as would be done for preconditions.
+   The one for case b) just evaluates to false if the
+   condition is not met.
+
+   [note: I don't think this is so terrible, after
+    all, if you have different subprograms that take
+    a subtype which needs tests and the tests are the
+    same, but you want different exceptions, you will
+    have to declare separate subtypes anyway. I suspect
+    that it is more subprogram specific than subtype
+    specific what exception you want raised]
+
+Approach B, new aspect
+
+   In approach B, we introduce a new aspect
+   Predicate_Exception, applicable to subtypes
+   or to subprograms, which says what exception
+   is to be raised if a predicate fails.
+
+   This Predicate_Exception aspect of course has
+   no role to play in the case of a membership
+   test since no exception is raised when the
+   predicate fails (yields False).
+
+   I think it makes sense to be allowed to apply
+   this to subprograms, since as I said above,
+   I suspect the need for exception substitution
+   really arises more at the subprogram level
+   than the type level.
+
+   This still does not handle the case where
+   different arguments raise different exceptions
+   under different conditions. In such cases, if
+   you want to use predicates, you will have to
+   define special subtypes for the occasion with
+   special predicates.
+
+So in short, I think this needs more thought. I spent quite a bit of effort
+implementing AI-0054 but I still don't like it. In fact the implementation is
+very odd, involving a traversal looking for raise expressions, excluding any
+that are generated by the code generator and not in the original source, and
+replacing them with return Fale. Very odd ....
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, February 12, 2013  8:33 AM
+
+> I hereby change my vote to negative on this AI. I have decided that
+> it's just too odd to be tolerable. For example, I find it really
+> awkward that with checks on:
+>
+>       if A = 0 then raise Constraint_Error else (10 / A) = 0 end if;
+>
+> is not equivalent to
+>
+>       (10 / A) = 0
+>
+> which of course raises Constraint_Error if A is zero.
+
+I think you are confused.  The first line is syntactically wrong.
+I'm guessing you mean it to be an if_expression:
+
+    (if A = 0 then raise Constraint_Error else (10 / A) = 0)
+
+If so, the two are equivalent (with checks on).
+If you meant something else, please clarify.
+
+This AI has no effect on the semantics of any features other than membership
+tests and 'Valid, neither of which appears above.
+
+So if that's your main reason for changing your vote, I suggest you think again.
+
+> Approach A: Do nothing special
+
+> Approach B, new aspect
+
+I could live with either of those.  But I still prefer the AI as written -- I
+guess I've gotten used to the fact that a "raise" that is sitting right there
+textually within a predicate is special.
+
+I'm pretty strongly opposed to anything that hides bugs by swallowing exceptions
+that are NOT "right there textually within...". Ada has a few such cases
+(interrupt handlers and task bodies swallow exceptions), and I consider every
+one of them to be a language design flaw.  I don't want to add more such cases,
+especially when there's no workaround (you can get in the habit of wrapping all
+your interrupt handlers and tasks with "when others" handlers, but you can't
+very well put a "when others" in every procedure that might be called directly
+or indirectly from a predicate!).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, February 12, 2013  9:53 PM
+
+> I think you are confused.
+
+As discussed on the phone, it was I who was confused.
+
+> ...The first line is syntactically wrong.
+> I'm guessing you mean it to be an if_expression:
+>
+>     (if A = 0 then raise Constraint_Error else (10 / A) = 0)
+
+What Robert meant was that if you write:
+
+    ... with Dynamic_Predicate =>
+        (if A = 0 then raise Constraint_Error else (10 / A) = 0)
+
+or:
+
+    ... with Dynamic_Predicate => (10 / A) = 0
+
+and then use 'in', the above two things are not equivalent according to this AI.
+That's true.
+
+> > Approach B, new aspect
+
+Regarding approach B, we could allow something like:
+
+    with Predicate_Failure => raise Some_Error with "some message";
+
+to allow one to give a message.  We would need to figure out what the expected
+type of that thing is, and figure out what, if anything, is meant by:
+
+    with Predicate_Failure => 2 + 2;
+
+The following could also be useful:
+
+    with Predicate_Failure => Note_Error (123, "hello, world);
+
+where Note_Error is a No_Return procedure.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 12, 2013  9:57 AM
+
+>> I hereby change my vote to negative on this AI. I have decided that
+>> it's just too odd to be tolerable. For example, I find it really
+>> awkward that with checks on:
+>>
+>>        if A = 0 then raise Constraint_Error else (10 / A) = 0 end if;
+>>
+>> is not equivalent to
+>>
+>>        (10 / A) = 0
+>>
+>> which of course raises Constraint_Error if A is zero.
+>
+> I think you are confused.  The first line is syntactically wrong.
+> I'm guessing you mean it to be an if_expression:
+>
+>      (if A = 0 then raise Constraint_Error else (10 / A) = 0)
+
+Yes of course I mean it to be an IF expression :-)
+
+> If so, the two are equivalent (with checks on).
+> If you meant something else, please clarify.
+
+No they are NOT! Not in the context of a predicate expression!
+If you use (10 / A) = 0 as a predicate and A is zero this will raise constraint
+error if used in a membership test.
+
+So it is interesting that you say "the two are equivalent", it shows that you
+can be fooled by the odd semantics of AI-0054. What you meant to say was "the
+two are equivalent except when used as a predicate expression for a predicate
+used in a membership test" UGH
+
+> This AI has no effect on the semantics of any features other than
+> membership tests and 'Valid, neither of which appears above.
+
+But could appear above
+
+> So if that's your main reason for changing your vote, I suggest you
+> think again.
+
+No need to think again, your response with the misstatement that those two
+expressions are equivalent, just acts to strengthen my impression that AI-0054
+is a mal-feature.
+
+>> Approach A: Do nothing special
+>
+>> Approach B, new aspect
+>
+> I could live with either of those.  But I still prefer the AI as
+> written -- I guess I've gotten used to the fact that a "raise" that is
+> sitting right there textually within a predicate is special.
+>
+> I'm pretty strongly opposed to anything that hides bugs by swallowing
+> exceptions that are NOT "right there textually within...".
+> Ada has a few such cases (interrupt handlers and task bodies swallow
+> exceptions), and I consider every one of them to be a language design
+> flaw.  I don't want to add more such cases, especially when there's no
+> workaround (you can get in the habit of wrapping all your interrupt
+> handlers and tasks with "when others"
+> handlers, but you can't very well put a "when others" in every
+> procedure that might be called directly or indirectly from a
+> predicate!).
+
+Note that both options a) and b) are completely immune to the swallowing bugs
+option. And AI-0054 is not completely immune in its current form.
+
+Suppose I write a predicate expression
+
+   (10 / A) = 0
+
+Then I notice that if things are really screwed up, A which is never supposed to
+be zero could be zero, so I rewrite the predicate expression as
+
+   (if A = 0 then raise Program_Error
+                    with "Fatal error, A is zero",
+    else (10 / A) = 0)
+
+confident that now if A is ever zero I will get my Program_Error raised.
+
+And lo and behold, AI-0054 results in cancelling out the effect of this check
+and silently hiding the fatal error.
+
+Of course I can fix this by rewriting this as
+
+   (if A = 0 then Fatal ("Fatal error, A is zero"),
+    else (10 / A) = 0)
+
+where I write the appropriate function Fatal that is a No_Return function that
+raises Program_Error. (yes I know we can't give No_Return for a function, but
+that's just a gap!)
+
+That works, but it is odd that I have to do it, and to me this example negates
+claims that AI-0054 ensures against the problem of hiding bugs by swallowing
+exceptions, since AI-0054 is all about swallowing exceptions.
+
+An exception is an error, that's really a fundamental invariant of the Ada
+design, AI-0054 violates this intention.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, February 12, 2013 10:11 AM
+
+> The following could also be useful:
+>
+>     with Predicate_Failure => Note_Error (123, "hello, world);
+>
+> where Note_Error is a No_Return procedure.
+
+<Asbestos suit on>
+
+At some time while thinking about this, I envisionned allowing:
+
+   function F (...) return exception;
+
+It's a No_Return function, whose return type would be any type (since it does
+not return anyway). Could be useful if we go this route.
+
+</Asbestos suit on>
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 12, 2013  10:16 AM
+
+>>> Approach B, new aspect
+>
+> Regarding approach B, we could allow something like:
+>
+>      with Predicate_Failure => raise Some_Error with "some message";
+>
+> to allow one to give a message.  We would need to figure out what the
+> expected type of that thing is
+
+I would think the expected type is Boolean.
+And the value would be ignored???
+
+I like this idea, since I realize an interesting use of raise expressions in
+assertions is something like
+
+    (M > 0 else raise Assertion_Error with msg)
+
+where we use the raise just to add a msg, not to change the exception.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, February 12, 2013  11:20 AM
+
+> ... I think the idea that a raise expression that is sitting right
+> there (statically) in the text of a predicate is different from a
+> raise exp in some callee,, is reasonable.  I admit this idea takes
+> some getting used to.  ;-)
+
+I might point out that predicates are tricky already in that even when your
+assertion policy is "ignore" they are still relevant to membership and 'Valid.
+Clearly the use of a predicate in these two contexts is quite special, and is
+not about raising an exception.
+
+In fact one would expect that if your assertion policy is "ignore" you can be
+confident that the annotations won't be the source of raising of
+Assertion_Error.  That seems like a pretty important guarantee to be able to
+make, especially to those operating in a mission critical environment.  Hence
+for that reason alone, we want the exception associated with a predicate to be
+eliminated in some way when used in a membership or 'Valid test.  The approach
+we have proposed seems like the most reasonable one, namely the predicate
+effectively returns False rather than raising an exception in these contexts.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 12, 2013  12:04 PM
+
+>> ... I think the idea that a raise expression that is sitting right
+>> there (statically) in the text of a predicate is different from a
+>> raise exp in some callee,, is reasonable.  I admit this idea takes
+>> some getting used to.  ;-)
+>
+> I might point out that predicates are tricky already in that even when
+> your assertion policy is "ignore" they are still relevant to
+> membership and 'Valid.  Clearly the use of a predicate in these two
+> contexts is quite special, and is not about raising an exception.
+
+This guarantee does not hold even with AI-0054, since a function called by a
+predicate expression could explicitly raise Assertion_Error, a perfectly
+reasonable thing if what you want is to add a message to the assertion under
+some circumstances but not others.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, February 12, 2013  1:09 PM
+
+But that would be a bad idea, given the use in membership and 'Valid if your
+goal was to communicate that the predicate failed.  If your goal was to
+communicate the predicate expression itself had a bug, then that would be the
+right thing to do, and you would want membership and 'Valid to propagate an
+exception as well.
+
+And of course if you have a policy that turns off assertions, you still want
+Predicates to work properly in membership and 'Valid, and if you were using an
+explicit, but buried, raise those would not work properly.
+
+An explicit raise in the predicate expression itself really seems like the right
+thing given their special significance to Membership and 'Valid.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 12, 2013  2:37 PM
+
+> > The following could also be useful:
+> >
+> >     with Predicate_Failure => Note_Error (123, "hello, world);
+> >
+> > where Note_Error is a No_Return procedure.
+>
+> <Asbestos suit on>
+>
+> At some time while thinking about this, I envisionned allowing:
+>
+>    function F (...) return exception;
+>
+> It's a No_Return function, whose return type would be any type (since
+> it does not return anyway). Could be useful if we go this route.
+>
+> </Asbestos suit on>
+
+Note sure why an asbestos suit is needed. We already have an AI for No_Return
+functions (AI12-0063-1), so there is nothing controversial about that. IMHO, we
+don't need a function that matches any type (98% of these will return Boolean),
+but certainly we can discuss that in the context of that AI.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 12, 2013  2:49 PM
+
+...
+> >>> Approach B, new aspect
+> >
+> > Regarding approach B, we could allow something like:
+> >
+> >      with Predicate_Failure => raise Some_Error with "some message";
+> >
+> > to allow one to give a message.  We would need to figure out what
+> > the expected type of that thing is
+
+I think this just reintroduces the problem. The primary thing that people are
+uncomfortable with is a "raise" that doesn't raise. We still have that here (the
+predicate still fails when used in a membership, only the result is False, not a
+raise).
+
+The other thing people are unconfortable with is the notion that moving some
+text into a function changes the semantics. That is fixed here, because you
+can't move this into a function.
+
+Luckily, we don't need to allow multiple exceptions from a single predicate,
+because using multiple subtypes has no negative effect. So you can split a
+predicate such that one exception is used for each subtype, and still get the
+effect of multiple exceptions being raised.
+
+So this helps one problem but leaves the weird semantics in the other case.
+Definitely an improvement.
+
+I had suggested being more explicit about "failed", but nobody ever responded to
+that idea, even to say they hated it. The basic idea was to using something in
+place of "raise" that clearly indicates failure (which means "raise" in most
+cases, and False in memberships).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 12, 2013  3:01 PM
+
+> I think this just reintroduces the problem. The primary thing that
+> people are uncomfortable with is a "raise" that doesn't raise. We
+> still have that here (the predicate still fails when used in a
+> membership, only the result is False, not a raise).
+
+Oh, I don't think so, the point of the Predicate_Failure is that it is only
+called when the predicate fails and would otherwise raise Assertion_Error. I
+think that's a VERY different matter from AI-0054. For instance there is no
+issue of hiding an exception (we are getting an exception anyway), there is no
+issue of abstraction (you can put the raise in a function if you like).
+
+This is really just identical to the
+
+          with Predicate_Exception => Some_Error
+
+it just allows you to add a message
+
+> I had suggested being more explicit about "failed", but nobody ever
+> responded to that idea, even to say they hated it. The basic idea was
+> to using something in place of "raise" that clearly indicates failure
+> (which means "raise" in most cases, and False in memberships).
+
+That's similar to what JPR suggested, it seems a bit of an over-complication to
+me.
+
+Anyway, clearly this should be discussed at the next meetinG!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 12, 2013  3:11 PM
+
+...
+>That's similar to what JPR suggested, it seems a bit of an over-complication
+>to me.
+
+J-P's suggestion involved multiple exceptions, which makes no sense as there is
+only one (or no) exception involved. I was suggesting indicating failure and an
+optional exception to raise if an exception would be raised. There are
+similarities, I grant, but this problem is all about appearances, not semantics.
+The semantics of what I'm proposing would be exactly as in AI12-0054-1, with the
+exception that a failure would not be allowed outside of an assertion expression
+- so there would be no extra run-time cost.
+
+> Anyway, clearly this should be discussed at the next meetinG!
+
+Agreed. But we need a worked out alternative proposal to discuss - I don't think
+a "blank sheet of paper" would accomplish much. Perhaps Bob would write
+something up based on the Predicate_Failure aspect??
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 12, 2013  3:27 PM
+
+I don 't think anyone is arguing for the Predicate_Failure aspectt at this stage
+(certainly not me, it is absent from my latest proposal).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 12, 2013  3:48 PM
+
+...
+> > Agreed. But we need a worked out alternative proposal to discuss - I
+> > don't think a "blank sheet of paper" would accomplish much. Perhaps
+> > Bob would write something up based on the Predicate_Failure aspect??
+>
+> I don 't think anyone is arguing for the Predicate_Failure aspectt at
+> this stage (certainly not me, it is absent from my latest proposal).
+
+Huh? That's the latest idea I saw:
+
+> Regarding approach B, we could allow something like:
+>
+>       with Predicate_Failure => raise Some_Error with "some message";
+
+To which you replied:
+
+"I like this idea, ..."
+
+And that was what I was responding to. Note the name of the aspect in this
+quote!
+
+I don't think that a solution that can't support a custom message will fly; I
+has suggested using two aspects for this purpose "Predicate_Exception" and
+"Predicate_Message", but Bob's idea is simpler and thus preferred.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 12, 2013  3:54 PM
+
+>> I don 't think anyone is arguing for the Predicate_Failure aspectt at
+>> this stage (certainly not me, it is absent from my latest proposal).
+>
+> Huh? That's the latest idea I saw:
+
+OK, I thought you were referring to the idea of having a eparate Predicate
+exception
+
+>> Regarding approach B, we could allow something like:
+>>
+>>        with Predicate_Failure => raise Some_Error with "some
+>> message";
+>
+> To which you replied:
+>
+> "I like this idea, ..."
+>
+> And that was what I was responding to. Note the name of the aspect in
+> this quote!
+
+OK, fine, no problem!
+
+****************************************************************
