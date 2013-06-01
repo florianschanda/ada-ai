@@ -1,0 +1,465 @@
+!standard 9.3(2)                                  13-05-31    AI12-0070-1/01
+!class binding interpretation
+!status work item 13-05-30
+!status received 13-05-02
+!priority Low
+!difficulty Easy
+!qualifier Error
+!subject 9.3(2) does not work for anonymous access types
+
+!summary
+
+The master of an anonymous access type is defined in 7.6.1 (often via
+3.10.2), and a task created by an allocator for an anonymous access type
+has that master, irregardless of whatever 9.3 says.
+
+!question
+
+9.3(2) says:
+
+    If the task is created by the evaluation of an allocator for a
+    given access type, it depends on each master that includes the
+    elaboration of the declaration of the ultimate ancestor of the
+    given access type.
+
+This rule hasn't changed since the original Ada 95.
+This rule was written when all access types were named, and
+it works fine when an allocator type is a named access type.  But if
+the type of an allocator is an anonymous access type, this rule doesn't
+make any sense. Anonymous access types don't have declarations of their
+own; they are part of some larger declaration. Moreover, we have lots of
+rules that specify what the accessibility (and thus the master) of an
+anonymous access type is. This rule overrides all of that, and would cause
+bizarre effects for access results, stand-alone objects of an anonymous
+acceess type, and access discriminants. Is this intended? (Surely not.)
+
+!recommendation
+
+(See !summary.)
+
+!wording
+
+Alternative 1: (Minimum fix)
+
+Modify 9.3(2):
+
+If the task is created by the evaluation of an allocator for a given access
+type, it depends on each master that includes the [elaboration of the declaration
+of the ultimate ancestor of the given access type]{the master identified by the
+accessibility level of the type}.
+
+Alternative 1: (Bare minimum fix)
+
+Modify 9.3(2):
+
+If the task is created by the evaluation of an allocator for a given {named}
+access type, it depends on each master that includes the elaboration of the
+declaration of the ultimate ancestor of the given access type.
+
+Alternative 3: (Remove redundancy fix - see discussion)
+
+Replace all of 9.3(1-3.1/2) with:
+
+Each task (other than an environment task - see 10.2) depends on one or more
+masters (see 7.6.1). A task depends on the master of the outermost object of
+which it is a part (as determined by the accessibility level of that object -
+see 3.10.2 and 7.6.1), as well as on any master whose execution includes that of
+the master of the outermost object.
+
+[Editor's note: This consists of parts of 9.3(1) and 9.3(3.1/2), and
+gets rid of the rest, which is redundant (or conflicts with other rules). If
+we think the "normal" allocator and object cases ought to be mentioned
+somewhere, we could add some user notes.]
+
+---
+
+Vaguely related fix:
+
+Mark the last sentence of 6.5(5.3/2) redundant.
+
+Add after 3.10.2(13.2/3): [This is immediately after the definition for
+a SAOAAT.]
+
+The accessibility level of the anonymous access subtype defined by
+a return_subtype_indication in an extended_return_statement is
+that of the result subtype of the enclosing function.
+
+[See !discussion for, umm, discussion.]
+
+!discussion
+
+3.10.2(14/3) and its many related paragraphs clearly define the accessibility
+level of an object declared by an allocator; and each accessibility level has
+an associated master. It's clearly the intent that these (complex) rules
+apply to tasks as well as finalization; there were many examples of task
+termination discussed during the crafting of these rules.
+
+So 9.3(2) must at least refer to those rules and not try to invent its own.
+
+Alternative 1 is the minimum fix for the question.
+
+Alternative 2 is an even more minimum fix which depends on the fact that
+9.2(3.1/2) is sufficient to describe the behavior for ALL cases.
+
+However, it would be better to reduce the wording in 9.3(2-3.1/3) to make it
+clear that this is solely determined by the rules given in 3.10.2. Alternative 3
+avoids repeating rules from elsewhere in the standard in favor of very
+simple wording.
+
+Note that we might need to use Alternative 3 anyway. A stand-alone object of
+an anonymous access type (SAOAAT) is an object_declaration. So for something
+like:
+     A : access A_Task_Type := new A_Task_Type;
+both 9.3(2) and 9.3(3) apply! This is sort-of OK (I think both rules ultimately
+identify the same set of masters), but it doesn't suggest a well-crafted set
+of rules. (Alternative 2 also fixes this problem, but seems confusing to me,
+as most readers will think it applies to all allocators, not just those for
+named access types.)
+
+
+A vaguely related point:
+
+The questioner also notes that 6.5(5.3) is the only rule that defines
+the accessibility of something that is not in 3.10.2. A copy of it ought to
+be added to 3.10.2 for completeness, and the original marked redundant.
+
+[Editor's note: We could do this in a presentation AI; I did it here because
+it came up here.]
+
+!ACATS Test
+
+No extra ACATS test is needed (presumably, tests for other objectives try
+such cases, although that might be optimistic).
+
+!ASIS
+
+No ASIS effect.
+
+
+!appendix
+
+!topic 9.3(2) is broken with respect to anonymous access types
+!reference 9.3(2)
+!from Adam Beneschan 13-05-02
+!discussion
+
+This arose out of a recent discussion on comp.lang.ada
+(https://groups.google.com/forum/?hl=en&fromgroups=#!topic/comp.lang.ada/NE-vR1pvgSo).
+
+9.3(2) says:
+
+    If the task is created by the evaluation of an allocator for a
+    given access type, it depends on each master that includes the
+    elaboration of the declaration of the ultimate ancestor of the
+    given access type.
+
+This rule hasn't changed since the original Ada 95, and it's
+essentially the same as the rule in RM83 9.4(2), with "ultimate
+ancestor" added:
+
+    The task designated by a task object that is the object, or a
+    subcomponent of the object, created by the evaluation of an
+    allocator depends on the master that elaborates the corresponding
+    access type definition.
+
+This rule was written when all access types were named, and I believe
+it works fine when an allocator type is a named access type.  But if
+the type of an allocator is an anonymous access type, it's not clear
+how this rule is supposed to apply.  First of all, I don't think
+anonymous access types have "declarations":
+
+    3.1(5): A declaration is a language construct that associates a
+    name with (a view of) an entity.
+
+and this can't apply to anonymous access types since there's no name
+to associate.  I can't find anywhere in 3.10 where it defines what the
+"declaration" of an anonymous access type would be.  But even if we
+were to assume that the "declaration" is a larger declaration that
+contains an access_definition, such as the declaration of a function
+that returns an anonymous access type, it appears that the results are
+not what people expect.
+
+    task type T1 is ...
+
+    function Return_Acc_T1 (N : Integer) return access T1 is
+    begin
+        return T : access T1 do
+            T := new T1;     -- (A)
+        end return;
+    end Return_Acc_T1;
+
+    procedure P ...
+    begin
+        ...
+        declare
+            A1 : array (1 .. 2) of access T1 :=
+                    (Return_Acc_T1(1), Return_Acc_T1(2));
+        begin
+            ...
+        end;
+    end P;
+
+When the tasks of type T1 are allocated at (A), what master do they
+depend on?  9.3(2) says the answer depends on who elaborates the
+*declaration* of the "given access type".  What's the "given access
+type"?  And which declaration does it use?  The one in the function
+declaration, the one in the extended return declaration, or the one in
+the declaration of array A1?  Randy thought the tasks' master is the
+block that declares A1, based on new rules in 3.10.2(10.2ff) that
+change what the "master of a function call" is.  But I don't think
+there's any language in 9.3(2) that makes it clear that the master of
+a function call is relevant.
+
+I believe 9.3(2) needs to be fixed, perhaps by adding "named" to it:
+
+    If the task is created by the evaluation of an allocator for a
+    given {named} access type, it depends on each master that includes
+    the elaboration of the declaration of the ultimate ancestor of the
+    given access type.
+
+and adding another paragraph after:
+
+    If the task is created by the evaluation of an allocator for a
+    given anonymous access type, then:
+    (a) if the anonymous access type is a function result type, or the
+        return_subtype_indication of an extended_return_statement that
+        applies to a function with an anonymous access result type,
+        then the task depends on the master of the function call (and
+        on each enclosing master ... ???)
+    (b) in other cases ... ???  (sorry, I don't know what would be
+        intended)
+
+I'm afraid that a new rule would be pretty complicated, and
+unfortunately probably not provide much benefit.  But it seems to me
+that 9.3(2) just doesn't work in this case, and something needs to be
+done.  If the answer is just to disallow this--to add a rule to 4.8
+that if an allocator's type is anonymous access, its designated type
+may not have a task subcomponent--that wouldn't upset me too much.
+That would force a programmer to make it clear (by using a named
+access type) who is supposed to be the task's master, which is
+probably a good thing.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May  2, 2013  5:30 PM
+
+...
+> 9.3(2) says:
+>
+>     If the task is created by the evaluation of an allocator for a
+>     given access type, it depends on each master that includes the
+>     elaboration of the declaration of the ultimate ancestor of the
+>     given access type.
+>
+> This rule hasn't changed since the original Ada 95,
+...
+> But if the type of an allocator is an anonymous access type, it's not
+> clear how this rule is supposed to apply.
+
+Here, the Dewar rule clearly applies: the standard does not say anything silly,
+even if the literal language does.
+
+Everyone "knows" that the model is that an allocated task belongs to the master
+of the access type. (Let me be clear that I don't think the literal wording
+"master of the access type" is defined, but something similar to it is. Trips
+into the "Heart of Darkness" are not for the faint of heart, and I'm not ready
+to do that right now.)
+
+We have several *pages* of rules that define what the master of an access type
+is, in 7.6.1 and 3.10.2 (you need both to understand it - 3.10.2 defines the
+"accessibility level" of entities, and there is a rule somewhere that says that
+the masters follow the same rule).
+
+9.3(2) should simply say something about depending on the master of the access
+type. Copying all of the rules in 3.10.2 and 7.6.1 is madness. (The current
+wording says "each master", for instance.)
+
+It would be best of all if task waiting was defined in terms of finalization;
+then all of the cruft could be swept away. ("The first step of finalizing a
+master is waiting for any tasks associated with that master."). Indeed, 9.3(5)
+already says this, so I really don't know why 9.3(2, 3, 3.1) says "each master".
+The only one that matters is the one that will do the waiting, the others have
+no effect so why talk about them?
+
+9.3(3.1/2) really defines the intended semantics, for all tasks. Not quite sure
+why we need the other bullets. (A task is an object, whether allocated by a
+allocator, a stand-alone object declaration, or as a component/return
+statement/whatever.)
+
+So I'd strongly suggest deleting 9.3(2-3), merging 9.3(1) and 9.3(3.1/2) into a
+single paragraph. And possibly creating a note that says something like the
+bullets 9.3(2-3).
+
+Of course, the trivial fix would be to just add "named" to 9.3(2) as you
+suggested, and let anonymous access types fall into the "otherwise" bullet
+(9.3(3.1/2)). But I don't see much value to the existing bullets (other than to
+keep me employed by contradicting the rest of the standard :-).
+
+Now, you also could be arguing that the master of some anonymous access type is
+not well-defined (as you know, there are several kinds with completely different
+rules for masters, so bugs are likely). That's possible in some case, but please
+explain that in detail if you think so.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, May  2, 2013  6:11 PM
+
+> It would be best of all if task waiting was defined in terms of
+> finalization; then all of the cruft could be swept away. ("The first
+> step of finalizing a master is waiting for any tasks associated with that master.").
+> Indeed, 9.3(5) already says this, so I really don't know why 9.3(2, 3,
+> 3.1) says "each master". The only one that matters is the one that
+> will do the waiting, the others have no effect so why talk about them?
+
+IIRC, the "each master" wording dates back to Ada 83, and it was necessary then
+(and still is) because you can have a block statement in task body Outer, and
+the block statement is the master of some inner tasks, and the block statement
+has a select-with-terminate for Outer.  So Outer can be ready to terminate (i.e.
+waiting on an open terminate alternative) while it has dependent tasks at
+several nesting levels.
+
+A whole tree of tasks can vanish when some sub-sub-sub task terminates or
+reaches a terminate alt.
+
+I don't know how all this interacts with anonymous access types (which is not my
+favorite feature of Ada!), but I'd be wary of meddling with this wording too
+much.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Thursday, May  2, 2013  6:30 PM
+
+> Now, you also could be arguing that the master of some anonymous
+> access type is not well-defined (as you know, there are several kinds
+> with completely different rules for masters, so bugs are likely).
+> That's possible in some case, but please explain that in detail if you think
+> so.
+
+No, I'm not arguing anything that subtle.  In truth, I haven't been able to keep
+up with the changes in the accessibility level rules and their ramifications.
+
+By the way, I noticed that all accessibility levels for all entities seem to be
+defined in 3.10.2, with one exception: 6.5(5.3), which defines the accessibility
+of anonymous access types in extended returns.  I had trouble finding this at
+first.  Maybe the ARG should consider putting a copy of this rule in 3.10.2, so
+that they're all in one place.  (Based on that rule, and presuming that the
+interpretation you've described is the intended one, it looks like the behavior
+in the original comp.lang.ada example is a compiler bug.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May  2, 2013  6:34 PM
+
+> A whole tree of tasks can vanish when some sub-sub-sub task terminates
+> or reaches a terminate alt.
+
+OK, that makes sense (sort of).
+
+> I don't know how all this interacts with anonymous access types (which
+> is not my favorite feature of Ada!), but I'd be wary of meddling with
+> this wording too much.
+
+I think that 9.3(3.1/3) is actually adequate for describing the master(s) of any
+possible Ada task. Do you agree?
+
+The reason I ask is that there are so many weird cases that we've added in Ada
+2005 and Ada 2012 that fixing up this wording seems like more trouble than it's
+worth. Let's just use the rules for masters declared elsewhere and not have
+not-quite-right rules in other places mucking up the works.
+
+In addition to Adam's original question, I was wondering if a SAOAAT
+(stand-alone object of an anonymous access type) gets the right master as it
+seems that *both* original bullets might apply.
+
+So the less said here, the better. It's tough enough to get the rules right in
+3.10.2 and 7.6.1 without having a copy somewhere else.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May  2, 2013  6:39 PM
+
+> > Now, you also could be arguing that the master of some anonymous
+> > access type is not well-defined (as you know, there are several
+> > kinds with completely different rules for masters, so bugs are likely).
+> > That's possible in some case, but please explain that in detail if
+> > you think so.
+>
+> No, I'm not arguing anything that subtle.  In truth, I haven't been
+> able to keep up with the changes in the accessibility level rules and
+> their ramifications.
+
+Neither has anyone else. :-) I expect this area to be a continuing source of
+merriment for years to come. :-)
+
+> By the way, I noticed that all accessibility levels for all entities
+> seem to be defined in 3.10.2, with one exception: 6.5(5.3), which
+> defines the accessibility of anonymous access types in extended
+> returns.  I had trouble
+> finding this at first.  Maybe the ARG should consider putting a copy
+> of this rule in 3.10.2, so that they're all in one place.
+
+Are you sure that it's the *only one*? If so, I agree with you, but if there are
+others, the case is weakened considerably.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Thursday, May  2, 2013  6:49 PM
+
+> Are you sure that it's the *only one*? If so, I agree with you, but if
+> there are others, the case is weakened considerably.
+
+I think so.  I searched a text version of AARM12 for the phrase "accessibility
+level" and looked for places where it might be defined.  On the other hand, the
+file I searched is about a year out of date, so I should probably try the same
+thing with the most recent version.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Thursday, May  2, 2013  7:05 PM
+
+> IIRC, the "each master" wording dates back to Ada 83, and it was
+> necessary then (and still is) because you can have a block statement
+> in task body Outer, and the block statement is the master of some
+> inner tasks, and the block statement has a select-with-terminate for
+> Outer.  So Outer can be ready to terminate (i.e. waiting on an open
+> terminate alternative) while it has dependent tasks at several nesting
+> levels.
+
+I don't see the phrase "each master" in RM83 9.4(2), but RM83 does say
+this:
+
+"Furthermore, if a task depends on a given master that is in a block statement
+executed by another master, then the task depends also on this other master, in
+an indirect manner ..."
+
+and it goes on for a while.  I'm guessing changing this to "each master that
+includes..." was a nicer way to say the same thing.  But I think you're right
+that the RM does need to make it clear that a master's dependent tasks include
+tasks in a sub-sub-sub-master or whatever.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, May  3, 2013  2:40 AM
+
+> IIRC, the "each master" wording dates back to Ada 83, and it was
+> necessary then (and still is) because you can have a block statement
+> in task body Outer, and the block statement is the master of some
+> inner tasks, and the block statement has a select-with-terminate for
+> Outer.  So Outer can be ready to terminate (i.e. waiting on an open
+> terminate alternative) while it has dependent tasks at several nesting levels.
+
+Right, I remember I was puzzled by this, until I implemented the termination
+algorithm in Ada/ED, and discovered that it was necessary. Don't remember the
+details though, it was a loooong time ago. (If anyone is interested, I could
+investigate into my PhD thesis, if the dust that covers it is not too thick).
+
+****************************************************************
+
