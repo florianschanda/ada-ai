@@ -1,0 +1,471 @@
+!standard 3.2.4(6/3)                              13-05-31    AI12-0071-1/01
+!class binding interpretation
+!status work item 13-05-31
+!status received 13-02-12
+!priority High
+!difficulty Medium
+!qualifier Omission
+!subject Order of evaluation when multiple predicates apply
+
+!summary
+
+If multiple predicates, constraints, and exclusions apply to a subtype when a
+check is required, the predicates, constraints, and exclusions are checked in
+the order that they are declared (the order is unspecified within a single
+declaration and between checks for different subtypes.
+
+!question
+
+3.2.4(6/3) says:
+The predicate of a subtype consists of all predicate specifications
+    that apply, and-ed together; ...
+
+and then we just talk about the evaluation of the predicate.
+
+Should we define the order in which this evaluation is performed? (Yes.)
+
+!recommendation
+
+(See !summary.)
+
+!wording
+
+Add before 3.2.4(30/3):
+
+When the predicate of a subtype is evaluated:
+   * Any associated checks of constraints or exclusions are evaluated first;
+   * Each predicate expression is evaluated in the order that the associated
+     subtypes are declared; if the result is False, no further evaluation
+     of predicates occurs.
+
+AARM To-Be-Honest: This also applies to evaluation in memberships and 'Valid,
+which aren't "checks".
+
+AARM Ramification: Of course, a compiler can always reorder the operations
+if it can prove that doing so doesn't change the result of the program (a
+so-called "as-if" optimization).
+
+[Editor's note: This is hard, because we don't want to specify too
+much. We could try to rewrite 3.2.4(6/3) to combine with "and then" rather
+than "and" (and specify the order). Also be careful if there are interactions
+with AI12-0054-2.
+
+Note that this is a bit more specified than the summary seems to suggest. We
+require the constraints and exclusions to be evaluated first, as they are
+purely additive so there doesn't appear to be much advantage to interleaving
+them (and it makes the wording a lot easier to craft, too). It's also important
+that not all predicate evaluations necessarily include evaluating the
+constraints (the reference parameter check is like that -- but that might be
+a problem -- more thought needed).]
+
+!discussion
+
+The obvious solution is to explicitly state that the order is unspecified.
+That's how other assertions work. However, there are several other factors
+occurring here that don't occur for other assertions.
+
+Most important is the realization that predicates are created by refinement
+(all predicates are evaluated, each possibly raising their own exception
+as proposed in AI12-0054-2). Preconditions, by contrast are defined by
+replacement -- Pre can only be replaced, not modified. (Admittedly, class-wide
+preconditions are different in this sense -- they might in fact have a similar
+problem.)
+
+In particular, the expectation is that the constraints/exclusions/predicates
+of a "parent" subtype hold in the child subtype. If we have:
+
+   subtype Small is Integer range 1..100;
+   subtype Tiny is Small range 1..10;
+
+We expect Tiny to be a subrange of Small (and we'd get Constraint_Error if it
+isn't). We want a similar dynamic to hold for predicates. After all, if we
+didn't want the predicate to hold, we just would make the second subtype
+a subtype of the base type directly.
+
+This is critical if the exception raised by the failure of a
+particular predicate is specified (as in AI12-0054-2). If the parts of
+the declarations are evaluated in a totally arbitrary order, the "wrong"
+exception could be raised. AI12-0054-2 recommends using multiple subtypes
+to have different exceptions raised for different failures (see the
+examples below). If the order is unspecified, then the exact exception raised
+would not be well-defined, which would make it harder to portably convert
+existing interfaces into contract assertions.
+
+Moreover, in extreme cases, it could cause an exception to be raised
+when no exception should be raised at all. Consider:
+
+   subtype Nonnull_Item_Ptr is not null Item_Ptr;
+   subtype Nonempty_Item_Ptr is Nonnull_Item_Ptr
+      with Dynamic_Predicate => Nonempty_Item_Ptr.Count > 0;
+
+   if Ptr in Nonempty_Item_Ptr then -- (1)
+
+The membership at (1) should not raise an exception. However, if the predicate
+was evaluated before the null exclusion, and Ptr was null, the evaluation
+of the predicate as part of the membership would raise Constraint_Error.
+
+Similar effects are possible using just predicates, or using constraints
+and predicates. Another example is (using the routines defined in Text_IO):
+
+   subtype Open_File_Type is File_Type
+      with Dynamic_Predicate => Is_Open (Open_File_Type),
+           Predicate_Failure => raise Status_Error;
+   subtype Read_File_Type is Open_File_Type
+      with Dynamic_Predicate => Mode (Read_File_Type) = In_File;
+           Predicate_Failure => raise Mode_Error with "Can't read file: " & Name (Read_File_Type);
+
+   if My_File in Read_File_Type then -- (2)
+
+If the predicate of Read_File_Type is evaluated first, then (2) would raise
+Status_Error if My_File is not open, whereas the expected result is for the
+membership to return False.
+
+Thus we define that the constraints, exclusions, and predicates are evaluated
+in the order that the subtypes are declared. This has no effect on the
+order of checks when multiple checks are needed (as in a subprogram call with
+multiple parameters); that is still unspecified.
+
+!ACATS Test
+
+An ACATS C-Test should be created using some of the examples given in the mail
+(especially using raise expressions or whatever AI12-0054-2 ends up with).
+
+!ASIS
+
+No ASIS effect.
+
+!appendix
+
+From: Steve Baird
+Sent: Tuesday, February 12, 2013  5:05 PM
+
+We currently have
+    The predicate of a subtype consists of all predicate specifications
+    that apply, and-ed together; ...
+
+and then we just talk about the evaluation of the predicate.
+
+I think we should say something about the order in which this evaluation is
+performed (at the very least, explicitly state that it is unspecified).
+
+If we are going to have exceptions flying out of predicates, we may want this to
+be specified.
+
+----
+
+We have the same problem with type invariants, although this might not be
+obvious.
+
+For type_invariants, we have
+   If a given call requires more than one evaluation of an invariant
+   expression, either for multiple objects of a single type or for
+   multiple types with invariants, the evaluations are performed in an
+   arbitrary order, and if one of them evaluates to False, it is not
+   specified whether the others are evaluated.
+
+but this doesn't address the issue because of the
+   ", either for multiple objects of a single type or for
+    multiple types with invariants"
+wording. One solution (not necessarily the best one) would be to just delete
+that wording. With that change, the order would be explicitly unspecified.
+
+----
+
+For Pre and Post, it is explicitly stated that conditions are evaluated in any
+order.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 12, 2013  6:16 PM
+
+> We currently have
+>     The predicate of a subtype consists of all predicate specifications
+>     that apply, and-ed together; ...
+>
+> and then we just talk about the evaluation of the predicate.
+>
+> I think we should say something about the order in which this
+> evaluation is performed (at the very least, explicitly state that it
+> is unspecified).
+>
+> If we are going to have exceptions flying out of predicates, we may
+> want this to be specified.
+
+It's not just the predicates, but also the order of the predicates, constraints,
+and null exclusions.
+
+Consider:
+
+   subtype Nonnull_Item_Ptr is not null Item_Ptr;
+   subtype Nonempty_Item_Ptr is Nonnull_Item_Ptr
+      with Dynamic_Predicate => Nonempty_Item_Ptr.Count > 0;
+
+With these declarations, we want the null exclusion to be evaluated before the
+predicate. Otherwise, the predicate would raise Constraint_Error for the null
+value, and that would happen even when Nonempty_Item_Ptr is used within a
+membership.
+
+One could create a similar example with a range constraint and a predicate using
+array indexing.
+
+Of course, both a null exclusion and range constraint can be written as a
+predicate, and we would want the semantics to be mostly unchanged:
+
+   subtype Nonnull_Item_Ptr is Item_Ptr
+      with Dynamic_Predicate => Nonnull_Item_Ptr /= null;
+   subtype Nonempty_Item_Ptr is Nonnull_Item_Ptr
+      with Dynamic_Predicate => Nonempty_Item_Ptr.Count > 0;
+
+And finally, if either of these specified an exception to be raised, then the
+order might matter even more.
+
+We could say that the order of evaluation is unspecified, but that would
+essentially require repeating parts of previous predicates in new ones
+(duplicating the logic). And it would make composition of subtypes with
+predicates much harder.
+
+Something like (using the Predicate_Failure aspect previously discussed, but the
+exact form of that doesn't matter to this example):
+
+   subtype Open_File_Type is File_Type
+      with Dynamic_Predicate => Is_Open (Open_File_Type),
+           Predicate_Failure => raise Status_Error;
+   subtype Read_File_Type is Open_File_Type
+      with Dynamic_Predicate => Mode (Read_File_Type) = In_File;
+           Predicate_Failure => raise Mode_Error with "Can't read file: " & Name (Read_File_Type);
+
+seems reasonable (we need both of these subtypes in various routines in
+Text_IO), but Read_File_Type doesn't work right in memberships if the second
+predicate gets evaluated first (the call to Mode would raise Status_Error in
+such a case).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, February 13, 2013  11:02 AM
+
+All of these should be "unspecified order" in my view.
+Any attempt at establishing an order would be more effort than it is worth, as
+far as I am concerned.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 13, 2013  12:28 PM
+
+Hmm, did you look at the examples I posted? You're saying that you don't think
+that users will try to "refine" predicates, that only replacements will work
+reliably. And you're also saying that predicates are limited to raising a single
+exception practically (as you could never tell which one would be tested first).
+And you're eliminating most of the value of AI12-0054-1, because memeberships
+could propagate exceptions if the predicates and constraints and null exclusions
+are evaluated in the "wrong" order.
+
+The combination of all of these considerations makes me think that predicates
+are different than preconditions in this regard. And that makes sense, because
+preconditions are mostly defined by replacement (Pre can only be replaced, not
+modified), while predicates are defined by refinement (all predicates are
+evaluated).
+
+If you think there is something wrong with writing subtypes like:
+
+   subtype Nonnull_Item_Ptr is Item_Ptr
+      with Dynamic_Predicate => Nonnull_Item_Ptr /= null;
+   subtype Nonempty_Item_Ptr is Nonnull_Item_Ptr
+      with Dynamic_Predicate => Nonempty_Item_Ptr.Count > 0;
+
+or
+
+   subtype Open_File_Type is File_Type
+      with Dynamic_Predicate => Is_Open (Open_File_Type),
+           Predicate_Failure => raise Status_Error;
+   subtype Read_File_Type is Open_File_Type
+      with Dynamic_Predicate => Mode (Read_File_Type) = In_File;
+           Predicate_Failure => raise Mode_Error with "Can't read file: " & Name (Read_File_Type);
+
+you need to explain how you would do these instead. Or why you think these are
+wrong. Or something...
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, February 13, 2013  12:38 PM
+
+Your are right that I did not look at these examples in detail.
+Looking at them now, I would agree that you must check the "inner"
+predicates before the "outer" ones.  But for the case where multiple independent
+predicates apply, the order should be unspecified, even if they raise different
+exceptions.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 13, 2013  1:25 PM
+
+>> All of these should be "unspecified order" in my view.
+>> Any attempt at establishing an order would be more effort than it is
+>> worth, as far as I am concerned.
+
+I strongly agree with Tuck on this, any attempt to establish an order would be a
+big mistake, and any use of predicates depending on an order is to be strongly
+discouraged IMO.
+
+> Hmm, did you look at the examples I posted? You're saying that you
+> don't think that users will try to "refine" predicates, that only
+> replacements will work reliably. And you're also saying that
+> predicates are limited to raising a single exception practically (as
+> you could never tell which one would be tested first).
+
+No that seems nonsense, if we have a predicate that says
+
+   raises Is_Odd if odd number is given
+   riases Too_Big if value is greater than 100
+
+I think it's just fine if you get one or other of the exceptions (unspecified)
+
+> And you're eliminating most of the value of
+> AI12-0054-1, because memeberships could propagate exceptions if the
+> predicates and constraints and null exclusions are evaluated in the "wrong"
+> order.
+
+I think that claim is just bogus, and the idea that it eliminates MOST of the
+value is more than that, it is complete nonsense, since most uses will be very
+simple. For instance, 0054 as it stands would be just fine for the math library
+stuff
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 13, 2013  1:28 PM
+
+>> you need to explain how you would do these instead. Or why you think
+>> these are wrong. Or something...
+>
+> Your are right that I did not look at these examples in detail.
+> Looking at them now, I would agree that you must check the "inner"
+> predicates before the "outer" ones.  But for the case where multiple
+> independent predicates apply, the order should be unspecified, even if
+> they raise different exceptions.
+
+Well I can live with that limited ordering rule, though I still don't like it.
+But I don't want to go any further.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, February 13, 2013  2:22 PM
+
+>> If you think there is something wrong with writing subtypes like:
+>>
+>>     subtype Nonnull_Item_Ptr is Item_Ptr
+>>        with Dynamic_Predicate => Nonnull_Item_Ptr /= null;
+>>     subtype Nonempty_Item_Ptr is Nonnull_Item_Ptr
+>>        with Dynamic_Predicate => Nonempty_Item_Ptr.Count > 0;
+>
+> I find it horrible to depend on the ordering here, if you need to
+> protect the .Count reference with a non-null test this should be done
+> in a propert conditional with clear ordering.
+
+Hmm... If I write:
+
+subtype Small is integer range 1..100;
+subtype Tiny is Small range 1..10;
+
+I expect Tiny to be a subrange of Small (and I get constraint_Error if it
+isn't). So, in Nonempty_Item_Ptr, I would expect the predicate for
+Nonull_Item_Ptr to hold. Otherwise, I would have made it a subtype of Item_Ptr.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 13, 2013  3:06 PM
+
+> Well I can live with that limited ordering rule, though I still don't
+> like it. But I don't want to go any further.
+
+No need to go further. The important point is that when someone writes a new
+subtype in terms of an existing one, they're going to expect the existing one
+holds true. It would be confusing if that's not true. Combining the predicates
+with "and then" in that case eliminates the possibility.
+
+In other cases, where there is not textual expectation of a correlation, I don't
+see any need for requiring anything, and agree that we should not. Certainly, we
+don't want to start requiring an order of checks on parameters: I don't see any
+need for that. Predicates are a special case because they can be constructed by
+refinement as well as independently.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, February 13, 2013  3:22 PM
+
+> Hmm... If I write:
+>
+> subtype Small is integer range 1..100; subtype Tiny is Small range
+> 1..10;
+>
+> I expect Tiny to be a subrange of Small (and I get constraint_Error if
+> it isn't). So, in Nonempty_Item_Ptr, I would expect the predicate for
+> Nonull_Item_Ptr to hold. Otherwise, I would have made it a subtype of
+> Item_Ptr.
+
+I agree with J-P.  In fact, I was about to send a similar example.  ;-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 13, 2013  4:57 PM
+
+> Hmm... If I write:
+>
+> subtype Small is integer range 1..100; subtype Tiny is Small range
+> 1..10;
+>
+> I expect Tiny to be a subrange of Small (and I get constraint_Error if
+> it isn't). So, in Nonempty_Item_Ptr, I would expect the predicate for
+> Nonull_Item_Ptr to hold. Otherwise, I would have made it a subtype of
+> Item_Ptr.
+
+Yes, of course all predicates will hold, you are missing the poit, which is
+that if we evaluate the predicares in the "wrong" order then you will get a
+constraint error instead of an assertion error if Nonnull_Item_Ptr is null.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 13, 2013  4:58 PM
+
+> No need to go further. The important point is that when someone writes
+> a new subtype in terms of an existing one, they're going to expect the
+> existing one holds true. It would be confusing if that's not true. Combining the
+> predicates with "and then" in that case   eliminates the possibility.
+
+OK that makes sense to me, I agree (and have changed my mind about this being
+ugly style :-))
+
+> In other cases, where there is not textual expectation of a
+> correlation, I don't see any need for requiring anything, and agree that we should not.
+> Certainly, we don't want to start requiring an order of checks on
+> parameters: I don't see any need for that. Predicates are a special
+> case because they can be constructed by refinement as well as independently.
+
+and I agree with this as well
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 13, 2013  5:06 PM
+
+...
+> Yes, of course all predicates will hold, you are missing the poit,
+> which is that if we evaluate the predicares in the "wrong" order then
+> you will get a constraint error instead of an assertion error if
+> Nonnull_Item_Ptr is null.
+
+And more importantly, that you'll get a Constraint_Error rather than False from
+a membership test if the predicates are evaluated in the wrong order. Which is
+what AI12-0054-1 is trying to avoid; it doesn't help to leave this issue
+unspecified.
+
+****************************************************************
