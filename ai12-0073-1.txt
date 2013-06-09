@@ -1,0 +1,637 @@
+!standard A.18.10(157/3)                              13-06-08    AI12-0073-1/01
+!class binding interpretation
+!status work item 13-06-08
+!status received 13-05-03
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Synchronous Barriers are not allowed with Ravenscar
+
+!summary
+
+Synchronous Barriers are not allowed when profile Ravenscar is in effect.
+
+!question
+
+Ada.Synchronous_Barriers allows for several different implementations. It could
+be directly implemented with target-provided library routines, such as are
+provided by POSIX. Alternatively, the package could be completely written in
+Ada using a protected object approach.
+
+However, a protected object approach would make the barrier objects unusable
+(other than at library-level), as the restriction No_Local_Protected_Objects
+applies when Ravenscar is specified. This poses a portability problem.
+
+Should this portability problem be addressed somehow? (Yes.)
+
+!recommendation
+
+(See !summary.)
+
+!wording
+
+In D.13(6/3), add "No_Dependence => Ada.Synchronous_Barriers," to the list
+of restrictions after "No_Depenence => Ada.Execution_Time.Timers,".
+
+!discussion
+
+Ravenscar is defined in order to support a simple Ada runtime which provides
+behavior that can be analyzed (both of the user programs and of the runtime
+itself). One of the major simplifications is "no queueing" -- that is, no more
+than one task can be blocked at any point in the program. The purpose of
+synchronous barriers is to block multiple tasks and allow simultaneous release;
+as such it is incompatible with the existing Ravenscar rules.
+
+This point was missed by the questioner; if a protected type implementation was
+used, the maximum number of tasks that could use a synchronous barrier in a
+Ravescar program would be 1, which would defeat the purpose of the synchronous
+barrier feature.
+
+It has been argued that analysis of synchronous barriers is easier than that of
+regular queuing, because the tasks are all released at the same time. Even if
+that is true, it is only part of the picture, as the increased complication of
+the Ravenscar runtime remains. In particular, the runtime would now require
+a ready queue, which is not required for the existing Ravenscar runtimes
+(assuming a special mechanism for task activation). Adding such a complication
+would surely make Ravenscar runtimes harder to analyze and verify.
+
+Historically, we have been very reluctant to add new complications to the
+Ravenscar profile (for instance, the request of AI05-0172-1 was rejected). As
+such, we do not allow this new facility to be used in Ravenscar programs. Note
+that this is the most flexible option for the future, as we could compatibly
+adopt some other solution should it prove necessary. Other options do not
+provide this flexiblity.
+
+Other options were considered:
+
+* Doing nothing, which would leave a significant portability problem in
+  Ravenscar. Barriers would work on some implementations and not on others. This
+  is precisely the sort of problem that Ada in general and the Ravenscar profile
+  specifically is supposed prevent, so this option was rejected.
+
+* Mandating that implementations *not* use protected types to implement
+  barriers. However, this would require a substantial change in Ada runtimes
+  that do not have target support for barriers - a simple implementation would
+  not be allowed (even when the Ravenscar profile is not in used).
+
+* Restrict barriers to a single task if declared at library-level with a new
+  restriction for Ravenscar programs. This would eliminate the portability
+  problem, but at the cost of most of the value of the feature.
+
+!ACATS Test
+
+An ACACTS B-Test ought to ensure that barriers are not allowed when profile
+Ravenscar is used.
+
+!ASIS
+
+No ASIS effect.
+
+
+!appendix
+
+!topic       Allowed use of Synchronous-Barriers with Ravenscar
+!reference   Ada 2012 RM D.10.1(7/3)
+!from        Brad Moore 13-05-03
+!keywords    Ravenscar Synchronous Barriers nested scope
+!discussion
+
+The specification of the standard library package, Ada.Synchronous_Barriers
+allows for several different implementations. For instance, the specification
+might get mapped to calls to OS provided library routines, such as are provided
+by POSIX. Alternatively, the package could be completely written in Ada using a
+protected object approach.  The choice of implementation however can affect
+usability with Ravenscar.  For instance, a barrier implemented via POSIX calls
+could be declared at a nested scope, and satisfy the restrictions of the
+Ravenscar profile, however a protected type implementation would not be allowed
+at a nested level by the restriction No_Local_Protected_Objects, RM D.13 (6/3).
+
+This presents a portability issue, if Ravenscar applications written for one
+target cannot be ported to other targets based on the choice of barrier
+implementation.
+
+In fact one particular Ada 2012 implementation currently uses a POSIX based
+implementation for the Linux platform, but uses a protected object
+implementation for the Windows platform.
+
+This raised the question whether it makes sense to allow barriers in Ravenscar
+programs in the first place. If protected objects are not allowed at nested
+levels, one wonders whether the same reasons for disallowing protected objects
+would also apply to barriers. For instance, the use of barriers might affect
+analyzability or schedulability for hard real-time applications.
+
+On the other hand, barriers are useful abstractions which could be needed by
+Ravenscar programs.
+
+For example, an implementation of a Ravenscar compliant, parallel Fast Fourier
+Transform algorithm exists that makes use of barriers to coordinate the work in
+parallel. Without a nested barrier abstraction it might not be possible to
+implement this algorithm in Ravenscar.
+
+One approach would be to rule out the use of Ada.Synchronous_Barriers in
+Ravenscar, which could be achieved easily by adding;
+   No_Dependence => Ada.Synchronous_Barriers to D.13 (6.3)
+
+This would address portability at the expense of usefulness, and could viewed as
+a backwards incompatibility, unless the issue can be fixed as a binding
+interpretation for Ada 2012.
+
+Another approach would be to allow barriers but encourage portability either
+give implementation advice or disallow implementation of
+Ada.Synchronous_Barriers using protected types.
+
+A third approach would be to do nothing, except perhaps add some note probably
+to RN D.10 that mentions this portability issue for Ravenscar.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May  3, 2013  9:02 PM
+
+...
+> One approach would be to rule out the use of Ada.Synchronous_Barriers
+> in Ravenscar, which could be achieved easily by adding;
+>    No_Dependence => Ada.Synchronous_Barriers to D.13 (6.3)
+>
+> This would address portability at the expense of usefulness, and could
+> viewed as a backwards incompatibility, unless the issue can be fixed
+> as a binding interpretation for Ada 2012.
+>
+> Another approach would be to allow barriers but encourage portability
+> either give implementation advice or disallow implementation of
+> Ada.Synchronous_Barriers using protected types.
+>
+> A third approach would be to do nothing, except perhaps add some note
+> probably to RN D.10 that mentions this portability issue for
+> Ravenscar.
+
+If the first approach is no good, I think the second and third make no sense.
+The option of implementing these with protected objects has to exist, as there
+may not be any kernel-level support for the feature. To somehow say that
+implementations are supposed to avoid that makes no sense. Doing nothing makes
+no sense either.
+
+When you say:
+
+> This raised the question whether it makes sense to allow barriers in
+> Ravenscar programs in the first place. If protected objects are not allowed
+> at nested levels, one wonders whether the same reasons for disallowing
+> protected objects would also apply to barriers. For instance, the use of
+> barriers might affect analyzability or schedulability for hard real-time
+> applications.
+
+It seems to me (but I'm not an expert on Ravenscar) that this would have to be
+true. If there is any good reason to disallow nested protected objects, it would
+also have to apply to barriers as these are equivalent in some sense to a
+protected object (in terms of queuing).
+
+That suggests another solution: add a restriction
+No_Nested_Synchronous_Barriers, which would be part of the Ravenscar profile.
+Then there can be no portability problem, because only library level barriers
+would be allowed.
+
+> For example, an implementation of a Ravenscar compliant, parallel Fast Fourier
+> Transform algorithm exists that makes use of barriers to coordinate the work
+> in parallel. Without a nested barrier abstraction it might not be
+> possible to implement this algorithm in Ravenscar.
+
+I can see a need to allow barriers in Ravenscar (thus why one might not want to
+default to the easy option of disallowing them altogether). But I don't see any
+need to use nested barriers; the barrier object could easily be declared at
+library-level. The *uses* would be inside of tasks, but not the object. This is
+the way protected objects have to be used in Ravenscar, I see no reason that
+barriers would be different.
+
+But one thing bothers me here: Ravenscar only allows queuing a single task on a
+protected object ("Max_Entry_Queue_Length => 1"). I don't see how a barrier
+would be very useful with that restriction; the entire point is to allow a set
+of tasks to be released at once. With that restriction, the Barrier_Limit would
+have to be 1 in Ravenscar, otherwise the barrier would violate the basic
+Ravenscar model. To allow queuing of multiple tasks on a barrier and not
+anywhere else in a Ravenscar program seems truly bizarre (what's so special
+about barriers that they allow this special treatment??).
+
+That seems to imply that barriers simply ought to be banned in Ravenscar. The
+fact that some algorithms can't be written that way doesn't matter -- there are
+a LOT of useful patterns that you can't implement in Ravenscar (there are no
+timed entry calls, for instance; I don't know how I could write anything I've
+ever done without those -- blocking forever on a failed task is a great way to
+go directly to deadlock). Ravenscar prioritizes analyzability over usability, so
+I don't think any arguments about usability hold much water. (I personally think
+that more usable tasking subset than Ravenscar would be a good thing, but of
+course none of this is aimed at me anyway, so I'll shut up. :-)
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, May  3, 2013  9:43 PM
+
+> > This raised the question whether it makes sense to allow barriers in
+> > Ravenscar programs in the first place. If protected objects are not allowed
+> > at nested levels, one wonders whether the same reasons for
+> > disallowing protected objects would also apply to barriers. For
+> > instance, the use of barriers might affect analyzability or schedulability
+> > for hard real-time applications.
+>
+> It seems to me (but I'm not an expert on Ravenscar) that this would
+> have to be true. If there is any good reason to disallow nested
+> protected objects, it would also have to apply to barriers as these
+> are equivalent in some sense to a protected object (in terms of
+> queuing).
+
+I'm guessing that probably analyzability and schedulability trumps useability in
+this case, but thats just a guess...
+
+> That suggests another solution: add a restriction
+> No_Nested_Synchronous_Barriers, which would be part of the Ravenscar
+> profile. Then there can be no portability problem, because only
+> library level barriers would be allowed.
+
+Yes, that would be better. We only have an issue with nested barriers, no reason
+to disallow non-nested ones.
+
+> > For example, an implementation of a Ravenscar compliant, parallel
+> > Fast Fourier
+> > Transform algorithm exists that makes use of barriers to coordinate
+> > the work in
+> > parallel. Without a nested barrier abstraction it might not be
+> > possible to
+> > implement this algorithm in Ravenscar.
+>
+> I can see a need to allow barriers in Ravenscar (thus why one might not want
+> to default to the easy option of disallowing them altogether). But I don't
+> see any need to use nested barriers; the barrier object could easily be
+> declared at library-level. The *uses* would be inside of tasks, but not the
+> object. This is the way protected objects have to be used in Ravenscar, I
+> see no reason that barriers would be different.
+
+As it turns out, it's not so easy in this case. In this algorithm,
+a new barrier object gets declared at each level of recursion, and
+is passed into the the two child recursive calls which are handled by two
+different workers. These workers synch on the barrier before
+returning back to the higher level of recursion, so that the higher
+level can be assured that both child workers are done before the
+parent does some sequential processing, and then synchronizes on
+his barrier that was passed in from his parent, and so on. Trying to do
+something like this, involving recursion with a static declaration
+of an array of barriers seems difficult, or at least would introduce
+a lot of contention for the central barrier array from all workers,
+which is avoided in the stack based approach, since at most there are
+only two tasks trying to access the same barrier object. This might
+defeat the benefits of trying to do this in parallel, if the performance
+is affected too much.
+
+> But one thing bothers me here: Ravenscar only allows queuing a single task
+> on a protected object ("Max_Entry_Queue_Length => 1"). I don't see how a
+> barrier would be very useful with that restriction; the entire point is to
+> allow a set of tasks to be released at once. With that restriction, the
+> Barrier_Limit would have to be 1 in Ravenscar, otherwise the barrier would
+> violate the basic Ravenscar model. To allow queuing of multiple tasks on a
+> barrier and not anywhere else in a Ravenscar program seems truly bizarre
+> (what's so special about barriers that they allow this special treatment??).
+
+A good point. This works for the POSIX implementation because its
+outside of the Ada runtime, so any queueing that happens there
+wouldn't be caught by the Ada runtime. I think one of the goals of
+the Ravenscar runtime was to introduce restrictions that allow for
+a simpler Ada runtime. If the underlying OS happens to already provide
+these facilities, then it doesn't really complicate the Ada runtime,
+one might argue, so maybe POSIX barriers would be acceptable.
+
+> That seems to imply that barriers simply ought to be banned in Ravenscar.
+> The fact that some algorithms can't be written that way doesn't matter --
+> there are a LOT of useful patterns that you can't implement in Ravenscar
+> (there are no timed entry calls, for instance; I don't know how I could
+> write anything I've ever done without those -- blocking forever on a failed
+> task is a great way to go directly to deadlock). Ravenscar prioritizes
+> analyzability over usability, so I don't think any arguments about usability
+> hold much water.
+
+Yes, I agree. If analyzability is the most important thing, then its
+makes a strong argument for disallowing barriers, one would think.
+Maybe this is an example of something you just cant do in Ravenscar.
+
+> (I personally think that more usable tasking subset than
+> Ravenscar would be a good thing, but of course none of this is aimed
+> at me anyway, so I'll shut up. :-)
+
+There were some papers at the recent IRTAW that discussed proposals for an
+extended Ravenscar profile, so it seems others are thinking along the same
+lines.
+
+****************************************************************
+
+From: Simon Wright
+Sent: Saturday, May  4, 2013 12:14 AM
+
+> In this algorithm,
+> a new barrier object gets declared at each level of recursion, and is
+> passed into the the two child recursive calls which are handled by two
+> different workers.
+
+I think that "recursion" immediately takes you out of the sort of (analysable,
+hard real time) system that Ravenscar is aimed at.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Saturday, May  4, 2013  1:07 AM
+
+I would agree for unbounded recursion, but I think a case could be made for
+bounded recursion. For example, for FFT, the array of data to be processed could
+be fixed length, and there is a maximum amount of recursion depth that can
+happen in that divide and conquor approach. If you have done the analysis, and
+can guarantee you have sufficient stack space to handle the recursion, then why
+not?
+
+****************************************************************
+
+From: Brad Moore
+Sent: Saturday, May  4, 2013 12:03 PM
+
+For the FFT case at least, it occurred to me that there is another possibility
+that is portable, 100% Ada solution, and no trouble for Ravenscar restrictions.
+
+For the case where only two tasks need to wait on a barrier, (release_threshold
+= 2), it is possible to use a barrier abstraction based on suspension objects.
+
+I tried this out, and it works with the FFT code ...
+
+The barrier is composed of two suspension objects. The two tasks wishing to
+synchronize on the barrier first set the other tasks suspension object to true,
+then waits on its own.
+
+private with Ada.Synchronous_Task_Control;
+
+package Ada.Simple_Synchronous_Barriers is
+    pragma Preelaborate (Simple_Synchronous_Barriers);
+
+    type Synchronous_Barrier is limited private;
+    --  This Barrier has an implicit threshold of two.
+    --  It is based on Suspension objects, and therefore
+    --  should be suitable for Ravenscar.
+
+    type Synch_Id is (Task_A, Task_B);
+
+    procedure Wait_For_Release
+      (The_Barrier : in out Synchronous_Barrier;
+       Id          : Synch_Id;
+       Notified    : out Boolean);
+
+private
+    use Ada;
+
+    type Synchronous_Barrier is limited
+       record
+          Synch_A, Synch_B : Synchronous_Task_Control.Suspension_Object;
+       end record;
+end Ada.Simple_Synchronous_Barriers;
+
+package body Ada.Simple_Synchronous_Barriers is
+
+    procedure Wait_For_Release
+      (The_Barrier : in out Synchronous_Barrier;
+       Id          : Synch_Id;
+       Notified    : out Boolean) is
+    begin
+       case Id is
+          when Task_A =>
+             Synchronous_Task_Control.Set_True (The_Barrier.Synch_B);
+             Synchronous_Task_Control.Suspend_Until_True
+               (The_Barrier.Synch_A);
+             Notified := False;
+
+          when Task_B =>
+             Synchronous_Task_Control.Set_True (The_Barrier.Synch_A);
+             Synchronous_Task_Control.Suspend_Until_True
+                (The_Barrier.Synch_B);
+             Notified := True;
+       end case;
+
+    end Wait_For_Release;
+
+end Ada.Simple_Synchronous_Barriers;
+
+If this is useful, maybe this could become a standard library package for Ada
+2020?
+
+It seems lighter weight than Synchronous_Barriers, and could be used in both
+Ravenscar and Non-Ravenscar when you only need to synchronize two tasks. Or is
+is it too specialized for standardization though?
+
+This doesn't answer the questions about Synchronous_Barriers at nested levels
+though. There are other algorithms where you want to synchronize more than two
+workers. I have another example involving solving matrices (thanks to Jon
+Squire), where a parallel loop involving worker tasks needs to synchronize
+during the loop before proceeding to the next iteration. One might be able to
+more easily get away with declaring the barrier at library level though in that
+case for Ravenscar, since there is only one barrier needed for the loop.
+
+****************************************************************
+
+From: Simon Wright
+Sent: Saturday, May  4, 2013  3:10 PM
+
+> For the FFT case at least, it occurred to me that there is another possibility
+> that is portable, 100% Ada solution, and no trouble for Ravenscar
+> restrictions.
+
+I think you'd need to check with the certifying authority for your application
+that it would be acceptable to implement tasking constructs which would be
+forbidden by Ravenscar using lower-level primitives. I'd expect them to be quite
+reluctant.
+
+And if you don't need to get your application certified, why bother with
+Ravenscar? (you could adopt Ravenscar design principles without pragma Profile
+(Ravenscar)).
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, May  5, 2013 12:25 AM
+
+I presume you are talking about the use of recursion, not the use of suspension
+objects, which I'm pretty sure should generally be OK to use in Ravenscar.
+
+So, for recursion, yes I agree that recursion might be on the list of language
+features that might be flagged by certain certifying authorities. But if the
+product functional requirements demands the use of some high performance
+algorithm that needs parallel recursion, and the code can somehow be shown to be
+safe, it may be possible to obtain acceptance as an exception to the rules. I
+would think it would depend on what is being certified, and to what level, and
+what is the nature of the application. A space probe to mars might not be safety
+critical or security critical, but still costly if the software fails. A Safety
+certification might require quite a different set of restrictions than a
+security certification for example.
+
+Also, I would think there could be customers that do not need or want to incur
+the costs of certification, but otherwise would like a system that uses a
+minimal Ada runtime, and perhaps provides better guarantees against problems
+like priority inversions and deadlocks for example.
+
+If one wanted to adopt Ravenscar Design principals, I would think one would also
+want to specify the Ravenscar Profile, which would help enforce that those
+principals are being followed.
+
+For certain highly restricted conservative system, you are probably right that
+such algorithms wouldn't be considered.
+
+I'm thinking there is likely a middle ground though, where such approaches would
+be acceptable.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, May  5, 2013  1:23 AM
+
+>> It seems to me (but I'm not an expert on Ravenscar) that this would
+>> > have to
+>> > be true. If there is any good reason to disallow nested protected
+>> > objects, it would also have to apply to barriers as these are
+>> > equivalent in some sense to a protected object (in terms of
+>> > queuing).
+> I'm guessing that probably analyzability and schedulability trumps
+> useability in this case, but thats just a guess...
+
+I think a basic principle of Ravenscar is that if you have any queue whose
+length is greater than 1, then the waiting time (implying WCET) becomes
+unbounded.
+
+So I agree that barriers are incompatible with Ravenscar, and I think that
+allowing them was just an omission.
+
+****************************************************************
+
+From: Niklas Holsti
+Sent: Sunday, May  5, 2013  5:14 AM
+
+But a barrier is not really (logically) a queue, since all tasks waiting at the
+barrier are released at the same time. The waiting time for any task is the same
+as if it were the only waiting task (modulo the kernel execution time used to
+update the scheduling state of all the released tasks, which is bounded).
+
+This seems to be quite compatible with WCET and response-time analysis.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Sunday, May  5, 2013  12:02 PM
+
+I agree completely with Nicklas. The reason that the Ravenscar and following
+IRTAW meetings prohibited multiple queues in a PO was that you could not
+reliably predict the release order for the queues. For multiple queue elements,
+the major issue was that the release from the PO queue can be arbitrarily long
+since no task is released from the PO itself until all released objects have
+been processed.
+
+In any case, barriers are a completely different issue - as long as they are not
+implemented by PO's. All tasks are released simultaneously and proceed according
+to the normal priority rules and number of physical processors, so all you need
+to know is the release overheads.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, May  5, 2013  7:09 PM
+
+In other words, we were sold of bill of goods again with this feature. We were
+told that there was no real extra cost to this, because it could always be
+implemented with a PO if the underlying kernel didn't support it directly. I
+doubt that this would have made the cut had that not been true.
+
+But you're now saying that the semantics of a PO are incompatible with
+Ravenscar, while the (abstract) semantics of a barrier are OK with Ravenscar.
+Ergo, we ought to have a requirement that barriers are never implemented with a
+PO. Thus, all implementations will have to expend extensive efforts to implement
+this directly in their kernel even if the underlying primitives don't really
+exist. Moreover, it implies that some targets will not be able to support
+Ravenscar properly (if there is no all-at-once release in  the underlying
+kernel).
+
+But of course, the argument now will be that we have this feature and both the
+language and the implementers will just have to suck it up and pay the price.
+
+This bait-and-switch really pisses me off. It's happened before (most notably
+with build-in-place function returns), and it is going to make me a lot less
+likely to vote for anything new coming out of IRTAW in the future.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, May  6, 2013  8:48 AM
+
+> In other words, we were sold of bill of goods again with this feature.
+> We were told that there was no real extra cost to this, because it
+> could always be implemented with a PO if the underlying kernel didn't
+> support it directly. I doubt that this would have made the cut had that not been true.
+> ...
+
+I think this only applies if you are providing a "Ravenscar runtime." That is
+not something everyone will be providing, and it generally means rewriting major
+parts of the run-time in any case, since it has other implications in terms of
+storage management, etc.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May  6, 2013  8:35 PM
+
+True enough, for a bare machine runtime, it just means more work. But for a
+runtime that runs on top of some real-time kernel (which I'm led to believe is
+most of them), it might not be implementable at all without using protected
+objects. (Barriers are not an optional part of the Annex!) That would mean that
+some kernels would not support Ravenscar 2012 at all, while they would have no
+problem supporting Ravenscar 2005. That seems bad and would prevent some users
+from moving to Ada 2012. I don't think we want such barriers (pun intended).
+
+Also see my other message on this topic.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May  6, 2013  8:48 PM
+
+> > I think a basic principle of Ravenscar is that if you have any queue
+> > whose length is greater than 1, then the waiting time (implying
+> > WCET) becomes unbounded.
+
+I don't really buy this argument. If the WCET of the execution of the entry body
+is T and the maximum size of the queue is N, the worst case waiting time is T*N.
+So long as the queue is bounded (and it's always bounded at least by the number
+of tasks), the WCET is bounded as well and relatively easy to calculate.
+(Remember that we're only talking about protected entries here, so there are no
+contained blocking operations.)
+
+I always thought that the real reason for disallowing queues of greater than
+length 1 is that it ensures that a Ravenscar task *never* needs to be queued. So
+the overhead associating with maintaining queues can be eliminated completely
+from a Ravenscar runtime. That can be significant amount of data and code,
+simplifying the runtime so that it is easier to verify.
+
+> But a barrier is not really (logically) a queue, since all tasks
+> waiting at the barrier are released at the same time.
+> The waiting time for any task is the same as if it were the only
+> waiting task (modulo the kernel execution time used to update the
+> scheduling state of all the released tasks, which is bounded).
+>
+> This seems to be quite compatible with WCET and response-time
+> analysis.
+
+Sure, but as noted above, I don't think that is the real reason for limiting
+queues to length 1. And it seems that allowing barriers with multiple tasks
+would reduce or eliminate that advantage of not having any queues.
+
+Specifically, if multiple tasks become ready at once, some of them are going to
+be ready but not running (unless they're all on separate processors), and that's
+going to require a ready queue or something like it. And this is a dynamic case
+- it can occur anywhere in the program, whereas the only existing such case is
+the initial activation of tasks (which can obviously be handled specially, as
+Ravenscar does not allow nested tasks, so there is only one such point in a
+program).
+
+As such, I still don't think it makes any sense to allow barriers in Ravenscar.
+Perhaps in Ravenscar++ :-), but the restrictions of the original Ravenscar don't
+seem compatible with barriers.
+
+****************************************************************
+
