@@ -1,0 +1,620 @@
+!standard 4.6(56)                                   13-06-09    AI12-0074-1/01
+!standard 6.4.1(12)
+!standard 6.4.1(13.1/3)
+!class binding interpretation
+!status work item 13-06-09
+!status received 13-04-30
+!priority Medium
+!difficulty Hard
+!qualifier Omission
+!subject View conversions and scalar out parameters passed by copy
+
+!summary
+
+** TBD.
+
+!question
+
+6.4.1(12-15) reads in part:
+
+   For an out parameter that is passed by copy, the formal
+   parameter object is created, and:
+     ...
+     For a scalar type that has the Default_Value aspect specified,
+     the formal parameter is initialized from the value of the actual,
+     without checking that the value satisfies any constraint or any
+     predicate
+
+This presupposes that "the value of the actual" exists and is well defined.
+
+How does this work in the case where the actual parameter is a view conversion?
+Consider:
+
+   with text_io; use text_io;
+   procedure bad_conv1 is
+     type Defaulted_Integer is new Integer
+       with Default_Value => 123;
+
+     procedure foo (x : out integer) is begin null; end;
+
+     y : long_long_float := long_long_float'last;
+      -- or, for a variation, leave y uninitialized
+   begin
+    foo (defaulted_integer (y));
+    put_line (long_long_float'image (y));
+   end;
+
+   with text_io; use text_io;
+   procedure bad_conv2 is
+
+     type mod3 is mod 3 with default_value => 0;
+     type mod5 is mod 5;
+
+     procedure foo (xx : out mod3) is begin null; end;
+
+     yy : mod5 := 4;
+   begin
+    foo (mod3 (yy));
+    put_line (mod5'image (yy));
+   end;
+
+In this case, the converted value might not (probably won't) fit into the
+parameter representation. What should happen? (Not sure. :-)
+
+!recommendation
+
+(See !summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+4.6(56) is supposed to cover this, but it isn't close to correct. First, it was
+never updated to include predicates and null exclusions as 6.4.1(13/3) was.
+Second, it doesn't include the rules for scalar types with Default_Values
+specified at all. Third, it doesn't explain what happens if the original value
+does not fit in the representation of the target type (as in the example in the
+question).
+
+Note that the "does not fit" case already exists in Ada, all the way back to Ada
+83. Specifically, if an implementation has multiple representations for access
+types, and the view conversion is going from the larger representation to the
+smaller one, then the problem could occur. [This happened historically; the
+segmented architecture of the 16-bit 8086 led to compilers supporting both long
+(with segments) and short (without segments) pointers. Similarly, the Unisys
+U2200 compiler that the author worked on supported Ada pointers (machine
+addresses) and C pointers (byte addresses, a pair of a machine address and a
+byte offset).]
+
+Clearly, the "does not fit" problem was unusual for access types, so it's not
+surprising that it was never solved. However, it becomes much more important
+for scalar types with Default_Values, especially when the source object is
+of a type that does not have a Default_Value (and thus might be uninitialized).
+
+[We now turn to the editor's musings on this problem. These have not been vetted
+by anyone.
+
+First, fixing 4.6(56) by copying all of 6.4.1(12-13.1/3) is unpleasant. It would
+be much better to somehow incorporate the rules by reference; having a separate
+copy of the rules is a maintenance hazard -- as proved by the fact that none of
+the three changes to 6.4.1(12-13.1/3) made by Ada 2012 was made in 4.6(56).
+However, I couldn't find a way to do that, thus I didn't propose any wording in
+this AI (duplicating the wording should be a last resort).
+
+Second, untagged view conversions are almost always explicit in the code. The
+only exception is in calls to inherited subprograms of a derived type.
+13.1(10/3) prevents any representation change in that case, so the "does not
+fit" problem can only occur with explicit view conversions. These are always
+possible to write using temporary objects, so we can fix this problem by banning
+these conversions in some cases. (So long as the cases are just related to the
+new in Ada 2012 Default_Value aspect; banning others would probably be too
+incompatible.)
+
+Third, we will have a problem with generic contract issues if we try to
+exclusively use a legality rule. The representation/Default_Value aspect is not
+part of the contract of a generic formal type, and any rule depending on that
+thus cannot be a Legality Rule in a generic body.
+
+I suggested in e-mail making it a Bounded Error to use a view conversion to
+an access type or a scalar type with a Default_Value if there exist potential
+values of the source object which cannot be represented in the target object.
+Either Program_Error or Constraint_Error should be raised, or the conversion
+should work.
+
+Making this a bounded error allows two implementation strategies: (1) check
+the representation of the *type* when converting, raising an exception if the
+value doesn't fit. (I believe this is what Janus/Ada does for access types
+in the historical cases mentioned above, both of which existed in various
+compiler versions.); (2) raise Program_Error if the representation might not
+fit; this is a static check for all cases other than generic bodies for a
+sharing implementation. As such, an implementation could display a warning
+in such cases, which would be more helpful than occassional Program_Errors
+flying out of code.
+
+Making it a bounded error also allows the rule to talk about representation
+(something that Legality Rules ought not do outside of representation aspect
+rules). Wording this will be a bit tricky, and as it is not clear to me that
+this is the preferred solution, I didn't attempt it.
+
+End editor's musings.]
+
+An alternative suggestion was to initialize the parameter with the
+Default_Value in this case. However, that would potentially "deinitialize"
+the actual object in the view conversion case:
+
+    type Small is range 0 .. 255
+       with Default_Value => 0;
+
+    procedure P (Do_It : in Boolean; Result : out Small) is
+    begin
+        if Do_It then
+            Result := 10;
+        end if;
+    end P;
+
+    Obj : Positive := 1;
+
+    P (Do_It => False, Result => Small); -- (1)
+
+The call to P at (1) would raise Constraint_Error upon return, even though
+the previously initialized value of Obj is properly initialized and it wasn't
+changed. This does not seem acceptable, especially as the similar rules
+for access types do not have this effect.
+
+!ACATS Test
+
+An ACATS test will be needed to test whatever solution is adopted.
+
+!ASIS
+
+No ASIS effect.
+
+
+!appendix
+
+From: Steve Baird
+Sent: Tuesday, April 30, 2013  6:30 PM
+
+We've got
+
+   For an out parameter that is passed by copy, the formal
+   parameter object is created, and:
+     ...
+     For a scalar type that has the Default_Value aspect specified,
+     the formal parameter is initialized from the value of the actual,
+     without checking that the value satisfies any constraint or any
+     predicate
+
+This presupposes that "the value of the actual" exists and is well defined.
+
+How does this work in the case where the actual parameter is a view conversion?
+Perhaps the Default_Value should be copied in in cases like
+
+   with text_io; use text_io;
+   procedure bad_conv1 is
+     type Defaulted_Integer is new Integer
+       with Default_Value => 123;
+
+     procedure foo (x : out integer) is begin null; end;
+
+     y : long_long_float := long_long_float'last;
+      -- or, for a variation, leave y uninitialized
+   begin
+    foo (defaulted_integer (y));
+    put_line (long_long_float'image (y));
+   end;
+
+   with text_io; use text_io;
+   procedure bad_conv2 is
+
+     type mod3 is mod 3 with default_value => 0;
+     type mod5 is mod 5;
+
+     procedure foo (xx : out mod3) is begin null; end;
+
+     yy : mod5 := 4;
+   begin
+    foo (mod3 (yy));
+    put_line (mod5'image (yy));
+   end;
+
+If copy-in involves converting a (frequently uninitialized) value, that would
+not be good - this feature was not supposed to make programs less reliable.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, May 1, 2013  1:37 AM
+
+>   For an out parameter that is passed by copy, the formal
+>   parameter object is created, and:
+>     ...
+>     For a scalar type that has the Default_Value aspect specified,
+>     the formal parameter is initialized from the value of the actual,
+>     without checking that the value satisfies any constraint or any
+>     predicate
+
+I just discovered this and said "ouch". How comes the formal parameter is not
+initialized from the default value, which is certainly what a casual user would
+expect?
+
+(didn't find anything about this in the AARM or the AIs)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, May 1, 2013  7:27 AM
+
+> I just discovered this and said "ouch". How comes the formal parameter
+> is not initialized from the default value, which is certainly what a
+> casual user would expect?
+
+I agree this makes more sense (btw, it's what GNAT happens to do now I believe).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, May 1, 2013  7:34 AM
+
+> >   For an out parameter that is passed by copy, the formal
+> >   parameter object is created, and:
+> >     ...
+> >     For a scalar type that has the Default_Value aspect specified,
+> >     the formal parameter is initialized from the value of the actual,
+> >     without checking that the value satisfies any constraint or any
+> >     predicate
+> >
+> I just discovered this and said "ouch". How comes the formal parameter
+> is not initialized from the default value, which is certainly what a
+> casual user would expect?
+
+That would make more sense, I think, but that's not how it works for records.  A
+record with defaulted components gets passed in for mode 'out', so I guess
+Default_Value was designed by analogy.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, May 1, 2013  7:38 AM
+
+> That would make more sense, I think, but that's not how it works for
+> records.  A record with defaulted components gets passed in for mode
+> 'out', so I guess Default_Value was designed by analogy.
+
+The behavior for records is a bit strange, but it is more efficient, and easy to
+implement.
+
+It was a bad idea to extend the analogy
+
+Especially given the nasty issues it raises as noted by Steve
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, May 1, 2013  7:47 AM
+
+All access values are copied in so that is another reason scalars use the same
+rule.
+
+Sent from my iPhone
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, May 1, 2013  8:07 AM
+
+> All access values are copied in so that is another reason scalars use
+> the same rule.
+
+Good point.  I'm not sure that's the best rule either, but the analogy there is
+even more apt.
+
+> Sent from my iPhone
+
+Sent from my Dell computer.
+
+> Especially given the nasty issues it raises as noted by Steve
+
+Well, I can't get too excited about interactions with view conversions of
+scalars.  That's a weird feature anyway.  Is it even useful?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, May 1, 2013  1:00 PM
+
+> That would make more sense, I think, but that's not how it works for
+> records.  A record with defaulted components gets passed in for mode
+> 'out', so I guess Default_Value was designed by analogy.
+
+I think the analogy was with parameters of access types (which are elementary)
+rather than parameters of record types. We essentially copied the model of
+access types (which of course always have a default value of Null) rather than
+invent a new one.
+
+The problem, of course, is that not all scalar types have a default value, while
+that is true of access types. So these sorts of problems can appear.
+
+I think the *best* solution would be to ban view conversions between types that
+differ in whether they have default_values. That would mostly eliminate the
+problem; probably we should ban conversions from other kinds of types in this
+case as well. After all, the only reason that these conversions exist is to
+support inheritance for type derivation, and that does not require a view
+conversion of a float to an integer!
+
+The problem with the *best* solution is that it would be a contract model
+violation. Thus, I would suggest instead that any such conversion raise
+Program_Error (that would eliminate Steve's concern about making things more
+fragile). After all, all that would have to be done to eliminate such a
+conversion is to introduce a temporary.
+
+As far as initializing with the default value, I don't see anything particularly
+logical about that. You're passing an object that presumably has a value (of
+something), and that value suddenly disappears even when the parameter is unused
+by the routine? That's going to cause more bugs than it fixes. This sort of
+structure sometimes occurs in my code:
+
+    procedure Get_Data (From : in Some_Container;
+                        Key  : in Key_Type;
+                        Data : out Data_Type;
+                        Found: out Boolean) is
+    begin
+	  if Exists (From, Key) then
+             Found := True;
+             Data := From (Key);
+        else
+             Found := False;
+             -- Data unchanged here.
+        end if;
+    end Get_Data;
+
+    declare
+        Found : Boolean;
+        Data  : Data_Type := Initial_Value;
+    begin
+        Get_Data (A_Container, Some_Key, Data, Found);
+        -- Use Data here and ignore Found.
+    end;
+
+Changing the untouched result of Data simply because the type has a
+Default_Value specified (Get_Data probably is declared in a generic, after all)
+seems bizarre.
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Wednesday, May 1, 2013  1:22 PM
+
+> > I just discovered this and said "ouch". How comes the formal
+> > parameter is not initialized from the default value, which is
+> > certainly what a casual user would expect?
+>
+> I agree this makes more sense (btw, it's what GNAT happens to do now I
+> believe).
+
+Actually what GNAT does is deinitialize the actual.
+
+In any case, I agree with Randy that it's a bad idea to default initialize the
+formal, as you don't want an initialized actual to be deinitialized in the case
+where the formal is not assigned.  (Some other solution may be needed for the
+weird view conversion case, though such cases are pretty uncommon.)
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, May 1, 2013  1:29 PM
+
+> As far as initializing with the default value, I don't see anything
+> particularly logical about that.
+
+I always considered that the model of out parameters is one of an unitialized
+local variable. Simple, and easy to explain.
+
+The benefit of that is that you are telling the caller that it is perfectly safe
+to call your subprogram with an uninitialized actual, precisely because you want
+to initialize it.
+
+If for some reason you use the previous value of the actual (including because
+you want to return the previous value unchanged, as in your example), use an
+in-out parameter.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, May 1, 2013  6:02 PM
+
+Which means you need two subprograms, one that allows passing uninitialized
+values, and one that allows leaving the value untouched. If you pass an "in out"
+parameter an uninitialized value, you run the risk of a stray Constraint_Error
+(a problem I know well, since most of my code has been running afoul of this
+problem since Janus/Ada started strictly following the Ada 95 checking rules).
+To fix this in my code, I've changed a lot of routines to take "out" parameters.
+But if that change also changes the behavior of calls that pass initialized
+values, then it becomes almost impossible to fix this problem short of ensuring
+that every value that can be passed to a routine is always initialized (which is
+a lot of useless code).
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, May 2, 2013  3:42 AM
+
+> Which means you need two subprograms, one that allows passing
+> uninitialized values, and one that allows leaving the value untouched.
+> If you pass an "in out" parameter an uninitialized value, you run the
+> risk of a stray Constraint_Error
+
+It's an interesting problem... The whole issue comes from "-- Data unchanged
+here.", where you want the "unchanged" to include invalid values. The heart of
+the problem is that you want to pass an invalid value in, without raising
+Constraint_Error. An out parameter allows you to do that, precisely on the
+assumpting that the invalid value cannot be used.
+
+Rather than relying on an out parameter being transmitted, I think I'd rather
+write:
+   Get_Data (Cont, Key, Temp, Found);
+   if Found then
+      My_Data := Temp;
+   end if;
+
+At least, the expected behaviour is much more explicit to the reader.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, May 2, 2013  3:46 AM
+
+>> All access values are copied in so that is another reason scalars use
+>> the same rule. -Tuck
+> Good point.  I'm not sure that's the best rule either, but the analogy
+> there is even more apt.
+
+Access values are special. The natural behavior would be to initialize out
+parameters to null, but if null is excluded, it is necessary to find a non null,
+non invalid value - and the previous value of the parameter is the only such
+thing available. This does not apply to scalars, especially if an explicit
+default value is specified.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, May 2, 2013  8:48 AM
+
+> Access values are special. The natural behavior would be to initialize
+> out parameters to null, but if null is excluded, it is necessary to
+> find a non null, non invalid value - and the previous value of the
+> parameter is the only such thing available.
+
+No, if the 'out' formal subtype excludes null, but the actual is null, we pass
+in null without raising C_E.  That's exactly analogous to Steve's example with
+scalars.
+
+Same if the formal has "Predicate => Subtype_Name /= null".
+
+>...This does not apply to scalars,
+> especially if an explicit default value is specified.
+
+The only difference is that access types always have a default, whereas scalars
+have a default only if Default_Value was specified.
+
+> Rather than relying on an out parameter being transmitted, I think I'd
+> rather write:
+>    Get_Data (Cont, Key, Temp, Found);
+>    if Found then
+>       My_Data := Temp;
+>    end if;
+
+Yes, that's what I would write, too.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, May 2, 2013  11:09 AM
+
+If you look in 4.6, para 56, you will see special handling for view conversions
+of OUT parameters of an access type. This same paragraph should have been
+modified to say the same thing for scalar types with a Default_Value specified.
+
+>> Access values are special. The natural behavior would be to
+>> initialize out parameters to null, but if null is excluded, it is
+>> necessary to find a non null, non invalid value - and the previous
+>> value of the parameter is the only such thing available.
+>
+> No, if the 'out' formal subtype excludes null, but the actual is null,
+> we pass in null without raising C_E.  That's exactly analogous to
+> Steve's example with scalars. ...
+
+Right.  Access values and Scalar types with Default_Value specified should be
+treated identically, as far as I can tell.  We just missed 4.6(56) when we
+defined Default_Value, as far as I can tell.
+
+The only teensy problem I see here is if the formal parameter is represented
+with fewer bits than that required for the Default_Value of the actual
+parameter's type.  The view conversion will be difficult to accomplish into this
+smaller space.  This generally doesn't come up with access values, though I
+suppose it could if one were a "fat pointer" and the other was a "thin pointer."
+
+This sounds like a fun topic to discuss in the Berlin ARG. ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May 2, 2013  5:55 PM
+
+> If you look in 4.6, para 56, you will see special handling for view
+> conversions of OUT parameters of an access type.
+> This same paragraph should have been modified to say the same thing
+> for scalar types with a Default_Value specified.
+
+Thanks Tuck, for pointing this out. This seems just like a restating of the
+original 6.4.1(13) -- and it's wrong even for access types because it doesn't
+mention predicates and null exclusions. I suppose we need something like
+6.4.1(13.1/3) as well.
+
+But this doesn't seem to address Steve's problem, which is what if the value
+simply doesn't fit into T?
+
+...
+> The only teensy problem I see here is if the formal parameter is
+> represented with fewer bits than that required for the Default_Value
+> of the actual parameter's type.
+
+We already have covered this for the normal case (AARM 6.4.1(13.c/3) says "out
+parameters need to be large enough to support any possible value of the base
+type of T"). I recall some Tucker person bringing this up at the second St. Pete
+Beach meeting at the Sirata (I think that's where it happened).
+
+I don't think that the Default_Value of the actual has any bearing on this,
+though, it's just the type of the actual and whether the *formal* has a
+Default_Value specified.
+
+> The view conversion will be difficult to accomplish into this smaller
+> space.  This generally doesn't come up with access values, though I
+> suppose it could if one were a "fat pointer"
+> and the other was a "thin pointer."
+
+And that's the crux of Steve's problem. What happens if the value simply can't
+be made to fit (as in his Long_Long_Float'First example)?
+
+And you are right, that this is not a new problem and doesn't specifically have
+much to do the new features -- they just made the issue a lot more likely and
+probably pushed it from a pathology to a likelihood. [Note that the Janus/Ada
+U2200 compiler had two kinds of access values: C Pointers that included byte
+addresses (not native on a 36-bit word machine) and Ada pointers that didn't (we
+always ensured that allocated and aliased objects were aligned, thus we could
+use the substantially cheaper pointers). We needed the C Pointers in order to
+interface to the Posix subsystem, of course. I don't know what would have
+happened if someone used an "out" parameter view conversion of a C Pointer to an
+Ada Pointer -- perhaps the byte address part would have been dropped on the
+floor -- but it probably wasn't 100% kosher.]
+
+> This sounds like a fun topic to discuss in the Berlin ARG. ;-)
+
+Surely funner than Adam's anonymous access allocated task issues, although I
+think we can get away with a one-word change there if we wish. (And I'm sure
+we're going to prefer that to duplicating all of the anonymous access rules into
+the tasking section.)
+
+Anyway, I think this case (the larger object into the smaller out parameter) has
+to be a bounded error, so that compilers can detect it. The only other
+alternative is to raise an exception if the actual value doesn't fit (we're not
+going to change the semantics of out parameters at this late date, even if J-P
+thinks it's a good idea). And that would mean that whether an exception is
+raised depends on the value and for uninitialized things, would be
+unpredictable. (This has to be a Bounded Error rather than a Legality Rule as
+otherwise we'd have nasty generic contract issues. I suppose a pair of Legality
+and Program_Error would work as it does for accessibility but that seems more
+complex than necessary.)
+
+More importantly, the only reason this feature exists is to provide a simple
+explanation of how inherited derived subprogram calls work; in all other cases,
+an explicit temporary makes more sense. And the Bounded Error I'm proposing
+cannot happen for a derived type, as you can't change anything that would
+trigger this Bounded Error for a derived type that has derived subprograms
+because of the infamous 13.1(10/3). Any case where the programmer wrote this
+explicitly would be better written with an explicit temporary (so they can leave
+it uninitialized if that's OK, or initialize explicitly however they need).
+
+****************************************************************
