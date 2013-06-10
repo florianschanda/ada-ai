@@ -1,0 +1,237 @@
+!standard 10.2.1(17/3)                              13-06-10    AI12-0076-1/01
+!standard E.2.2(17/2)
+!class binding interpretation
+!status work item 13-06-10
+!status received 13-05-03
+!priority Medium
+!difficulty Hard
+!qualifier Omission
+!subject Variable state in pure packages
+
+!summary
+
+It is erroneous to change the value of a library-level constant in a pure or
+remote types package.
+
+!question
+
+In Ada 2012, the Rosen trick can be used to have variable state in a pure
+package. For instance:
+
+   package Not_So_Pure with Pure is
+    type Outer;
+    type Inner (Ref : access Outer) is limited null record;
+    type Outer is limited record
+      Self : Inner (Ref => Outer'Access);
+      Int : Integer := 123;
+    end record;
+
+    X : constant  Outer := (others => <>);
+    -- clients can modify X.Self.Ref.all.Int
+   end;
+
+Is this a problem? (Yes.)
+
+!recommendation
+
+(See !summary.)
+
+!wording
+
+Add after 10.2.1(17/3):
+
+Erroneous Execution
+
+Execution is erroneous if some operation (other than the elaboration of the
+object) attempts to modify the value of a constant object declared at
+library-level in a pure package.
+
+AARM Note: This could be accomplished via a self-referencing pointer or via
+squirrelling a writable pointer to a controlled object.
+
+Add after E.2.2(17/2):
+
+Erroneous Execution
+
+Execution is erroneous if some operation (other than the elaboration of the
+object) attempts to modify the value of a constant object declared at
+library-level in a remote types package.
+
+AARM Note: This could be accomplished via a self-referencing pointer or via
+squirrelling a writable pointer to a controlled object.
+
+!discussion
+
+This is very important for distribution. The model of distribution is that pure
+packages can replicated in each partition. If there is variable state in such a
+package, it would require some sort of synchronization means, which is not an
+intended complication in the language.
+
+This problem could not occur in Ada 95 pure packages as access types were not
+allowed. In Ada 2005, any modification of a constant via an access value was
+erroneous because of 13.9.1(13). However, 13.9.1(13) was modified to allow
+modifications to controlled and immutably limited objects, as these are commonly
+used operations which need to be implemented correctly by all compilers.
+
+This modification of 13.9.1(13) opened up this problem; as such we replace the
+erroneousness in cases where it would actually be harmful.
+
+It would be preferable to have a static rule rather than erroneous execution for
+such cases, but such a rule could not break privacy and thus would have to
+reject constants of private types (as they might have a controlled part). That
+would be unacceptably incompatible.
+
+Another alternative would be to craft a Bounded Error rule which would require
+an exception to be raised if this occurs (dynamic rules can look through
+privacy). While this probably is better, it's unclear that it is worth the
+effort as erroneous execution was considered "good enough" for this case in Ada
+95 and 2005.
+
+!ACATS Test
+
+No ACATS test is possible; it's never sensible to check the effect of erroneous
+execution.
+
+!ASIS
+
+No ASIS effect.
+
+
+!appendix
+
+From: Steve Baird (part of private message)
+Sent: Friday, May  3, 2013  1:18 PM
+
+AFAIK, the Rosen trick be used to subvert purity (by allowing a pure package to
+have variable state). Is this issue already well known?
+
+   package Not_So_Pure with Pure is
+    type Outer;
+    type Inner (Ref : access Outer) is limited null record;
+    type Outer is limited record
+      Self : Inner (Ref => Outer'Access);
+      Int : Integer := 123;
+    end record;
+
+    X : constant  Outer := (others => <>);
+    -- clients can modify X.Self.Ref.all.Int
+   end;
+
+If purity can be subverted, do we care?
+In other words, does anything essential
+really depend on pure packages being stateless?
+
+Note that the same trick can be used to get around the "no variable
+declarations" rule for a Remote_Types package.
+
+It seems like this would be problematic for multi-partition programs (e.g., if
+each partition has its own local copy of a unit which turns out to have state),
+but the DSA was never my strong point.
+
+****************************************************************
+
+From: Randy Brukardt (part of private message)
+Sent: Friday, May  3, 2013  1:18 PM
+
+> AFAIK, the Rosen trick be used to subvert purity (by allowing a pure
+> package to have variable state).
+> Is this issue already well known?
+
+Yes, but only for parameters (where it is considered harmless).
+
+>    package Not_So_Pure with Pure is
+>     type Outer;
+>     type Inner (Ref : access Outer) is limited null record;
+>     type Outer is limited record
+>       Self : Inner (Ref => Outer'Access);
+>       Int : Integer := 123;
+>     end record;
+>
+>     X : constant  Outer := (others => <>);
+>     -- clients can modify X.Self.Ref.all.Int
+>    end;
+
+I've never seen this particular way to get state. I think this is problematical,
+at least compared to the intended model. It certainly is a problem if the
+package is used in a distributed system, as you note below.
+
+> If purity can be subverted, do we care?
+
+Sure, those of us who want things checked do. The AdaCore designers, not so
+much.
+
+> In other words, does anything essential really depend on pure packages
+> being stateless?
+
+It depends on what you mean by essential. The implementation permission to
+remove redundant calls gets pretty dubious if side-effects are possible. The
+permission to ignore side-effects is really intended to cover Chapter 13 abuse
+and/or interfacing abuse, not to allow ignoring bugs in the language definition.
+
+In any case, my "SuperPure" does not allow this as it does not allow
+dereferencing anything. Thus it is safe (modulo abuse of Chapter 13 features
+and/or interfacing).
+
+> Note that the same trick can be used to get around the "no variable
+> declarations" rule for a Remote_Types package.
+
+Now the other shoe drops. CLUNK!!! This seems far more dangerous; the whole
+model of distribution depends on there being no variables.
+
+> It seems like this would be problematic for multi-partition programs
+> (e.g., if each partition has its own local copy of a unit which turns
+> out to have state), but the DSA was never my strong point.
+
+This latter problem is definitely a real problem that will have to be fixed
+somehow. That necessarily will fix it for Pure packages (as they can be used in
+such partitions - and they cannot have any variable state in that case).
+
+So I guess you have to bring this up to the group. [Which he never did - but
+he's not getting off that easy - Editor.]
+
+****************************************************************
+
+From: Steve Baird (part of private message)
+Sent: Monday, May  6, 2013  11:48 AM
+
+> Now the other shoe drops. CLUNK!!! This seems far more dangerous; the
+> whole model of distribution depends on there being no variables.
+
+There is also the known-to-be-constrained issue, as illustrated by
+
+   with Text_Io; use Text_Io;
+   procedure Known is
+    type Mutable (D : Boolean := False) is
+       record
+	 case D is
+	    when True  => When_True  : Float := 0.0;
+	    when False => When_False : Integer range 123 .. 456 := 123;
+	 end case;
+       end record;
+
+    type Outer;
+    type Inner (Ref : access Outer) is limited null record;
+    type Outer is limited record
+      Self : Inner (Ref => Outer'Access);
+      Mut : Mutable;
+    end record;
+
+    X : constant  Outer := (others => <>);
+
+    Wf : Integer renames X.Mut.When_False;
+   begin
+    X.Self.Ref.Mut := (True, 789.0);
+    Put_Line (Integer'Image (Wf));
+  end;
+
+We also have the same problem with a mutable component of a controlled constant
+which is modified via finalization and then referenced (which is awkward to
+accomplish, but possible).
+
+I'm thinking that we want to somehow expand the definition of erroneous to
+handle cases like this, but we'd have to be careful that we don't classify as
+erroneous the perfectly reasonable case of a finalization routine which modifies
+a constant when nobody ever reads it (or queries the array bounds of a
+subcomponent, or ...) in a "bad" way after the modification.
+
+****************************************************************
