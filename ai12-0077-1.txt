@@ -1,0 +1,206 @@
+!standard 13.3(73.4/3)                              13-06-10    AI12-0077-1/01
+!class binding interpretation
+!status work item 13-06-10
+!status received 13-05-29
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Has_Same_Storage on objects of size zero
+
+!summary
+
+X'Has_Same_Storage(Y) returns False if either X or Y occupies no bits.
+
+!question
+
+The description of Has_Same_Storage should be explicit about the
+result of X'Has_Same_Storage(Y) when X'Size = Y'Size = 0.  The current
+text could be read either way.  (By contrast, X'Overlaps_Storage(Y) is
+clearly false because the objects cannot "share at least one bit".)
+
+What is the result? (It is False.)
+
+!recommendation
+
+(See !summary.)
+
+!wording
+
+Modify 13.3(73.4/3):
+
+  The actual parameter shall be a name that denotes an object. The object
+  denoted by the actual parameter can be of any type. This function evaluates
+  the names of the objects involved and returns True if the representation of
+  the object denoted by the actual parameter occupies exactly the same bits
+  as the representation of the object denoted by X; otherwise, it returns False
+  {included when the representation of either object occupies no bits}.
+
+[Editor's note: There must be a better way to structure this, but I wasn't able
+to find it.]
+
+!discussion
+
+The intended use case of Has_Same_Storage and Overlaps_Storage is to answer the
+question: "if I write to A, is there a risk that I'm ruining B?". Since this
+cannot happen for zero-sized objects, the answer should be False if either
+operand is zero-sized. As the questioner notes, this is clear for
+Overlaps_Storage, but we need wording for Has_Same_Storage.
+
+We also want to preserve the relationship that Has_Same_Storage imples
+Overlaps_Storage. If Overlaps_Storage is False, this means that Has_Same_Storage
+also has to be False.
+
+This interpretation might cause some runtime overhead, but only in the case
+where the size of both operands are determined at runtime and both can be zero.
+In this case, Has_Same_Storage will need a size check anyway (so the cost of
+reading/calculating the sizes will be included no matter what rule we decide
+on), so the extra cost of a comparison against zero will not be particularly
+significant.
+
+!ACATS Test
+
+An ACATS C-Test is needed to check this interpretation.
+
+!ASIS
+
+No ASIS effect.
+
+!appendix
+
+!topic Has_Same_Storage on objects of size zero
+!reference 13.3(73.1ff)
+!from Adam Beneschan 13-05-29
+!discussion
+
+The description of Has_Same_Storage should be explicit about the
+result of X'Has_Same_Storage(Y) when X'Size = Y'Size = 0.  The current
+text could be read either way, in my opinion.  (By contrast,
+X'Overlaps_Storage(Y) is clearly false because the objects cannot
+"share at least one bit".)
+
+I'm not sure whether it's desirable to make X'Has_Same_Storage(Y) true
+or false in this case.  If it's True, then Note 13.3(73.9) would also
+need to be changed since it would not hold when X'Size = Y'Size = 0.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, May 29, 2013  2:53 PM
+
+I would not want the implementation to be slowed down at all to give an answer
+for the zero-size case.  Presuming the "Has_Same_Storage" check is generally
+just going to check that the addresses match, and only bother to check if the
+sizes match if the types differ, I would suggest that zero size objects with the
+same address should return True for Has_Same_Storage.
+
+As far as Overlap_Storage, if either is of zero size, I would say it is
+unspecified.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, May 29, 2013  2:53 PM
+
+I think it is pretty important that Has_Same_Storage is always False if
+Overlaps_Storage is False, as Overlaps_Storage is supposed to be superset of
+Has_Same_Storage (that is "same object" implies overlapping object). Thus,
+assuming you are correct that Overlaps_Storage is False in this case (and I
+think you are), then Has_Same_Storage should also be False. We probably need to
+clarify the wording to ensure this.
+
+Obviously, this is a corner case of little practical interest; we just need to
+make sure that the results are well-defined and consistent.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Wednesday, May 29, 2013  3:33 PM
+
+The original AI envisioned using it on array slices, and that's certainly a case
+where you'd want to make sure things work, since slices often have zero elements
+(although admittedly the array slice case would be more likely to involve
+'Overlaps_Storage instead of 'Has_Same_Storage).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, May 29, 2013  3:55 PM
+
+> I would not want the implementation to be slowed down at all to give
+> an answer for the zero-size case.  Presuming the "Has_Same_Storage"
+> check is generally just going to check that the addresses match, and
+> only bother to check if the sizes match if the types differ, I would
+> suggest that zero size objects with the same address should return
+> True for Has_Same_Storage.
+>
+> As far as Overlap_Storage, if either is of zero size, I would say it
+> is unspecified.
+
+Great, two different answers from the first two people to reply.
+
+I still think it is pretty important that Has_Same_Storage = True implies
+Overlaps_Storage = True (otherwise, you can't replace one with the other without
+lots of extra analysis, and the basic model for the attributes is flawed), so I
+don't think that claiming Overlaps_Storage is "unspecified" works. That would be
+OK for the case where Has_Same_Storage is False, but not when it is True. I
+suppose one could make both attributes unspecified in that case, but we'd still
+want them consistent (which is impossible with "unspecified"). And saying it is
+unspecified would require new wording which would complicate the definition of
+the attributes.
+
+I'm also dubious that the implementation of Has_Same_Storage would be slowed
+down in typical usages for the zero-size case. So long as either of the objects
+has a fixed size (which is the most likely case) or even a known non-zero size
+(like any tagged type), the zero-size case can be eliminated at compile-time. If
+neither object has a fixed size, then clearly a size check will be needed so the
+extra overhead of a zero size check will be minimal (and this appears to be the
+rare case). So I think getting the answers right is more important than making
+these cheap (especially as these are primarily going to appear in assertions,
+which can be turned off if too expensive).
+
+I'm more worried about making the Overlaps_Storage meaningful in the zero size
+case. If we decide that Has_Same_Storage should be True for zero-sized objects
+(which certainly could make sense), then Overlaps_Storage has to be true in the
+same circumstance. That would suggest that Overlaps_Storage would have to do a
+range check in that case, which I agree has to be an extra check (especially
+annoying in code size). That's why I prefer defining it to be False and let the
+extra expense only occur in dynamically-sized cases (which are going to be more
+expensive anyway).
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, May 29, 2013  4:34 PM
+
+> If we decide that Has_Same_Storage should be True for zero-sized
+> objects (which certainly could make sense)
+
+The typical use case of Has_Same_Storage and Overlaps_Storage is to answer the
+question: "if I write to A, is there a risk that I'm ruining B". Since this
+cannot happen for zero-sized objects, the answer should be False.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, May 30, 2013  11:53 AM
+
+Good point.  The main use for Overlaps_Storage will be for "anti-aliasing"
+assertions.  That is, you want to be sure that two parameters are independent of
+one another, so you can update one without the other being affected. So we
+should err on the side of saying two objects do *not* overlap.
+
+Has_Same_Storage is somewhat different, and I am not sure what it is meant for.
+I suppose it is for optimizing "self" assignment, though the built in ":="
+already does that (unlike in C++).  I suppose a few of the container operations
+have special cases for the input and output being the same object, and that
+might be one use for it.  In these cases, if it is of zero bits, it really
+doesn't matter either way.  But I suppose if we want a general rule that
+Overlaps_Storage = False should imply Has_Same_Storage = False, then it would
+make sense to go with the same rule, namely you get False from Has_Same_Storage
+if either is of zero size.
+
+So Tucker-Taft-2 agrees pretty much with Randy.  If either size is zero, both
+attributes return False.
+
+****************************************************************
+
