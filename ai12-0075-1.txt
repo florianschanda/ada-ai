@@ -1,0 +1,245 @@
+!standard 4.9(6)                                  13-06-09    AI12-0075-1/01
+!standard 4.9(18)
+!class Amendment 13-06-09
+!status work item 13-06-09
+!status received 13-05-07
+!priority Medium
+!difficulty Medium
+!subject Static expression functions
+!summary
+
+An expression function can be static in appropriate circumstances.
+
+!problem
+
+It should be possible to use an expression function in a static expression.
+This would allow greater abstraction for static expressions, which sometimes
+can get quite large.
+
+!proposal
+
+(See summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+The easy part of this definition is to allow expression functions to be
+static functions (in the sense of 4.9(6)) in specific instances. The minimum
+requirement is that the expression would be static if the parameters
+are assumed to be static.
+
+However, a number of other issues were identified that would need to be
+addressed:
+
+* The fact that a subprogram is an expression function would have to be
+  visible; that would prevent completions that are expression functions from
+  participating. Perhaps an aspect Static_Possible could be defined for
+  specifications, that would require the body to be a potentially static
+  expression function.
+
+* Recursion would have to be eliminated somehow.
+
+* "Potentially static" wouldn't include any functions with parameters of
+  types that aren't static.
+
+* The subtypes of the formal parameters have to be checked; probably this
+  would take the form of implicit qualified expressions on the parameters.
+
+* It would be best to say that functions with "in out" or "out" parameters
+  aren't "potentially static".
+
+* Do formal parameters that don't participate in the expression affect
+  whether or not a function is "potentially static"?
+
+* Do the "statically unevaluated" rules have any effect on "potentially
+  static"? If not, there wouldn't be a complete equivalence between
+  a call and the associated expression. (That's probably OK, as it is true
+  for non-static calls as well.)
+
+!example
+
+!ASIS
+
+** ASIS queries needed **
+
+!ACATS test
+
+ACATS B-Tests and C-Tests.
+
+!appendix
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, May  7, 2013  7:28 AM
+
+First asking, in case it has been discussed before...
+
+Wouldn't it be possible to make some expression functions static?
+
+Apparently, all that is needed is to add "formal parameters of an expression
+function" to the list of static things in 4.9. (Of course, the actual
+parameters of the call would have to be static, but that's already covered by
+4.9(6))
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May  7, 2013  6:24 PM
+
+> First asking, in case it has been discussed before...
+>
+> Wouldn't it be possible to make some expression functions static?
+
+This was mentioned as a possible extension in the original AI. The !discussion
+section of AI05-0177-1 says:
+
+One could imagine allowing these functions (when visible) to be used in static
+expressions if the inlined expression would be static. This would definitely
+allow abstracting expressions that currently are written as a giant single
+expression because they need to be static. That's something you cannot do now.
+We didn't add this to proposal in order to keep the proposal simple.
+
+There's a bit of discussion of this in the e-mail, but nothing very interesting.
+I thought we also discussed it briefly at a meeting, but I didn't find anything
+in the October 2010 minutes when this was mainly discussed.
+
+> Apparently, all that is needed is to add "formal parameters of an
+> expression function" to the list of static things in 4.9. (Of course,
+> the actual parameters of the call would have to be static, but that's
+> already covered by  4.9(6))
+
+I think it would be necessary for the fact that it is an expression function to
+be visible at the point of use. That would limit the value of this as it would
+prevent expression functions used as completions from participating. If we were
+willing to break privacy, we could allow expression functions used as completion
+in the private part, but that's probably a bad idea.
+
+Perhaps a better idea would be to have an aspect Static_Possible that could be
+applied to a subprogram declaration. The completion then would have to be an
+expression function that can be static.
+
+Also, I think there would have to be rule that for such a function the
+expression of it is static if one considers the parameters static. (And since
+not all types can be static, if there are any problems that aren't of either
+scalar or string types, then those parameters would be non-static.) And we'd
+need some sort of rule to deal with recursion (that's something we don't
+currently have to deal with in static expressions), unless we're willing to have
+compilers crash in such circumstances. (Running out of memory is hard to check
+for accurately, and it's often impossible to recover.)
+
+Anyway, this is a non-trivial idea. No problem with adding it as a possible
+Amendment, but it isn't going to magically appear as a Binding Interpretation in
+Ada 2012 (we already rejected that idea initially).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, May  7, 2013  6:38 PM
+
+> Anyway, this is a non-trivial idea. No problem with adding it as a
+> possible Amendment, but it isn't going to magically appear as a
+> Binding Interpretation in Ada 2012 (we already rejected that idea initially).
+
+Maybe we should try implementing Randy's pragma first, and see if there are
+unforseen difficulties. With that pragma, we don't even have to limit it to
+expression functions!
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, May  8, 2013  4:18 PM
+
+> Anyway, this is a non-trivial idea. No problem with adding it as a
+> possible Amendment, but it isn't going to magically appear as a
+> Binding Interpretation in Ada 2012 (we already rejected that idea initially).
+
+You got that right.
+
+We'd have to be careful not to ignore the subtypes of the formal parameters.
+
+When we "plug in" the arguments to see if the resulting expression is static, I
+think we'd need to treat the plugged-in value like a qualified expression,
+qualified by the subtype of the formal.
+
+There is also the question of ignored formal parameters.
+
+A particularly pathological example:
+
+    package Pkg is
+        type T is private with Invariant => Is_Even (T);
+
+        function Is_Even (X : T) return Boolean;
+
+        function Zoofle (X : in out T; Y, Z : Integer) return Integer
+         is (Y + Z) with Static_Possible;
+
+    private
+        type T is new Integer;
+
+        function Is_Even (X : T) return Boolean is (X mod 2 = 0);
+
+        Invalid : T := 3;
+
+        Three : constant Integer := Zoofle (Invalid, 1, 2); -- static?
+    end Pkg;
+
+We'd probably deal with this particular case by just requiring formal parameters
+to be of mode In, but the point is that such a rule would need to be stated.
+
+I agree with Randy; this is not a one-liner.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, May  8, 2013  4:31 PM
+
+> We'd probably deal with this particular case by just requiring formal
+> parameters to be of mode In, but the point is that such a rule would
+> need to be stated.
+
+To me that's an OBVIOUS restriction for a static function
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, May  8, 2013  5:33 PM
+
+Interactions with short circuit evaluation, for example, might be less obvious.
+
+     Flag_V1 : constant Boolean := True or else (1 / 0) = 123;
+
+is static, but presumably this version
+
+     function Or_Else (C1, C2 : Boolean) return Boolean is
+         (C1 or else C2) with Static_Possible;
+
+     Flag_V2 : constant Boolean := Or_Else (True, (1 / 0) = 123);
+
+would not be static.
+
+My only real point is to agree with Randy: this is not a one-liner, if only
+because these "OBVIOUS" restrictions would need to be stated.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, May  8, 2013  5:56 PM
+
+>       Flag_V2 : constant Boolean := Or_Else (True, (1 / 0) = 123);
+>
+> would not be static.
+
+I would not allow anything like this most certainly. All arguments to a function
+have to be static. Again that seems like an obvious restriction. (1 / 0) = 123
+is not a static expression!
+
+> My only real point is to agree with Randy: this is not a one-liner, if
+> only because these "OBVIOUS" restrictions would need to be stated.
+
+The proper approach would be to make the restrictions as tight as possible,
+rather than getting into the tempting mode of making them as universal as
+possible.
+
+****************************************************************
