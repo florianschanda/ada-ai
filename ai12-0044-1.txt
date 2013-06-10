@@ -1,4 +1,4 @@
-!standard 7.3.2(19/3)                               12-12-01    AI12-0044-1/01
+!standard 7.3.2(19/3)                            13-06-09    AI12-0044-1/02
 !class binding interpretation 12-12-01
 !status work item 12-12-01
 !status received 12-09-10
@@ -7,7 +7,10 @@
 !subject Calling visible functions from type invariant expressions
 !summary
 
-** TBD.
+Type invariants on IN parameters are checked on exit from procedures,
+but not from functions, when the Assertion_Policy is Check. (Implementations
+can always provide other Assertion_Policy's which provide more rigorous
+checking of IN parameters.)
 
 !question
 
@@ -27,98 +30,43 @@ Is it intended that invariants be useless? (No.)
 
 !wording
 
-** TBD.
+Modify RM 7.3.2(19/3) as follows:
+
+ * {is a function that} has a result with a part of type T[,] or one or
+   more {OUT or IN OUT} parameters with a part of type T{, or is a
+   procedure with one or more parameters [redundant: of any mode] with a
+   part of type T}, or {is a subprogram with} an access [to variable]
+   parameter whose designated type has a part of type T.
 
 !discussion
 
-The easiest fix to this problem is to revert to not checking "in" parameters
-(that is, to repeal AI05-0289-1). However, this is not appealing for two
-reasons:
-  (1) The holes that AI05-0289-1 was intended to plug would be reopened.
-      These were considered important enough to make a last-minute change
-      to the Standard, it's hard to imagine how they would have gotten less
-      important in 9 months.
-  (2) The final Ada 2012 Standard (and presumably the printed editions that
-      will be coming out soon) say that "in" parameters are checked. To
-      change this via an AI would cause an endless line of "bug" reports to
-      implementers about their "incorrect" implementation. The visibility
-      of AIs is quite low within the Ada community and it is unlikely that
-      most users would be aware of such a major change.
+The easiest fix to this problem would be to revert to not checking "in"
+parameters (that is, to repeal AI05-0289-1). However, this does not address
+any of the issues that caused AI05-0289 to be approved in the first place.
 
-A better solution is to somehow mark public subprograms that do not need or
-want invariant checks, combined with a rule that any direct calls from an
-invariant expression must be so marked.
+We considered many approaches to fixing this problem, but they all added
+complexity to almost any use of Type_Invariant. Limiting the checks on
+IN parameters to procedures is simple to explain and implement, and avoids
+portability issues associated with bounded errors or implementation
+permissions. Clearly plenty of holes remain, so the goal is to reduce the
+number of holes without adding complexity for the user.
 
-A number of possible ways to mark routines have been suggested:
-  (A) A aspect on the subprogram specification that specifies that no invariant
-      checks will be made for any type for which the subprogram is primitive.
-      This includes all kinds of parameters. A suggested name is
-      Do_Not_Check_Invariant.
-  (B) A aspect on the subprogram specification that specifies that no invariant
-      checks are needed for any type for which the subprogram is primitive.
-      This includes all kinds of parameters. A suggested name is
-      Unmodified_Parameters.
-      [Note that this is subtly different than (A); this aspect asserts that
-      the parameters of the primitive types are not modified, actually or
-      logically. Compilers could warn if the parameters appear to be modified.
-      By "logically" here, we mean that if the parameters are handles or
-      contain handles, the target(s) of those handles are not modified either.]
-      This aspect would be most useful on query and predicate functions,
-      which are the most likely kinds to be used in invariant expression.
-  (C) A aspect on the subprogram specification that specifies that no invariant
-      checks are needed for "in" parameters of any type for which the
-      subprogram is primitive. This is the same as (B), except that it only
-      applies to "in" parameters. A suggested name: Unmodified_In_Parameters.
-      [The original suggestion was to mark subprograms that need such checks,
-      but that's backwards for Ada: "safe"/"checked" should be the default. I've
-      turned it around here.]
-  (D) Invariant checks are not made on functions that are completed with
-      expression functions in the same package specification. (Such functions
-      have almost no way to modify their parameters that would not already
-      check the invariant.)
-  (E) Invariant checks are not performed on parameters that are declared
-      with a special subtype. Extending 'Base for this situation is one
-      suggestion.
-  (F) Add a marker to types which do not contain handles or access values
-      that are expected to be modified. This is really a property of the
-      invariant expression more than of the type. A suggested name would
-      be Simple_Invariant.
-      [The original suggestion was to mark types that need such checks, but
-      that's backwards for Ada: "safe"/"checked" should be the default. I've
-      turned it around here. Either way, it is not a complete solution; one
-      of the other ideas would be needed as well.]
+The long-term solution of this issue depends on providing
+aspects that indicate when global (or indirectly-referenced) state is
+modified, and we don't want to interfere with an appropriate solution
+to that problem by overly constraining the problem now with quick-fix
+special-case aspects.
 
-Note that the legality rule only applies directly within the invariant
-expression; we make no attempt to prove that any calls made from within the
-marked functions are OK (that is, don't make invariant checks themselves).
-That's especially important if the marking mechanism is automatic somehow,
-[ideas (D) and (F) in particular] as it is likely that routines that are not
-going to be used in an invariant expression will be involved.
-
-[Editor's musing: The root problem here, IMHO, is that Ada doesn't have any
-way to tell between a parameter that is intended to be read-only vs. a
-parameter that is going to be modified somehow ("modified" here means a
-deep modification of anything that is logically part of the object). For
-instance, type File_Type in Text_IO is an "in" parameter to Put, but Put
-changes the line/column counters in the object, and probably has other effects
-on the object. The object has mode "in", but it still is being modified.
-OTOH, function Name also has an "in" parameter, but it is just a query function
-and it is very unlikely that the associated object is modified in any way.
-The "best" solution to this problem is to have a way to mark the difference
-between these situations, in which case only routines that don't modify their
-parameters can be used in invariant expressions. (This also would help the
-performance of invariants markedly.)
-
-Note that I don't like the 'Base solution (E), or the aspect (A) (I know it was
-my idea, bear with me!) because they put the emphasis on the wrong property:
-the presence of the check. I think the emphasis should be placed on describing
-when the invariant check cannot be needed -- this is safer because it only
-introduces a hole when the programmer is claiming the check isn't needed --
-rather than just suppressing the check.]
+Note that we changed "access-to-variable parameters" to be simply
+"access parameters," as access-to-constant parameters cannot contribute
+to the problem of infinite recursion, but can represent a hole in exactly
+the same way an IN parameter can represent a hole, so there seems no reason
+to limit the checks to only access-to-variable parameters.
 
 !ACATS test
 
-An ACATS x-Test should be created to test these rules.
+An ACATS C-Test should be created to test these rules, although it probably
+can just be a modification of the initial test for these rules.
 
 !appendix
 
@@ -2435,5 +2383,17 @@ parameters, you cannot do modular proofs based on those. Which means in fact
 that you have to add these constraints to make modular proof feasible. If the
 RM states what you just said, the constraint is already in place, even if not
 checked dynamically!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, June  9, 2013 12:15 PM
+
+Well I took a stab at this one.  My "fix" was to go to what seemed the simplest,
+namely only check IN parameters on return from a procedure.  All of the other
+proposals added complexity without closing all of the holes, while this one
+eliminated essentially all of the likely infinite recursion cases, while still
+closing the most likely IN parameter holes. [This is version /02 of this AI -
+Editor.]
 
 ****************************************************************
