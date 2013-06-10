@@ -1,4 +1,5 @@
-!standard E.2.1(7/1)                           12-12-31    AI12-0038-1/02
+!standard E.2.1(7/1)                           13-06-09    AI12-0038-1/03
+!standard E.2.1(8/1)
 !class binding interpretation 12-11-28
 !status Amendment 202x 12-12-31
 !status work item 13-01-04
@@ -27,7 +28,10 @@ Shared passive packages are not allowed to declare access-to-class-wide
 types, but there is nothing preventing them from referencing an access-to-
 class-wide type declared in a declared-pure package.  We propose to
 disallow using access types declared in declared-pure packages within
-a shared-passive package.
+a shared-passive package. In addition, when an access type from a
+declared-pure package is used in a shared-passive package, it is treated
+as though it were declared in the shared passive package as far as
+the special accessibility check given in E.2.1(8).
 
 !wording
 
@@ -39,6 +43,17 @@ Modify E.2.1(7/1):
    that includes a name that denotes a subtype with a part having an access type
    that is declared within a declared-pure package}.
 
+Modify E.2.1(8/1):
+   * Notwithstanding the definition of accessibility given in 3.10.2, the
+   declaration of a library unit P1 is not accessible from within the
+   declarative region of a shared passive library unit P2, unless the
+   shared passive library unit P2 depends semantically on P1.  {Furthermore,
+   for the purposes of accessibility checking, when an access type that is
+   declared within a declared-pure package is used as part of a library-level
+   declaration in a shared-passive package, it is as though the access
+   type were declared in the shared-passive package.}
+
+
 !discussion
 
 The accessibility rule of E.2.1(8) is intended to prevent pointers being created
@@ -47,7 +62,12 @@ particular active partition. Unfortunately, this doesn't work if the access
 type is declared in something other than a shared-passive package, in
 particular, in a declared-pure package. Therefore, we need to disallow the use
 of such "unprotected" access types in a shared-passive package.  That is the
-point of the wording added to E.2.1(7/1).
+point of the wording added to E.2.1(7/1). Furthermore, any use of an
+access type in a shared-passive package can be problematic if it allows
+the creation of a pointer value from a shared-passive package back to the data
+area of some active partition. Hence, when an access type from a declared-
+pure package is used in a shared-passive package, it "inherits" the
+accessibility rules of the referencing shared-passive package.
 
 !corrigendum E.2.1(7/1)
 
@@ -61,6 +81,8 @@ designates a class-wide type, task type, or protected type with
 @fa<entry_declaration>s; further, it shall not contain a library-level declaration
 that includes a @fa<name> that denotes a subtype with a part having an access type
 that is declared within a declared-pure package.>
+
+[more needed here]
 
 !ACATS test
 
@@ -204,10 +226,10 @@ Sent: Friday, January  4, 2013  2:43 PM
 
 ...
 > A Legality Rule would be easy if we could break privacy, but we can't.
-> Probably the best solution would to attack the function that is 
-> required to cause a problem (as it has to return the type, and take a 
-> parameter with a part of an access type). But there probably are more 
-> forms of this (for instance, a procedure with an out parameter of the 
+> Probably the best solution would to attack the function that is
+> required to cause a problem (as it has to return the type, and take a
+> parameter with a part of an access type). But there probably are more
+> forms of this (for instance, a procedure with an out parameter of the
 > type), so such a solution is likely to be fragile.
 
 There seems to be a myriad of ways to do this sort of thing other than returning
@@ -217,14 +239,14 @@ private with Ada.Streams;
 
 package Pure_P is
    pragma Pure;
-   
+
    type T is private with Preelaborable_Initialization;
 
    type Access_T is access all T with Storage_Size => 0;
-   
+
    procedure Add (X : in out T;
                   Val : Integer;
-                  Next : access T);  -- Anonymous Access 
+                  Next : access T);  -- Anonymous Access
 
    procedure Add2 (X : in out T;
                   Val : Integer;
@@ -233,14 +255,14 @@ package Pure_P is
    procedure Add3 (X : in out T;
                    Val : Integer;
                    Next : aliased in out T);  -- Aliased
-   
+
    function Value (X : T) return Integer;
-      
+
 private
-   
+
    type Array_Of_Access_T is array (1 .. 10) of Access_T;
    type Array_Of_Anon_Access_T is array (1 .. 10) of access T;
-   
+
    type T is record
       Val : Integer := 0;
       Count : Integer := 0;
@@ -248,17 +270,17 @@ private
       List : Array_Of_Anon_Access_T;
       List2 : Array_Of_Access_T;
    end record;
-   
-   procedure Read 
+
+   procedure Read
      (Stream : not null access Ada.Streams.Root_Stream_Type'Class;
       Item : out T);
    for T'Read use Read;
-   
+
    procedure Write
      (Stream : not null access Ada.Streams.Root_Stream_Type'Class;
       Item : T);
    for T'Write use Write;
-   
+
 end Pure_P;
 
 package body Pure_P is
@@ -295,7 +317,7 @@ package body Pure_P is
       Next.Val := Val;
    end Add3;
 
-   procedure Read 
+   procedure Read
      (Stream : not null access Ada.Streams.Root_Stream_Type'Class;
       Item : out T) is
    begin
@@ -303,12 +325,12 @@ package body Pure_P is
       for I in 1 .. Item.Count loop
          ...
       end loop;
-      
+
       Integer'Read (Stream, Item.Count2);
       for I in 1 .. Item.Count2 loop
          ...
       end loop;
-      
+
    end Read;
 
    function Value (X : T) return Integer is
@@ -324,13 +346,13 @@ package body Pure_P is
       for I in 1 .. Item.Count loop
          ...
       end loop;
-      
+
       Integer'Write (Stream, Item.Count2);
       for I in 1 .. Item.Count2 loop
          ...
       end loop;
    end Write;
-   
+
 end Pure_P;
 
 with Pure_P;
@@ -342,7 +364,7 @@ with Pure_P;
 
 package Passive_P is
    pragma Shared_Passive;
-   X : Pure_P.T;   
+   X : Pure_P.T;
 end Passive_P;
 
 with Normal_P;
@@ -354,7 +376,7 @@ begin
    Pure_P.Add (X    => Normal_P.X,
                Val  => 1,
                Next => Normal_P.Y'Access);  -- Store anonymous access to Normal variables in Shared package
-   
+
    Pure_P.Add2 (X    => Passive_P.X,
                Val  => 1,
                Next => X'Unchecked_Access);  -- Store named access to local variables in Shared package
@@ -374,14 +396,14 @@ Perhaps No_Access_Components as in...
 
 package Pure_P is
    pragma Pure;
-   
+
    type T is private with Preelaborable_Initialization, No_Access_Components;
 
    ...
 
 private
-   
-   ...   
+
+   ...
 end Pure_P;
 
 Then the wording for Shared Passive units could be tweaked to only allow non
@@ -397,8 +419,8 @@ We don't need to protect against examples using Unchecked_Access.
 I would say make it a bounded error if there is no use of Unchecked_Access.
 
 If Unchecked_Access is used, then as usual execution can become erroneous if the
-designated object disappears and someone dereferences the access value stored
-in the passive partition.
+designated object disappears and someone dereferences the access value stored in
+the passive partition.
 
 ****************************************************************
 
@@ -407,36 +429,50 @@ Sent: Friday, January  4, 2013  7:03 PM
 
 > We don't need to protect against examples using Unchecked_Access.
 
-Right. The "original" rule that prevents these problems is an accessibility check,
-and the whole point of 'Unchecked_Access is to turn off accessibility checks.
- 
-> I would say make it a bounded error if there is no use of 
+Right. The "original" rule that prevents these problems is an accessibility
+check, and the whole point of 'Unchecked_Access is to turn off accessibility
+checks.
+
+> I would say make it a bounded error if there is no use of
 > Unchecked_Access.
 
-The advantage of a Bounded Error is that it is a runtime check, and thus can break
-privacy (or more accurately, privacy is not considered). The question is, exactly
-what is checked?
+The advantage of a Bounded Error is that it is a runtime check, and thus can
+break privacy (or more accurately, privacy is not considered). The question is,
+exactly what is checked?
 
-The rule I suggested was that the *assignment* of an object that has an access part
-declared in a pure unit is a bounded error. I suppose that would also have to cover
-reference parameter passing (I forgot about this in my original message; I was
-thinking assignment covered all parameter passing, which is wrong). But the idea is
-that the check is on the assignment or parameter passing of an object declared in
-a shared passive package.
+The rule I suggested was that the *assignment* of an object that has an access
+part declared in a pure unit is a bounded error. I suppose that would also have
+to cover reference parameter passing (I forgot about this in my original
+message; I was thinking assignment covered all parameter passing, which is
+wrong). But the idea is that the check is on the assignment or parameter passing
+of an object declared in a shared passive package.
 
-I don't see how it could be on the access value or object passed in, unless we want
-to insist on full run-time accessibility checking in this case. (In which case, I
-don't think it needs to be a bounded error, it just has to be checked at run-time.)
-But that seems like it would have distributed overhead.
- 
-> If Unchecked_Access is used, then as usual execution can become 
-> erroneous if the designated object disappears and someone dereferences 
+I don't see how it could be on the access value or object passed in, unless we
+want to insist on full run-time accessibility checking in this case. (In which
+case, I don't think it needs to be a bounded error, it just has to be checked at
+run-time.) But that seems like it would have distributed overhead.
+
+> If Unchecked_Access is used, then as usual execution can become
+> erroneous if the designated object disappears and someone dereferences
 > the access value stored in the passive partition.
 
 Right.
 
-But in any case my original question was whether we need to reopen the AI to determine
-a solution. If we do that, then there is plenty more time for the AI author (that would
-be Tucker) to figure out a solution (we don't have to have it now).
+But in any case my original question was whether we need to reopen the AI to
+determine a solution. If we do that, then there is plenty more time for the AI
+author (that would be Tucker) to figure out a solution (we don't have to have it
+now).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, June  9, 2013  3:23 PM
+
+I came up with a possible simple fix for this one.  I propose that whenever a
+reference is made to an access type declared in a declared-pure package is used
+within a library-level declaration of a shared-passive package, that it
+effectively "inherits" the special accessibility rule of access types declared
+in shared-passive packages.  I didn't work out all of the implications, but I
+think this is approximately right... [This is version /03 of the AI.]
 
 ****************************************************************
