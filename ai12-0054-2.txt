@@ -1,5 +1,5 @@
-!standard 3.2.4(14/3)                              13-06-14    AI12-0054-2/02
-!standard 3.2.4(30/3)
+!standard 3.2.4(14/3)                              13-06-15    AI12-0054-2/03
+!standard 3.2.4(31/3)
 !class binding interpretation 13-05-31
 !status work item 13-05-31
 !status received 13-05-02
@@ -17,13 +17,15 @@ It does NOT apply when evaluating memberships and the Valid attribute.
 
 AI12-0022-1, "Raise expressions for specifying the exception raised for an
 assertion" added the ability to control which exception is raised by failure of
-various assertions. This is an important capability, because it allows to change
-interfaces to use assertions while preserving compatibility.
+various assertions. This is an important capability, because it allows one to
+change interfaces to use assertions while preserving compatibility.
 
-However, this feature doesn't work properly for predicates, because predicates
-are evaluated by membership tests, so we would get spurious failures. Should
-these spurious failures be removed from the language, so that there is a
-mechanism for specifying the exception raised by a predicate failure? (Yes.)
+However, this feature doesn't work properly for predicates, because
+predicates are evaluated by membership tests, so we would get spurious
+failures in such membership tests if the predicate expression included a
+raise expression. Should these spurious failures be removed from the
+language, so that there is a mechanism for specifying the exception
+raised by a predicate failure? (Yes.)
 
 !recommendation
 
@@ -33,28 +35,61 @@ mechanism for specifying the exception raised by a predicate failure? (Yes.)
 
 Add after 3.2.4(14/3):
 
-For a subtype, the following language-defined aspect may be specified with an
+For a subtype with a directly-specified predicate aspect, the following
+additional language-defined aspect may be specified with an
 aspect_specification (see 13.1.1):
 
 Predicate_Failure
-   This aspect specifies an expression that will be evaluated if a predicate
-   check for the subtype fails; it defines the Message associated to the
-   occurrence of Assertion_Error wich is raised by the failure of the condition.
+   This aspect shall be specified by a *string*_expression, which
+   determines the action to be performed when a predicate check fails because a
+   directly-specified predicate aspect of the subtype evaluates to
+   False, as explained below.
 
 Name Resolution Rules
 
-The expected type for a precondition or postcondition expression is String.
+The expected type for the Predicate_Failure expression is String.
 
-Change the end of 3.2.4(31/3) as follows:
-"Assertion_Error is raised {with the message defined by evaluating the
-aspect Predicate_Failure (or the empty string if not specified)} if
-any of these checks fail."
+Remove "Assertion_Error is raised if any of these checks fail." from
+3.2.4(31/3).
+
+Add after 3.2.4(31/3):
+
+If any of predicate checks fail, Assertion_Error is raised, unless the
+subtype whose directly-specified predicate aspect evaluated to False
+also has a directly-specified Predicate_Failure aspect.  In that case, the
+specified Predicate_Failure expression is evaluated; if the evaluation
+of the Predicate_Failure expression propagates an exception occurrence,
+then this occurrence is propagated for the failure of the predicate
+check; otherwise, Assertion_Error is raised, with an associated message
+string defined by the value of the Predicate_Failure expression.
+In the absence of such a Predicate_Failure aspect, an implementation-defined
+message string is associated with the Assertion_Error exception.
+
+NOTE: The example in AI12-0022-1 should be updated to not use a
+predicate expression as an example of where raise_expression should be
+used.
 
 !discussion
 
 Note that Predicate_Failure is not involved when a predicate is evaluated in a
 membership or Valid attribute. This is how we get our cake and eat it too in
 this case.
+
+Originally the Predicate_Failure was suggested as a way to be able to
+specify a different exception to be raised when failing a predicate
+check, without causing an exception to be raised when the predicate
+expression were evaluated as part of a membership test or Valid
+attribute reference. But then it was realized that the
+Predicate_Failure expression could be something other than simply a
+raise expression. In particular, it was suggested that it could specify
+the string to be associated with the predicate failure, even when still
+raising Assertion_Error. Here is a simple example, using
+Predicate_Failure to specify the message string to be associated with
+the Assertion_Error:
+
+   subtype Even_Integer is Integer
+     with Dynamic_Predicate => Even_Integer mod 2 = 0,
+          Predicate_Failure => "Even_Integer must be a multiple of 2";
 
 The expression of the Predicate_Failure aspect can be as simple as a
 string litteral if all that is desired is to change the message; note
@@ -68,27 +103,27 @@ if it is a raise expression), the exception will propagate normally,
 thus achieving the effect of the predicate raising an expression
 different from Assertion_Error.
 
-If it is necessary to raise multiple exceptions for different failures, it is
-necessary to define multiple subtypes. For instance, Text_IO could define
-subtypes like:
+If it is necessary to raise multiple exceptions for different failures,
+or have distinct messages depending on which predicate fails, it is
+necessary to define multiple subtypes. For instance, Text_IO could
+define subtypes like:
 
    subtype Open_File_Type is File_Type
       with Dynamic_Predicate => Is_Open (Open_File_Type),
-           Predicate_Failure => raise Status_Error;
-   subtype Read_File_Type is Open_File_Type
-      with Dynamic_Predicate => Mode (Read_File_Type) = In_File;
-           Predicate_Failure => raise Mode_Error with "Can't read file: " & Name (Read_File_Type);
+           Predicate_Failure => raise Status_Error with "Already open";
+   subtype Input_File_Type is Open_File_Type
+      with Dynamic_Predicate => Mode (Input_File_Type) = In_File,
+           Predicate_Failure => raise Mode_Error with "Cannot read file: " &
+             Name (Input_File_Type);
 
-One could imagine defining similar aspects for the other kinds of contract
-assertions. We didn't do that because those aspects generally aren't combinable,
-so such an aspect would be of limited utility and probably not be worth the
-implementation cost. Moreover, there is no counterpart to the membership that
-causes all of the trouble with predicates. But defining such an aspect would not
-be hard.
+One could imagine defining similar aspects for the other kinds of
+contract assertions such as Pre and Post. However, there is no
+counterpart to the membership test or Valid attribute that causes
+the trouble with predicates. But defining such aspects would not be hard.
 
 A simpler alternative would be to simply have a Predicate_Failure_Exception
 aspect, which just specifies the exception. In that case, however, we've
-lost the ability to give an exception message. Thus we prefer the given
+lost the ability to specify an exception message. Thus we prefer the given
 solution.
 
 !ACATS Test
