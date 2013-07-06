@@ -1,6 +1,9 @@
-!standard 3.2.4(14/3)                              13-06-15    AI12-0054-2/03
+!standard 3.2.4(14/3)                              13-07-05    AI12-0054-2/04
 !standard 3.2.4(31/3)
+!standard 3.2.4(35/3)
 !class binding interpretation 13-05-31
+!status Amendment 202x 13-07-05
+!status ARG Approved 8-0-0  13-06-15
 !status work item 13-05-31
 !status received 13-05-02
 !priority High
@@ -40,7 +43,7 @@ additional language-defined aspect may be specified with an
 aspect_specification (see 13.1.1):
 
 Predicate_Failure
-   This aspect shall be specified by a *string*_expression, which
+   This aspect shall be specified by an expression, which
    determines the action to be performed when a predicate check fails because a
    directly-specified predicate aspect of the subtype evaluates to
    False, as explained below.
@@ -54,9 +57,9 @@ Remove "Assertion_Error is raised if any of these checks fail." from
 
 Add after 3.2.4(31/3):
 
-If any of predicate checks fail, Assertion_Error is raised, unless the
+If any of the predicate checks fail, Assertion_Error is raised, unless the
 subtype whose directly-specified predicate aspect evaluated to False
-also has a directly-specified Predicate_Failure aspect.  In that case, the
+also has a directly-specified Predicate_Failure aspect. In that case, the
 specified Predicate_Failure expression is evaluated; if the evaluation
 of the Predicate_Failure expression propagates an exception occurrence,
 then this occurrence is propagated for the failure of the predicate
@@ -65,9 +68,65 @@ string defined by the value of the Predicate_Failure expression.
 In the absence of such a Predicate_Failure aspect, an implementation-defined
 message string is associated with the Assertion_Error exception.
 
-NOTE: The example in AI12-0022-1 should be updated to not use a
-predicate expression as an example of where raise_expression should be
-used.
+[Editor's Note: The above will be changed again by AI12-0071-1, which defines
+the order of checks when a predicate is evaluated.]
+
+Add additional notes and examples after 3.2.4(35/3):
+
+Predicate_Failure expressions are never evaluated during the evaluation of a
+membership test (see 4.5.2) or Valid attribute (see 13.9.2).
+
+A Predicate_Failure expression can be a raise_expression (see 11.3).
+
+Examples
+
+   subtype Basic_Letter is Character -- See A.3.2 for "basic letter".
+     with Static_Predicate => Basic_Letter in 'A'..'Z' | 'a'..'z' | '’' | '‘' | 'D' | 'd' | '_' | '_' | 'á';
+
+   subtype Even_Integer is Integer
+     with Dynamic_Predicate => Even_Integer mod 2 = 0,
+          Predicate_Failure => "Even_Integer must be a multiple of 2";
+
+*Text_IO (see A.10.1) could have used predicates to describe some common
+exceptional conditions as follows:*
+
+    with Ada.IO_Exceptions;
+    package Ada.Text_IO is
+
+       type File_Type is limited private;
+
+       subtype Open_File_Type is File_Type
+          with Dynamic_Predicate => Is_Open (Open_File_Type),
+               Predicate_Failure => raise Status_Error with "File not open";
+       subtype Input_File_Type is Open_File_Type
+          with Dynamic_Predicate => Mode (Input_File_Type) = In_File,
+               Predicate_Failure => raise Mode_Error with "Cannot read file: " &
+                 Name (Input_File_Type);
+       subtype Output_File_Type is Open_File_Type
+          with Dynamic_Predicate => Mode (Output_File_Type) /= In_File,
+               Predicate_Failure => raise Mode_Error with "Cannot write file: " &
+                 Name (Output_File_Type);
+
+       ...
+
+       function Mode (File : in Open_File_Type) return File_Mode;
+       function Name (File : in Open_File_Type) return String;
+       function Form (File : in Open_File_Type) return String;
+
+       ...
+
+       procedure Get(File : in Input_File_Type; Item : out Character);
+
+       procedure Put(File : in Output_File_Type; Item : in Character);
+
+       ...
+
+       -- Similarly for all of the other input and output subprograms.
+
+[Editor's note: We can't do this for Ada 202x, because of compatibility
+concerns (these subprograms would not be subtype conformant with existing
+access-to-subprogram types, so 'Access would fail). We could do something
+similar with preconditions, but that would *look* like a lot more change.]
 
 !discussion
 
@@ -83,13 +142,9 @@ attribute reference. But then it was realized that the
 Predicate_Failure expression could be something other than simply a
 raise expression. In particular, it was suggested that it could specify
 the string to be associated with the predicate failure, even when still
-raising Assertion_Error. Here is a simple example, using
-Predicate_Failure to specify the message string to be associated with
-the Assertion_Error:
-
-   subtype Even_Integer is Integer
-     with Dynamic_Predicate => Even_Integer mod 2 = 0,
-          Predicate_Failure => "Even_Integer must be a multiple of 2";
+raising Assertion_Error. The first example in the wording above is
+a simple example, using Predicate_Failure to specify the message string
+to be associated with the Assertion_Error.
 
 The expression of the Predicate_Failure aspect can be as simple as a
 string litteral if all that is desired is to change the message; note
@@ -105,16 +160,8 @@ different from Assertion_Error.
 
 If it is necessary to raise multiple exceptions for different failures,
 or have distinct messages depending on which predicate fails, it is
-necessary to define multiple subtypes. For instance, Text_IO could
-define subtypes like:
-
-   subtype Open_File_Type is File_Type
-      with Dynamic_Predicate => Is_Open (Open_File_Type),
-           Predicate_Failure => raise Status_Error with "Already open";
-   subtype Input_File_Type is Open_File_Type
-      with Dynamic_Predicate => Mode (Input_File_Type) = In_File,
-           Predicate_Failure => raise Mode_Error with "Cannot read file: " &
-             Name (Input_File_Type);
+necessary to define multiple subtypes. For an example, see the Text_IO
+example in the wording above.
 
 One could imagine defining similar aspects for the other kinds of
 contract assertions such as Pre and Post. However, there is no
@@ -125,6 +172,175 @@ A simpler alternative would be to simply have a Predicate_Failure_Exception
 aspect, which just specifies the exception. In that case, however, we've
 lost the ability to specify an exception message. Thus we prefer the given
 solution.
+
+
+NOTE: The example in AI12-0022-1 should not use a predicate expression as
+an example of where raise_expression should be used. That part of AI12-0022-1
+should be replaced by the following.
+
+Example: Imagine the following routine in a GUI library:
+
+    procedure Show_Window (Window : in out Root_Window);
+       -- Shows the window.
+       -- Raises Not_Valid_Error if Window is not valid.
+
+We would like to be able to use a predicate to check the comment. With the
+"raise_expression" (and the Predicate_Failure aspect, see AI12-0054-2),
+we can do this without changing the semantics:
+
+    subtype Valid_Root_Window is Root_Window
+       with Dynamic_Predicate => Is_Valid (Valid_Root_Window),
+            Predicate_Failure => raise Not_Valid_Error;
+
+    procedure Show_Window (Window : in out Valid_Root_Window);
+       -- Shows the window.
+
+If we didn't include the Predicate_Failure aspect with a raise_expression here,
+using the predicate would change the exception raised on this failure. That
+could cause the exception to fall into a different handler than currently, which
+is likely to not be acceptable.
+
+We could have used a precondition on Show_Window instead of defining a
+predicate. In that case, we'd use the raise_expression directly in the
+precondition to raise the correct exception:
+
+    procedure Show_Window (Window : in out Valid_Root_Window)
+       with Pre => Is_Valid (Window) or else raise Not_Valid_Error;
+       -- Shows the window.
+
+or perhaps a conditional expression is preferable:
+
+    procedure Show_Window (Window : in out Valid_Root_Window)
+       with Pre => (if not Is_Valid (Window) then raise Not_Valid_Error);
+       -- Shows the window.
+
+Similarly, the various Containers packages in Ada could use predicates or
+preconditions in this way to make some of the needed checks; but that can only
+be done if the semantics remains unchanged (raising Program_Error and
+Constraint_Error, not Assertion_Error). (The !proposal also shows how this could
+be used in Text_IO and other I/O packages.)
+
+End replacement for AI12-0022-1.
+
+!corrigendum 3.2.4(14/3)
+
+@dinsa
+@xbullet<Otherwise, predicate checks are disabled for the given subtype.>
+@dinss
+For a subtype with a directly-specified predicate aspect, the following
+additional language-defined aspect may be specified with an
+@fa<aspect_specification> (see 13.1.1):
+
+@xhang<@xterm<Predicate_Failure>
+   This aspect shall be specified by an @fa<expression>, which
+   determines the action to be performed when a predicate check fails because a
+   directly-specified predicate aspect of the subtype evaluates to
+   False, as explained below.>
+
+@s8<@i<Name Resolution Rules>>
+
+The expected type for the Predicate_Failure @fa<expression> is String.
+
+!corrigendum 3.2.4(31/3)
+
+@drepl
+@xindent<On every subtype conversion, the predicate of the target subtype is
+evaluated, and a check is performed that the predicate is True. This includes all
+parameter passing, except for certain parameters passed by reference, which
+are covered by the following rule: After normal completion and leaving of a
+subprogram, for each @b<in out> or @b<out> parameter that is passed by reference, the
+predicate of the subtype of the actual is evaluated, and a check is performed that
+the predicate is True. For an object created by an @fa<object_declaration> with no
+explicit initialization @fa<expression>, or by an uninitialized @fa<allocator>,
+if any subcomponents have @fa<default_expression>s, the predicate of
+the nominal subtype of the created object is evaluated, and a
+check is performed that the predicate is True. Assertions.Assertion_Error is raised
+if any of these checks fail.>
+@dby
+@xindent<On every subtype conversion, the predicate of the target subtype is
+evaluated, and a check is performed that the predicate is True. This includes all
+parameter passing, except for certain parameters passed by reference, which
+are covered by the following rule: After normal completion and leaving of a
+subprogram, for each @b<in out> or @b<out> parameter that is passed by reference, the
+predicate of the subtype of the actual is evaluated, and a check is performed that
+the predicate is True. For an object created by an @fa<object_declaration> with no
+explicit initialization @fa<expression>, or by an uninitialized @fa<allocator>,
+if any subcomponents have @fa<default_expression>s, the predicate of
+the nominal subtype of the created object is evaluated, and a
+check is performed that the predicate is True.>
+
+@xindent<If any of the predicate checks fail, Assertion_Error is raised, unless the
+subtype whose directly-specified predicate aspect evaluated to False
+also has a directly-specified Predicate_Failure aspect. In that case, the
+specified Predicate_Failure @fa<expression> is evaluated; if the evaluation
+of the Predicate_Failure @fa<expression> propagates an exception occurrence,
+then this occurrence is propagated for the failure of the predicate
+check; otherwise, Assertion_Error is raised, with an associated message
+string defined by the value of the Predicate_Failure @fa<expression>.
+In the absence of such a Predicate_Failure aspect, an implementation-defined
+message string is associated with the Assertion_Error exception.>
+
+!corrigendum 3.2.4(35/3)
+
+@dinsa
+@xindent<@s9<6  A Static_Predicate, like a constraint, always remains True for all
+objects of the subtype, except in the case of uninitialized variables and
+other invalid values. A Dynamic_Predicate, on the other hand, is checked as
+specified above, but can become False at other times. For example, the
+predicate of a record subtype is not checked when a subcomponent is modified.>>
+@dinss
+@xindent<@s9<7  Predicate_Failure @fa<expression>s are never evaluated during
+the evaluation of a membership test (see 4.5.2) or Valid attribute
+(see 13.9.2).>>
+
+@xindent<@s9<8  A Predicate_Failure @fa<expression> can be a
+@fa<raise_expression> (see 11.3).>>
+
+@s8<@i<Examples>>
+
+@xcode<@b<subtype> Basic_Letter @b<is> Character -- @ft<@I<See A.3.2 for "basic letter".>>
+   @b<with> Static_Predicate =@> Basic_Letter @b<in> 'A'..'Z' | 'a'..'z' | '@unicode(198)' | '@unicode(230)' | '@unicode(208)' | '@unicode(240)' | '@unicode(222)' | '@unicode(254)' | '@unicode(223)';>
+
+@xcode<@b<subtype> Even_Integer @b<is> Integer
+   @b<with> Dynamic_Predicate =@> Even_Integer @b<mod> 2 = 0,
+        Predicate_Failure =@> "Even_Integer must be a multiple of 2";>
+
+@i<Text_IO (see A.10.1) could have used predicates to describe some common
+exceptional conditions as follows:>
+
+@xcode<@b<with> Ada.IO_Exceptions;
+@b<package> Ada.Text_IO @b<is>>
+
+@xcode<   @b<type> File_Type @b<is limited private>;>
+
+@xcode<   @b<subtype> Open_File_Type @b<is> File_Type
+      @b<with> Dynamic_Predicate =@> Is_Open (Open_File_Type),
+           Predicate_Failure =@> @b<raise> Status_Error @b<with> "File not open";
+   @b<subtype> Input_File_Type @b<is> Open_File_Type
+      @b<with> Dynamic_Predicate =@> Mode (Input_File_Type) = In_File,
+           Predicate_Failure =@> @b<raise> Mode_Error @b<with> "Cannot read file: " &
+             Name (Input_File_Type);
+   @b<subtype> Output_File_Type @b<is> Open_File_Type
+      @b<with> Dynamic_Predicate =@> Mode (Output_File_Type) /= In_File,
+           Predicate_Failure =@> @b<raise> Mode_Error @b<with> "Cannot write file: " &
+             Name (Output_File_Type);>
+
+@xcode<   ...>
+
+@xcode<   @b<function> Mode (File : @b<in> Open_File_Type) @b<return> File_Mode;
+   @b<function> Name (File : @b<in> Open_File_Type) @b<return> String;
+   @b<function> Form (File : @b<in> Open_File_Type) @b<return> String;>
+
+@xcode<   ...>
+
+@xcode<   @b<procedure> Get (File : @b<in> Input_File_Type; Item : @b<out> Character);>
+
+@xcode<   @b<procedure> Put (File : @b<in> Output_File_Type; Item : @b<in> Character);>
+
+@xcode<   ...>
+
+@xcode<   -- @ft<@I<Similarly for all of the other input and output subprograms.>>>
+
 
 !ACATS Test
 
