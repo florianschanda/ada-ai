@@ -1,13 +1,15 @@
-!standard 13.2(6.1/2)                               13-06-10    AI12-0001-1/04
+!standard 13.2(6.1/2)                               13-07-08    AI12-0001-1/05
 !standard 13.2(7)
 !standard 13.2(8)
 !standard 13.2(9/3)
 !standard C.6(8.1/3)
 !standard C.6(10)
 !standard C.6(11)
-!standard C.6(13.2/3)
 !standard C.6(21)
+!standard C.6(24)
 !class binding interpretation 06-03-31
+!status Amendment 202x 13-07-08
+!status ARG Approved 6-0-3  13-06-14
 !status work item 06-03-31
 !status received 06-03-30
 !priority Medium
@@ -19,7 +21,7 @@
 
 [Editor's note: This AI was carried over from Ada 2005.]
 
-Pack doesn't not require tight packing in infeasible cases (atomic, volatile,
+Pack doesn't require tight packing in infeasible cases (atomic,
 aliased, by-reference types, independent addressability).
 
 !question
@@ -31,8 +33,8 @@ intent? (No.)
 !recommendation
 
 Resolve the difference by eliminating C.6 (21) and changing 13.2 (6.1/2)
-to be a recommended level of support where by-reference, aliased, atomic
-and volatile objects must be aligned according to subtype.
+to be a recommended level of support where by-reference, aliased, and atomic
+objects must be aligned according to subtype.
 
 Change 13.2(8 and 9) to add an exception for components that have alignment
 requirements as detailed above.
@@ -57,6 +59,28 @@ Modify AARM 9.10(1.d/3):
      elsewhere.] Note, however, that the components of an atomic object
      are not necessarily atomic.
 
+Add an AARM Language Design Principle after 13.2(1):
+  If the default representation is already uses minimal storage for a
+  particular type, aspect Pack may not cause any representation change.
+  It follows that aspect Pack should always be allowed, even when it
+  has no effect on representation.
+
+  As a consequence, the chosen representation for a packed type may change
+  during program maintenance even if the type is unchanged (in particular,
+  if other representation aspects change on a part of the type). This is
+  different than the behavior of most other representation aspects, whose
+  properties remain guaranteed no matter what changes are made to other
+  aspects.
+
+  Therefore, aspect Pack should not be used to achieve a representation
+  required by external criteria. For instance, setting Component_Size to 1
+  should be preferred over using aspect Pack to ensure an array of bits.
+  If future maintenance would make the array components aliased, independent,
+  or atomic, the program would become illegal if Component_Size is used
+  (immediately identifying a problem) while the aspect Pack version would
+  simply change representations (probably causing a hard-to-find bug).
+End Language Design Principle.
+
 Delete 13.2(6.1/2) which currently says:
 
   If a packed type has a component that is not of a by-reference type and has no
@@ -64,18 +88,25 @@ Delete 13.2(6.1/2) which currently says:
   Alignment of its subtype; in particular it need not be allocated on a storage
   element boundary.
 
-Add a new bullet after 13.2(7/3) (replacing the above deleted paragraph):
+Add a new bullet after 13.2(7/3):
 
-    * For a packed type that has a component that has an aliased part,
-      or is of a by-reference type, or is volatile, atomic or
-      independently addressable, the component shall be aligned
-      according to the alignment of its subtype. Any other component need
-      not be aligned.
+    * Any component of a packed type that is of a by-reference type, that is
+      specified as independently addressable, or that contains an aliased part,
+      shall be aligned according to the alignment of its subtype.
+
+AARM Ramification: 
+This also applies to atomic components. "Atomic" implies "specified as
+independently addressable", so we don't need to mention atomic here.
+
+Other components do not have to follow the alignment of the subtype when packed;
+in many cases, the Recommended Level of Support will require the alignment to
+be ignored.
+End AARM Ramification.
 
 Modify 13.2(8):
 
     * For a packed record type, the components should be packed as tightly
-      as possible subject to {the above alignment requirements},
+      as possible subject to {the above alignment requirements,}
       the Sizes of the component subtypes, and [subject to]
       any record_representation_clause that applies to the type;
       the implementation may, but need not, reorder components or cross
@@ -118,22 +149,6 @@ Add "and independent" to C.6(10/3-11), twice:
   implementation from performing the required indivisible {and independent}
   reads and updates.
 
-Modify C.6(13.2/3):
-
-It is illegal to specify a representation aspect {other than Pack} for a
-component, object or type for which the aspect Independent or
-Independent_Components is True, in a way that prevents the implementation from
-providing the independent addressability required by the aspect.
-
-[Editor's comment: I don't believe that the above change is necessary or wise.
-The revision to the meaning of Pack means that the above could never happen for
-Pack, so there is no need to mention it here. Perhaps an AARM note would be
-appropriate "Note that the above can never happen for Pack.", but I worry that
-mentioning Pack here implies that it somehow can silently destroy independent
-addressibility. (Certainly, the above can be read that way.) That's certainly
-the wrong take-away.]
-
-
 Delete C.6(21/3) and the associated AARM note, because the new alignment
 requirement above covers this case:
 
@@ -145,21 +160,17 @@ requirement above covers this case:
    illegal as the Recommended Level of Support cannot be achieved; otherwise, a
    warning might be appropriate if no packing whatsoever can be achieved.
 
-[Editor's comment: I think it would be a good idea to add a Language Design Principle
-to 13.2 to explain that Pack is about storage minimization and not about matching
-a particular representation. In particular, if Pack is used to match a particular
-representation, future maintenance might cause the representation to silently
-change (if components become volatile or aliased, they will not be packed as
-tightly), while this will not happen for other representation clauses (like
-Component_Size).]
+Add a new note after C.6(24):
 
+Specifying the Pack aspect cannot override the effect of specifying an Atomic or
+Atomic_Components aspect.
 
 !discussion
 
 The idea of Pack is that if it's infeasible to pack a given component tightly
-(because it is atomic, volatile, aliased, of a by-reference type, or has
-independent addressability), then Pack is not illegal; it just doesn't pack as
-tightly as it might without the atomic, volatile, etc.
+(because it is atomic, aliased, of a by-reference type, or has independent
+addressability), then Pack is not illegal; it just doesn't pack as tightly
+as it might without the atomic, volatile, etc.
 
 This was always the intent, but the Recommended Level of Support (RLS)
 contradicted it.
@@ -175,20 +186,19 @@ momentarily).
 !corrigendum 13.2(6.1/2)
 
 @ddel
-If a packed type has a component that  is not of a by-reference type and has
+If a packed type has a component that is not of a by-reference type and has
 no aliased part, then such a component need not be aligned according to the
 Alignment of its subtype; in particular it need not be allocated on
 a storage element boundary.
 
 !corrigendum 13.2(7)
 
-@dinst
-The recommended level of support for pragma Pack is:
 @dinsa
-@xindent<For a packed type that has a component that has an aliased part, or is
-of a by-reference type, or is volatile, atomic or independently addressable, the
-component shall be aligned according to the alignment of its subtype. Any other
-component need not be aligned.>
+The recommended level of support for pragma Pack is:
+@dinst
+@xbullet<Any component of a packed type that is of a by-reference type, that is
+specified as independently addressable, or that contains an aliased part,
+shall be aligned according to the alignment of its subtype.>
 
 !corrigendum 13.2(8)
 
@@ -230,7 +240,7 @@ a type, all objects or components of that type. All atomic objects
 are considered to be specified as independently addressable.
 @dby
 When True, the aspects Independent and Independent_Components @i<specify as
-independently addressable the named object or component(s), or in the case of
+independently addressable> the named object or component(s), or in the case of
 a type, all objects or components of that type. All atomic objects and aliased
 objects are considered to be specified as independently addressable.
 
@@ -258,25 +268,24 @@ Component_Size attribute for an array type with atomic components, or the layout
 attributes of an atomic component, in a way that prevents the implementation
 from performing the required indivisible and independent reads and updates.
 
-!corrigendum C.6(13.2/3)
-
-@drepl
-It is illegal to specify a representation aspect for a
-component, object or type for which the aspect Independent or
-Independent_Components is True, in a way that prevents the implementation from
-providing the independent addressability required by the aspect.
-@dby
-It is illegal to specify a representation aspect other than Pack for a
-component, object or type for which the aspect Independent or
-Independent_Components is True, in a way that prevents the implementation from
-providing the independent addressability required by the aspect.
-
 !corrigendum C.6(21)
 
 @ddel
 If a pragma Pack applies to a type any of whose subcomponents are atomic, the
 implementation shall not pack the atomic subcomponents more tightly than that
 for which it can support indivisible reads and updates.
+
+!corrigendum C.6(24)
+
+@dinsa
+@xindent<@s9<NOTES:@hr
+9  An imported volatile or atomic constant behaves as a constant (i.e. read-only)
+with respect to other parts of the Ada program, but can still be modified by an
+"external source.">>
+@dinst
+@xindent<@s9<10  Specifying the Pack aspect cannot override the effect of
+specifying an Atomic or Atomic_Components aspect.>>
+
 
 !ACATS test
 
