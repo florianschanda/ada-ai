@@ -1,7 +1,9 @@
-!standard 4.6(56)                                   13-06-15    AI12-0074-1/02
+!standard 4.6(56)                                   13-07-08    AI12-0074-1/03
 !standard 6.4.1(12)
 !standard 6.4.1(13.1/3)
 !class binding interpretation 13-06-09
+!status work item 13-07-08
+!status ARG Approved 9-0-0  13-06-15
 !status work item 13-06-09
 !status received 13-04-30
 !priority Medium
@@ -11,7 +13,8 @@
 
 !summary
 
-** TBD.
+Scalar view conversion values are well defined if the Default_Value aspect
+of the target type is specified.
 
 !question
 
@@ -40,7 +43,7 @@ Consider:
      y : long_long_float := long_long_float'last;
       -- or, for a variation, leave y uninitialized
    begin
-    foo (defaulted_integer (y));
+    foo (defaulted_integer (y));  -- Now illegal.
     put_line (long_long_float'image (y));
    end;
 
@@ -54,18 +57,35 @@ Consider:
 
      yy : mod5 := 4;
    begin
-    foo (mod3 (yy));
+    foo (mod3 (yy));  -- Now illegal.
     put_line (mod5'image (yy));
    end;
 
 In this case, the converted value might not (probably won't) fit into the
-parameter representation. What should happen? (Not sure. :-)
+parameter representation. What should happen? (The calls on Foo are illegal.)
 
 !recommendation
 
 (See !summary.)
 
 !wording
+
+Modify 4.6(56):
+
+Reading the value of the view yields the result of converting the value of the
+operand object to the target subtype (which might raise Constraint_Error), except
+if the object is of an {elementary}[access] type and the view conversion is passed
+as an out parameter; in this latter case, the value of the operand object is used
+to initialize the formal parameter without checking against any constraint of the
+target subtype ({as described more precisely in}[see] 6.4.1). 
+
+[Editor's note: It's not clear to me that this is sufficiently vague to avoid conflict
+with 6.4.1.]
+
+Modify AARM 4.6(56.a):
+
+This ensures that even an out parameter of an {elementary}[access] type is
+initialized reasonably. 
 
 Append to end of 6.4.1 Legality Rules section:
 
@@ -111,7 +131,14 @@ with
 
 !discussion
 
-4.6(56) is supposed to cover this, but it isn't close to correct. First, it was
+The value of an elementary view conversion is that of its operand.
+
+We want the value of an elementary view conversion to be a 
+well defined value of the target type of the conversion if 
+the target type is either an access type or a scalar type for 
+whose Default_Value aspect has been specified.
+
+4.6(56) is supposed to define this, but it isn't close to correct. First, it was
 never updated to include predicates and null exclusions as 6.4.1(13/3) was.
 Second, it doesn't include the rules for scalar types with Default_Values
 specified at all. Third, it doesn't explain what happens if the original value
@@ -133,54 +160,88 @@ surprising that it was never solved. However, it becomes much more important
 for scalar types with Default_Values, especially when the source object is
 of a type that does not have a Default_Value (and thus might be uninitialized).
 
-[We now turn to the editor's musings on this problem. These have not been vetted
-by anyone.
+To ensure that the value of a scalar view conversion is well-defined,
+we disallow such scalar view conversions in cases where either
+   - the set of values of the type of the operand and of the
+     target type need not be the same; or
+   - an object of the type of the operand might not have a well
+     defined value.
 
-First, fixing 4.6(56) by copying all of 6.4.1(12-13.1/3) is unpleasant. It would
-be much better to somehow incorporate the rules by reference; having a separate
-copy of the rules is a maintenance hazard -- as proved by the fact that none of
-the three changes to 6.4.1(12-13.1/3) made by Ada 2012 was made in 4.6(56).
-However, I couldn't find a way to do that, thus I didn't propose any wording in
-this AI (duplicating the wording should be a last resort).
+The rule that was chosen to accomplish this is that the two 
+types must have a common ancestor type and, in the scalar 
+case, the operand type's Default_Value aspect must be specified.
 
-Second, untagged view conversions are almost always explicit in the code. The
-only exception is in calls to inherited subprograms of a derived type.
-13.1(10/3) prevents any representation change in that case, so the "does not
-fit" problem can only occur with explicit view conversions. These are always
-possible to write using temporary objects, so we can fix this problem by banning
-these conversions in some cases. (So long as the cases are just related to the
-new in Ada 2012 Default_Value aspect; banning others would probably be too
-incompatible.)
+This is expressed both as a Legality Rule (which handles most cases
+statically) and as a runtime check (which handles certain 
+obscure cases involving generic instance bodies which make it 
+past the legality rule). For an implementation which 
+macro-expands instance bodies, the outcome of this runtime 
+check is always known statically.
 
-Third, we will have a problem with generic contract issues if we try to
-exclusively use a legality rule. The representation/Default_Value aspect is not
-part of the contract of a generic formal type, and any rule depending on that
-thus cannot be a Legality Rule in a generic body.
+The runtime check would be triggered in examples like the following:
 
-I suggested in e-mail making it a Bounded Error to use a view conversion to
-an access type or a scalar type with a Default_Value if there exist potential
-values of the source object which cannot be represented in the target object.
-Either Program_Error or Constraint_Error should be raised, or the conversion
-should work.
+   declare
+      type T is range 0 .. 100;
+      type T_With_Default is new T with Default_Value => 0;
 
-Making this a bounded error allows two implementation strategies: (1) check
-the representation of the *type* when converting, raising an exception if the
-value doesn't fit. (I believe this is what Janus/Ada does for access types
-in the historical cases mentioned above, both of which existed in various
-compiler versions.); (2) raise Program_Error if the representation might not
-fit; this is a static check for all cases other than generic bodies for a
-sharing implementation. As such, an implementation could display a warning
-in such cases, which would be more helpful than occassional Program_Errors
-flying out of code.
+      generic
+         type New_T is new T;
+      package G is
+      end G;
 
-Making it a bounded error also allows the rule to talk about representation
-(something that Legality Rules ought not do outside of representation aspect
-rules). Wording this will be a bit tricky, and as it is not clear to me that
-this is the preferred solution, I didn't attempt it.
+      package body G is
+         X : T;
 
-End editor's musings.]
+         procedure P (X : out New_T) is
+         begin
+            X := 0;
+         end;
+      begin
+         P (New_T (X)); -- conversion raises Program_Error
+      end G;
 
-An alternative suggestion was to initialize the parameter with the
+       package I is new G (T_With_Default);
+
+    begin
+       null;
+    end;
+
+This Legality Rule is compatible with previous versions of Ada as they do not
+have the Default_Value aspect. No calls on inherited subprograms will be affected,
+as 13.1(10) ensures that the Default_Value aspect is the same for the derived type
+and the parent type, and of course the types are related in this case. That means
+that all affected view conversions will be explicit in the program.
+
+We do not use a Legality Rule to handle the more minor issue with access types,
+as that would be incompatible with existing Ada code.
+
+[Editor's note: Steve and I strongly disagree on how to handle the access type case.
+Steve argues that the language is well-defined and that any compiler that choses
+an access representation that cannot be converted in both directions without information
+lose is simply wrong. I argue that such cannot be the intent of the language, as it would
+effectively require all access types to be represented the same. In the case of a machine
+where interfacing to a language like C requires expensive byte-pointers rather than cheaper
+word-pointers, it would prevent Ada from using the word pointers at all if it wants to
+support C interfacing. A similar issue would arise if some access types needed to support
+x86 segments (which would be far more expensive than unsegmented access types). If Steve's
+intrepretation holds, then the only way to have a useful compiler in these situations would
+be to ignore the standard. That's not a direction that we want to go.
+
+I still believe that it should be a Bounded Error to do an untagged elementary view
+conversion for any target type with an implicit initial value if the representations of
+the types differ; the possible results being Constraint_Error, Program_Error, or works
+properly (no information loss). (And I wouldn't bother with the runtime check for the
+generic cases above, as the bounded error would cover them.) This way, a compiler only
+need to make a check if a representation change is involved, and any result will not fit.
+I would not include the value in the bounded error conditions, so a safety-critical compiler
+could always raise Program_Error if any case would fail; alternatively, the check could be
+made on the value (this is what Janus/Ada's code generator actually does, whether the
+language allows it or not, since we're not going to lose information or generate wildly
+expensive code just to make Steve happy).]
+
+---
+
+An alternative solution was to initialize the parameter with the
 Default_Value in this case. However, that would potentially "deinitialize"
 the actual object in the view conversion case:
 
