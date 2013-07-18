@@ -263,3 +263,86 @@ to a remote subprogram in the parent unit, so that it could make a local call
 instead of going through the PCS.
 
 ****************************************************************
+
+From: Brad Moore
+Sent: Sunday, June 16, 2013  1:40 AM 
+
+The discussion of this AI yesterday arrived at this being a no action AI, and
+the answer to the question being asked was changed to indicate that
+All_Calls_Remote also applied to indirect calls from outside the declarative
+region of the RCI package. The reasoning was that it would not be difficult to
+add a bit of information to the fat pointer associated with a
+remote-access-to-subprogram object to indicated whether the call came from
+an All_Calls_Remote package. 
+
+That is likely true, but I think the other case described in the AI is still a
+problem, and is the main issue that needs to be solved. This is the case of a
+normal access-to-subprogram object that happens to denote a subprogram in an
+All_Calls_Remote package, when the call is being made from within the
+declarative region of the RCI subprogram. This normal access-to-subprogram
+object is likely not a fat pointer, and ordinarily would just invoke the
+denoted All_Calls_Remote subprogram through the PCS. E.2.3(19/3) currently
+says that this needs to be a local call though, yet it would likely be
+difficult for the implementation to determine that the call is being made
+from within the same declarative region.
+
+The examples I had in the AI discussion unfortunately did not actually
+capture this case. 
+
+Here I think is a more specific example.
+
+package RCI_Package is
+
+   pragma Remote_Call_Interface;
+   pragma All_Calls_Remote;
+
+   procedure P;
+
+end RCI_Package;
+
+with Normal_Package;
+package body RCI_Package is
+
+   procedure Foo (Cb : Normal_Package.Callback) is
+   begin
+      Cb.all;  -- Supposed to be local call to P from 
+               -- within declarative region.
+               -- How can we determine this normal access-to-subprogram
+               -- denotes an All_Calls_Remote subprogram from within
+               -- the same declarative region?
+   end Foo;
+
+   procedure X is   -- this gets called somehow
+   begin
+      Normal_Package.Doit (Foo'Access);
+   end X;
+
+   procedure P is
+   begin
+     ...
+   end P;
+
+end RCI_Package.Child;
+
+package Normal_Package is
+   type Callback is access procedure;
+
+   procedure Doit (Cb : Callback);
+end Normal_Package;
+
+with RCI_Package;
+package body Normal_Package is
+
+   procedure Doit (Cb : Callback) is
+   begin
+      Cb.all (RCI_Package.P'Access); 
+      -- Normal access-to-subprogram object, which invokes
+      -- an All_Calls_Remote subprogram though PCS
+   end Doit;
+
+end Normal_Package;
+
+Based on this, I think perhaps that the AI as it was originally written up, is
+closer to what we want.
+
+****************************************************************
