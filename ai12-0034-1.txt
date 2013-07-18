@@ -1,4 +1,4 @@
-!standard E.4(8)                               12-06-28    AI12-0034-1/02
+!standard E.4(8)                               13-06-15    AI12-0034-1/03
 !class binding interpretation 12-06-06
 !status work item 12-06-06
 !status received 12-05-11
@@ -7,8 +7,8 @@
 !subject Remote stream attribute calls
 !summary
 
-The specific type corresponding to the designated type of a remote access-to-class-wide
-type cannot have user-defined stream attributes.
+Dereferencing a remote-access-to-classwide type to make a dispatching call to a
+stream attribute is not allowed.
 
 !question
 
@@ -59,52 +59,46 @@ Should this be fixed? (Yes.)
 
 !wording
 
-Add after E.2.3(14.1/3):
+Modify E.2.2(16):
 
-* The corresponding specific type shall not have available stream attributes (see 13.13.2);
+* A value of a remote access-to-class-wide type shall be dereferenced (or
+  implicitly converted to an anonymous access type) only as part of a
+  dispatching call {to a primitive operation of the designated type}
+  where the value designates a controlling operand of the call (see E.4,
+  "Remote Subprogram Calls");
 
-AARM Note: This prevents dispatching calls to stream attributes of the designated type of
-the remote access-to-class-wide type. Such calls would have to be remote, but that would
-be impossible as the stream access type does not support external streaming.
+AARM Ramification: Stream attributes of the designated type are not
+primitive operations of the designated type, and thus are prohibited
+by this rule. This is good, as the access parameter of a stream attribute
+does not have external streaming, and thus cannot be a parameter of a
+remote call.
+
+[Editor's note: This is the solution proposed by Thomas Quinot. He's right
+that stream attributes aren't primitive operations of any type (see the
+definition on 3.2.3(2-7)), so this works. Note that this is suspiously
+similar to the original solution provided by Adam in the original comment.]
 
 !discussion
 
-We could modify E.2.2(16) to prevent this specific problem, but that just
-fixes one possible way to cause the problem and leaves open the door for
-other ways to be found. Moreover, that would complicate the model (there is
-nothing wrong with the dereference, given that it is used in a dispatching
-call); the problem is that the call has a profile that shouldn't be allowed.
-Blaming that on the access type usage seems wrong.
+We could require the root designated type to not have available stream
+attributes. However, this solution is incompatible, and potentially penalizes
+users that do not use any problematic calls to stream attributes.
 
 We can't ban the declarations of the subprograms like we do for other
 subprograms with access parameters, because that would make it impossible to
 define marshalling and unmarshalling for these types. Which also would make
 remote calls impossible, defeating the entire purpose.
 
-We could directly ban calls on such attributes, but that is messy because of
-need to handle renames.
+So we modify E.2.2(16) to prevent this specific problem. This leaves the
+concern that the door is left open for other ways to cause the problem to
+be uncovered. It also complicates the model (there is
+nothing wrong with the dereference, given that it is used in a dispatching
+call); the problem is that the call has a profile that shouldn't be allowed.
+Blaming that on the access type usage seems wrong.
 
-So we require the basic type to not have not have available stream attributes.
+But this solution is compatible with all programs except those that actually
+try to do the bad thing. Thus it seems the best of a bad lot of solutions.
 
-This solution is incompatible, but it should not be a major problem in practice,
-as most such base types should be abstract and thus not have concrete implementations
-anyway.
-
-[Editor's note: I wrote this up as I was directed to, but I don't believe the
-conclusion that we came to about the incompatibility. The specific types that
-make up the class most likely will need overridden stream attributes in order
-to be able to marshall/unmarshall the objects for these remote dispatching calls.
-(They might not if there are no extension components, but otherwise there will
-need to be overridden stream attributes somewhere.) It's easiest to define these
-attributes on the root type, as Ada will automatically create stream attributes
-for extensions so long as the extension components support external streaming.
-So I would expect many programs using remote access-to-class-wide types to
-have defined attributes on the root tagged type. Thus the compatibility
-impact would be severe -- assuming that anyone actually uses remote
-access-to-class-wide types in the first place (not a certainty itself).
-I believe that my previously proposed solution, or the idea described below,
-are both better solutions (as they are not incompatible - other than the case
-that does not work).]
 
 Note that there is another issue brought up by this example that we're
 not fixing.
@@ -126,6 +120,10 @@ each specific type; with that implementation there is no need for remote calls
 local. As such, there should be a permission to make local calls to local
 routines (and perhaps an aspect "All_Calls_Remote" on the remote
 access-to-classwide to revoke that permission if that is actually useful).
+
+!ASIS
+
+No ASIS effect.
 
 !ACATS test
 
@@ -527,6 +525,90 @@ change whether or not we confirm the Annex), and has almost no demand (I don't
 think anyone ever asked RRS for an implementation). I haven't got much traction
 with such a position, but perhaps wasting many more hours on this junk again
 will change some views.
+
+****************************************************************
+
+From: Thomas Quinot
+Sent: Saturday, June 15, 2013  11:56 AM
+
+> Need informed advice on AI12-0034 : remote stream attribute calls
+
+First observation: in any case a call to stream attributes can't
+possibly be a remote call -- for one thing, as is mentioned, the Stream
+parameter does not support external streaming. Second, it seems silly to
+make a remote call in order to prepare data for sending.
+
+Now in any case I think the proposed solution is a ugly hack. I see two
+possible alternative approaches. Both solutions have the same underlying
+philosophy that a dereference of an RACW is intended to be permitted
+only in the context of a call to a primitive operation of the type,
+i.e. to a service that the user specifies is provided by the designated
+object. (S'Write'Class is not a service that is intended to be provided
+by the object, it's a collateral subprogram produced "on the side").
+
+1. Approach without need for amendment
+--------------------------------------
+
+A bit of creative exegesis, the idea is to take advantage of the fact
+that there is no declaration for the procedure denoted by S'Class'Write,
+and from there derive that the user does not intend this procedure to be
+a service provided [to remote callers] by the designated to object.
+
+Consider 13.13.2(11):
+
+"
+S'Class'Write
+S'Class'Write denotes a procedure with the following specification: 
+
+procedure S'Class'Write(
+  Stream : not null access Ada.Streams.Root_Stream_Type'Class;
+  Item   : in T'Class)
+
+Dispatches to the subprogram denoted by the Write attribute of the
+specific type identified by the tag of Item.
+"
+
+in a call "S'Class'Write (Stream, Item)", is Item a controlling operand
+in a dispatching call? I don't think so.
+
+The call dispatches according to the tag of Item (as would be the
+case if Item were a controlling operand), BUT it is not "a call on
+a dispatching operation" because its name (S'Class'Write) does not
+denote the declaration of a primitive operation (the name denotes
+a procedure, but there is no declaration for this procedure).
+
+So, Item is not a controlling operand per 3.9.2(2/3), so having a RACW
+dereference here is illegal per E.2.2(16).
+
+2. Approach with amendment
+--------------------------
+
+Same idea, but making an explicit change instead of leveraging existing
+bits.
+
+Clarify E.2.2(16) as follows:
+
+A value of a remote access-to-class-wide type shall be dereferenced (or
+implicitly converted to an anonymous access type) only as part of a
+dispatching call
+
+to a primitive operation of the designated type <<<
+
+where the value designates a controlling operand of the call 
+
+I think that's the best solutions I can think of in 10 minutes time.
+Unless I'm missing something obvious, they should adequately address the
+raised issue, and I feel they are clearer than the proposed alternative
+solution described in the AI. If you agree with that, could you please
+forward them to the ARG?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, June 15, 2013  2:51 PM
+
+I rewrote AI12-0034-1 using Thomas' solution so we can dispose of it
+quickly tomorrow. [This is version /03 of the AI - ED]
 
 ****************************************************************
 
