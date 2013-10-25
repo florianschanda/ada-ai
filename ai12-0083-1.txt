@@ -1,0 +1,539 @@
+!standard 3.9.3(6/2)                                13-10-24    AI12-0083-1/01
+!class Amendment 13-10-24
+!status work item 13-10-24
+!status received 13-08-12
+!priority Medium
+!difficulty Hard
+!subject Automatic creation of constructor functions
+
+!summary
+
+We define "default extension initialization"; types that have this property
+can automatically have constructor functions created upon derivation, just
+as they are created for null extensions in Ada 2012.
+
+!problem
+
+Imagine that you have a classic mix-in generic - that is, a generic package
+that defines a type that is an extension of a generic formal type:
+
+    generic
+        type T is tagged private;  -- or type T is new TTT with private;
+    package Generic_Package is
+        type Derived is new T with ...
+
+    end Generic_Package;
+
+The issue comes up when you try to instantiate the package, and the
+actual type has operations that must be overridden (functions with
+controlling results; or, if the actual type is abstract, abstract
+subprograms). Now the instantiation will fail, because no overriding
+subprogram is declared in the generic package. But of course it's
+impossible for an overriding subprogram to be put in the generic,
+because the generic specification cannot know what operations may
+exist that need to be overridden.  
+
+!proposal
+
+We propose extending the existing "null extension" rules to allow
+extension components if a new type property is defined on the type,
+and so long as those components have some default initialization.
+
+Define aspect Allow_Default_Extension_Initialization.
+
+This aspect is allowed only on tagged types for which all of the
+extension components have either default initialization expressions or
+have implicit initial values (see 3.3.1). A tagged type with this aspect
+True is called a type that has default extension initialization.
+
+Aspect Allow_Default_Extension_Initialization is never inherited; it is
+true if the type is a null extension or if it is specified as True; it
+is False otherwise.
+
+Rules like 3.9.3(4) and 3.9.3(6) that allow functions with controlling
+results to be created for a type "that is a null extension" would be
+changed to allow a type "that have default extension initialization".
+
+3.4(27) would be modified
+", or in the case of [a null extension]{a type with default extension
+initialization}, extended to the derived type using the equivalent of
+an extension_aggregate with the original result as the ancestor_part
+and [NULL RECORD]{a list of the extension components with an association
+of => <>} as the record_component_association_list"
+
+!wording
+
+** TBD.
+
+!discussion
+
+This solution is just an extension of the existing rules for null
+extensions. We keep compatibility by making all null extensions have
+this new aspect.
+
+Note that this solution mitigates the maintenance hazard posed by the
+existing null extension rule (if a component needs to be added by
+maintenance, suddenly a bunch of routines need to be overridden). With
+this new aspect, adding the aspect and appropriate defaults will
+keep the existing behavior and prevent the discontinuity.
+(The author of this AI finds this property more appealing than the original
+problem itself; he has always been against the null extension rules because
+of this maintenance hazard.)
+
+Also note that this leaves the trade-off between compile-time checking
+and automatic creation in the hands of the programmer. It might have been
+preferred for this behavior to be the default, and the "shall be overridden"
+case the one selected by the aspect, but it's too late for that.
+
+---
+
+An alternative solution would be to make a special case for generics, such
+that Program_Error is raised from subprograms that require overriding in
+a generic rather than rejecting the instantiation.
+
+This idea was rejected for two reasons: First, it essentially changes a
+compile-time check into a runtime check. That's especially bad if some
+client wants to use a dispatching constructor - the mix-in generic cannot
+know how the resulting type might be used and it's bad to restrict that
+for clients.
+
+Secondly, this would give an unusual incentive to use generics even when
+that is not needed, as derivations within a generic would be "easier" than
+the same derivation in non-generic code. We try to avoid such incentives
+by making the capabilities of generic and non-generic code be equivalent.
+
+--- 
+
+This solution has not been checked for Bairdian problems. In particular,
+there may be some issue with finalization of these implicitly constructed
+aggregates (if the default expression for one of the extension components
+needs finalization, a situation that cannot occur in Ada 2012). We could
+restrict the kinds of default expressions allowed if necessary.
+
+!example
+
+!ASIS
+
+** TBD.
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+!topic Subprograms that must be overridden and cannot be overridden
+!reference 3.9.3(6)
+!from Adam Beneschan 13-08-12
+!discussion
+
+I just recently noticed something that might be a deficiency in the
+language definition.  I don't know if this is something that has
+already been discussed or not.
+
+The issue is when a generic package defines a type that is an
+extension of a generic formal type:
+
+    generic
+        type T is tagged private;  -- or type T is new TTT with private;
+    package Generic_Package is
+        type Derived is new T with ...
+
+    end Generic_Package;
+
+This is actually used in some open-source Ada packages.  OpenToken has
+the following in one package:
+
+generic
+   type Parent_Token is abstract new OpenToken.Token.Instance with private;
+   type Component_Token is abstract new OpenToken.Token.Instance with private;
+package OpenToken.Token.List_Mixin is
+   type Instance is new Parent_Token with private;
+
+and I've seen the same case in AdaPower and MaRTE.
+
+The issue comes up when you try to instantiate the package, and the
+actual type has operations that must be overridden (functions with
+controlling results; or, if the actual type is abstract, abstract
+subprograms).  Now the instantiation will fail, because no overriding
+subprogram is declared in the generic package.  But of course it's
+impossible for an overriding subprogram to be put in the generic,
+because the generic specification cannot know what operations may
+exist that need to be overridden.  This seems like a problem to
+me---that if you have a type that has functions that return a
+controlling result, you just cannot instantiate your generic with it,
+and there seems to be no way around it.  A related problem came up
+recently on comp.lang.ada where a poster wanted to use an instance of
+Ada.Containers.Vectors.Vector as an actual type.  The difference is
+that he declared his Derived type to be abstract, avoiding the
+problem.  But it does seem that this is an issue that could crop up in
+real life, since both parts of it (a type extension derived from a
+generic formal, and an attempt to use a Vector, which has functions
+with controlling results, as a generic actual) have occurred in real
+code. 
+
+I'm wondering if this is problematic enough to need a solution?  One
+possible solution is to say in 3.9.3(6) or thereabouts that if a
+subprogram that must be overridden occurs in the visible part of an
+instance and is not overridden, and the parent type of the type is a
+generic formal type (or however we refer to a type that comes from a
+generic formal type) but the type itself is not a generic formal type,
+then instead of the program being illegal, an implicit overriding
+subprogram is created whose only effect is to raise Program_Error.  I
+don't know what the right wording would be.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 12, 2013  7:30 PM
+
+> The issue is when a generic package defines a type that is an 
+> extension of a generic formal type:
+> 
+>     generic
+>         type T is tagged private;  -- or type T is new TTT with private;
+>     package Generic_Package is
+>         type Derived is new T with ...
+> 
+>     end Generic_Package;
+
+This is the mix-in pattern, which I would expect to be fairly common.
+
+...
+> The issue comes up when you try to instantiate the package, and the 
+> actual type has operations that must be overridden (functions with 
+> controlling results; or, if the actual type is abstract, abstract 
+> subprograms).  Now the instantiation will fail, because no overriding 
+> subprogram is declared in the generic package. But of course it's 
+> impossible for an overriding subprogram to be put in the generic, 
+> because the generic specification cannot know what operations may 
+> exist that need to be overridden.  This seems like a problem to 
+> me---that if you have a type that has functions that return a 
+> controlling result, you just cannot instantiate your generic with it, 
+> and there seems to be no way around it.
+
+...
+> I'm wondering if this is problematic enough to need a 
+> solution?
+
+I'm dubious. If you can't write something explicitly, it would seem dubious
+to allow writing it in a generic instance. As Bob says in other contexts,
+that would give an incentive to make packages generic for no other reason
+than to make it easier to derive a type.
+
+That is, if
+    type New_T is new T with ...; -- Illegal if T has functions with controlling results.
+
+then making
+    package My_Pack is new Generic_Package (New_T);
+legal via some automated mechanism would allow a generic to do things that
+are not allowed in non-generic code. That's clearly a bad incentive.
+
+[Of course, this is legal if the extension is a null extension; I think that
+already provides a bad incentive, but that's the rules.]
+
+>One possible solution is to say in 3.9.3(6) or thereabouts that if
+>a subprogram that must be overridden occurs in the visible part of
+>an instance and is not overridden, and the parent type of the type
+>is a generic formal type (or however we refer to a type that comes
+>from a generic formal type) but the type itself is not a generic
+>formal type, then instead of the program being illegal, an implicit
+>overriding subprogram is created whose only effect is to raise
+>Program_Error. 
+
+This trades compile-time checking for run-time checking, which usually seems
+like going in the wrong direction.
+
+Moreover, this wouldn't fix anything in many cases. If the functions with
+controlling results are used in dispatching (especially if they are used in
+a factory, that is an instance of Generic_Dispatching_Constructor), then all
+you've done is changed a compile-time error into a run-time failure (of the
+constructor). That hardly seems like much of a gain, for what would be a
+fairly complex set of rules.
+
+I think if we really wanted to fix this, we'd want to add an aspect (to a
+derived type declaration) that specified that the default values for the
+extension components are sufficient to initialize the extension part, and
+thus each function with a controlling result would automatically be
+overridden to return an aggregate that uses the default values for all
+extension components (rather than being illegal) -- just like the existing
+null extension case. The existing special case for null extensions could
+then be characterized as that aspect automatically being set for null
+extensions.
+
+This solution wouldn't break constructors, and could be used for all
+extensions (not just those in generics). Moreover, it would leave the
+trade-off between compile-time checking and automatic construction of
+constructors (which might require run-time checking) in the hands of
+programmers. This seems like a natural extension (pun intended) of the
+existing rules (and would, as a side-effect, eliminate most of my complaints
+about the original rule).
+
+It couldn't always be used (mainly if the extension components need to
+access some property of the parent to be initialized), but more complex
+solutions would require calling a procedure to initialize things, and that
+quickly starts to get messy because it brings in dispatching calls and
+inheritance. Moreover, the case in question is the mix-in pattern, and that
+shouldn't be depending on the properties of the parent. So it would seem to
+work in the most likely cases. The only downside that I see is that a
+generic would have to be explicitly coded to allow this usage -- but that's
+also the upside, IMHO, since it means that we continue to have compile-time
+checking unless the programmer declares that it is safe to do without it.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 12, 2013  7:50 PM
+
+> The issue comes up when you try to instantiate the package, and the 
+> actual type has operations that must be overridden (functions with 
+> controlling results; or, if the actual type is abstract, abstract 
+> subprograms).  Now the instantiation will fail, because no overriding 
+> subprogram is declared in the generic package. ...
+
+This is not too surprising to me.  In cases like this, the best thing is
+probably to declare the type in the generic to also be abstract, and then
+after instantiating the generic, derive a type from the type in the
+instance, and add additional operations if needed.  It is pretty common to
+use derivation to "extract" a type from an instance, and this allows you to
+handle must-be-overridden operations in a straightforward manner.
+
+Or to put it another way, a generic used to "mix in" additional functionality
+is most flexible if both the formal type and the newly defined type are
+abstract.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Monday, August 12, 2013  7:56 PM
+
+> >One possible solution is to say in 3.9.3(6) or thereabouts that if a 
+> >subprogram that must be overridden occurs in the visible part of an 
+> >instance and is not overridden, and the parent type of the type is a 
+> >generic formal type (or however we refer to a type that comes from a 
+> >generic formal type) but the type itself is not a generic formal 
+> >type, then instead of the program being illegal, an implicit 
+> >overriding subprogram is created whose only effect is to raise 
+> >Program_Error.
+> 
+> This trades compile-time checking for run-time checking, which usually 
+> seems like going in the wrong direction.
+
+My thinking here is that in this case:
+
+    generic
+        type T is tagged private;  -- or type T is new TTT with private;
+    package Generic_Package is
+        type Derived is new T with ...
+    end Generic_Package;
+
+    package Inst is new Generic_Package (Actual);
+
+if the code wasn't planning on using any of the functions with controlling
+results on Inst.Derived, then a solution like this would be appropriate;
+the implicit functions that raise Program_Error would never get called,
+while in the current state of things, you couldn't get the program to compile
+even though the routines that require overriding would never get called.
+That's the kind of case I was thinking about where the current rules just get
+you stuck.
+
+I was envisioning that in some cases, the generic could be written like        
+    
+    generic
+        type T is tagged private;  -- or type T is new TTT with private;
+    package Generic_Package is
+        type Derived is new T with ... end record;
+        function Create (Data : T) return Derived;
+    end Generic_Package;
+
+and then if Actual has its own constructor function Create (that requires
+overriding), the code that instantiates Generic_Package would then use it like
+
+    Something : Derived := new Inst.Create (Actual_Package.Create (...));
+
+where Actual_Package is the package that defines Actual.
+
+Anyway, that's the kind of code I was thinking that a fix would allow, that
+isn't allowed now.
+
+> Moreover, this wouldn't fix anything in many cases. If the functions 
+> with controlling results are used in dispatching (especially if they 
+> are used in a factory, that is an instance of 
+> Generic_Dispatching_Constructor), then all you've done is changed a 
+> compile-time error into a run-time failure (of the constructor). That 
+> hardly seems like much of a gain, for what would be a fairly complex set of rules.
+> 
+> I think if we really wanted to fix this, we'd want to add an aspect 
+> (to a derived type declaration) that specified that the default values 
+> for the extension components are sufficient to initialize the 
+> extension part, and thus each function with a controlling result would 
+> automatically be overridden to return an aggregate that uses the 
+> default values for all extension components (rather than being 
+> illegal) -- just like the existing null extension case. The existing 
+> special case for null extensions could then be characterized as that 
+> aspect automatically being set for null extensions.
+
+I thought about something like that, too.  The "raise Program_Error"
+seemed like a simpler idea, since it wouldn't involve adding new syntax or
+anything.  But maybe the new syntax would be worthwhile.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 12, 2013  8:23 PM
+
+...
+> My thinking here is that in this case:
+> 
+>     generic
+>         type T is tagged private;  -- or type T is new TTT with 
+> private;
+>     package Generic_Package is
+>         type Derived is new T with ...
+>     end Generic_Package;
+> 
+>     package Inst is new Generic_Package (Actual);
+> 
+> if the code wasn't planning on using any of the functions with 
+> controlling results on Inst.Derived, then a solution like this would 
+> be appropriate; the implicit functions that raise Program_Error would 
+> never get called, while in the current state of things, you couldn't 
+> get the program to compile even though the routines that require 
+> overriding would never get called.  That's the kind of case I was 
+> thinking about where the current rules just get you stuck.
+
+"the code wasn't planning..."??? Whose code? The code in the generic? Sure,
+then the generic is OK. But what about clients that have declared objects of
+Inst.Derived? What about class-wide routines that dispatch? And most important,
+what about routines not yet written? The problem here is that the programmer of
+Inst cannot know how its clients use (and will use in the future) the
+declaration.
+
+This is my problem with the existing null extension rule; future maintenance
+often adds extension components, and when that happens, all of a sudden you
+have to write a bunch more routines. That's especially annoying given the way
+that I typically create extensions (write a null extension, override all of
+the routines that will need overriding, with TBD bodies [raise Program_Error
+or the like], compile to make sure everything is correct, then start
+implementing the routines -- at which point extension components get added
+and all of the work to check that everything is overridden has to thrown out
+the window and redone).
+
+> I was envisioning that in some cases, the generic could be written 
+> like
+
+>     
+>     generic
+>         type T is tagged private;  -- or type T is new TTT with private;
+>     package Generic_Package is
+>         type Derived is new T with ... end record;
+>         function Create (Data : T) return Derived;
+>     end Generic_Package;
+> 
+> and then if Actual has its own constructor function Create (that 
+> requires overriding), the code that instantiates Generic_Package would 
+> then use it like
+> 
+>     Something : Derived := new Inst.Create (Actual_Package.Create 
+> (...));
+> 
+> where Actual_Package is the package that defines Actual.
+
+That doesn't work for any dispatching on the existing constructor functions
+(specifically Generic_Dispatching_Constructor). As such, it is a pattern I
+don't want to encourage.
+
+> Anyway, that's the kind of code I was thinking that a fix would allow, 
+> that isn't allowed now.
+
+OK.
+
+...
+> > I think if we really wanted to fix this, we'd want to add an aspect 
+> > (to a derived type declaration) that specified that the default 
+> > values for the extension components are sufficient to initialize the 
+> > extension part, and thus each function with a controlling result 
+> > would automatically be overridden to return an aggregate that uses 
+> > the default values for all extension components (rather than being
+> > illegal) -- just like the existing null extension case. The existing 
+> > special case for null extensions could then be characterized as that 
+> > aspect automatically being set for null extensions.
+> 
+> I thought about something like that, too.  The "raise Program_Error"
+> seemed like a simpler idea, since it wouldn't involve adding new 
+> syntax or anything.  But maybe the new syntax would be worthwhile.
+
+No new syntax here, just a new Boolean aspect. New aspects are much more like
+new attributes than new syntax: any compiler vendor can add one. And then we
+can use the existing null extension rules for almost all of the semantics --
+it wouldn't be a wholy new invention as you are suggesting.
+(Specifically, where it currently says "except for functions with controlling
+results for a null extension", it could say "except for functions with
+controlling results for a type with default extension initialization".
+Probably the implementation would be easier, too, since all of the places
+where null extensions aggregates are implicitly created would be the only
+places that need to be changed. (Rather than having to find a bunch of new
+places in ones compiler code.)
+
+The one problem I see is that we'd now have a chance of side-effects and
+finalization in these implicit aggregates, which isn't possible now. I can't
+think of a problem related to that, but I'm sure Steve Baird can. :-) We
+could limit the default expressions allowed if there is a real problem, but I
+would hope to avoid that.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 12, 2013  8:28 PM
+
+...
+> > The issue comes up when you try to instantiate the package, and the 
+> > actual type has operations that must be overridden (functions with 
+> > controlling results; or, if the actual type is abstract, abstract 
+> > subprograms).  Now the instantiation will fail, because no 
+> > overriding subprogram is declared in the generic package. ...
+> 
+> This is not too surprising to me.  In cases like this, the best thing 
+> is probably to declare the type in the generic to also be abstract, 
+> and then after instantiating the generic, derive a type from the type 
+> in the instance, and add additional operations if needed.  It is 
+> pretty common to use derivation to "extract" a type from an instance, 
+> and this allows you to handle must-be-overridden operations in a 
+> straightforward manner.
+
+Yikes! You're suggesting turning a bad idea (derivation to "extract" a type)
+into a requirement of mix-in packages. You know all of the reasons that such
+derivations are a bad idea (especially bad if the package exports multiple
+types, as the containers do), so I can't consider this a serious suggestion
+other than in the simplest of cases.
+
+It's really too bad that we couldn't solve the "extract a type" problem
+("integrated packages" was the last attempt), but the failure to solve it
+doesn't make it a good idea. (I've regretted it virtually every time I tried
+to do that, because I ended up with dozens of type conversions scattered
+about.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 12, 2013  9:08 PM
+
+> Yikes! You're suggesting turning a bad idea (derivation to "extract" a 
+> type) into a requirement of mix-in packages. You know all of the 
+> reasons that such derivations are a bad idea (especially bad if the 
+> package exports multiple types, as the containers do), so I can't 
+> consider this a serious suggestion other than in the simplest of cases.
+
+I don't agree.  For a "mix-in" generic, you are generally simply adding some
+operations and perhaps some components to an existing type, producing exactly
+one new type.  You can also "chain" the mix-ins, using the result of one as
+the actual to the next.  And then the final step is to "extract" the final
+type with all the desired mix-ins.
+
+Containers are a completely different situation, in my view, where you are
+defining a new abstraction, with a formal type determining the component
+type, and possibly multiple new types being defined.  In that case, the
+requirements are very different, and I agree that the "extraction" technique
+can be more problematic.
+
+****************************************************************
