@@ -1,0 +1,1889 @@
+!standard 4.3.1(17/3)                                  13-10-30    AI12-0086-1/01
+!standard 4.3.1(19/3)
+!class Amendment 13-10-30
+!status work item 13-10-30
+!status received 13-08-22
+!priority Medium
+!difficulty Easy
+!subject Aggregates and variant parts
+!summary
+
+A discriminant that controls a variant can be non-static if the subtype of the
+discriminant is static and all values belonging to that subtype select the same
+variant.
+
+!problem
+
+Ada requires that the discriminant that selects a variant in an aggregate be
+static. This can be overly limiting for constructor functions. For instance,
+consider:
+
+    type Enum is (Aa, Bb, Cc, ..., Zz);
+    subtype S is Enum range Dd .. Hh;
+
+    type Rec (D : Enum) is
+      case D is
+        when S => Foo, Bar : Integer;
+        when others => null;
+      end case;
+    end
+
+The following is illegal because the discriminant is not static, even though
+it can only select a single variant:
+
+    function Make (D : S) return Rec is
+    begin
+      return (D => D, Foo => 123, Bar => 456);
+    end;
+
+This can only be worked around by abandoning the aggregate (and losing the
+associated completeness check), or by using a case statement of similar
+aggregates (which has a lot of duplicated code):
+
+      function Workaround (D : S) return Rec is
+      begin
+        case D is
+          when Dd => return (D => Dd, Foo => 123, Bar => 456);
+          when Ee => return (D => Ee, Foo => 123, Bar => 456);
+          ...
+          when Hh => return (D => Hh, Foo => 123, Bar => 456);
+       end case;
+      end;
+
+Neither workaround is appealing.
+
+!proposal
+
+(See summary.)
+
+!wording
+
+[Editor's note: This wording was Steve's original wording updated
+with suggestions from Bob and others in e-mail, plus a couple of minor
+issues that I noticed.]
+
+Replace 4.3.1(17/3)
+
+   The value of a discriminant that governs a variant_part P shall
+   be given by a static expression, unless P is nested within a
+   variant V that is not selected by the discriminant value
+   governing the variant_part enclosing V.
+
+with
+
+   Given a variant part P governed by a discriminant whose type is T, an
+   expression of type T is said to *determine a variant* of P if
+   either
+     * the value of the expression is static; or
+     * the expression is the name of an object whose nominal subtype
+       is static and constrained, there is at least one value
+       belonging to the subtype that satisfies any predicate of the subtype,
+       and there exists exactly one discrete_choice_list of P
+       that covers every value belonging to that static subtype that satisfies the
+       constaints and predicates of that subtype.
+
+[Editor's note: "of" was changed to "belonging to" since that's the defined
+term to describe which values are in a subtype. The middle part is new and
+is intended to require that the subtype has at least one value; the wording
+was lifted from 3.5.5(7.1/3), which makes the same requirement.]
+
+   The value of a discriminant that governs a variant_part P shall
+   be given by an expression that determines a variant of P, unless
+   P is nested within a variant V that is not
+   selected by the discriminant value governing the variant_part
+   enclosing V.
+
+Append to the end of 4.3.1(19).
+
+   If the value of a discriminant is given by a non-static
+   expression that is required by the above rules to determine
+   a variant of some variant_part [of the type of the aggregate],
+   and the evaluation of that expression yields a value that does not
+   belong to the nominal subtype of the expression, then Constraint_Error
+   is raised.
+
+   AARM Ramification: In this case, the value of the discriminant is
+   outside the base range of its type, or is an invalid representation.
+   This is the same rule as the similar case for case statements.
+
+[TBD: instead of the awkward "is required by the above rules" wording, we could
+define yet another term in the 4.3.1(17/3) stuff with something like "Such an
+expression is said to be aggregate governing" or "variant part determining" or
+somesuch and then refer to that new term in the dynamic semantics rule.]
+
+!discussion
+
+With these rules, the compiler always knows at compile-time which components
+should be present in the aggregate. We expect that the change would be very
+localized in compilers.
+
+!example
+
+(See question.)
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that this extension is supported correctly.
+
+!appendix
+
+From: Steve Baird
+Sent: Thursday, August 22, 2013  7:15 PM
+
+When we get around to discussing amendments in Pittsburgh, I'd like to consider
+relaxing the requirement that a discriminant value in a record aggregate must be
+static if it governs a variant part.
+
+Given
+    type Enum is (Aa, Bb, Cc, ..., Zz);
+    subtype S is Enum range Dd .. Hh;
+
+    type Rec (D : Enum) is
+      case D is
+        when S => Foo, Bar : Integer;
+        when others => null;
+      end case;
+    end
+
+I want to allow the following example, which is currently illegal:
+
+    function Make (D : S) return Rec is
+    begin
+      return (D => D, Foo => 123, Bar => 456);
+    end;
+
+As things stand today, a user who wants write such a constructor function has a
+choice of two workarounds:
+
+1) Give up on using an aggregate, as in
+
+      function Workaround_1 (D : S) return Rec is
+      begin
+        return Result : Rec (D => D) do
+           Result.Foo => 123;
+           Result.Bar => 456;
+        end return;
+      end;
+
+    This forfeits the advantages of using an aggregate.
+    For example, if a new component is added to the record type,
+    this version will continue to compile; this is often
+    undesirable.
+
+2) Use many similar aggregates, as in
+
+      function Workaround_2 (D : S) return Rec is
+      begin
+        case D is
+          when Aa => return (D => Aa, Foo => 123, Bar => 456);
+          when Bb => return (D => Bb, Foo => 123, Bar => 456);
+          ...
+          when Zz => return (D => Zz, Foo => 123, Bar => 456);
+       end case;
+      end;
+
+    The resulting duplication introduces obvious maintenance problems.
+
+Neither of these alternatives are very satisfactory.
+
+After some very helpful discussions with Randy, it looks like the wording
+changes needed to accomplish this would be reasonably straightforward (see
+below), and can follow the example of how case statements make use of the
+nominal subtype of the selecting expression.
+
+Opinions?
+
+Incidentally, Randy points out that essentially the same idea was suggested in
+AC-00017 in 2001 (see www.ada-auth.org/cgi-bin/cvsweb.cgi/acs/ac-00017.txt?rev=1.2).
+
+====
+
+!wording
+
+Replace 4.3.1(17/3)
+
+   The value of a discriminant that governs a variant_part P shall
+   be given by a static expression, unless P is nested within a
+   variant V that is not selected by the discriminant value
+   governing the variant_part enclosing V.
+
+with
+
+   Given a variant part P governed by a discriminant of type T, an
+   expression of type T is said to "determine a variant" of P if
+   either
+     - the value of the expression is static; or
+     - the nominal subtype of the expression is static and constrained,
+       and there exists exactly one discrete_choice_list of P that
+       covers every value of that static subtype which satisfies
+       the predicate of that subtype.
+
+   The value of a discriminant that governs a variant_part P shall
+   be given by an expression which determines a variant of P, unless
+   P is nested within a variant V that is not
+   selected by the discriminant value governing the variant_part
+   enclosing V.
+
+[Note: The "Exactly one" wording handles the case where the static subtype has
+no values.]
+
+Append to the end of 4.3.1(19).
+
+   If the value of a discriminant is given by a non-static
+   expression which is required by the above rules to determine
+   a variant of some variant_part [of the type of the aggregate],
+   and if furthermore the evaluation of that expression
+   yields a value which does not belong to the nominal subtype
+   of the expression, then Program_Error is raised.
+
+[TBD: in the analogous situation with case statements, we raise Constraint_Error
+and not Program_Error - see 5.4(13). Which exception do we want here? It really
+doesn't matter, either here or for case statements, because 13.9.1(9) explicitly
+permits raising either exception.]
+
+[TBD: instead of the awkward "is required by the above rules" wording, we could
+define yet another term in the 4.3.1(17/3) stuff with something like "Such an
+expression is said to be aggregate governing" or "variant part determining"
+or somesuch and then refer to that new term in the dynamic semantics rule.]
+
+!discussion
+
+The "and constrained" part of the "static and constrained"
+wording is important because of 4.6's wording about how subtype conversions work:
+   After conversion of the value to the target type, if the target
+   subtype is constrained, a check is performed that the value satisfies
+   this constraint.
+The proposed wording is also consistent with 5.4(7/3)'s "having a static and constrained nominal subtype".]
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 23, 2013  9:59 AM
+
+> I want to allow the following example, which is currently illegal:
+>
+>     function Make (D : S) return Rec is
+>     begin
+>       return (D => D, Foo => 123, Bar => 456);
+>     end;
+
+I agree that's annoying.  I have run into this limitation many times.
+
+I'm opposed to making big changes for Ada 2022, but this one seems small enough.
+On the other hand, anything having to do with aggregates is an implementation
+headache.  I suggest that if there is support for the idea, AdaCore should
+implement it and report back how much of an earthquake it is.
+
+> 2) Use many similar aggregates, as in
+>
+>       function Workaround_2 (D : S) return Rec is
+>       begin
+>         case D is
+>           when Aa => return (D => Aa, Foo => 123, Bar => 456);
+>           when Bb => return (D => Bb, Foo => 123, Bar => 456);
+>           ...
+>           when Zz => return (D => Zz, Foo => 123, Bar => 456);
+>        end case;
+>       end;
+
+Why doesn't the above mention just Dd .. Hh?
+
+> After some very helpful discussions with Randy, it looks like the
+> wording changes needed to accomplish this would be reasonably
+> straightforward (see below), and can follow the example of how case
+> statements make use of the nominal subtype of the selecting
+> expression.
+
+General language-design comment:
+I don't think the difficulty of wording is particularly important, except to the
+extent that such difficultly reflects inherent complexity.  What matters most is
+the programmer's view (e.g. incompatibilities are a menace), and second most is
+implementation difficulty.  Both trump wording difficulty.
+
+> !wording
+>
+> Replace 4.3.1(17/3)
+>
+>    The value of a discriminant that governs a variant_part P shall
+>    be given by a static expression, unless P is nested within a
+>    variant V that is not selected by the discriminant value
+>    governing the variant_part enclosing V.
+>
+> with
+>
+>    Given a variant part P governed by a discriminant of type T, an
+
+I think "discriminant of type T" is ambiguous.  T could be the record type
+containing the discriminant, or T could be the type of the discriminant.
+
+>    expression of type T is said to "determine a variant" of P if
+>    either
+>      - the value of the expression is static; or
+>      - the nominal subtype of the expression is static and
+> constrained,
+
+I don't think expressions have nominal subtypes.  Objects, views of objects, and
+names of objects do.  Maybe "the expression is the name of an object whose
+nominal subtype ..."?
+
+>        and there exists exactly one discrete_choice_list of P that
+>        covers every value of that static subtype which satisfies
+                                                  "that"
+
+>        the predicate of that subtype.
+>
+>    The value of a discriminant that governs a variant_part P shall
+>    be given by an expression which determines a variant of P, unless
+                              "that"
+
+>    P is nested within a variant V that is not
+>    selected by the discriminant value governing the variant_part
+>    enclosing V.
+>
+> [Note: The "Exactly one" wording handles the case where the static
+> subtype has no values.]
+
+The empty subtype case would necessarily raise an exception, by the rule below,
+right?
+
+I think we'd better explicitly outlaw the empty subtype case.
+Otherwise this is legal:
+
+    type T(D: boolean) is
+        record
+            case D is
+                when True | False => ...;
+            end case;
+        end record;
+
+    subtype Empty is Boolean range True..False;
+
+    procedure P(X: Empty) is
+        ... T'(D => X, ...) ...
+
+because there's "exactly one".  I think this example should be illegal -- it
+seems like a (small) implementation headache to allow it, and it's useless.
+
+> Append to the end of 4.3.1(19).
+>
+>    If the value of a discriminant is given by a non-static
+>    expression which is required by the above rules to determine
+               "that"
+
+>    a variant of some variant_part [of the type of the aggregate],
+>    and if furthermore the evaluation of that expression
+Might be better to leave out "if furthermore"?
+
+>    yields a value which does not belong to the nominal subtype
+                    "that"
+
+>    of the expression, then Program_Error is raised.
+
+This can only happen for invalid values, right?
+It's worth pointing that out in the AARM -- i.e. it's a very-corner case.
+
+> [TBD: in the analogous situation with case statements, we raise
+> Constraint_Error and not Program_Error - see 5.4(13). Which exception
+> do we want here? It really doesn't matter, either here or for case
+> statements, because 13.9.1(9) explicitly permits raising either
+> exception.]
+
+Don't care.  Here, I'll flip a coin for you ... OK, choose C_E.
+
+> [TBD: instead of the awkward "is required by the above rules" wording,
+> we could define yet another term in the 4.3.1(17/3) stuff with
+> something like "Such an expression is said to be aggregate governing"
+> or "variant part determining" or somesuch and then refer to that new
+> term in the dynamic semantics rule.]
+
+Don't much care.  I guess I'd prefer not adding yet another jaw-breaking term.
+
+> !discussion
+>
+> The "and constrained" part of the "static and constrained"
+> wording is important because of 4.6's wording about how subtype
+> conversions work:
+>    After conversion of the value to the target type, if the target
+>    subtype is constrained, a check is performed that the value satisfies
+>    this constraint.
+
+I don't understand that point.  Example, please?
+
+> The proposed wording is also consistent with 5.4(7/3)'s "having a
+> static and constrained nominal subtype".]
+
+P.S. Thanks for writing this up.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, August 23, 2013  11:23 AM
+
+>> 2) Use many similar aggregates, as in
+>>
+>>        function Workaround_2 (D : S) return Rec is
+>>        begin
+>>          case D is
+>>            when Aa => return (D => Aa, Foo => 123, Bar => 456);
+>>            when Bb => return (D => Bb, Foo => 123, Bar => 456);
+>>            ...
+>>            when Zz => return (D => Zz, Foo => 123, Bar => 456);
+>>         end case;
+>>        end;
+>
+> Why doesn't the above mention just Dd .. Hh?
+>
+
+Because I foolishly didn't attempt to compile my example before sending it.
+
+>>
+>>     Given a variant part P governed by a discriminant of type T, an
+>
+> I think "discriminant of type T" is ambiguous.  T could be the record
+> type containing the discriminant, or T could be the type of the
+> discriminant.
+>
+
+Good point.
+Would "of scalar type T" be clear enough?
+
+>>     expression of type T is said to "determine a variant" of P if
+>>     either
+>>       - the value of the expression is static; or
+>>       - the nominal subtype of the expression is static and
+>> constrained,
+>
+> I don't think expressions have nominal subtypes.  Objects, views of
+> objects, and names of objects do.  Maybe "the expression is the name
+> of an object whose nominal subtype ..."?
+>
+
+You're exactly right. I didn't follow the case-statement template closely enough
+(the analogous case statement wording includes "If the selecting_expression IS A
+NAME having a static and constrained nominal subtype").
+
+Your suggested wording addresses the problem because (as you know) every name
+(as opposed to expression) has a nominal subtype (that was the point of
+(AI05-0006).
+
+>> [Note: The "Exactly one" wording handles the case where the static
+>> subtype has no values.]
+>
+> The empty subtype case would necessarily raise an exception, by the
+> rule below, right?
+>
+
+> I think we'd better explicitly outlaw the empty subtype case.
+> Otherwise this is legal:
+>
+>      type T(D: boolean) is
+>          record
+>              case D is
+>                  when True | False => ...;
+>              end case;
+>          end record;
+>
+>      subtype Empty is Boolean range True..False;
+>
+>      procedure P(X: Empty) is
+>          ... T'(D => X, ...) ...
+>
+> because there's "exactly one".  I think this example should be illegal
+> -- it seems like a (small) implementation headache to allow it, and
+> it's useless.
+>
+
+Sound good to me.
+
+>> Append to the end of 4.3.1(19).
+>>
+>>     If the value of a discriminant is given by a non-static
+>>     expression which is required by the above rules to determine
+>                 "that"
+>
+>>     a variant of some variant_part [of the type of the aggregate],
+>>     and if furthermore the evaluation of that expression
+> Might be better to leave out "if furthermore"?
+>
+>>     yields a value which does not belong to the nominal subtype
+>                      "that"
+>
+>>     of the expression, then Program_Error is raised.
+>
+> This can only happen for invalid values, right?
+> It's worth pointing that out in the AARM -- i.e. it's a very-corner
+> case.
+>
+
+Right. Once again, the answer is "follow the example of case statements".
+
+For case statements, we have AARM 5.4(13.a):
+   Ramification: In this case, the value is outside the base range of
+   its type, or is an invalid representation.
+
+>> The "and constrained" part of the "static and constrained"
+>> wording is important because of 4.6's wording about how subtype
+>> conversions work:
+>>     After conversion of the value to the target type, if the target
+>>     subtype is constrained, a check is performed that the value satisfies
+>>     this constraint.
+>
+> I don't understand that point.  Example, please?
+
+It's part of the "make sure uninitialized variables lead to bounded errors, not
+erroneousness" stuff. I guess the real reason for this wording is to keep things
+as similar as possible to the treatment of case statements.
+
+> P.S. Thanks for writing this up.
+
+And thanks for your usual detailed and insightful review.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 23, 2013  11:55 AM
+
+> Would "of scalar type T" be clear enough?
+
+I suppose.  A nitpicker might then say, "But scalar types can't have
+discriminants."  To which ARG should respond, "!no action". Hopefully without
+much discussion.
+
+Or we could say "discriminant whose type is T", or even "discriminant whose
+(scalar) type is T". Or "discriminant that is of type T".  (Not "which",
+please!)
+
+I'm quite sure I've run into this frustrating English ambiguity many times.
+
+> And thanks for your usual detailed and insightful review.
+
+You're welcome.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, August 23, 2013  6:24 AM
+
+> When we get around to discussing amendments in Pittsburgh, I'd like to
+> consider relaxing the requirement that a discriminant value in a
+> record aggregate must be static if it governs a variant part.
+
+A few questions and observations:
+
+Do we have other instances in the language, were
+  "when statically known, then compile-time check / error
+   else run-time check / exception"
+semantics apply?
+
+Would this be the first rule that requires compilers to carry detailed
+structural information about records into the run-time (be it as descriptors or
+as inline case-distinction code)? Or do they already, anyway? Put differently,
+what is the implementation model? Easily done as part of aggregate building, or
+hard to do by before-hand checking?
+
+Coding guidelines that prohibit the use of exceptions need to be amended with a
+"static aggregates only" rule. How to tell them?
+
+On the C_E or P_E: in for a penny ... my vote goes for C_E for sure.
+
+> It really doesn't matter, either here or for case statements, because
+> 13.9.1(9) explicitly permits raising either exception.
+
+Not so, because 13.9.1(9) talks about scalar values only. I see no scalar value
+on the screen here.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 23, 2013  10:13 AM
+
+> A few questions and observations:
+>
+> Do we have other instances in the language, were
+>   "when statically known, then compile-time check / error
+>    else run-time check / exception"
+> semantics apply?
+
+Case statements.  If you say:
+
+    type T is range 1 .. 10;
+    X : T := 2;
+
+    case X**100 is
+        when 1 => ...;
+        when 2..10 => ...;
+
+the compiler is allowed to compute the correct answer for X**100, even though
+it's (likely) outside T'Base.  Then it must raise an exception.  (GNAT even has
+an option to do unbounded arithmetic at run time, although I'm not sure if it
+works in this context.)
+
+Same for "case X is ..." where X is an uninitialized variable, and therefore
+could have a value outside what the full-coverage rules checked.  Ada 83 made
+this case erroneous, but Tucker wanted to make the use of uninit vars a Bounded
+Error in Ada 95, hence this rule.
+
+> Would this be the first rule that requires compilers to carry detailed
+> structural information about records into the run-time (be it as
+> descriptors or as inline case-distinction code)? Or do they already,
+> anyway? Put differently, what is the implementation model?
+> Easily done as part of aggregate building, or hard to do by
+> before-hand checking?
+
+I don't see any need to "carry detailed structural information..."
+-- not sure what you mean.
+
+The implementation simply assigns the needed components into the object.
+Steve's rules preserve the important property: the compiler knows which variant
+is selected.
+
+But as I suggested, we should get some implementation experience before
+standardizing this new feature.  Maybe I'm wrong, and it will be a nightmare to
+implement.
+
+> Coding guidelines that prohibit the use of exceptions need to be
+> amended with a "static aggregates only" rule. How to tell them?
+
+Shrug.  It's not our job to worry about coding conventions.
+People who have such conventions simply need to avoid invalid values.  ("Simply"
+-- hah! ;-) )  Any use of invalid values can raise an exception, so they already
+have that problem in many other cases.
+
+> On the C_E or P_E: in for a penny ... my vote goes for C_E for sure.
+
+Ah, that's the same penny I flipped.  ;-)
+
+> > It really doesn't matter, either here or for case statements,
+> > because 13.9.1(9) explicitly permits raising either exception.
+>
+> Not so, because 13.9.1(9) talks about scalar values only. I see no
+> scalar value on the screen here.
+
+The value we're talking about is the value of the discriminant, which must be
+scalar.  And unless I'm confused, it can only be out of bounds if it is invalid.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, August 23, 2013  11:36 AM
+
+>> When we get around to discussing amendments in Pittsburgh, I'd like
+>> to consider relaxing the requirement that a discriminant value in a
+>> record aggregate must be static if it governs a variant part.
+>
+> A few questions and observations:
+>
+> Do we have other instances in the language, were
+>    "when statically known, then compile-time check / error
+>     else run-time check / exception"
+> semantics apply?
+>
+
+As Bob pointed out, this entire AI is modeled on the existing treatment of case
+statements.
+
+I think that is the real answer to your question.
+
+However, there are also a few cases (not at all related to this AI) where we
+disallow accessibility violations statically but then also have runtime checks
+in expanded bodies (where legality checks don't apply). I don't think these are
+relevant to this discussion, but your question did bring them to mind.
+
+> Would this be the first rule that requires compilers to carry detailed
+> structural information about records into the run-time (be it as
+> descriptors or as inline case-distinction code)? Or do they already,
+> anyway? Put differently, what is the implementation model?
+> Easily done as part of aggregate building, or hard to do by
+> before-hand checking?
+
+I don't see any such requirement here. This is a small change with no
+complicated dynamic semantics (or at least that is the intent).
+
+>> It really doesn't matter, either here or for case statements, because
+>> 13.9.1(9) explicitly permits raising either exception.
+>
+> Not so, because 13.9.1(9) talks about scalar values only. I see no
+> scalar value on the screen here.
+
+As Bob points out, any discriminant that governs a variant part must be a
+scalar.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, August 23, 2013  11:45 AM
+
+>>> > > It really doesn't matter, either here or for case statements,
+>>> > > because 13.9.1(9) explicitly permits raising either exception.
+>> >
+>> > Not so, because 13.9.1(9) talks about scalar values only. I see no
+>> > scalar value on the screen here.
+> The value we're talking about is the value of the discriminant, which
+> must be scalar.  And unless I'm confused, it can only be out of bounds
+> if it is invalid.
+
+But it isn't out of bounds as far as the declaration of the discriminant of the
+type is concerned. The value merely does not match up with the discriminant
+value implied by the other components of the aggregate. E.g., on the Make(Zz)
+call, I do not see any invalid value anyplace, merely a bad combination of
+discriminant value and components. After all, an aggregate (D => D) would be
+o.k. for that call. So how could the use of the parameter D be an invalid value
+in one aggregate, but a valid value in the other of the same type?
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, August 23, 2013  12:02 PM
+
+I think the source of the confusion here may be an issue Bob identified (and
+suggested a fix for): my original proposal failed to include a requirement that
+the discriminant expression must be a name in order for this new rule to apply.
+
+So let's assume that correction has been incorporated and then take a look at
+the question you raise.
+
+If we evaluate an expression which happens to also be a name and that evaluation
+yields a scalar value which is outside of the nominal subtype of that name, I
+think 13.9.1(9) applies.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 23, 2013  12:10 PM
+
+> But it isn't out of bounds as far as the declaration of the
+> discriminant of the type is concerned. The value merely does not match
+> up with the discriminant value implied by the other components of the
+> aggregate. E.g., on the Make(Zz) call, I do not see any invalid value
+> anyplace, merely a bad combination of discriminant value and components.
+> After all, an aggregate (D => D) would be o.k. for that call. So how could
+> the use of the parameter D be an invalid value in one aggregate, but a
+> valid value in the other of the same type?
+
+We have:
+
+    function Make (D : S) return Rec is
+
+Zz is outside S, so Make(Zz) will raise C_E, and we don't get to evaluating the
+aggregate, and the rule doesn't apply.  The case where the rule we're talking
+about happens like this:
+
+    X : S; -- happens to be initialized to stack junk that
+           -- looks like Zz.
+
+    ... Make(X) ... -- attempt to pass the invalid value Zz
+
+The compiler is allowed to check that X is in bounds on the call, in which case
+C_E will be raised.  AdaMagic does that check, and I think recent versions of
+GNAT do too.
+
+But that check is not required.  If the compiler chooses not to do the check,
+then that's the case where the rule we're talking about applies -- we need to
+say that the aggregate itself raises an exception.
+
+As Steve said, this stuff is exactly analogous to the case statement.
+The full-coverage rules attempt to require at compile time that every case is
+covered.  But there's a loophole in the case of "case Uninitialized_Var is...",
+so we detect that at run time.
+
+The other loophole, also covered by the same rule, is where the discriminant is
+of type Integer, and Integer'Base is 32 bits, and you pass X**48 (where X = 2),
+and the compiler chooses to hold the correct value of 2**48 in a 64-bit
+register.  The case statement or variant record covers all values of type
+Integer'Base, but it doesn't cover 2**48 (it's not even allowed to) -- so we
+need a run-time check.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, August 23, 2013  2:13 PM
+
+...
+> The compiler is allowed to check that X is in bounds on the call, in
+> which case C_E will be raised.  AdaMagic does that check, and I think
+> recent versions of GNAT do too.
+>
+> But that check is not required.  If the compiler chooses not to do the
+> check, then that's the case where the rule we're talking about applies
+> -- we need to say that the aggregate itself raises an exception.
+
+This says to me that the choice between C_E and P_E should be not based on a
+coin flip.
+
+If the compiler does the check, then C_E is raised. If the compiler doesn't do
+the check, then one would hope that the same exception is at least raised, so
+that different compilers generate the same exception for better portability.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 23, 2013  2:56 PM
+
+I think everybody so far (including my coin) has voted for C_E.  ;-)
+
+I'm a big fan of portability, but I don't think case is a very important one.
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Friday, August 23, 2013  2:56 PM
+
+> I think everybody so far (including my coin) has voted for C_E.  ;-)
+
+Another vote for C_E.
+
+>
+> I'm a big fan of portability, but I don't think case is a very
+> important one.
+
+Agreed.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, August 23, 2013  4:55 PM
+
+> We have:
+>
+>     function Make (D : S) return Rec is
+>
+> Zz is outside S, so Make(Zz) will raise C_E, and we don't get to
+> evaluating the aggregate, and the rule doesn't apply.
+
+O.k. Agreed there. What I had in mind (and misremembered the signature of the
+original Make) was
+
+   function Make (D : Enum) return Rec is
+   begin
+     if Oracle then return (D => D, Foo => 123, Bar => 456);
+     else return (D => D);
+     end if;
+   end;
+
+   Make(Zz);
+
+No invalid value in sight, yet the same issue of run-time checking completeness
+of the aggregate.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 23, 2013  5:46 PM
+
+> O.k. Agreed there. What I had in mind (and misremembered the signature
+> of the original Make) was
+>
+>    function Make (D : Enum) return Rec is
+>    begin
+>      if Oracle then return (D => D, Foo => 123, Bar => 456);
+>      else return (D => D);
+
+Ah, now I see what you meant by "requires compilers to carry detailed structural
+information about records into the run-time".  Fortunately, that is not
+necessary.
+
+Both of the above aggregates are illegal in Ada, and will still be illegal after
+Steve's suggested change, if I understand correctly. The first aggregate would
+be legal if the nominal subtype of D were S, as in Steve's original example.
+The second aggregate would be illegal (because S selects the variant with Foo
+and Bar, and they're missing from the aggregate).
+
+>      end if;
+>    end;
+>
+>    Make(Zz);
+>
+> No invalid value in sight, yet the same issue of run-time checking
+> completeness of the aggregate.
+
+Right, that would be a big problem if it were legal.
+Steve's change preserves the property that the compiler knows which variant is
+being selected.  In the above code, the compiler can't know that, so it is
+(still) illegal.
+
+After Steve's change, it's just like case statements:  full-coverage checking is
+a compile-time thing, except for the two loopholes I noted. (I'd like to close
+those loopholes statically, too, but that's off-topic for this AI.  The same two
+loopholes will exist for variant-record-aggregates as already exist for case
+statements.)
+
+To clarify the compiler algorithm:
+
+    Determine which variant is being used, based on the static value
+    of the discriminant (as in Ada 83) or the static nominal subtype
+    of the discriminant (this is the new part).  If this can't be done
+    statically, it's illegal.
+
+    Generate code to:
+
+        - (Also new) check that the value of the discriminant is within
+          that static nominal subtype, and raise C_E if not.  This can
+          only fail in the two loophole cases I mentioned.
+
+        - Build the aggregate (no changes here).
+
+Seems simple enough, implementation-wise.  Nothing fancy is going on at run
+time.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, August 24, 2013  6:32 AM
+
+> When we get around to discussing amendments in Pittsburgh, I'd like to
+> consider relaxing the requirement that a discriminant value in a
+> record aggregate must be static if it governs a variant part. ...
+
+We bumped into this problem when writing the SofCheck Inspector, aka AdaCore
+CodePeer, in the "factory" routines for value numbers.
+
+By the way, my other pet peeve in this general vicinity is when defining a
+variant record, it is annoying that the nested variant parts having to cover the
+full range of the discriminant, rather than just that part of the range of the
+discriminant that is possible in the nested variant.  E.g.
+
+     case D is
+        when 1..5 =>
+           X : Float
+           case D is
+              when 1 => ...
+              when 2..5 => ...
+              when others => ...  -- Why on earth is this needed?
+
+Just a knit, but I bump into it *every time* I define a variant record with
+nested variants.
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Sunday, August 25, 2013  9:13 AM
+
+> Just a knit, but I bump into it *every time* I define a variant record with
+> nested variants.
+
+knit => nit :-)
+
+Yes, I've always found that very irritating (since the early days of Ada).
+
+Would be nice to address that one as well.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, August 25, 2013  1:36 PM
+
+I also found this to be very annoying in the past, and agree it would be nice to
+see a fix. The challenge would be to address this problem without breaking
+backwards compatibility.
+
+I think it could work by continuing to allow the extra redundant coverage to be
+specified, but not requiring it to be specified.
+
+Compiler vendors would then probably want to issue warnings to guide programmers
+to remove unnecessary discriminant coverage.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 26, 2013  7:42 PM
+
+...
+> By the way, my other pet peeve in this general vicinity is when
+> defining a variant record, it is annoying that the nested variant
+> parts having to cover the full range of the discriminant, rather than
+> just that part of the range of the discriminant that is possible in
+> the nested variant.  E.g.
+>
+>      case D is
+>         when 1..5 =>
+>            X : Float
+>            case D is
+>               when 1 => ...
+>               when 2..5 => ...
+>               when others => ...  -- Why on earth is this needed?
+>
+> Just a knit, but I bump into it *every time* I define a variant record
+> with nested variants.
+
+Is "knit" a Harvard spelling for "nit", or did your iPhone get you? ;-)
+
+Anyway, I've thought about this problem several times in the past, and pretty
+much concluded that it is unsolvable.
+
+First of all, there is the compatibility problem that Brad mentioned. I don't
+like his solution of "optional" coverage, mainly because it would seem to
+require to keeping track of as many subtypes as there are nesting levels, and
+checking the coverage for each (if any work, then it is OK, otherwise it is
+bad). That seems too complicated to me.
+
+Second, I don't care much about the integer case Tucker showed here. Every time
+this has happened to me (and it has been frequent), the discriminant is some
+sort of enumeration. For an example from our compiler (greatly simplified):
+
+    case Kind is
+       when A_Type => ...
+       when A_Package => ...
+       when A_Function | A_Procedure | An_Entry =>
+           -- Common components here (parameter lists among others).
+           case Kind is
+               when A_Function =>
+                   Return_Type : Type_Number;
+               when A_Procedure =>
+                   ...
+               when An_Entry =>
+                   ...
+               when others => -- ** Junk **
+           end case;
+       when An_Object | An_Exception | A_Generic_Formal_Object | A_Parameter =>
+           -- Common components here. (These all have lists of identifiers.)
+           case Kind is
+               when An_Object => ...
+               when An_Exception => ...
+               when A_Generic_Formal_Object => ...
+               when A_Parameter => ...
+               when others => -- ** Junk **
+           end case;
+       when ... =>
+    end case;
+
+The "others" here are actively harmful, as they prevent finding maintenance
+errors in these declarations. (If a new enumeration is added to the list of
+callable entities, it also has to be added to the inner case statement. This
+would be a compile-time check without the "others").
+
+The problem here is that these are (or might be) discontiguous ranges. I would
+be unhappy to solve this problem only for contiguous ranges, as that would
+reintroduce a maintenance problem that we just got rid of in Ada 2012 (a need to
+figure out an order for enumeration literals to make memberships and subtypes
+possible).
+
+A possible solution to this problem would be to make a requirement that the
+problem is only solved for limbs that are described by a single named subtype.
+We could use static predicates to describe the above examples and thus are able
+to describe any such problem in Ada 2012.
+
+I briefly thought that the problem was already solved in Ada 2012 (for named
+subtypes):
+
+    subtype Callable_Kind is Entity_Kind
+       with Static_Predicate => Callable_Kind in A_Function | A_Procedure | An_Entry;
+    subtype Multiname_Kind is Entity_Kind
+       with Static_Predicate => Multiname_Kind in An_Object | An_Exception | A_Generic_Formal_Object | A_Parameter;
+
+    case Kind is
+       when A_Type => ...
+       when A_Package => ...
+       when Callable_Kind =>
+           -- Common components here (parameter lists among others).
+           case Callable_Kind'(Kind) is
+               when A_Function =>
+                   Return_Type : Type_Number;
+               when A_Procedure =>
+                   ...
+               when An_Entry =>
+                   ...
+           end case;
+       when Multiname_Kind =>
+           -- Common components here. (These all have lists of identifiers.)
+           case Multiname_Kind'(Kind) is
+               when An_Object => ...
+               when An_Exception => ...
+               when A_Generic_Formal_Object => ...
+               when A_Parameter => ...
+           end case;
+       when ... =>
+    end case;
+
+I eventually realized that the qualifications aren't allowed here (the
+discriminant name must stand alone).
+
+But this does provide a possible compatible solution: if we made this legal
+(when the subtype of the case limb and that of the qualification on the choice
+match), then we wouldn't need any further language changes nor would there be a
+compatibility issue (as this isn't currently legal).
+
+I realize it is a bit clunky, but any other solution is incompatible or complex.
+(It's certainly better than anything I've came up with in the past for this
+problem, mostly because Ada 2012 now can describe discontiguous static
+subtypes.) I could also see making the change only for explictly named subtypes
+(without the qualification); those are much more rare in variants than just
+listing things explicitly and thus that would limit the compatibility problem.
+(But I'm dubious that this problem is important enough to allow a compatibility
+problem.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 26, 2013  8:06 PM
+
+> Is "knit" a Harvard spelling for "nit", or did your iPhone get you?
+> ;-)
+
+Neither.  It was a brain freeze.
+
+> Anyway, I've thought about this problem several times in the past, and
+> pretty much concluded that it is unsolvable.
+>
+> First of all, there is the compatibility problem that Brad mentioned.
+
+I don't understand the compatibility problem.  You are allowed to have an
+"others" part that doesn't cover anything, aren't you?  Here it would seem to be
+easy enough to say that if the "others" part didn't cover any values, then it
+should have "null;" for its component list as well.
+
+> ... The problem here is that these are (or might be) discontiguous
+> ranges. I would be unhappy to solve this problem only for contiguous ranges,...
+
+I agree, it should support discontiguous ranges.  Case statements already allow
+individual case alternatives to cover a discontiguous range, so compilers are
+perfectly capable of dealing with this problem.  I would say that in a nested
+variant, the variant part must cover every value covered by the enclosing
+"when".  That doesn't need to be a contiguous range.  It can certainly cover
+more values than that (so long as they are within the base range of the
+discriminant subtype), but I would say that if a given variant alternative
+covers *no* values from the enclosing "when" then it must have a "null;"
+component list.
+
+> ... any other solution is incompatible or complex.
+
+I don't see the incompatibility nor the big complexity.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 26, 2013  8:51 PM
+
+...
+> > First of all, there is the compatibility problem that Brad
+> > mentioned.
+>
+> I don't understand the compatibility problem.  You are allowed to have
+> an "others" part that doesn't cover anything, aren't you?
+
+Sure, but that only works if the user *used* an "others" part. What if they
+listed the other values instead? I'm assuming that we want the coverage rules to
+be checked on the "useful" subtype of the discriminant (the one from the case
+limb) rather than the nominal subtype of the discriminant. In that case,
+mentioning values outside of that are illegal.
+
+If we had a simplified version of my example:
+
+    case Kind is
+       when A_Type => ...
+       when A_Package => ...
+       when A_Function | A_Procedure | An_Entry =>
+           -- Common components here (parameter lists among others).
+           case Kind is
+               when A_Function =>
+                   Return_Type : Type_Number;
+               when A_Procedure =>
+                   ...
+               when An_Entry =>
+                   ...
+               when A_Type | A_Package => null; -- ** Junk **
+           end case;
+     end case;
+
+For those of us that try to avoid "others", it makes sense to write this if the
+enumeration range is short enough.
+
+If the subtype of Kind is based on the case limb, instead of the entire nominal
+subtype of Kind, writing A_Type and A_Package is illegal. I don't think this
+would be very common, but it certainly is an incompatibility.
+
+> Here it would seem to be easy enough to say that if the "others" part
+> didn't cover any values, then it should have "null;" for its component
+> list as well.
+
+That also would be an incompatibility, but it would be one that would detect
+bugs, so I think we could let it slide.
+
+> > ... The problem here is that these are (or might be) discontiguous
+> > ranges. I would be unhappy to solve this problem only for
+> contiguous ranges,...
+>
+> I agree, it should support discontiguous ranges.  Case statements
+> already allow individual case alternatives to cover a discontiguous
+> range, so compilers are perfectly capable of dealing with this
+> problem.
+
+Huh? Just because a case limb can be discontiguous doesn't mean that the subtype
+of a case selector (a totally different thing) can be discontiguous.
+
+A better argument would be that the subtype of a case selector can be
+discontiguous because of Ada 2012 rules, in which case you are right, but for
+the wrong reasons. :-) I'm not sure if Ada 2012 requires that (I haven't
+implemented this yet); I know it will be a mess to do in our compiler. (If we
+have to do it anyway, however, it is irrelevant how hard it is.)
+
+> I would say that in a
+> nested variant, the variant part must cover every value covered by the
+> enclosing "when".  That doesn't need to be a contiguous range.  It can
+> certainly cover more values than that (so long as they are within the
+> base range of the discriminant subtype), but I would say that if a
+> given variant alternative covers *no* values from the enclosing "when"
+> then it must have a "null;" component list.
+
+I object to creating new coverage rules for a variant part. These are far too
+complex already, and trying to separate the current rules into case and variant
+parts (that is all shared currently) sounds like a nightmare. (Both for wording
+and for implementation; I know we share the implementation.) I'm OK with
+changing the subtype on which those rules are applied; we've done that many
+times in maintaining the language. But not with allowing things that would
+otherwise be illegal just because it is in a variant part.
+
+> > ... any other solution is incompatible or complex.
+>
+> I don't see the incompatibility nor the big complexity.
+
+You've just invented a whole new set of coverage rules (allowing values that the
+nominal subtype does not currently allow, and as well allowing values to be
+omitted that are currently required). That's *not* complex? And it's *still*
+marginally incompatible (perhaps its detecting bugs, but the extra components
+are harmless and that's no consolation if your program won't compile).
+
+In addition, variants can be nested to many levels. It's unclear to me which
+values that you are allowing to be omitted (and how that would be described).
+Certainly, if the subtype has to be named  as I had proposed, then there is no
+such problem.
+
+I admit that I hadn't considered modifying the coverage rules just for variants,
+because I considered the equivalence of such rules something that we wouldn't
+break for a minor issue. (Especially one that has been known for 30 years and
+certainly hasn't changed in that time.)
+
+I think I'd have to see the exact rules you are proposing in order to have some
+idea as to why you think this is not complex as it seems to me. (I don't see any
+way to either describe or implement this without treating variants separately.)
+
+I have to say that neither of these problems is worth fixing, IMHO. Steve's fix
+is clever (although it ought to be mentioned that Dan Eilers suggested it in
+2001), but it won't help in the majority of the cases where this is a problem.
+As such, it's pretty marginal.
+
+For the second problem, a fix that leaves the others clauses intact doesn't fix
+the real issue (the loss of compile-time checking of missing items), and a fix
+that removes the others clauses is incompatible. So I don't see much value to
+fixing this, certainly not to the level of changing the coverage rules for
+variants.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 26, 2013  9:00 PM
+
+> ...
+>>> First of all, there is the compatibility problem that Brad
+>>> mentioned.
+>>
+>> I don't understand the compatibility problem.  You are allowed to
+>> have an "others" part that doesn't cover anything, aren't you?
+>
+> Sure, but that only works if the user *used* an "others" part. What if
+> they listed the other values instead? I'm assuming that we want the
+> coverage rules to be checked on the "useful" subtype of the
+> discriminant (the one from the case limb) rather than the nominal
+> subtype of the discriminant. In that case, mentioning values outside of that
+> are illegal. ...
+
+I wouldn't make them illegal.  I would only require that if a given variant
+alternative mentions only values that never can occur for that nested variant
+part, that it be associated with a "null" component list.  That would seem to
+give adequate checking without the incompatibilities.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 26, 2013  9:25 PM
+
+But as I said, that's still incompatible (there could be components in those
+variants). I think you could argue that the incompatibility is harmless (the
+component could never be accessed), but that's still not the same as "no
+incompatibilities".
+
+Anyway, that Legality Rule doesn't fix anything at all, as the maintenance
+problem still exists and you still need to modify the coverage rules to even
+allow programmers to avoid it.
+
+In particular, if you have
+    type Enum is (A, B, C, D);
+
+    type Rec (Disc : Enum) is record
+       case Disc is
+         when C => ...
+         when A | B | D =>
+           -- Common components.
+           case Disc is
+               when A => ...
+               when B => ...
+               when D => ...
+               when others => null;
+           end case;
+       end case;
+
+This passes your Legality Rule. If you now add E:
+
+    type Enum is (A, B, C, D, E);
+
+    type Rec (Disc : Enum) is record
+       case Disc is
+         when C => ...
+         when A | B | D | E =>
+           -- Common components.
+           case Disc is
+               when A => ...
+               when B => ...
+               when D => ...
+               when others => null;
+           end case;
+       end case;
+
+We've failed to add a branch for E. This is not detected by your Legality Rule.
+But this missing compile-time detection of modification errors is the primary
+reason for modifying these rules in the first place (otherwise, the only effect
+is that the code is ugly, and that isn't worth the language disruption of any
+sort of fix). So this Legality Rule doesn't really do anything of value (and if
+a vendor thinks it does, it makes perfect sense for a warning).
+
+There has to be some change to the coverage rules or to the subtype to be
+covered in order for this to do any good. (The others has to go.) And that's
+when it gets complex and/or incompatible.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 26, 2013  9:36 PM
+
+> But as I said, that's still incompatible (there could be components in
+> those variants). I think you could argue that the incompatibility is
+> harmless (the component could never be accessed), but that's still not
+> the same as "no incompatibilities".
+
+True.  Strictly speaking, this is an incompatibility.  And perhaps there is no
+reason to make it illegal, but you could certainly encourage compilers to warn
+about such "silly" variant alternatives.
+
+> Anyway, that Legality Rules doesn't fix anything at all, as the
+> maintenance problem still exists and you still need to modify the
+> coverage rules to even allow programmers to avoid it.
+>
+> In particular, if you have
+>      type Enum is (A, B, C, D);
+>
+>      type Rec (Disc : Enum) is record
+>         case Disc is
+>           when C => ...
+>           when A | B | D =>
+>             -- Common components.
+>             case Disc is
+>                 when A => ...
+>                 when B => ...
+>                 when D => ...
+>                 when others => null;
+>             end case;
+>         end case;
+>
+> This passes your Legality Rule. If you now add E:
+>
+>      type Enum is (A, B, C, D, E);
+>
+>      type Rec (Disc : Enum) is record
+>         case Disc is
+>           when C => ...
+>           when A | B | D | E =>
+>             -- Common components.
+>             case Disc is
+>                 when A => ...
+>                 when B => ...
+>                 when D => ...
+>                 when others => null;
+>             end case;
+>         end case;
+>
+> We've failed to add a branch for E. This is not detected by your
+> Legality Rule.  ...
+
+I've lost you here.  If you use an "others" then you are never going to detect a
+missing branch.  If you want to take advantage of this new capability, you would
+certainly have to remove all of the "when others" clauses from your variant
+records.  Having done that, then the compiler *would* find a missing variant
+alternative for "D".  Isn't that solving the most important maintenance problem?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 26, 2013  10:12 PM
+
+> I've lost you here.  If you use an "others" then you are never going
+> to detect a missing branch.  If you want to take advantage of this new
+> capability, you would certainly have to remove all of the "when
+> others" clauses from your variant records.  Having done that, then the
+> compiler *would* find a missing variant alternative for "D".  Isn't
+> that solving the most important maintenance problem?
+
+What "new capability"? I've been trying to get a straight answer from you on
+that all evening.
+
+If you *must* remove the "others" branches, you have a major incompatibility.
+You said you don't want that. But the only way that I can see to make a simple
+change is to leave the coverage rules alone and change the subtype of the
+selector (the discriminant in this case) -- which has this effect (and
+incompatibility).
+
+If you *can* (but don't have to) remove the "others" branches, you must have
+changed the coverage rules such that they are now different for variants and
+case statements. This is a major new complexity, at least in description and
+most likely in implementation as well (depending on how much of the coverage
+rules a compiler shares). But you claim that there is no new complexity.
+
+Thus I can only conclude that the only thing you were planning to change is the
+new Legality Rule, and I've shown that doesn't work.
+
+So now I'm just 100% confused. You are either proposing something very complex
+and calling it simple, or there is a serious incompatibility, or nothing useful
+is being changed. Or (hopefully), you have some brilliant new insight that no
+one has seen before. In any case, please explain precisely what changes you are
+proposing, and how they would work in the context of language wording. (In this
+case, implementations follow the language wording very closely -- at least ours
+does -- and any increase in wording complexity would be matched by a
+corresponding increase in implementation complexity.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 26, 2013  10:31 PM
+
+> What "new capability"? I've been trying to get a straight answer from
+> you on that all evening.
+
+Sorry, I think we were on different wavelengths here.
+
+The "new capability" is that the coverage rules for nested variant parts would
+be different, namely there is no need to cover a value that cannot "reach" the
+nested variant part.  So we are making programs legal that were illegal before.
+You could only get the benefit of this "new capability" if you removed the "when
+others" clauses from your nested variant parts.
+
+This seems quite straightforward, but I think you are saying this is a major new
+complexity.  We clearly have different views here.  To me nested variant parts
+are special beasts, and it would be fine if they have special rules about
+coverage.
+
+The "added legality" rule seems optional, and it would be that if you have a
+variant alternative of a nested variant part where *all* of its choices are
+impossible for the given nested variant part, then the component list must be
+"null;".  That seems like a "nice to have" but it admittedly would create an
+incompatibility for some slightly "strange" programs (but of course such
+programs could exist, perhaps due to past maintenance activity).  A warning
+would probably be adequate here to get most of the value.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, August 27, 2013  1:33 AM
+
+> The "new capability" is that the coverage rules for nested variant
+> parts would be different, namely there is no need to cover a value
+> that cannot "reach" the nested variant part.
+> So we are making programs legal that were illegal before.
+> You could only get the benefit of this "new capability" if you removed
+> the "when others" clauses from your nested variant parts.
+>
+> This seems quite straightforward, but I think you are saying this is a
+> major new complexity.  We clearly have different views here.  To me
+> nested variant parts are special beasts, and it would be fine if they
+> have special rules about coverage.
+
+I think I understand what you're suggesting, and maybe (just maybe) understand
+the disconnect.
+
+(1) My understanding is that you are suggesting that the coverage rules for
+nested variants be modified to *allow* coverage in the nominal subtype, but not
+*require* coverage outside of the values of the parent alternative. Is this
+correct? If so, this appears to be a complex new capability to me. The current
+coverage rules either require a value to be covered, or not covered. There is no
+grey area of values that don't have to be covered. So we're talking about a new
+or heavily modified mechanism. (It's hard enough to get the coverage code to
+work without having grey areas.)
+
+(2) Nested variants aren't special, at least in terms of their coverage rules.
+They work the same as any other variant or case statement so far as Legality
+Rules go. The processing for some other things (especially assignment of storage
+for components) is somewhat special, but that's not related to the coverage
+rules in my view. Making those rules special means a lot of new work.
+
+(3) Issues (1) and (2) also have an effect on the wording of the standard. We
+don't have any concept of a value that might be covered but doesn't have to be
+covered today. We'd have to come up with some way to represent that. That had to
+be added complexity (I don't see how it could be done for free). It seems to me
+that implementations here follow the wording almost exactly, so added complexity
+in wording translates to added complexity in implementation.
+
+(4) Aside: This rule (as I understand it) would seem to allow weird
+constructions where some, but not all, of the values of the nominal subtype that
+aren't in the alternative, are covered. Brad's suggestion eliminated that
+possibility: either all of the values of the nominal subtype would be covered,
+or just those in the alternative. That's better from a readability perspective
+(and it also eliminates most of the grey area), but I think it too would get
+very complex when you have multiple levels of nesting -- you would have to check
+the coverage against a list of possible subtypes.
+
+(5) Aside 2: For Janus/Ada, implementing this would require either throwing away
+the entire existing coverage mechanism, or constructing subtypes for every case
+alternative. That's because the existing mechanism takes the nominal subtype of
+the selecting expression/discriminant and a representation of the case
+alternatives. The easiest (but most expensive at runtime) way to deal with that
+would be to create a subtype for every alternative in order to have one to pass
+in. That would be particularly expensive for discontiguous subtypes (clearly the
+most common kind), and would have ripple effects elsewhere in the compiler (more
+subtypes -> slower loading of withed compilation units [which is quadratic in
+the number of subtypes as we eliminate duplicates on the fly] -> slower
+compilation speeds). The alternative would be to totally replace the inputs to
+the algorithm with some other data structure; certainly possible but not easy. I
+would expect that many other compilers would have a similar issue because
+changing from a nominal subtype (something that's always a first-class
+symboltable item) to a determined-by-context subtype (something that usually
+doesn't exist in the symboltable) would have some significant cost. (After all,
+there is no place in Ada currently where we need a discontiguous anonymous
+subtype. If we hadn't already added static predicates in Ada 2012 to give
+discontiguous subtypes, I would consider the cost of adding that as completely
+unacceptable for this problem; as it is, adding them implicitly is pretty
+expensive)
+
+Anyway, I hope you can see why I think this would add substantial new complexity
+to both the wording of the Standard and of the implementations. True, this isn't
+of the level of interfaces, but then again the value of the change is also much,
+much less.
+
+I think we can agree to disagree on this one -- but I do insist that this be a
+separate proposal from Steve's original one, because I don't think that they
+necessarily should tied together. (The problems are quite different.)
+
+> The "added legality" rule seems optional, and it would be that if you
+> have a variant alternative of a nested variant part where *all* of its
+> choices are impossible for the given nested variant part, then the
+> component list must be "null;".
+>  That seems like a "nice to have" but it admittedly would create an
+> incompatibility for some slightly "strange"
+> programs (but of course such programs could exist, perhaps due to past
+> maintenance activity).  A warning would probably be adequate here to
+> get most of the value.
+
+Probably this Legality Rule isn't worth the headache. It's hard to justify
+introducing an incompatibility here, especially at this late date. (If we had
+considered this for Ada 2005, maybe the thinking would have been different.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, August 27, 2013  5:26 PM
+
+> I think I understand what you're suggesting, and maybe (just maybe)
+> understand the disconnect.
+>
+> (1) My understanding is that you are suggesting that the coverage
+> rules for nested variants be modified to *allow* coverage in the
+> nominal subtype, but not *require* coverage outside of the values of
+> the parent alternative. Is this correct?
+
+Yes.
+
+> ... If so, this appears to be a complex new capability to me.
+
+We all have our own definition of "complex" I guess!
+
+> ... The
+> current coverage rules either require a value to be covered, or not covered.
+> There is no grey area of values that don't have to be covered. So
+> we're talking about a new or heavily modified mechanism. (It's hard
+> enough to get the coverage code to work without having grey areas.)
+>
+> (2) Nested variants aren't special, at least in terms of their
+> coverage rules.
+
+In my view, that is the problem!  I am proposing that they *should* be treated
+specially, since they have a very limited set of values that are possible,
+namely those of the enclosing variant alternative.
+
+> (3) Issues (1) and (2) also have an effect on the wording of the standard.
+
+Doesn't seem that complicated.  Given the addition of predicates, we could
+simply say that for the purposes of checking that all needed values are covered,
+the (implicit) predicate that applies to a discriminant used in a nested variant
+part is that it is in the range of values of the choice list for the enclosing
+variant alternative.  For deciding what values that must *not* be covered, the
+usual nominal subtype would apply, (primarily for upward compatilibity).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, August 28, 2013 11:43 AM
+
+...
+> > (2) Nested variants aren't special, at least in terms of their
+> > coverage rules.
+>
+> In my view, that is the problem!  I am proposing that they
+> *should* be treated specially, since they have a very limited set of
+> values that are possible, namely those of the enclosing variant
+> alternative.
+
+I don't mind changing their *subtype* to reflect the limited values, but
+changing the actual coverage rules is a different matter, as those are already
+very complex to describe and implement.
+
+> > (3) Issues (1) and (2) also have an effect on the wording of the standard.
+>
+> Doesn't seem that complicated.  Given the addition of predicates, we
+> could simply say that for the purposes of checking that all needed
+> values are covered, the (implicit) predicate that applies to a
+> discriminant used in a nested variant part is that it is in the range
+> of values of the choice list for the enclosing variant alternative.
+> For deciding what values that must *not* be covered, the usual nominal
+> subtype would apply, (primarily for upward compatibility).
+
+For this, I would say that you have to prove it. The current wording has no
+distinction between what must be covered and what must not be -- it's either
+required to be covered or required to not be covered. I don't see any simple way
+to separate those concerns short of completely duplicating the rules.
+
+So, please provide actual wording to show how this would work. There is no other
+way to prove or disprove your assertion.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, August 29, 2013  7:58 AM
+
+> So, please provide actual wording to show how this would work. There
+> is no other way to prove or disprove your assertion.
+
+Here is a possible way of accomplishing this:
+
+Revise 3.8.1(14-16) as follows:
+
+The possible values of the discriminant of a variant_part shall be covered as
+follows:
+
+  * If the discriminant is of a static constrained scalar subtype, then, except
+    within an instance of a generic unit, each non-others discrete_choice shall
+    cover only values in that subtype that satisfy its predicate, and each value
+    of that subtype that satisfies its predicate shall be covered by some
+    discrete_choice [(either explicitly or by others)]{, either of a
+    discrete_choice_list of this variant_part, or, if the variant_part is itself
+    nested within a variant, by a discrete_choice_list of some non-enclosing
+    variant of an enclosing variant_part};
+
+  * If the type of the discriminant is a descendant of a generic formal scalar
+    type, then the variant_part shall have an others discrete_choice{, or if the
+    variant_part is itself nested within a variant, some non-enclosing variant
+    of an enclosing variant_part shall have an others discrete_choice};
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, August 26, 2013  9:34 AM
+
+> By the way, my other pet peeve in this general vicinity is when
+> defining a variant record, it is annoying that the nested variant
+> parts having to cover the full range of the discriminant, rather than
+> just that part of the range of the discriminant that is possible in the nested variant.  E.g.
+>
+>      case D is
+>         when 1..5 =>
+>            X : Float
+>            case D is
+>               when 1 => ...
+>               when 2..5 => ...
+>               when others => ...  -- Why on earth is this needed?
+
+I agree this is annoying, but I am opposed to fixing it.
+
+It doesn't come up very often.  "Every time I write a nested variant" just isn't
+very often.
+
+When it does come up, the cost is minor: one extra line of code saying:
+
+    when others => null; -- can't happen
+
+I don't buy the "big maintenance hazard" idea.  You add an enumeration literal.
+The full coverage rules cause the OUTER variant to fail to compile.  So you fix
+that.  It's pretty obvious at that point that you need to inspect the code in
+the INNER variant, and that code is sitting right there in front of you.
+
+I suggest Randy and Tucker quit arguing about how hard it is to fix this problem
+until we agree that it might be worth fixing.  I mean, I don't think it's worth
+fixing even if the fix is trivial wording effort and small compiler effort. What
+do others think?
+
+And I hope we all agree that it's not worth ANY incompatibilities!
+
+P.S. By the way, this whole sub-thread is off-topic.
+It has nothing to do with aggregates.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Thursday, August 29, 2013  9:54 AM
+
+I'm tending towards the "it's not worth bothering with" view.
+
+It's less irritating than the need to use different identifiers for components
+of different alternatives of a variant.
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, August 29, 2013  1:37 PM
+
+>It's less irritating than the need to use different identifiers for
+>components of different alternatives of a variant.
+
+I agree. That has always annoyed me.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, August 29, 2013  4:39 PM
+
+> I suggest Randy and Tucker quit arguing about how hard it is to fix
+> this problem until we agree that it might be worth fixing.  I mean, I
+> don't think it's worth fixing even if the fix is trivial wording
+> effort and small compiler effort.
+
+I strongly disagree with this on general principles (having nothing to do with
+this case). *Any* bug that can be fixed compatibly with a trivial wording effort
+and small compiler effort should be fixed.
+
+In almost all such cases, either there is no trivial compatible fix (as in this
+case), or it is arguable if even there is a bug (not in this case, being
+required to cover values that can never happen is clearly silly at best and
+requires writing confusing code). So we don't usually get to this point.
+
+My entire purpose of discussing this with Tuck was to see if there was a trivial
+fix that I had missed. If not, the problem is insufficiently common to justify
+fixing. I think Tucker proved the point with "...some non-enclosing variant of
+an enclosing variant_part..." :-)
+
+...
+> When it does come up, the cost is minor: one extra line of code
+> saying:
+>
+>     when others => null; -- can't happen
+
+This isn't minor. Untestable paths are a big deal in some environments, and
+being unable to avoid writing them may very well prevent the use of nested
+variants at all. And they're something I use often (they appear in most of my
+variant records) because they bring an extra level of use checking that does not
+happen if you toss all of the components together into a single variant. (And I
+do use a lot of variant records - the OOP alternative requires writing and
+debugging far more code to the extent that it is often impractical, especially
+for a one-man shop like mine.)
+
+> I don't buy the "big maintenance hazard" idea.
+
+I don't think anyone ever said "big". But no programming language should require
+maintenance hazards that can be avoided.
+
+> You add an
+> enumeration literal.  The full coverage rules cause the OUTER variant
+> to fail to compile.  So you fix that.  It's pretty obvious at that
+> point that you need to inspect the code in the INNER variant, and that
+> code is sitting right there in front of you.
+
+The notion that the programmer "obviously needs" to do something is bogus in
+general. After all, we don't need strong typing, because its "obvious" that the
+programmer "needs" to combine correct types. Moreover, I find that I depend
+almost completely on Ada's completeness checking. When I add an enumeration
+these days, it's a completely mindless operation - the only thing I do is think
+about where the enumeration needs to be added to case alternatives and the like.
+There is no chance that I would look at the inner variant without an error; any
+place where completeness checking fails is a danger point. (I didn't work this
+way in the past, but compilations are now fast enough that there isn't much
+value to expending mental effort to save compilation time.)
+
+The only mitigating factor here is that it is not unlikely that the missing
+variant alternative has no components, so we would get code that works correctly
+even though it is formally wrong. Arguably, that's even worse (since the "can't
+happen" comment is now a lie), but that is a matter of taste.
+
+Again, to summarize, I think this problem ought to be fixed, but only if the
+solution is trivial. And no such solution has yet been proposed.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, August 26, 2013  4:57 PM
+
+> Again, to summarize, I think this problem ought to be fixed, but only
+> if the solution is trivial. And no such solution has yet been proposed.
+
+I don't think we're going to find a solution that is trivial in terms of
+compiler effort.
+
+But anyway, please make sure that this issue is a separate AI from the
+"aggregates and variant parts" AI (which I DO think is worth fixing).
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, September  2, 2013  2:55 AM
+
+> I mean, I don't think it's worth fixing even if the fix is trivial
+> wording effort and small compiler effort.
+> What do others think?
+
+1) I never write:
+    when others => null; -- can't happen
+but:
+    when others => Failure ("Impossible");
+
+and guess what? Every now and then, it gets fired (especially when the case
+selector is a subtype that covers more values than I thought).
+
+2) I think it is a minor annoyance. An annoyance, but minor (i.e. I can live
+with it). When I hit it, I generally think "Oh, it's annoying, but that's the
+price to pay for all the other nice features of Ada".
+
+<rant on> To be honest, when I see how the language is used in industry, I think
+energy should be spent on teaching people how to use the language properly, not
+on fixing minor issues. But of course, it is not in the charter of the ARG...
+</rant>
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, September  2, 2013  3:26 AM
+
+> 1) I never write:
+>     when others => null; -- can't happen
+> but:
+>     when others => Failure ("Impossible");
+
+Ooops, before anybody else notices:
+
+Of course, this is bogus, since it is a record case, not a statement case. I am
+too used to arguing against "when others => null"...
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, September  2, 2013  8:36 AM
+
+> Of course, this is bogus, since it is a record case, not a statement
+> case.
+
+I was just trying to think of how to make a joke about your mistake, but I
+couldn't figure it out.  Something about how that's "Impossible" syntax in a
+variant record.  ;-)
+
+>... I am too used to arguing against "when others => null"...
+
+Yeah!  I like to say that "others" means ALL the others, including the ones you
+might invent next week or next year.
+
+****************************************************************
