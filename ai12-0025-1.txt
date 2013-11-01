@@ -1545,3 +1545,1406 @@ worry about the next release breaking everything you've done).
 I think we've gotten way off topic here, so I'll try to give this a rest.
 
 ****************************************************************
+
+From: Brad Moore
+Sent: Friday, October 25, 2013  10:04 AM
+
+In further support of this AI, I have come across a stronger case.
+
+A useful construction is to be able to pass an array of access to nested
+parameterless procedures into another subprogram. Such a construction can be
+used to execute subprograms recursively in parallel for example.
+
+Using GNAT, there are three (possibly more, but if so, non-obvious) ways this
+can be done.
+
+1) Pass an array of Unchecked_Access to class wide tagged types objects
+2) Pass an array of System.Address of access to subprogams, and use
+   Unchecked_Conversion to convert the addresses back into access to subprograms
+   so that they can be called.
+3) Pass an array of Unrestricted_Access to subprograms.
+
+Option 1 is portable, but it has a lot of overhead and is very slow, and
+   considerably more awkward to write. (about 50-60 times slower than option 3
+   in my testing) Tagged type objects need to be derived and declared. Tagged
+   types have dispatching tables, add an additional parameter for primitives,
+   have a tag, etc.
+
+Option 2 is less portable, quite a bit faster, and quite a bit less awkward and
+   less elegant to write. (about 5 times faster than option 1 in my testing)
+   Calls to Unchecked_Conversion add overhead, and dealing with addresses is
+   less safe than dealing with access to subprogram types.
+
+Option 3 is non-portable, as it involves using Unrestricted_Access which is GNAT
+   specific (about 50-60 times faster than option 1, and the least awkward to
+   write
+
+The argument I present is that if we allowed Unchecked_Access on subprograms, it
+would allow a programmer to express a portable solution in a much less awkward
+manner, that could execute potentially 50-60 times faster than the current
+portable solution.
+
+My test program follows if that helps illustrate.
+
+-----------------------------------------------------------
+
+with System;
+
+package Block_Pkg is
+
+   --  Portable but very slow solution:
+   --  Execute an array of tagged type subprograms
+
+   type Tagged_Subprogram is interface;
+   procedure Process (Item : Tagged_Subprogram) is abstract;
+
+   type Tagged_Subprogram_List is array (Positive range <>) of
+     not null access Tagged_Subprogram'Class;
+
+   procedure Execute_Tagged_Subprogram_List (List : Tagged_Subprogram_List);
+
+   --------------------------------------------------------
+
+   --  Less portable but medium performance solution: (about 5 times faster)
+   --  Execute an array of address to access to subprogram
+
+   type Subprogram_Address_List is array (Positive range <>) of System.Address;
+
+   procedure Execute_Subprogram_Address_List (List : Subprogram_Address_List);
+
+   --------------------------------------------------------
+
+   --  Non portable but fast performance solution: (about 50-60 times faster)
+   --  Execute an array of access to subprogram
+
+   type Subprogram_List is array (Positive range <>) of
+     not null access procedure;
+
+   procedure Execute_Subprogram_List (List : Subprogram_List);
+
+end Block_Pkg;
+
+----------------------------------------------------------
+
+with Ada.Unchecked_Conversion;
+
+package body Block_Pkg is
+
+   procedure Execute_Tagged_Subprogram_List (List : Tagged_Subprogram_List) is
+   begin
+      for I of List loop
+         I.Process;
+      end loop;
+   end Execute_Tagged_Subprogram_List;
+
+   procedure Execute_Subprogram_Address_List
+     (List : Subprogram_Address_List)
+   is
+      type Access_To_Subprogram is not null access procedure;
+
+      function Convert is new Ada.Unchecked_Conversion
+        (Source => System.Address,
+         Target => Access_To_Subprogram);
+   begin
+      for Execute of List loop
+         Convert (Execute).all;
+      end loop;
+   end Execute_Subprogram_Address_List;
+
+   procedure Execute_Subprogram_List (List : Subprogram_List) is
+   begin
+      for Execute of List loop
+         Execute.all;
+      end loop;
+   end Execute_Subprogram_List;
+
+end Block_Pkg;
+
+------------------------------------------------
+
+with Block_Pkg;
+with Ada.Command_Line;
+with Ada.Real_Time;
+with Ada.Text_IO;
+with Ada.Float_Text_IO; use Ada; use Ada.Text_IO;
+
+procedure Test_Access_To_Subprogram is
+   N : constant Natural := Natural'Value (Ada.Command_Line.Argument (1));
+   Start_Time : Real_Time.Time;
+   Elapsed    : Duration;
+   use type Real_Time.Time;
+
+begin
+
+   Portable_But_Very_Slow_And_Awkward : declare
+
+      procedure Tagged_Subprograms (N : Natural) is
+
+         type Cat_Block is new Block_Pkg.Tagged_Subprogram with null record;
+         overriding procedure Process (Item : Cat_Block) is
+            pragma Unreferenced (Item);
+         begin
+            Tagged_Subprograms (N - 1);
+         end Process;
+
+         type Dog_Block is new Block_Pkg.Tagged_Subprogram with null record;
+         overriding procedure Process (Item : Dog_Block) is
+            pragma Unreferenced (Item);
+         begin
+            Tagged_Subprograms (N - 1);
+         end Process;
+
+         type Horse_Block is new Block_Pkg.Tagged_Subprogram with null record;
+         overriding procedure Process (Item : Horse_Block) is
+            pragma Unreferenced (Item);
+         begin
+            Tagged_Subprograms (N - 1);
+         end Process;
+
+         type Cow_Block is new Block_Pkg.Tagged_Subprogram with null record;
+         overriding procedure Process (Item : Cow_Block) is
+            pragma Unreferenced (Item);
+         begin
+            Tagged_Subprograms (N - 1);
+         end Process;
+
+         Cat : aliased Cat_Block;
+         Dog : aliased Dog_Block;
+         Horse : aliased Horse_Block;
+         Cow : aliased Cow_Block;
+
+      begin -- Tagged_Subprograms
+
+         if N = 0 then
+            return;
+         else
+            Block_Pkg.Execute_Tagged_Subprogram_List
+              ((1 => Cat'Unchecked_Access,
+                2 => Dog'Unchecked_Access,
+                3 => Horse'Unchecked_Access,
+                4 => Cow'Unchecked_Access));
+         end if;
+
+      end Tagged_Subprograms;
+
+   begin -- Portable_But_Very_Slow_And_Awkward
+
+      Put ("Tagged subprograms: Elapsed=");
+
+      Start_Time := Real_Time.Clock;
+
+      Tagged_Subprograms (N);
+
+      Elapsed := Real_Time.To_Duration (Real_Time.Clock - Start_Time);
+
+      Float_Text_IO.Put (Item => Float (Elapsed),
+                         Fore => 2,
+                         Aft  => 2,
+                         Exp  => 0);
+
+      Put_Line (" seconds");
+   end Portable_But_Very_Slow_And_Awkward;
+
+   ---------------------------------------------------------
+
+   Less_Portable_But_Medium_Speed : declare
+
+      procedure Subprogram_Addresses (N : Natural) is
+
+         procedure Cat is
+         begin
+            Subprogram_Addresses (N - 1);
+         end Cat;
+
+         procedure Cow is
+         begin
+            Subprogram_Addresses (N - 1);
+         end Cow;
+
+         procedure Dog is
+         begin
+            Subprogram_Addresses (N - 1);
+         end Dog;
+
+         procedure Horse is
+         begin
+            Subprogram_Addresses (N - 1);
+         end Horse;
+
+      begin -- Subprogram_Addresses
+
+         if N = 0 then
+            return;
+         else
+
+            Block_Pkg.Execute_Subprogram_Address_List
+              ((1 => Cat'Address,
+                2 => Dog'Address,
+                3 => Horse'Address,
+                4 => Cow'Address));
+         end if;
+
+      end Subprogram_Addresses;
+
+   begin  -- Less_Portable_But_Medium_Speed
+
+      Put ("System.Address conversions: Elapsed=");
+
+      Start_Time := Real_Time.Clock;
+
+      Subprogram_Addresses (N);
+
+      Elapsed := Real_Time.To_Duration (Real_Time.Clock - Start_Time);
+
+      Float_Text_IO.Put (Item => Float (Elapsed),
+                         Fore => 2,
+                         Aft  => 2,
+                         Exp  => 0);
+
+      Put_Line (" seconds");
+   end Less_Portable_But_Medium_Speed;
+
+   -----------------------------------------------------------
+
+   Non_Portable_But_Fast : declare
+      procedure Subprograms (N : Natural) is
+
+         procedure Cat is
+         begin
+            Subprograms (N - 1);
+         end Cat;
+
+         procedure Cow is
+         begin
+            Subprograms (N - 1);
+         end Cow;
+
+         procedure Dog is
+         begin
+            Subprograms (N - 1);
+         end Dog;
+
+         procedure Horse is
+         begin
+            Subprograms (N - 1);
+         end Horse;
+
+      begin -- Subprograms
+
+         if N = 0 then
+            return;
+         else
+
+            Block_Pkg.Execute_Subprogram_List
+              ((1 => Cat'Unrestricted_Access,
+                2 => Dog'Unrestricted_Access,
+                3 => Horse'Unrestricted_Access,
+                4 => Cow'Unrestricted_Access));
+         end if;
+
+      end Subprograms;
+
+   begin -- Non_Portable_But_Fast
+
+      Put ("Unrestricted_Access: Elapsed=");
+
+      Start_Time := Real_Time.Clock;
+
+      Subprograms (N);
+
+      Elapsed := Real_Time.To_Duration (Real_Time.Clock - Start_Time);
+
+      Float_Text_IO.Put (Item => Float (Elapsed),
+                         Fore => 2,
+                         Aft  => 2,
+                         Exp  => 0);
+
+      Put_Line (" seconds");
+   end Non_Portable_But_Fast;
+
+end Test_Access_To_Subprogram;
+
+-------------------------------------------
+
+if I execute the above program with a command line parameter of 13, I get the
+following output on my machine.
+
+Tagged subprograms: Elapsed=73.63 seconds System.Address conversions:
+Elapsed=13.47 seconds Unrestricted_Access: Elapsed= 1.45 seconds
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, October 25, 2013  11:15 AM
+
+> ...
+> The argument I present is that if we allowed Unchecked_Access on
+> subprograms, it would allow a programmer to express a portable
+> solution in a much less awkward manner, that could execute potentially 50-60 times faster than the current portable solution.
+
+It is not easy to implement Unchecked_Access on subprograms in many run-time
+models.  It doesn't become any easier to do so if we add it to the Ada standard.
+The main reason we didn't add it during the Ada 9X process was because of this
+difficulty, and I don't think anything has really changed here.  In particular,
+the various Ada compilers based on the AdaMagic front end (Green Hills, Atego,
+Analog Devices SHARK, Raytheon Patriot) would have real trouble implementing
+this in a well-defined manner.
+
+> My test program follows if that helps illustrate.
+
+Have you tried this on non-GNAT-based Ada compilers?  Did it work as expected?
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, October 25, 2013  1:19 PM
+
+>> ...
+>> The argument I present is that if we allowed Unchecked_Access on
+>> subprograms, it would allow a programmer to express a portable
+>> solution in a much less awkward manner, that could execute potentially
+>> 50-60 times faster than the current portable solution.
+>
+> It is not easy to implement Unchecked_Access on subprograms in many
+> run-time models.  It doesn't become any easier to do so if we add it
+> to the Ada standard.  The main reason we didn't add it during the Ada
+> 9X process was because of this difficulty, and I don't think anything
+> has really changed here.  In particular, the various Ada compilers
+> based on the AdaMagic front end (Green Hills, Atego, Analog Devices SHARK,
+> Raytheon Patriot) would have real trouble implementing this in a well-defined
+> manner.
+
+Well at least *allow* Ada 2012 compilers to do this, it is annoying to have
+progress held up by compilers that realistically are never likely to implement
+full Ada 2012 anyway, and I suspect that if they tried to do so, handling this
+would be by no means the biggest barrier???
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October 28, 2013  2:38 PM
+
+> Well at least *allow* Ada 2012 compilers to do this, ...
+
+I don't see the point, given that we already have 'Unrestricted_Access.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, October 25, 2013  2:08 PM
+
+> Well at least *allow* Ada 2012 compilers to do this, it is annoying to
+> have progress held up by compilers that realistically are never likely
+> to implement full Ada 2012 anyway, and I suspect that if they tried to
+> do so, handling this would be by no means the biggest barrier???
+
+Ada 2012 compilers are free to support the GNAT subp'Unrestricted_Access
+attribute. Declaring that all Ada 2012 compilers *must* support
+subp'Unchecked_Access only raises the barrier to full support of Ada 2012.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, October 25, 2013  2:33 PM
+
+OK, and that is a concern, but how realistic is it that this is in reality a
+significant additional barrier to full support of Ada 2012. In other words, do
+you really think that adding this requirement would make the difference?
+
+I just remember in the past the mistakes we have made in accomodating old
+compilers that in fact never made the transition, e.g. all the considerations of
+supporting display use in the old ALsys compiler, which never in fact made it to
+Ada 95 after all.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, October 26, 2013  10:39 AM
+
+Unchecked_Access on a subprogram is not easy to define.
+AdaMagic consistently uses static links for non-library-level subprograms, and
+does not use static links for library-level subprograms. If you have a
+library-level access-to-subprogram type, it is represented by a single code
+address.  The only way I know how to convert a single code address into a
+static-link/address pair is to use a "trampoline," which implies writable code
+space, something that is bad news from a security point of view.
+
+If there were a very good, solid definition of exactly what Unchecked_Access on
+a subprogram meant, that would be interesting to read and consider.  But just
+saying it can be useful is not enough!
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, October 28, 2013  2:20 PM
+
+> AdaMagic consistently uses static links for non-library-level
+> subprograms, and does not use static links for library-level subprograms.
+> If you have a library-level access-to-subprogram type, it is represented by a
+> single code address.
+
+I believe the Rational/Atego compiler does something similar.
+
+IMO, requiring support for Unchecked_Access for subprograms would effectively
+force implementations to abandon this sort of optimization, at least in the
+vanilla case. One could imagine some way of specifying that this optimization is
+still ok in some cases but that wouldn't just fall out.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October 28, 2013  2:38 PM
+
+It's not just an optimization; it's important for interoperability with C and
+other languages.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 28, 2013  3:30 PM
+
+...
+> If you have a library-level access-to-subprogram type, it is
+> represented by a single code address.  The only way I know how to
+> convert a single code address into a static-link/address pair is to
+> use a "trampoline," which implies writable code space, something that
+> is bad news from a security point of view.
+
+Right. For what it's worth (probably not much), Janus/Ada uses displays rather
+than static links. Anonymous-access-to-subprogram is a (very) fat pointer
+including a display copy and some generic descriptor pointers, and calls to
+those are quite expensive because all of those things have to be set up and torn
+down. (We use a similar mechanism for calls through generic formal subprograms.)
+None of that would happen with 'Unchecked_Access (as named access-to-subprogram
+is a bare pointer, important for C interfacing at least), and the results would
+be hard to predict.
+
+> If there were a very good, solid definition of exactly what
+> Unchecked_Access on a subprogram meant, that would be interesting to
+> read and consider.  But just saying it can be useful is not enough!
+
+I think such a definition is relatively easy: a call through a value created
+from 'Unchecked_Access is erroneous if the called body references any up-level
+data (more formally, if the called body accesses anything other than parameters,
+local objects, and objects with library-level accessibility). Because of the
+varying implementation models, no up-level access can be guarenteed. (You might
+not have the right static link or display in the subprogram body for such
+access.)
+
+The problem with that, of course, is that it means that you can't do anything
+with such a subprogram access that you can't do with 'Access on a library-level
+subprogram (presuming you want to avoid erroneous execution, which one needs to
+do if they want portable code). So what gain there would be from such a
+definition is unclear to me, and obviously there is a cost to implementing such
+a definition.
+
+To do better would be much harder (even if one wanted to assume a static link
+model) - unless there is no concern about requiring Ada code to be insecure (by
+essentially requiring trampolines). I don't think we should even consider
+requiring trampolines or similar constructs (I never even considered such an
+implementation in Janus/Ada, for any purpose, it always seemed out of bounds to
+me, even in the 1980s).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, October 28, 2013  7:38 PM
+
+>> IMO, requiring support for Unchecked_Access for subprograms would
+>> effectively force implementations to abandon this sort of
+>> optimization, at least in the vanilla case. One could imagine some
+>> way of specifying that this optimization is still ok in some cases
+>> but that wouldn't just fall out.
+>
+> It's not just an optimization; it's important for interoperability
+> with C and other languages.
+
+Well we end up interoperable with C, so I don't see this!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 29, 2013  5:43 AM
+
+> Well we end up interoperable with C, so I don't see this!
+
+Because GNAT represents an access to library level procedure as the address of
+the code, just like the other compilers being discussed.  (Nested procedures are
+more complicated, and the margin of this email is too small...)
+
+Anyway, GNAT manages to do the "optimization" Steve is talking about while still
+supporting 'Unrestricted_Access on nested procedures.  So it's possible.  But
+it's probably not easy for other implementations.
+
+Anyway, I am opposed to adding 'Unchecked_Access on subprograms. The usefulness
+is marginal, and the implementation burden large (for all bug GNAT).  (I'm
+pretty much opposed to adding ANY big features to Ada until other
+implementations have a chance to catch up.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 29, 2013  6:10 AM
+
+> Unchecked_Access on a subprogram is not easy to define.
+
+Heh?  To me, it seems trivial to define.  Hard to implement in some existing
+implementations, perhaps, but not hard to define what it means.
+
+You seem to be mixing up semantics (above) with implementation issues (below).
+
+> AdaMagic consistently uses static links for non-library-level
+> subprograms, and does not use static links for library-level subprograms.
+> If you have a library-level access-to-subprogram type, it is
+> represented by a single code address.  The only way I know how to
+> convert a single code address into a static-link/address pair is to use a
+> "trampoline," ...
+
+See the GNAT implementation.  (I'm not prepared to describe it here from memory
+-- I've no doubt forgotten important details!)
+
+>... which implies writable code space,  something that is bad news from
+>a security point of view.
+
+Right, and is grossly inefficient.
+
+> If there were a very good, solid definition of exactly what
+> Unchecked_Access on a subprogram meant, that would be interesting to
+> read and consider.  But just saying it can be useful is not enough!
+
+I think the RM already describes what an acc-to-subp means.  We just need to say
+that it is erroneous to evaluate an object whose value designates a subprogram
+that no longer exists.  P'Unchecked_Access means exactly the same as P'Access at
+run time -- the only difference is a legality rule on P'Access that makes it
+safer.
+
+I'm still opposed to adding this feature -- even though its semantics are
+crystal clear to me!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 29, 2013  10:00 AM
+
+>> Unchecked_Access on a subprogram is not easy to define.
+>
+> Heh?  To me, it seems trivial to define.  Hard to implement in some
+> existing implementations, perhaps, but not hard to define what it
+> means.
+>
+> You seem to be mixing up semantics (above) with implementation issues
+> (below).
+
+One issue is whether 'Unchecked_Access implies that the designated subprogram is
+presumed to *not* make up-level references into some or all of the enclosing
+scopes.  Another part of the problem is that the meaning of the phrase you use
+below, "the designated subprogram no longer exists."  Clearly we aren't worried
+about the subprogram's code going away, we are worried about some or all of the
+enclosing scopes of the subprogram going away. Another issue is whether you can
+use 'Unchecked_Access to bypass a caller-side elaboration check.
+
+In any case, the challenge of going from a single code address to a pair
+<code-addr,static-link> is non-trivial.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 29, 2013  11:38 AM
+
+I still think you're thinking about this backwards.  You seem to be thinking, "I
+am familiar with an implementation that uses technique X. Now what would happen
+if we use X unmodified to implement this new feature (in particular, a call via
+a global access type to a nested procedure)?"
+
+It won't work, that's what.
+
+> One issue is whether 'Unchecked_Access implies that the designated
+> subprogram is presumed to *not* make up-level references into some or
+> all of the enclosing scopes.
+
+In my view the answer is obvious:  Ada does not forbid up-level references, so
+of course they are allowed.
+
+I can't imagine anyone seriously suggesting otherwise -- it would defeat the
+main purpose of nested procedures, and would render the suggested
+'Unchecked_Access feature entirely useless.
+
+>...Another part of the problem is that the  meaning of the phrase you
+>use below, "the designated subprogram no  longer exists."
+
+In Ada, declared entities begin to exist when the elaboration of some
+declaration creates them ("procedure P(...);" in this case).  And they cease to
+exist when the containing procedure (or whatever) is left.
+
+>...Clearly we aren't worried about the subprogram's code  going away,
+>we are worried about some or all of the enclosing scopes  of the
+>subprogram going away.
+
+In implementation terms, that's true.
+
+In semantic terms, so long as a procedure exists, everything it might up-level
+reference also exists.  And don't forget that a single procedure decl can create
+many procedures, sometimes existing simultaneously.
+
+>...Another issue is whether you can use  'Unchecked_Access to bypass a
+>caller-side elaboration check.
+
+I don't see why you would want to bypass elab checks, and I don't think anybody
+suggested that.  Am I missing something -- would there be some benefit to that?
+
+> In any case, the challenge of going from a single code address to a
+> pair <code-addr,static-link> is non-trivial.
+
+Right.  I think that's the argument you should be making.  In particular, low
+benefit to users, high implementation cost, implies cost/benefit ratio is too
+high.  I think your discussions about semantics obscure this simple point (e.g.
+talking about some oddball semantics where up-level references don't work).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 29, 2013  11:45 AM
+
+> In my view the answer is obvious:  Ada does not forbid up-level
+> references, so of course they are allowed.
+
+Just to emphasize:
+
+I think Randy also made this point:  If up-level references don't work, then
+'Unchecked_Access is 100% useless.
+
+Also note that Brad is the one requesting the feature, and his recent example
+(see Test_Access_To_Subprogram) uses up-level references.  (If it didn't, he
+wouldn't need/want 'Unchecked_Access!)
+
+So I suggest that we assume that if 'Unchecked_Access is allowed, then OF COURSE
+up-level references still work as they do in Ada today.  And then attack the
+idea based on the difficulty of implementing that properly.
+
+Otherwise, we have confusion (e.g. Brad didn't ask for erroneousness of uplevel
+refs!).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 29, 2013  2:20 PM
+
+...
+> Just to emphasize:
+>
+> I think Randy also made this point:  If up-level references don't
+> work, then 'Unchecked_Access is 100% useless.
+
+Right, I made that point. I also made the point that implementing up-level addresses for 'Unchecked_Access is impractical (it requires trampolines or making access incompatible with C).
+
+> Also note that Brad is the one requesting the feature, and his recent
+> example (see Test_Access_To_Subprogram) uses up-level references.  (If
+> it didn't, he wouldn't need/want
+> 'Unchecked_Access!)
+>
+> So I suggest that we assume that if 'Unchecked_Access is allowed, then
+> OF COURSE up-level references still work as they do in Ada today.  And
+> then attack the idea based on the difficulty of implementing that
+> properly.
+>
+> Otherwise, we have confusion (e.g. Brad didn't ask for erroneousness
+> of uplevel refs!).
+
+I agree. The requested feature is impossible(*) to implement without making
+uplevel addresses erroneous or making some sort of on-the-fly subprogram
+creation or using only fat pointers. Thus it does not belong in Ada.
+
+Note that we (RRS) encountered a similar problem with 'Access of subprograms in
+the bodies of shared generics. Such subprograms have to have an extra parameter
+that represents the data for the particular instance involved. For a bare
+access-to-subprogram type, there is nowhere to get that data from, nor does the
+profile match properly without it. The solution to this problem: demonstrate to
+the ARG that allowing such 'Access prevents generic code sharing of any kind
+(except in trivial instances where the generic unit has no instance data) and
+get such 'Accesses declared illegal.
+
+'Unchecked_Access would reintroduce this problem, and on top of that would cause
+a similar problem for all subprograms (now you need to get the display or static
+link data from somewhere, but the only places that that data could be stored at
+require the display or static link to be set properly - global data would not be
+task-safe).
+
+Someone requesting this feature (i.e. Brad) would have to show that there is a
+correct implementation that would actually work and not require writable code
+space or breaking task-safety. (My understanding is that 'Unrestricted_Access in
+GNAT uses a form of trampoline, which we are not going to consider. If that's
+false, it's imperative that someone explain the details of the implementation,
+because I know of no way to implement this and I'm convinced that it is
+impossible without violating task-safety or having writable code.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 29, 2013  5:08 PM
+
+> I agree. The requested feature is impossible(*) to implement without
+> making uplevel addresses erroneous or making some sort of on-the-fly
+> subprogram creation or using only fat pointers.
+
+Not impossible.  Just hard.
+
+>...Thus it does not belong in Ada.
+
+I agree it does not belong in Ada at this time.  I might change my tune if there
+were several Ada 2012 compilers, with teams of maintainers looking for more work
+to do.  ;-)
+
+> Someone requesting this feature (i.e. Brad) would have to show that
+> there is a correct implementation that would actually work and not
+> require writable code space or breaking task-safety. (My understanding
+> is that 'Unrestricted_Access in GNAT uses a form of trampoline, which
+> we are not going to consider. If that's false, it's imperative that
+> someone explain the details of the implementation, because I know of
+> no way to implement this and I'm convinced that it is impossible
+> without violating task-safety or having writable code.)
+
+GNAT no longer uses trampolines, except in rare cases that are not relevant to
+this discussion.  I was involved in removing trampolines, but unfortunately I
+don't remember all the details. And I'm not willing to dig up the info.
+
+The basic idea is: If P is top level, then P'Access is represented by the
+address of P's code.  This address is always even, because of alignment.  If P
+is nested, then P'Unrestricted_Access is represented as the address of a
+descriptor, plus 1 (so it's odd, again because of alignment).  The descriptor
+contains the static link and code address. (I suppose it could work with
+displays just as well.)
+
+An indirect call does "if the address is even, call that, else subtract 1, load
+static link and then do the call."  The "even" case is the fast path, and it
+involves a correctly-predicted jump, which is free or nearly free (compared to
+an indirect call!) on most machines.
+
+Or something like that.  I'm leaving out all sorts of complexities and details,
+but those aren't important here.  Maybe it was minus 1 instead of plus 1, etc
+etc.
+
+Access value is one word.  Compatible with C representation.
+Task/thread safe.  No trampolines or other writeable-code.
+
+One important point: this implementation is target dependent, so complexities
+are multiplied by the number of supported target machine architectures.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October 29, 2013  5:19 PM
+
+> One important point: this implementation is target dependent, so
+> complexities are multiplied by the number of supported target machine
+> architectures.
+
+That's FAR too pessimistic, on the contrary the even/odd approach is pretty much
+target independent, it applies fine to all targets we support (which is a LOT!)
+
+Of course on some machines like Alpha, the ABI doesn't use code addresses
+anyway, procedure descriptors with data are always used, so there is no
+trampoline issue there in any case.
+
+But yes, the even/odd idea has worked out just fine to get rid of trampolines in
+GNAT.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October 29, 2013  5:34 PM
+
+By the way, this even/odd trick is a really nice example of how you have to
+rethink things for modern architectures.
+
+Old thinking "oh my gosh, an extra test and jump for every indirect call, that's
+a disastrous performance hit".
+
+New thinking "nearly always we can predict the jump so the test and jump is
+free, and indeed we can't measure any performance hit at all, compared with the
+use of trampolines" (where you rarely take the trampline hit, and nearly always
+just do a direct call).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 29, 2013  7:02 PM
+
+I grant that the branch would be nearly free, but compared to single indirect
+call, it would seem (on Intel, at least) that you would either end up with a
+extra memory read (we typically make the call getting the address directly from
+memory, it is never in a register) or have to free a register (possibly causing
+an extra write to spill a temporary).
+
+Also, the additional code size could cause additional paging if indirect calls
+are common. (I wouldn't expect that in well-written Ada code, but there is
+C-in-Ada out there that does that.)
+
+So it doesn't sound completely free in practice, although it probably is in
+benchmarks (which aren't likely to have registers in use across calls).
+
+In any case, I agree with your basic point that (carefully designed) branching
+is close to free on modern architectures, so the main reason to worry about it
+is simply code size and the associated cache and page pressure. Not at all the
+same as in 1980's and early 1990's processors.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October 29, 2013  7:09 PM
+
+> Also, the additional code size could cause additional paging if
+> indirect calls are common. (I wouldn't expect that in well-written Ada
+> code, but there is C-in-Ada out there that does that.)
+
+We were unable to detect any impact even in weird test programs designed to
+over-excercise this feature.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 29, 2013  5:39 PM
+
+...
+> Access value is one word.  Compatible with C representation.
+> Task/thread safe.  No trampolines or other writeable-code.
+
+Humm. This is compatible with C *representation*, but it's not likely to work
+with C *code*, in that the C compiler isn't likely to be generating code to use
+the "odd" representation. So if an access created with 'Unrestricted_Access is
+passed to C, it's going to fail in some weird way (usually that should be a
+memory protection fault). So I wouldn't call this representation truly
+"compatible with C". (I suppose GCC might actually be prepared for this, but
+most of us don't have the luxury of sharing anything with the C compiler.)
+
+This also requires aligning subprogram start addresses. That's something we do
+only in time optimization mode (for space optimization, the padding required can
+be significant, so we leave it out). I recall reading once that Windows NT had
+to eliminate subprogram alignment because the extra alignment increased paging
+(causing a slow-down) more than it increased speed. (That's probably not as much
+of an issue anymore, but it certainly used to be one.)
+
+The latter issue is certainly minor, but the former seems important to me.
+It doesn't matter to keep a C-compatible representation if the C compiler can't
+reliably call the value in that representation. YMMV.
+
+In any case, thanks for the explanation.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October 29, 2013  5:52 PM
+
+> Humm. This is compatible with C *representation*, but it's not likely
+> to work with C *code*, in that the C compiler isn't likely to be
+> generating code to use the "odd" representation. So if an access
+> created with 'Unrestricted_Access is passed to C, it's going to fail
+> in some weird way (usually that should be a memory protection fault).
+> So I wouldn't call this representation truly "compatible with C". (I
+> suppose GCC might actually be prepared for this, but most of us don't
+> have the luxury of sharing anything with the C compiler.)
+
+Well in fact gcc *is* prepared for that. In the event your C compiler is simply
+totally unable to accomodate any scheme, then of course you can't have
+X'Unchecked_Access (Unrestricted_Access in GNAT) generate C-convention pointers.
+Note that this does not by any means say that the feature is useless, even if it
+can generate only Ada-compatible subprogram pointers.
+
+> This also requires aligning subprogram start addresses. That's
+> something we do only in time optimization mode (for space
+> optimization, the padding required can be significant, so we leave it
+> out). I recall reading once that Windows NT had to eliminate
+> subprogram alignment because the extra alignment increased paging
+> (causing a slow-down) more than it increased speed. (That's probably
+> not as much of an issue anymore, but it certainly used to be one.)
+
+Oh my gosh, unaligned access to subprograms, and unaligned labels is an
+efficiency disaster on all modern architectures, so I think your recalled
+reading is bogus.
+
+That's been true for a long time. The early versions of Norton's system test had
+a loop to check performance. Norton (who didn't know much early on) didn't know
+about alignment, the second version was accidentally unaligned and suddently
+have HORRIBLE results on some machines.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 29, 2013  6:23 PM
+
+> Humm. This is compatible with C *representation*, but it's not likely
+> to work with C *code*, in that the C compiler isn't likely to be
+> generating code to use the "odd" representation. So if an access
+> created with 'Unrestricted_Access is passed to C, it's going to fail
+> in some weird way (usually that should be a memory protection fault).
+> So I wouldn't call this representation truly "compatible with C". (I
+> suppose GCC might actually be prepared for this, but most of us don't
+> have the luxury of sharing anything with the C compiler.)
+
+C compilers don't support nested procedures, so don't know about static links /
+displays.  There's no way you can expect a C compiler to do an indirect call to
+a nested Ada procedure.  So what?  C can do indirect calls to top-level Ada
+procedures, which is all anybody would expect.  After all, you can't expect to
+call (e.g.) Ada protected procedures from C, either.
+
+Now, the gcc "C compiler" is not (just) a C compiler.  It supports an extended
+dialect of C that has nested functions, and those interoperate with Ada just
+fine.  That's one of the details I left out, and I'll continue to do so, since
+it's not relevant to the Ada standard. (You're right that the gcc C compiler
+knows nothing of the "odd" representation, but you shouldn't care about that
+detail as far as ARG is concerned.)
+
+> In any case, thanks for the explanation.
+
+You're welcome.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 29, 2013  6:29 PM
+
+> ...
+>> The basic idea is: If P is top level, then P'Access is represented by
+>> the address of P's code.  This address is always even, because of
+>> alignment.  If P is nested, then P'Unrestricted_Access is represented
+>> as the address of a descriptor, plus 1 (so it's odd, again because of
+>> alignment).
+
+> In any case, thanks for the explanation.
+
+My thanks too.
+
+On 10/28/2013 12:19 PM, Steve Baird wrote:
+> IMO, requiring support for Unchecked_Access for subprograms would
+> effectively force implementations to abandon this sort of
+> optimization,
+
+I stand corrected.
+
+About which phrase, the internet sez:
+   It was first recorded in John Dryden's The Maiden Queen (1668): "I
+   stand corrected, and myself reprove."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 29, 2013  6:38 PM
+
+> > Humm. This is compatible with C *representation*, but it's not
+> > likely to work with C *code*, in that the C compiler isn't likely to
+> > be generating code to use the "odd" representation. So if an access
+> > created with 'Unrestricted_Access is passed to C, it's going to fail
+> > in some weird way (usually that should be a memory protection fault).
+> > So I wouldn't call this representation truly "compatible with C". (I
+> > suppose GCC might actually be prepared for this, but most of us
+> > don't have the luxury of sharing anything with the C compiler.)
+>
+> Well in fact gcc *is* prepared for that. In the event your C compiler
+> is simply totally unable to accomodate any scheme,
+
+Like say Visual C... :-)
+
+> then of course you can't have X'Unchecked_Access (Unrestricted_Access
+> in GNAT) generate C-convention pointers.
+> Note that this does not by any means say that the feature is useless,
+> even if it can generate only Ada-compatible subprogram pointers.
+
+But it also means that the feature can't be implemented within the restrictions
+intended (unless you can change the C compiler). I don't see how we could put
+the feature into Ada and then say it is OK for it not work with C interfacing. I
+can't think of any other feature with a C counterpart for which we allow that.
+
+> > This also requires aligning subprogram start addresses. That's
+> > something we do only in time optimization mode (for space
+> > optimization, the padding required can be significant, so we leave
+> > it out). I recall reading once that Windows NT had to eliminate
+> > subprogram alignment because the extra alignment increased paging
+> > (causing a slow-down) more than it increased speed. (That's probably
+> > not as much of an issue anymore, but it certainly used to be one.)
+>
+> Oh my gosh, unaligned access to subprograms, and unaligned labels is
+> an efficiency disaster on all modern architectures, so I think your
+> recalled reading is bogus.
+
+At least on the Intel machines, "efficiency disaster" is an overstatement.
+I've tested the runtime difference for aligned and unaligned subprograms in
+Janus/Ada, and the difference is barely noticeable at all in the programs I've
+tried. I'm sure that it might matter more for some program for which that is the
+predominant issue, but by no means is it a "disaster".
+
+There seems to be much more effect between the various Intel processors in the
+effects of other optimizations (like unrolling block compares) than there is
+from alignment. (And yes, I checked that the code was in fact aligned, because I
+was very surprised at the lack of effect.) [Most of this testing was done in
+2009, so it's fairly recent.]
+
+There might be an Intel processor where alignment is critically important, but
+none of the ones I have have shown that. (I haven't tried the experiment on my
+new Linux box because I don't have Janus/Ada for Linux and I don't know how to
+make the appropriate experiments with GNAT.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October 29, 2013  6:46 PM
+
+  > There seems to be much more effect between the various Intel processors in
+> the effects of other optimizations (like unrolling block compares)
+> than there is from alignment. (And yes, I checked that the code was in
+> fact aligned, because I was very surprised at the lack of effect.)
+> [Most of this testing was done in 2009, so it's fairly recent.]
+
+2009 is NOT recent when it comes to x86 technology, you are talking several
+generations back!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 29, 2013  7:14 PM
+
+True, but you were talking about a version of Norton a lot older than that; from
+that I took it that you meant that alignment was important going way, way back.
+(It's not just in the most recent generation.) Plus you claimed that my
+recollection of an article that claimed that alignment had to be turned off for
+Windows NT (which would have been in the mid-1990s) was bogus. So I would expect
+that your statement applied to all processors of recent vintage, not just the
+most recent generation. As such, 2009 results are quite relevant.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 29, 2013  6:49 PM
+
+> C compilers don't support nested procedures, so don't know about
+> static links / displays.  There's no way you can expect a C compiler
+> to do an indirect call to a nested Ada procedure.  So what?  C can do
+> indirect calls to top-level Ada procedures, which is all anybody would
+> expect.
+
+Why? The C code does not know or care that the routine is nested, just like the
+*Ada* code doesn't know nor care that when you make an indirect call. It's the
+routine itself that has to worry about nesting (managing a display or static
+link).
+
+If you're arguing that C somehow needs accessibility checks when Ada is not
+supposed to, that seems like madness to me.
+
+I remain convinced that C ought to be able to call any subprogram access value
+that can be put into a C convention library-level access-to-subprogram. To say
+that 'Unchecked_Access is always erroneous in that case makes no sense to me at
+all, because what is "Unchecked" about that? And there is no justification
+whatsoever for compile-time rejection of the 'Unchecked_Access.
+
+To me, this feature remains impossible to implement, because there is no scheme
+that will work in all of the ways it needs to work. As such the feature does not
+belong in Ada -- ever.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October 29, 2013  6:53 PM
+
+A curiously reactionary attitude if you ask me!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 29, 2013  7:20 PM
+
+"reactionary"? Not sure what you mean by that.
+
+Read "ever" in my statement above as meaning "so long as interfacing to C is
+important" and "so long as writable code is considered a security hazard". I
+expect those to be the case so long as I'm working in Ada (as opposed to being
+retired).
+
+If there is anything here that's "reactionary", it's worrying about
+access-to-subprograms. I'd much rather people avoided access-to-subprogram
+altogether and used more modern techniques.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, October 29, 2013  7:46 PM
+
+SOmetimes access to subprograms are the correct approach, just as gotos are
+sometimes the best approach. Absolutism and purity can be a menace in
+programming.
+
+What is reactionary to me is letting the design of Ada be too controlled by
+shortcomings in specific C compilers :-). As, an example of this happening, IMO
+we made a bad mistake not allowing more general use of funargs in Ada 95, based
+on worrying about specific existing Ada technologies that never were very
+significant in the long run.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 30, 2013  9:29 PM
+
+> > If there is anything here that's "reactionary", it's worrying about
+> > access-to-subprograms. I'd much rather people avoided
+> > access-to-subprogram altogether and used more modern techniques.
+>
+> SOmetimes access to subprograms are the correct approach, just as
+> gotos are sometimes the best approach. Absolutism and purity can be a
+> menace in programming.
+
+True enough; I sometime use access-to-subprograms in interfacing because they're
+the best match to the underlying API. But the question here isn't whether Ada
+should allow access-to-subprograms (nobody is suggesting removing them!), but
+rather whether it is a good use of scarce resources to extend an aging
+technology. I would say the same thing if someone was proposing to extend gotos.
+
+> What is reactionary to me is letting the design of Ada be too
+> controlled by shortcomings in specific C compilers :-). As, an example
+> of this happening, IMO we made a bad mistake not allowing more general
+> use of funargs in Ada 95, based on worrying about specific existing
+> Ada technologies that never were very significant in the long run.
+
+As I mentioned above, one of the most important uses of access-to-subprogram
+(IMHO) is in interfacing to C. And we're aiming a lot of our new Ada work at
+safety-critical users. I don't think those users want to see new ways to have
+erroneous execution added to Ada. And that's going to be necessary for pretty
+much all Ada vendors; we're not really talking about specific C compilers; the
+shortcoming is in the C language (the only reason that GCC doesn't have the
+problem is that it extended the C language).
+
+I'm especially leery of adding a feature to Ada that cannot be implemented
+without new erroneous cases (or other bad properties) for the majority of Ada
+implementations. We have enough instances of users wanting some nifty GNAT
+gadget without adding ones to the language that cannot be implemented perfectly.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 30, 2013  11:46 AM
+
+>> If there is anything here that's "reactionary", it's worrying about
+>> access-to-subprograms. I'd much rather people avoided
+>> access-to-subprogram altogether and used more modern techniques.
+
+Ada being a "safe language", the "right" answer to Brad's needs would be
+subprogram types as parameter types. The big advantages are:
+- no safety issues: the activation block of the enclosing routine is sure to
+  exist
+- no implementation issues: if one doesn't like fat routine references, one can
+  implement it with the help of 2 actual parameters (much like dope for arrays
+  is handled as a second parameter without asking C-oriented backends to do
+  something un-Cish).
+
+(Water under the bridge, I guess.)
+
+As to Brad's problem: If there are no up-level addresses in the routine, there
+is no need to make it local to another routine. Use packages and bodies to hide
+the subprogram from visibility. If there are up-level addresses in there, surely
+"Unchecked" in the sense of "It will not work because no static link is passed"
+is an unbelievably unacceptable implementation semantics. So, whatever it is, it
+needs to include the static link or equivalent.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 30, 2013  9:20 PM
+
+> Ada being a "safe language", the "right" answer to Brad's needs would
+> be subprogram types as parameter types. The big advantages are:
+> - no safety issues: the activation block of the enclosing routine is
+> sure to exist
+> - no implementation issues: if one doesn't like fat routine
+> references, one can implement it with the help of 2 actual parameters
+> (much like dope for arrays is handled as a second parameter without
+> asking C-oriented backends to do something un-Cish).
+>
+> (Water under the bridge, I guess.)
+
+Humm, this sounds like anonymous access-to-subprogram parameters, which of
+course are in both Ada 2005 and Ada 2012. There should be no need for
+'Unchecked_Access when using those, as there is no accessibility check on
+'Access (so they'd be equivalent). I was assuming that Brad's problem couldn't
+be handled with anonymous access-to-subprogram parameters, because if it could,
+he surely would be using them.
+
+Having a general "subprogram type" that could be used as objects and the like
+would solve the problem, but of course that would reintroduce accessibility
+issues (it's unclear that that would be substantially different than
+access-to-subprogram).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 30, 2013  9:34 PM
+
+...
+> >...Thus it does not belong in Ada.
+>
+> I agree it does not belong in Ada at this time.  I might change my
+> tune if there were several Ada 2012 compilers, with teams of
+> maintainers looking for more work to do.  ;-)
+
+Well, we're not talking about adding *anything* to Ada "at this time". We're
+talking about the next version of Ada, which I doubt that we will even start
+thinking about seriously for another 3-4 years. (If we really want Ada 2020,
+we'll have to start in late 2016. But even that might be too soon.)
+
+Discussions like this one primarily serve to keep us sane and interested,
+because no one would pay any attention if the only discussion was on correcting
+the accessibility rules to treat generic functions and functions the same. :-)
+[I'm working on an AI about this wording issue, and it's hard to imagine anyone
+will come to a meeting just to discuss that. ;-)]
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, October 31, 2013  8:33 AM
+
+> Humm, this sounds like anonymous access-to-subprogram parameters,
+> which of course are in both Ada 2005 and Ada 2012. There should be no
+> need for 'Unchecked_Access when using those, as there is no
+> accessibility check on 'Access (so they'd be equivalent). I was
+> assuming that Brad's problem couldn't be handled with anonymous
+> access-to-subprogram parameters, because if it could, he surely would be using them.
+
+Actually, I hadn't considered this, as I wouldn't have expected that passing in
+an in-mode array of anonymous access-to-subprogram parameter would be different
+than passing in a bunch of anonymous access-to-subprogram parameters.
+
+Thanks for the suggestion.
+
+I tried this, though and it works, and it runs the fastest of all. The downside
+is you need to know statically how many parameters you need to pass.
+
+Most cases I am interested in can be handled by passing in two anonymous
+access-to-subprograms. I could create multiple versions of functions for cases
+of 3, 4, 5, etc subprograms, which would be OK. Ideally you'd like to pass in
+any number of them though.
+
+Also, I have some more results.
+
+On GNAT Linux (an AMD quadcore box), the program executes with the following
+times when passed a parameter of 13 at the command line.
+
+Tagged subprograms: Elapsed=72.60 seconds System.Address conversions:
+Elapsed=14.70 seconds Unrestricted_Access: Elapsed=1.45 seconds Access to fixed
+list: Elapsed=0.90 seconds.
+
+On GNAT Windows (an Intel dualcore notebook with an Atom processor), I observed
+the following times, when passing a value of 11 at the command line. (I had to
+use a smaller number, because the system is slower over all)
+
+Tagged subprograms: Elapsed=19.49 seconds System.Address conversions:
+Elapsed=138.91 seconds Unrestricted_Access: Elapsed= 0.35 seconds Access to
+fixed list : Elapsed= 0.28 seconds
+
+Note that System.Address conversions is considerably worse on Windows for some
+reason, and is about 500 times slower than the best time.
+
+Tucker was asking about trying this on another compiler.
+I tried this on the ICC compiler, and found that the System.Address approach
+fails, which I presume is because they use fat pointers with static links,
+similar to most other implementations based what I've heard in this email
+thread.
+
+I suspect GNAT may be the only compiler where the System.Address conversions
+works, which means that that approach is effectively no more portable than using
+'Unrestricted_Access, so if one has to choose between these two choices on GNAT,
+'Unrestricted_Access is the better choice.
+
+ICC's version of 'Unrestricted_Access apparently does not support nested
+subprograms that access objects from an enclosing scope, and would not compile
+that part of the test code.
+
+The times with ICC were interesting in that for tagged access to subprogram,
+they were considerably faster than GNAT, however not as fast for the case using
+'Access to a list of anonymous access-to-subprogram. Still, the 'Access to a
+list of anonymous access-to-subprogram was by far a better time than access to
+tagged subprogram.
+
+So to summarize, given what Ada has today, I would probably make do with a fixed
+list of anonymous access-to-subprogram parameters, which gives me the best
+performance, and is portable.
+
+This lessens the need for adding some sort of support for 'Unchecked_Access to
+nested subprograms.
+
+It still could be useful for the case of providing an interface that can handle
+any number of anonymous access-to-subprogram parameters though. It might be
+worth considering if a list of anonymous access-to- subprogram parameters can be
+passed using 'Access, should it be possible to pass an in mode array of
+anonymous access-to-subprogram parameters using 'Access as well?
+
+Also, thanks all this thread has been an interesting read. I particularly
+enjoyed Bob Duff's explanation of the odd address technique.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 31, 2013  6:01 PM
+
+...
+> > Humm, this sounds like anonymous access-to-subprogram parameters,
+> > which of course are in both Ada 2005 and Ada 2012. There should be
+> > no need for 'Unchecked_Access when using those, as there is no
+> > accessibility check on 'Access (so they'd be equivalent). I was
+> > assuming that Brad's problem couldn't be handled with anonymous
+> > access-to-subprogram parameters, because if it could, he surely
+> > would be using them.
+>
+> Actually, I hadn't considered this, as I wouldn't have expected that
+> passing in an in-mode array of anonymous access-to-subprogram
+> parameter would be different than passing in a bunch of anonymous
+> access-to-subprogram parameters.
+
+I agree that's weird, but it's also the way things are. Welcome to the wacky
+world of Ada's anonymous access types. :-)
+
+> Thanks for the suggestion.
+>
+> I tried this, though and it works, and it runs the fastest of all. The
+> downside is you need to know statically how many parameters you need
+> to pass.
+>
+> Most cases I am interested in can be handled by passing in two
+> anonymous access-to-subprograms. I could create multiple versions of
+> functions for cases of 3, 4, 5, etc subprograms, which would be OK.
+> Ideally you'd like to pass in any number of them though.
+
+Well, you could default parameters that you don't need to null. The body would
+have to test how many there are, but it would be a bit easier to read than
+having a bunch of overloaded routines. You'd still have a maximum number of
+procedures that way, though.
+
+    procedure Execute_Subprogram_List (Proc1 : access procedure;
+                                       Proc2 : access procedure := null;
+                                       Proc3 : access procedure := null;
+                                       ...
+                                       Procn : access procedure := null);
+
+You'd have to pre-test each one for null before trying to call it, but that's
+unlikely to add any significant overhead (partly because the language probably
+already is doing that somewhere, and partly because the overhead would be
+swamped by the cost of the indirect call).
+
+I've used techniques like this one occasionally (not for access-to-subprogram,
+though); it actually simplifies the call a tad because you don't have to pass an
+aggregate (thus no need for qualification or parens), and you don't have to live
+with a fixed size list (only the maximum is fixed).
+
+...
+> It still could be useful for the case of providing an interface that
+> can handle any number of anonymous access-to-subprogram parameters
+> though.
+> It might be worth considering if a list of anonymous
+> access-to- subprogram parameters can be passed using 'Access, should
+> it be possible to pass an in mode array of anonymous
+> access-to-subprogram parameters using 'Access as well?
+
+The problem with the array is that it is a type that could be used in other ways
+as well. (Say, to declare an object.) In other cases, the nice property that the
+accessibility is always OK so long as the parameter exists isn't true, and we
+have all of the previous issues again. OTOH, if we allowed anonymous arrays in
+subprogram specifications (we don't currently), then it would make sense that an
+anonymous array of anonymous access-to-subprogram used as an in parameter would
+have the same special semantics. But that's pretty weird - but it might make a
+sensible alternative to 'Unchecked_Access.
+
+****************************************************************
