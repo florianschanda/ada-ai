@@ -1,0 +1,157 @@
+!standard 3.10.2(7/3)                                   13-10-31  AI05-0089-1/01
+!standard 3.10.2(19.2/3)
+!standard 3.10.2(19.3/3)
+!class binding interpretation 13-10-31
+!status work item 13-10-31
+!status received 13-10-07
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject A generic function is not a function
+
+!summary
+
+The accessibility rules for explicitly aliased parameters and access results
+also apply in generic function bodies.
+
+!question
+
+Repeat after me: a generic function is not a function. :-)
+
+However, the special accessibility rules for aliased parameters of functions
+do not take this into account, and thus do not apply inside of a generic
+function.
+
+Thus, an example like:
+
+     type Return_It (D : access Element) is null record;
+
+     generic
+     function Foobar (X : aliased in out Bounded_Container; C : in Cursor) return Return_It;
+
+     function Foobar (X : aliased in out Bounded_Container; C : in Cursor) return Return_It is
+     begin
+         ...
+         return R : Return_It (X(C)'access); -- What accessibility check here?
+     end Foobar;
+
+would seem to fail a compile-time accessibility in the return statement,
+whereas the non-generic equivalent would always be legal.
+
+This is weird, should be it be changed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+[Editor: It's appropriate that I'm writing this on Halloween, because every trip
+to the Heart of Darkness is scary!! :-0]
+
+Modify 3.10.2(7/3) as modified by AI12-0067-1:
+
+... Other than for an explicitly aliased parameter of a function {or generic
+function}, a formal parameter of a callable entity has the same accessibility
+level as the master representing the invocation of the entity.
+
+Modify 3.10.2(19.2/3):
+
+Inside a return statement that applies to a function {or generic function} F,
+when determining whether the accessibility level of an explicitly aliased
+parameter of F is statically deeper ...
+
+Modify 3.10.2(19.3/3):
+
+For determining whether a level is statically deeper than the level of the
+anonymous access type of an access result of a function {or generic function F},
+when within a return statement that applies to [the function]{F},
+the level of the master of the call is presumed to be the same as that of the
+level of the master that elaborated the [function] body{ of F}.
+
+!discussion
+
+Repeat after me: a generic function is not a function, a generic procedure is not
+a procedure, and a generic package is not a package. Even long-time Ada experts
+tend to forget this, and we clearly did when we fixed the rules in AI12-0067-1,
+not to mention when we created the rules in the first place.
+
+This falls under the Dewar rule that the Standard does not say nonsense even
+when it literally does say nonsense. No one would expect a function and a
+similar generic function to have different accessibility rules for aliased
+parameters.
+
+We have to change the rule for access results of a function, as it has the
+same problem.
+
+Note that we don't have to change any dynamic semantics rules, as those can
+only occur in an instance of a generic function, which IS a function. [A
+generic unit is not executable, only an instance is.] This means that we don't
+need to modify 3.10.2(13.3/3), for example.
+
+[Editor's note: I didn't find any other problems in 3.10.2, taking the above
+into account. 6.4.1's rules are only about calls, so they don't need fixing
+(can't call a generic function). One could argue that the entire set of
+Legality Rules 6.5(4/2-5.9.3) have this problem - is a generic function body
+a function body? If no, none of these rules apply in a generic function body
+- but changing those seems over-the-top. I didn't look elsewhere.]
+
+!ASIS
+
+No changes needed.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the example in the question is legal.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Monday, October 7, 2013  8:09 PM
+
+John asked in his editorial review of AI12-0067-1:
+
+>I am not sure that I like the term non-function in the !subject. Are
+>generic functions functions or not? We could say procedures and entries.
+
+Of course :-), generic functions are not functions. (Let's not discuss yet
+again how silly that is, that's not a productive use of time.)
+
+That makes me wonder if we have the right definition for the accessibility
+rules for explicitly aliased parameters. The rules apply only to functions
+(presumably including instances of generic functions), but do not appear
+to apply to generic function bodies. Thus, an example like:
+
+     type Return_It (D : access Element) is null record;
+
+     generic
+     function Foobar (X : aliased in out Bounded_Container; C : in Cursor) return Return_It;
+
+     function Foobar (X : aliased in out Bounded_Container; C : in Cursor) return Return_It is
+     begin
+         ...
+         return R : Return_It (X(C)'access); -- What accessibility check here?
+     end Foobar;
+
+would seem to fail a compile-time accessibility in the return statement,
+whereas the non-generic equivalent would always be legal.
+
+This is a pretty unlikely case (most such functions will be in a package of
+some sort, which would eliminate the problem).
+
+It seems to me that 3.10.2(7/3) needs to say "of a function or generic
+function" (rather than just "of a function" as added by AI12-0067-1), and
+that 3.10.2(13.3/3) needs to say "The accessibility level of an explicitly
+aliased (see 6.1) formal parameter in a function {or generic function} body
+is determined by the point of call; it is the same level that the return
+object ultimately will have.".
+
+(I didn't check if there was any other wording that will need to be changed
+similarly, I first wanted to check if this is right so far.)
+
+So:
+(1) Am I right that there is a (minor) problem here?
+(2) Should we reopen AI12-0067-1 to make this fix, or make a new AI just for
+this case?
+
+****************************************************************
