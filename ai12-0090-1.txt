@@ -1,0 +1,269 @@
+!standard 9.5.4(5/3)                                   13-10-31  AI05-0090-1/01
+!class binding interpretation 13-10-31
+!status work item 13-10-31
+!status received 13-10-11
+!priority High
+!difficulty Hard
+!qualifier Omission
+!subject Pre- and Postconditions and requeues
+
+!summary
+
+Something sensible happens with the pre- and postconditions when a requeue
+occurs.
+
+!question
+
+Interactions between pre/post-condition checking (for entries) and requeues
+appear to have some peculiar consequences.
+
+Suppose entries E1 and E2 have pre- and post-conditions, a call to E1 requeues
+to E2, and E2 returns normally.
+
+Is E2's precondition ever checked? (A requeue isn't a call!) Is E1's
+postcondition ever checked?
+
+Is the answer to either of these questions a problem that needs to be
+fixed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+Let's assume that E1 and E2 are as defined in the question.
+
+Entering any callable entity without evaluating its precondition is trouble,
+as the body may assume that the precondition is true. (This is assuming that
+the Assertion_Policy is Check, of course.) We need to ensure that E2's
+precondition holds before its body executes, whether or not a requeue is
+a call.
+
+One expects the postcondition of E2 will be evaluated, but this is
+problematical if that postcondition includes 'Old references that were never
+evaluated on the original call.
+
+We can use Legality Rules or dynamic checks to ensure these things are true
+on a requeue. For a Legality Rule, we can use the existing conformance
+mechanism -- we already do that for precondition inheritance. The advantage
+of using Legality Rules is that they can be compatibly relaxed in the future;
+changing runtime rules would be inconsistent.
+
+!ASIS
+
+No changes needed.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the handling of overlong encodings is
+correct.
+
+!appendix
+
+From: Steve Baird
+Sent: Friday, October 11, 2013  7:53 PM
+
+One reasonably substantive question followed by two corner case nits.
+
+[Editor's note: Each question is handled separately.]
+
+1) In internal discussions at AdaCore, it was noted that the
+    interactions between pre/post-condition checking (for entries)
+    and requeues appear to have some peculiar consequences.
+
+    Suppose entries E1 and E2 have pre- and post-conditions,
+    a call to E1 requeues to E2, and E2 returns normally.
+
+    Is E2's precondition ever checked? (note that a requeue isn't a call)
+    Is E1's postcondition ever checked?
+
+    Is the answer to either of these questions a problem that
+    needs to be fixed?
+
+    [I don't think uses of 'Old in either of the two post-conditions
+    add any problems, but it seems like a case to bear in mind
+    when considering possible language changes in this area.]
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, October 14, 2013  4:55 AM
+
+I tend to think that the pre/post conditions should match between initial and
+requeued entry, the same way as profiles must match, because the user shouldn't
+even know that the service is provided through requeue. Matching conditions
+could be (TBD) either the same, or weaker preconditions / stronger
+post-conditions.
+
+I understand that in practice, this means introducing a new conformance kind,
+but it may be useful in other cases as well...
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 14, 2013  9:19 AM
+
+I agree, though weaker/stronger is not something the compiler should be expected
+to determine, so these will require run-time checks or a very simple static
+rule.  To keep things static, a simple rule would be no precondition or a
+matching precondition on the target of the requeue (vaguely reminiscent of no
+parameters or matching parameters). Similarly, the entry doing the requeue would
+be required do have no postcondition or a postcondition that matched that of the
+target entry.
+
+> I understand that in practice, this means introducing a new
+> conformance kind, but it may be useful in other cases as well...
+
+E.g. a renaming-as-body could have used a similar rule.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October 14, 2013  10:07 AM
+
+> I agree, though weaker/stronger is not something the compiler should
+> be expected to determine, so these will require run-time checks or a
+> very simple static rule.  To keep things static, a simple rule would
+> be no precondition or a matching precondition on the target of the
+> requeue (vaguely reminiscent of no parameters or matching parameters).
+> Similarly, the entry doing the requeue would be required do have no
+> postcondition or a postcondition that matched that of the target entry.
+
+I don't get it.  If E1 changes the state of the world, and then requeues to E2,
+how can E2 be expected to have the same precondition? And if E1 has Post =>
+F(X), then callers expect F(X) to be True upon return, but you're allowing E2 to
+have no postcondition, so there's no run-time check that F(X) is True.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 14, 2013  10:32 AM
+
+Sorry, I was both confused and confusing.  If E1 requeues on E2, then E1 must
+check E2's precondition prior to the requeue, and E2 must have the same
+postcondition as E1, or E1 must have no postcondition at all.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 14, 2013  8:24 PM
+
+> > I understand that in practice, this means introducing a new
+> > conformance kind, but it may be useful in other cases as well...
+>
+> E.g. a renaming-as-body could have used a similar rule.
+
+I don't see any new conformance kind here, or any new use of a similar rule.
+We already use expression conformance in the renames-as-body case (6.1.1(17/3)),
+and it's part of the homograph check in the requires overriding case
+(6.1.1(13/3) and (16/3)). I would expect that we'd use expression conformance in
+the same way if we wanted to enforce a similar rule. If we did find some reason
+that the existing expression conformance was too limiting, I'm sure we'd change
+it in such a way that it applied to all conformance (as we did for quantified
+expressions).
+
+The point being, we already do this in some cases, it certainly would make sense
+to do it in more cases if that is necessary for those cases to make sense.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 15, 2013  11:06 AM
+
+> I would expect that we'd use
+> expression conformance in the same way if we wanted to enforce a
+> similar rule. If we did find some reason that the existing expression
+> conformance was too limiting, I'm sure we'd change it in such a way
+> that it applied to all conformance (as we did for quantified expressions).
+
+I think that requiring full conformance of postcondition expressions wouldn't
+handle 'Old correctly (at least given the current definition of full
+conformance).
+
+Let's say the postcondition for both entries is
+     X = X'Old + 1
+
+Say E1 increments X and then requeues on E2; E2 increments X again, performs its
+postcondition check (which passes), and returns normally.
+
+The original caller is surprised to find that X has grown by 2, not 1.
+
+One way to look at it is that the two uses of X'Old are names denoting two
+different (implicitly declared) constants.
+
+If we choose to view it that way, then it might make sense to (as you mentioned)
+change the definition of expression conformance to handle this case.
+
+I think this would be a compatible change because 'Old attribute references are
+only allowed in postconditions and there are currently no language rules for
+which the full conformance (or lack thereof) of a postcondition expression with
+some other expression matters.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, October 15, 2013  11:33 AM
+
+Do you mean that you are willing to accept that behaviour? I certainly wouldn't;
+I'd prefer to completely remove postconditions on entries - better have no
+contract than a contract you can't trust.
+
+How to achieve correct behaviour is another matter. I can only think of either
+passing all 'Old to the second entry, or evaluating the postcondition of the
+first entry after the one of the second entry. Both seem unpleasant...
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 15, 2013  11:36 AM
+
+> I think that requiring full conformance of postcondition expressions
+> wouldn't handle 'Old correctly (at least given the current definition
+> of full conformance).
+>
+> Let's say the postcondition for both entries is
+>      X = X'Old + 1
+>
+> Say E1 increments X and then requeues on E2; E2 increments X again,
+> performs its postcondition check (which passes), and returns normally.
+>
+> The original caller is surprised to find that X has grown by 2, not 1.
+
+Ugh!
+
+>
+> One way to look at it is that the two uses of X'Old are names denoting
+> two different (implicitly declared) constants.
+>
+> If we choose to view it that way, then it might make sense to (as you
+> mentioned) change the definition of expression conformance to handle
+> this case.
+
+Interesting way to look at it.  But what happens if you requeue on yourself?
+
+I suspect we will want to disallow requeue from an entry that uses 'Old in a
+postcondition.
+
+> I think this would be a compatible change because 'Old attribute
+> references are only allowed in postconditions and there are currently
+> no language rules for which the full conformance (or lack thereof) of
+> a postcondition expression with some other expression matters.
+
+I think we should just say that X'Old doesn't conform, even with itself.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 15, 2013  11:54 AM
+
+> I suspect we will want to disallow requeue from an entry that uses
+> 'Old in a postcondition.
+
+Sounds right to me.
+
+****************************************************************
