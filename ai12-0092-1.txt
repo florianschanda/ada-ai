@@ -1,0 +1,1856 @@
+!standard 1.1.5(4)                                  13-11-01    AI12-0092-1/00
+!class Amendment 13-11-031
+!status received 13-08-29
+!priority Low
+!difficulty Medium
+!subject Soft errors
+!summary
+
+Errors are split into two categories, one for errors that must cause the
+program to fail to compile (hard errors, the usual case), and those that still
+allow the program to be executed (soft errors).
+
+!problem
+
+In numerous cases, the ARG has gotten stuck between a rock and a hard place:
+Some situation really IS an error, so we want it to be detected, preferably at
+compile time. But making it illegal is an incompatibility. The ARG then had to
+choose between allowing errors to go undetected (bad) and breaking existing
+code (also bad).
+
+!proposal
+
+(See summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+** TBD.
+
+Terminology:
+The original proposal was for "fatal error" and "nonfatal error". That wasn't
+liked because it misuses a common (outside of Ada) term.
+We settled on "hard error" and "soft error". Also suggested was "major error"
+and "minor error".
+
+!ASIS
+
+No ASIS impact.
+
+!ACATS test
+
+A new class of ACATS tests is needed to test nonfatal errors.
+
+!appendix
+
+From: Bob Duff
+Sent: Thursday, August 29, 2013  3:25 PM
+
+I would like to propose a new AI on the subject of "nonfatal errors".
+The recent discussions under the subject "aggregates and variant parts"
+reminded me of this.  I'm talking about the sub-thread related to nested
+variants, not the main thread about aggregates.
+
+My idea is that a nonfatal error is a legality error.  The compiler is
+required to detect nonfatal errors at compile time[*], just as it is for any
+other legality errors.  However, a nonfatal error does not stop the program from
+running.  (This of course implies that we must have well-defined run-time
+semantics in the presence of nonfatal errors.)
+
+[*] Or at "link time", if marked as a "Post-Compilation Rule".
+
+In numerous cases, ARG has gotten stuck between a rock and a hard place:  Some
+situation really IS an error, so we want it to be detected, preferably at
+compile time.  But making it illegal is an incompatibility.  ARG had to choose
+between allowing errors to go undetected (bad) and breaking existing code (also
+bad).
+
+When that happens in the future, I propose that we define the error situation to
+be a "nonfatal error".  We get the best of both worlds:  the error must be
+detected, but there is no incompatibility.
+
+Example from the "aggregates and variant parts" discussion:
+It was suggested that something like this:
+
+    type Color is (Red, Orange, Yellow);
+
+    type T(D: Color) is
+        record
+            case D is
+                when Red | Orange =>
+                    X : Integer;
+                    case D is
+                        when Red =>
+                            Y : Integer;
+                        when Orange =>
+                            null;
+                        when others =>
+                            Bogus : Integer; -- Wrong!
+                    end case;
+                when Yellow =>
+                    null;
+            end case;
+        end record;
+
+is an error, because the Bogus component can never exist.
+One should write "when others => null; -- can't happen".
+
+But it would be completely irresponsible for ARG to make that illegal, because
+it would be incompatible.  Solution: we could make it a nonfatal error, if we
+think it's important to detect it.
+
+!wording
+
+RM-1.1.5 says:
+
+1   The language definition classifies errors into several different
+categories:
+
+2     * Errors that are required to be detected prior to run time by every Ada
+        implementation;
+
+3       These errors correspond to any violation of a rule given in this
+        International Standard, other than those listed below. In particular,
+        violation of any rule that uses the terms shall, allowed, permitted,
+        legal, or illegal belongs to this category. Any program that contains
+        such an error is not a legal Ada program; on the other hand, the fact
+        that a program is legal does not mean, per se, that the program is
+        free from other forms of error.
+
+4       The rules are further classified as either compile time rules, or post
+        compilation rules, depending on whether a violation has to be detected
+        at the time a compilation unit is submitted to the compiler, or may be
+        postponed until the time a compilation unit is incorporated into a
+        partition of a program.
+
+RM-2.8 says:
+
+                         Implementation Requirements
+
+13  The implementation shall give a warning message for an unrecognized pragma name.
+
+13.a        Ramification: An implementation is also allowed to have modes in
+            which a warning message is suppressed, or in which the presence of
+            an unrecognized pragma is a compile-time error.
+
+I suggest moving the pragma-specific stuff into 1.1.5 and generalizing it.
+
+Add after 1.1.5(4):
+
+        When such an error is detected, the implementation shall issue
+        a diagnostic message.  Redundant[This International Standard
+        does not define the form or content of diagnostic messages.]
+
+[Note to anyone who complains that we don't have a precise mathematical
+definition of "diagnostic message":  Well, we don't have a definition of
+"warning", either, yet the sky didn't fall when we wrote 2.8(13)!  We also don't
+have a definition of what it means to "detect", but everybody knows (informally)
+what it means.]
+
+        By default, a legality error is a "fatal error".  Fatal errors
+        prevent the program from running (see 10.2).  Some legality errors
+        are explicitly defined by this International Standard to be
+        "nonfatal errors".  Nonfatal errors do not prevent the program
+        from running.
+
+        AARM Ramification: An implementation is also allowed to have
+        modes in which a nonfatal error is ignored, or in which a
+        nonfatal error is treated as a fatal error.
+        [???If it makes people more comfortable, we could require the
+        latter mode, by adding a normative rule to the RM: An
+        implementation shall provide a mode in which nonfatal errors
+        are treated as fatal errors.]
+
+RM-10.2 says:
+
+27  The implementation shall ensure that all compilation units included in a
+    partition are consistent with one another, and are legal according to the
+    rules of the language.
+
+Change that to:
+
+27  The implementation shall ensure that all compilation units included in a
+    partition are consistent with one another, and do not contain fatal errors.
+    Redundant[This implies that such partitions cannot be run. Partitions may
+    contain nonfatal errors.]
+
+Change 2.8(13) to:
+
+                         Legality Rules
+
+13  A pragma name that is not recognized by the implementation is illegal.
+A violation of this rule is a nonfatal error.
+
+!discussion
+
+Another example is "interface".  Using (say) "begin" as an identifier is a fatal
+error, and that's fine.  But we should have said that using "interface" as an
+identifier is a nonfatal error.  That would have avoided users wasting huge
+amounts of money converting existing code (since "interface" is a widely-used
+identifier).
+
+When I originally proposed this idea, I called it "required warnings".
+Some folks were worried that programmers might ignore what are considered "mere"
+warnings.  Calling it a "nonfatal error" makes it clearer that these really are
+errors.  You really should fix them, unless you are in a situation where it is
+very expensive to make ANY modifications to existing code.  (In the unrecognized
+pragma case, I guess you would "fix" the error (i.e. warning) by suppressing
+it.)
+
+In any case, it should be up to programmers to decide whether fixing nonfatal
+errors is cost-effective.  That is not our job as language designers.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, August 29, 2013  3:25 PM
+
+> I would like to propose a new AI on the subject of "nonfatal errors"...
+
+Make sense to me.
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Friday, August 30, 2013  3:50 AM
+
+Interesting.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August 30, 2013  4:05 PM
+
+I'm not going to comment on the merits of the idea now.
+
+But I think the terminology is wrong in that it is different than typical usage
+of the term.
+
+...
+>         By default, a legality error is a "fatal error".  Fatal errors
+>         prevent the program from running (see 10.2).
+
+This is not the typical meaning of "fatal error". In pretty much every program
+I've ever used, "fatal error" means an error that terminates processing
+*immediately*. That is, a "fatal error" can have no recovery. That's not how you
+are using it here (certainly, you don't mean to require Ada compilers to detect
+no more than one error per compilation attempt).
+
+The canonical use of "fatal error" in Janus/Ada is when the specified source
+file cannot be found, but we also use the modifier on some of the
+language-defined rules when we believe recovery is likely to cause many bogus
+errors. For instance, we treat all context clause errors as fatal in that
+continuing with an incomplete or corrupt symboltable is unlikely to provide any
+value.
+
+I don't think Ada should use an existing and commonly used term in an
+inconsistent manner with the rest of the world. There must be a better term that
+doesn't imply immediate termination of processing.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 30, 2013  4:44 PM
+
+> ...
+> >         By default, a legality error is a "fatal error".  Fatal errors
+> >         prevent the program from running (see 10.2).
+>
+> This is not the typical meaning of "fatal error". In pretty much every
+> program I've ever used, "fatal error" means an error that terminates
+> processing *immediately*. That is, a "fatal error" can have no recovery.
+> That's not how you are using it here (certainly, you don't mean to
+> require Ada compilers to detect no more than one error per compilation attempt).
+
+Good point.  Let's first discuss the merits of the idea, and then later try to
+come up with a better term.
+
+History:  I first called it "required warning".  But you objected that "warning"
+is too mild a term -- some folks might ignore warnings. I have no sympathy for
+people who deliberately put pennies in fuse boxes (i.e. ignore warnings), but in
+a futile attempt to appease you, I came up with a term that contains the word
+"error".
+
+But let's try to ignore the term for now, and concentrate on my goal:
+to get ARG to quit introducing gratuitous incompatibilities.
+That is, to give ARG an "out" -- a way to say, "we really think this ought to be
+illegal, but if you have 10 million lines of code scattered across 17
+organizations[*] you don't absolutely have to fix these errors -- your call, you
+can choose to ignore these errors and still run your programs".
+
+[*] I gather that that was the situation reported by Robert, with some company
+that used Interface as the name of lots of child packages.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, August 30, 2013  4:55 PM
+
+survivable error?
+recoverable error?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August 30, 2013  5:05 PM
+
+> I would like to propose a new AI on the subject of "nonfatal errors".
+
+Certainly you can propose it. I'm against it in its current form, but the fixes are simple. I previously commented on "fatal".
+
+...
+> Example from the "aggregates and variant parts" discussion:
+> It was suggested that something like this:
+>
+>     type Color is (Red, Orange, Yellow);
+>
+>     type T(D: Color) is
+>         record
+>             case D is
+>                 when Red | Orange =>
+>                     X : Integer;
+>                     case D is
+>                         when Red =>
+>                             Y : Integer;
+>                         when Orange =>
+>                             null;
+>                         when others =>
+>                             Bogus : Integer; -- Wrong!
+>                     end case;
+>                 when Yellow =>
+>                     null;
+>             end case;
+>         end record;
+>
+> is an error, because the Bogus component can never exist.
+> One should write "when others => null; -- can't happen".
+
+This is a terrible idea, irrespective of the compability issue. That's because
+the definition and implementation of such a rule would be fairly complex, and it
+fixes nothing (the real problem is that the others clause is virtually required
+because values that can't happen must be covered in the variant). Solving a
+symptom rather than the actual problem is a terrible use of resources.
+
+I think you need to make a much more compelling example in order to make this
+idea worth even having. In the past when the idea was suggested, we essentially
+determined that the problem really wasn't worth fixing (as in the above, or as
+in the value always out of range problem). The only errors that the language
+should be mandating are those that are virtually always an error; under no
+circumstances should programmers be "suppressing" language-defined errors (of
+any kind). They should either fix them, or simply live with the
+"executable-error" error. Warnings are a different kettle of fish in that way, I
+think.
+
+If you had suggested making the trivial fix to the underlying problem, I think
+you would have had a stronger case.
+
+That is, in the above, the coverage of the inner variant should be as if the
+nominal subtype of the discriminant has a static predicate that matches the
+immediately enclosing variant alternative. That would be an "executable error"
+(what you called a "non-fatal error"), if the coverage is OK for the nominal
+subtype of the discriminant and a "non-executable error" (what you misdiscribed
+as a "fatal error") otherwise.
+
+That would make sense, as it would eliminate the compatibility problem by
+allowing compilation if the coverage is as it used to be, but would strongly
+encourage doing the right thing.
+
+> In any case, it should be up to programmers to decide whether fixing
+> nonfatal errors is cost-effective.  That is not our job as language
+> designers.
+
+I agree, but again this is a matter of description. If you call these "errors",
+then the intent is that they really reflect something wrong. (Warnings are not
+like this, they might reflect something dubious that could be OK.) As such, the
+language shouldn't be encouraging them to be left in code. The reason for
+leaving them in code is to be able to use existing code that cannot be
+practically changed, not to allow sloppy programming.
+
+That has a very significant impact on what can be categorized this way. We must
+not categorize anything that might be legitimate usage as a "non-fatal error"
+(or whatever the term might be). For instance, calling a static expression that
+will always be outside of its static subtype an "error" of any kind is a very
+bad idea. (These are very common in dead code, as settings of parameters often
+lead to situations where values are outside of unused null ranges, expressions
+are divided by zero, and the like.)
+
+That also suggests that the suggestion of changing unrecognized pragmas to a
+"non-fatal error" must be opposed. That is a capability that is commonly used in
+portable code. Claw, for instance, contains many Gnat-specific pragmas that are
+just harmlessly ignored in other compilers. To claim that this is somehow an
+"error" would be a major disconnect with reality, IMHO.
+
+Basic conclusion here: terminology matters, and in this case, it is pretty much
+the only thing that matters. The actual language rules are far less important
+than the impression given by the terminology, because most programmers will only
+know the terminology, not the language rules.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August 30, 2013  5:18 PM
+
+...
+> But let's try to ignore the term for now, and concentrate on my goal:
+> to get ARG to quit introducing gratuitous incompatibilities.
+
+I just finished writing a message that essentially concludes that the *only*
+thing important here is the terminology. We need to decide on that before we can
+even begin to understand what might fall into that category. For instance, an
+unrecognized pragma clearly is a "warning" (it is something that makes perfect
+sense to ignore), while a "soft error" is still an error - you only ignore it in
+frozen code (or code primarily maintained for some previous version of Ada) and
+fix it in all other cases.
+
+> That is, to give ARG an "out" -- a way to say, "we really think this
+> ought to be illegal, but if you have 10 million lines of code
+> scattered across 17 organizations[*] you don't absolutely have to fix
+> these errors
+> -- your call, you can choose to ignore these errors and still run your
+> programs".
+>
+> [*] I gather that that was the situation reported by Robert, with some
+> company that used Interface as the name of lots of child packages.
+
+I'm sympathetic with the goal, but I'm dubious that there are any such
+situations. The bad problems (like composition of untagged records) would not be
+helped by this (the incompatibility is mostly at runtime, and the compile-time
+incompatibilities are necessary to have any sensible semantics for composition).
+That's pretty common; many incompatibilities are caused by semantic necessities.
+The trivial problems (such as the recent nest variant problem) might be helped,
+but it's unclear that they're worth fixing in the first place if there is any
+sniff of a compatibility issue. (You, for instance, claimed that that one was
+not.)
+
+We've discussed this in the context of other AIs, and yet I cannot recall any
+situation where this would have ultimately helped. (And its existence might even
+prevent us from finding a better solution that doesn't have any incompatibility,
+because we might quit looking earlier. Not that that possibility would factor
+into my vote much.)
+
+I think this is much like Tucker's pragma Feature -- an idea that sounds good on
+the surface, but never actually would get used in practice. (Although maybe
+pragma Feature would have gotten used had Tucker actually made a concrete
+proposal as to what "features" it encompassed.) And I expect it to end up in the
+same place -- the "No Action" pile. Feel free to prove me wrong.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 30, 2013  6:14 PM
+
+> Basic conclusion here: terminology matters, and in this case, it is
+> pretty much the only thing that matters. The actual language rules are
+> far less important than the impression given by the terminology,
+> because most programmers will only know the terminology, not the language
+> rules.
+
+Yeah, except that we don't really have any control over what terms the user
+sees.  That is, we don't define what diagnostic messages look like.
+
+A compiler could say "missing semicolon", or "Syntax Error: missing semicolon",
+or "Minor Warning, no big deal: missing semicolon", and all those are conforming
+implementations, so long as the implementation doesn't allow programs with
+missing semicolons to run.
+
+Yes, the terms are important, but we don't control them in practise.
+
+Users don't read the RM, they read the diagnostic messages.
+(I hope "diagnostic message" is a neutral term I can use that doesn't indicate
+whether it's an "error" or "likely error" or "possible error" or whatever.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, August 30, 2013  6:30 PM
+
+> I'm sympathetic with the goal, but I'm dubious that there are any such
+> situations.
+
+I've mentioned half-a-dozen or so during the last few months, as they came up.
+Cases where one person says, "Yeah, but that would be INCOMPATIBLE!", and the
+other person says, "Yeah, but that is just WRONG!".  I'm trying to defuse that
+sort of conflict.
+
+All I ask is that we keep an open mind to the idea that we CAN require detection
+of errors at compile time, while STILL requiring that the implementation run the
+program.  And don't reject that idea based on pedantic concerns about the formal
+definition of "detect" and "give a diagnostic message" and "error vs. warning"
+and so on.
+
+> ...the "No Action" pile. Feel free to prove me wrong.
+
+To prove you wrong, I could go through all the (compile time) incompatibilities
+introduced in 95, 2005, 2012, and analyze them. I'll bet there are dozens of
+cases.  I'm not sure I have the time to do that.
+
+One that comes to mind right now: the new rules about 'in out' parameters being
+mutually conflicting or some such.  I don't understand those rules, but I think
+we found a bunch of incompatibilities in the test suite.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August 30, 2013  6:40 PM
+
+> > Basic conclusion here: terminology matters, and in this case, it is
+> > pretty much the only thing that matters. The actual language rules
+> > are far less important than the impression given by the terminology,
+> > because most programmers will only know the terminology, not the
+> > language rules.
+>
+> Yeah, except that we don't really have any control over what terms the
+> user sees.  That is, we don't define what diagnostic messages look
+> like.
+
+True, but compiler vendors try to stay fairly close to the RM terminology.
+In most cases where we didn't do that, we came to regret it.
+
+> A compiler could say "missing semicolon", or "Syntax Error:
+> missing semicolon", or "Minor Warning, no big deal: missing
+> semicolon", and all those are conforming implementations, so long as
+> the implementation doesn't allow programs with missing semicolons to
+> run.
+
+Or "*SYNTAX ERROR* Missing semicolon" :-)
+
+My problem with "fatal error" is that we have lots of messages with that in
+it:
+
+"*FATAL ERROR* Missing source"
+
+I don't want to get the RM and our messages that far out of sync.
+
+> Yes, the terms are important, but we don't control them in practise.
+>
+> Users don't read the RM, they read the diagnostic messages.
+> (I hope "diagnostic message" is a neutral term I can use that doesn't
+> indicate whether it's an "error" or "likely error"
+> or "possible error" or whatever.)
+
+(Yes it's neutral enough.)
+
+I think my point is that the difference between (using your original terms) a
+"fatal error", a "non-fatal error", and a "warning" is fuzzy enough that vendors
+will want to stay quite close to the RM terminology. That's especially true in
+that 3rd party documents (web sites, books, etc.) that explain these differences
+are usually going to stick very close to the RM terminology. So as a practical
+matter, I think that vendors *could* stray a long way from the RM terminology,
+but there are lots of powerful reasons for not doing so. Maybe AdaCore could get
+away with it, but few other vendors can.
+
+And the terminology matters a huge amount here: no one should be ignoring errors
+except in exceptional circumstances whereas warnings are ignorable with
+justification (examples given in previous messages). For Janus/Ada, I've been
+thinking about separating some "warnings" into "informations", as it's hard to
+tell in Janus/Ada whether a warning should really be addressed or whether its
+information about something that might be important to know but often is
+irrelevant. Even though there is no practical difference, the difference in
+terminology would clarify things. The same would be true in the RM.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August 30, 2013  6:53 PM
+
+...
+> One that comes to mind right now: the new rules about 'in out'
+> parameters being mutually conflicting or some such.  I don't
+> understand those rules, but I think we found a bunch of
+> incompatibilities in the test suite.
+
+We knew that there were incompatibilities there; those represent very dubious
+code that should never have been written. The real question is whether we were
+wrong in that judgment, but presuming that we weren't, it's better off this way.
+We've always tolerated incompatibilities that find real bugs.
+
+The incompatibilities that we've introduced into the language to date were
+considered acceptable (for whatever reason), and they would not be relevant to
+your proposed feature. I see no scenario where we could avoid *all*
+incompatibilities by having a feature like this. It could do nothing for runtime
+incompatibilities, nor can it help if an incompatibility is necessary to have
+the language make semantic sense (many Binding Interpretations are in this
+category, as are the added legality rules for untagged record composition). So
+having a minor incompatibility for a high-value change does not bother me at
+all, and indeed I could easily imagine being against classifying one of these as
+"soft errors" or whatever we decide to call it, believing that requiring
+correction is important.
+
+What would be relevant is cases where we decided not to fix the problem at all
+(the nested variant issue most likely will be such a case) or where we adopted a
+sub-optimal solution because of compatibility concerns. I don't know of any
+practical way to find those in the past. (Re-reading all of the AIs does not
+count as "practical".) When I said, "feel free to prove me wrong", I really
+meant going forward. (We won't be seriously considering Amendment AIs for years
+to come, so we can see if there are any compelling examples in the intervening
+years.) There won't be an answer to that challenge until 2018 at the earliest!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, August 30, 2013  9:38 PM
+
+>> A compiler could say "missing semicolon", or "Syntax Error:
+>> missing semicolon", or "Minor Warning, no big deal: missing
+>> semicolon", and all those are conforming implementations, so long as
+>> the implementation doesn't allow programs with missing semicolons to
+>> run.
+
+More accurately "as long as the implementation has a mode in which it does not
+allow programs with missing semicolons to run".
+
+...
+> I think my point is that the difference between (using your original
+> terms) a "fatal error", a "non-fatal error", and a "warning" is fuzzy
+> enough that vendors will want to stay quite close to the RM
+> terminology. That's especially true in that 3rd party documents (web
+> sites, books, etc.) that explain these differences are usually going
+> to stick very close to the RM terminology. So as a practical matter, I
+> think that vendors *could* stray a long way from the RM terminology,
+> but there are lots of powerful reasons for not doing so. Maybe AdaCore
+> could get away with it, but few other vendors can.
+
+We avoid RM terminology where it is confusing. For instance we say package spec
+instead of package declaration, because that's what most programmers say. And we
+would not use "package" in a message expecting a programmer to know that a
+generic package is not a package. There are lots of obscure terms in the RM
+better avoided in error messages (most programmers these days don't read the RM
+much!)
+
+> And the terminology matters a huge amount here: no one should be
+> ignoring errors except in exceptional circumstances whereas warnings
+> are ignorable with justification (examples given in previous
+> messages). For Janus/Ada, I've been thinking about separating some
+> "warnings" into "informations", as it's hard to tell in Janus/Ada
+> whether a warning should really be addressed or whether its
+> information about something that might be important to know but often
+> is irrelevant. Even though there is no practical difference, the
+> difference in terminology would clarify things. The same would be true in the
+> RM.
+
+GNAT distinguishes between "info" messages and "warning" messages
+
+****************************************************************
+
+From: Arnaud Charlet
+Sent: Saturday, August 31, 2013  4:47 AM
+
+> > One that comes to mind right now: the new rules about 'in out'
+> > parameters being mutually conflicting or some such.  I don't
+> > understand those rules, but I think we found a bunch of
+> > incompatibilities in the test suite.
+>
+> We knew that there were incompatibilities there; those represent very
+> dubious code that should never have been written. The real question is
+> whether we were wrong in that judgment, but presuming that we weren't,
+> it's better off this way. We've always tolerated incompatibilities
+> that find real bugs.
+
+As shown by customer code and by many ACATS tests (you have received a bunch of
+ACATS petitions for Ada 2012 from us about this), we were pretty wrong: people
+use a common idiom when they simply want to ignore the out parameters, using a
+single variable, e.g:
+
+  Proc1 (Input, Ignore_Out, Ignore_Out);
+
+is *very* common and changing all that code is a real pain for users.
+
+Bob is right, this rule is a good example where a "soft" error would have been
+more useful than a "hard" error.
+
+I personally find "hard error" and "soft error" good names FWIW.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, August 31, 2013  9:03 AM
+
+> As shown by customer code and by many ACATS tests (you have received a
+> bunch of ACATS petitions for Ada 2012 from us about this), we were pretty wrong:
+> people use a common idiom when they simply want to ignore the out
+> parameters, using a single variable, e.g:
+>
+>   Proc1 (Input, Ignore_Out, Ignore_Out);
+>
+> is *very* common and changing all that code is a real pain for users.
+
+And that code is completely harmless!
+
+> Bob is right, this rule is a good example where a "soft" error would
+> have been more useful than a "hard" error.
+
+So let's go back and make some of these 2005/2012 incompatibilities into soft
+errors.  It's not too late.  But ARG should consider that high priority -- the
+rest of its work can wait several years.
+
+If ARG doesn't do that, I think perhaps AdaCore should have a nonstandard mode
+that does it.
+
+> I personally find "hard error" and "soft error" good names FWIW.
+
+Yes, I like it, too.  Or instead of "error", talk about "legality":
+In each case, we can say something like:
+
+    Blah blah shall not blah blah.  This rule is a soft legality rule.
+
+And put something in the "classification of errors" section in chap 1 making an
+exception for soft legality rules.  The rule in 10.2 also needs work.
+
+I suggest:  All legality rules require a diagnostic message. (No, I can't
+formally define that -- so what?) An implementation must have two modes: one in
+which soft errors prevent the program from running, and one in which they do
+not.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, September 1, 2013  5:52 PM
+
+> > As shown by customer code and by many ACATS tests (you have received
+> > a bunch of ACATS petitions for Ada 2012 from us about this), we were
+pretty wrong:
+> > people use a common idiom when they simply want to ignore the out
+> > parameters, using a single variable, e.g:
+> >
+> >   Proc1 (Input, Ignore_Out, Ignore_Out);
+> >
+> > is *very* common and changing all that code is a real pain for users.
+>
+> And that code is completely harmless!
+
+I can believe that this happens, but I find it hard to believe that it is "very
+common". (Ignoring ACATS tests; ACATS tests often don't reflect the way Ada code
+is really used, so I don't much care about incompatibilities that show up in
+them.)
+
+Code like the above requires three unlikely things to occur:
+
+(1) Ignoring of one or more parameters is not dangerous at the call site. Most
+    "in out" and "out" parameters can't be unconditionally ignored. They might
+    have circumstances where they aren't meaningful, but those are usually tied
+    to the values of other "out" parameters. So unconditionally ignoring a
+    parameter meaning assuming that the value of another parameter, which is
+    always a bad idea. (Ignoring error codes on return from a routine is the
+    most common example of the danger of doing this.)
+
+(2) The specification of the routine is designed such that it is necessary to
+    ignore parameters. One hopes that Ada routines don't have unused parameters
+    and the like; Ada has default parameters and overloading which can easily be
+    used to reduce the occurrences of such subprograms to rare usages.
+
+(3) For the above to occur, you have to have two or more "out" parameters of the
+    same type. If you're using strong typing, this is pretty unlikely. I cannot
+    think of any case where this has ever happened in my code, as out parameters
+    are most often used for returning multiple entities together from something
+    that would otherwise be a function. Those entities are almost always of
+    different types.
+
+Perhaps there are cases not involving ignoring of results that are also involved
+here, if this is indeed very common.
+
+In any case, if there truly are a lot of cases where this check is in fact
+rejecting legitimate code, then I think that it should be removed altogether.
+The idea behind a "soft error" is that it reflects something wrong that doesn't
+have to fixed immediately. It is not a case where the "error" should be ignored
+forever (unless of course it is impossible to change the source code).
+
+In this particular case, the reason for the rule applying to procedures was
+simply that it didn't make sense to say that you can't do this for functions if
+you could do it for procedures. If that's not true, then it probably shouldn't
+apply to anything.
+
+> > Bob is right, this rule is a good example where a "soft" error would
+> > have been more useful than a "hard" error.
+>
+> So let's go back and make some of these 2005/2012 incompatibilities
+> into soft errors.  It's not too late.  But ARG should consider that
+> high priority -- the rest of its work can wait several years.
+
+This seems like a complete waste of time. It only makes sense for "soft errors"
+to be those where the semantics are well-defined if the error is not required to
+be detected. There are very few such errors in Ada. Moreover, it would take an
+immense amount of analysis to differentiate errors that exist for semantic
+reasons (like the untagged record equality Legality Rules) and those that could
+be "soft errors". Getting it wrong would be very bad, as we would have programs
+with undefined semantics executing. (We certainly would have to have tests
+containing "soft errors" in the ACATS, and that seems unpleasant.)
+
+I've said it before, but I think this "soft error" idea seems appealing at
+first, but I don't think there are many circumstances where it actually could be
+applied. In most such cases, the check itself is dubious and quite likely we
+don't really want or need it; how its reported is not the real issue.
+
+I think it is fine to keep this idea in our back pocket in case we find a
+situation where it would allow making a change that otherwise would be
+impossible. But I don't see any reason to try to go back and revisit the last 8
+years of Ada development to try to retrofit this idea. That sounds like
+rehashing every argument we've ever had about the direction of Ada.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, September  2, 2013  3:55 AM
+
+> I personally find "hard error" and "soft error" good names FWIW.
+
+I'd prefer "major" and "minor" errors, FWIW...
+
+As for the rest, I also think there is some value in the idea, but that it looks
+like another of these brilliant solutions looking desperatly for a problem to
+solve...
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, September  2, 2013  8:32 AM
+
+> I'd prefer "major" and "minor" errors, FWIW...
+
+I don't think that gives the right impression.  There is no implication that
+soft errors are more "minor".  Programmers should take soft error messages
+seriously.
+
+At least some soft errors will be errors that we would make into normal
+(hard) legality rules, except for the compatibility concern.
+
+Only the programmer can decide how "minor" the soft errors are, and whether to
+fix them.  Randy doesn't want to make "unrecognized pragma" into a soft error,
+and I don't want to fight about that, but the same point applies to warnings: If
+you're porting from GNAT to some other compiler, and you see "unrecognized
+pragma Abort_Defer", that's probably a very serious error that must be fixed.
+On the other hand, if you see "unrecognized pragma Check", that's no big deal --
+the program will work fine while ignoring pragmas Check.
+
+> As for the rest, I also think there is some value in the idea, but
+> that it looks like another of these brilliant solutions looking
+> desperatly for a problem to solve...
+
+The problem is that ARG keeps introducing incompatibilities in every language
+version.  For many people that's no big deal, but for others, it either costs a
+lot of money, or prevents them from upgrading to the new language.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, September  2, 2013  9:30 AM
+
+> Randy doesn't want to make "unrecognized pragma" into a soft error
+
+If we want to discuss whether unrecognized pragmas are an error, let me mention
+transformation tools that use pragmas to indicate places where a transformation
+is needed, or other special elements to consider. Using pragmas to that effect
+has the benefit that it is very convenient for an ASIS-based transformation
+tool, and looks good from the programmer's point of view.
+
+One such tool is Morpheus from Adalabs
+(http://www.adalabs.com/products-morpheus.html).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, September  2, 2013  10:00 AM
+
+> > Randy doesn't want to make "unrecognized pragma" into a soft error
+> If we want to discuss whether unrecognized pragmas are an error,
+
+My point was that we do NOT want to discuss that -- some are error, some are
+not.  It's the programmer's call.
+
+>...let me
+> mention transformation tools that use pragmas to indicate places where
+>a  transformation is needed, or other special elements to consider.
+>Using  pragmas to that effect has the benefit that it is very
+>convenient for an  ASIS-based transformation tool, and looks good from
+>the programmer's  point of view.
+
+Right, good example.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, September  3, 2013  1:39 AM
+
+[I'm leaving on vacation tomorrow, so I won't be able to participate in this
+discussion going forward. Thus a "final" summary from me. Don't decide anything
+stupid while I'm gone. :-)]
+
+> > > I personally find "hard error" and "soft error" good names FWIW.
+
+> > I'd prefer "major" and "minor" errors, FWIW...
+>
+> I don't think that gives the right impression.  There is no
+> implication that soft errors are more "minor".  Programmers should
+> take soft error messages seriously.
+>
+> At least some soft errors will be errors that we would make into
+> normal
+> (hard) legality rules, except for the compatibility concern.
+>
+> Only the programmer can decide how "minor" the soft errors are, and
+> whether to fix them.  Randy doesn't want to make "unrecognized pragma"
+> into a soft error, and I don't want to fight about that,
+
+I'm unsure, actually. The real point is that it's not clear how valuable this
+is.
+
+...
+> > As for the rest, I also think there is some value in the idea, but
+> > that it looks like another of these brilliant solutions looking
+> > desperatly for a problem to solve...
+>
+> The problem is that ARG keeps introducing incompatibilities in every
+> language version.  For many people that's no big deal, but for others,
+> it either costs a lot of money, or prevents them from upgrading to the
+> new language.
+
+Yes, but this idea is unlikely to have any effect on that. It's greatest value
+is in other areas that we traditionally have stayed away from.
+
+The main problem (as I've said before) is that for "hard" errors, the program
+cannot be executed. Thus, we don't have to define any semantics for such
+execution. For "soft" errors, however, we *do* have to define semantics for
+execution, as the program can be executed (at least in one language-defined
+mode).
+
+Among other things, this means that soft errors would require a new kind of
+ACATS test, which would combine the features of a B-Test and a C-Test -- both
+messages would need to be output *and* the execution would have to finish
+properly. That's a substantial complication and cost for the ACATS. (I happen to
+think that a similar cognitive complication would also exist for *users* of Ada,
+but that's not so clear-cut. I also note that this idea bears a lot of
+resemblance to the whole argument about unreserved keywords -- which also went
+nowhere.)
+
+Anyway, this fact makes "soft" errors most useful for methodological
+restrictions as opposed to semantic restrictions. The problem is that Ada
+doesn't have many methodological restrictions.
+
+Just a quick look at some common kinds of incompatibilities in Ada 2012:
+
+(1) Adding new entities to a language-defined package (examples: A.4.5(88.e/3),
+    A.18.2(264.c/3), D.14(29.c/3)). Soft errors would not be helpful for these
+    incompatibilities (redoing resolution rules in order to avoid the
+    incompatability would be nasty and bizarre).
+
+(2) Changing the profile of a language-defined subprogram (I didn't remember an
+    Ada 2012 example off-hand). Even with careful use of default parameters,
+    these have incompatibilities with renames and 'Access uses (as the profile
+    is different). Again, I don't think soft errors would be of any value, as
+    defining multiple profiles would be a massive compilation in the language.
+
+(3) Incompatibilities required by semantic consistency. (examples:
+    4.5.2(39.k/3)) These are cases where we could not make a sensible definition
+    of the language without the incompatibility. I don't see how soft errors
+    would help such cases, as the semantics would need to be well-defined in
+    order to have a soft error.
+
+(4) Nonsense semantics in previous standards. [This is pretty similar to the
+    above, but its not caused by a language change.] (Examples: 10.2.1(28.l/3),
+    12.7(25.e/3), B.3.3(32.b/3)). Soft errors would not help here, as it
+    wouldn't make sense to define the nonsense semantics formally.
+
+(5) Runtime inconsistencies. Obviously, soft errors will not help in any way
+    with these.
+
+Certainly there are cases where soft errors could help. (I didn't do any sort of
+formal survey.) 6.4.1(6.16/3) is really a methodological restriction, and one
+could make it a soft error unless the call is to a function (that can't be
+incompatible). I'd like to see more compelling examples than the one Arnaud
+posted before doing that (or eliminating the check altogether), but that's a
+separate discussion.
+
+The problem with incompatibilities caused by methodological restrictions is that
+they're easily avoided by not having the restriction. We don't need soft errors
+to do that!
+
+I think the most valuable use of soft errors would be in properly restricting
+the contents of assertions, which we decided not to do because we couldn't find
+a rule that wasn't too restrictive. That would be less of a problem with soft
+errors, as there would always be the option to ignore the error and do the
+dubious thing anyway. Similarly, the question of invariants of types with
+visible components could be dealt with using soft errors (so that the cases of
+generics would not have to be rejected).
+
+So, I think the majority of the value of soft errors would be found going
+forward, and it's unlikely to be much help for compatibility issues (except
+those we didn't have to introduce, which is a whole 'nuther discussion). We'd
+need some cases where they clearly allowed something that we can't currently do.
+
+So I rather agree with J-P:
+
+> > As for the rest, I also think there is some value in the idea, but
+> > that it looks like
+> > another of these brilliant solutions looking desperatly for a
+> > problem to solve...
+
+Exactly.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, September  3, 2013  9:02 AM
+
+The subject matter of this AI is incompatibilities -- in particular, a mechanism
+to reduce the need/desire for them.  (And I started the thread, so I get to
+define what it's about. ;-))  Below, you point out some cases where soft errors
+could help, but brush those aside with "that's a separate discussion" and "whole
+'nuther discussion". No, that's THIS discussion.  If we can come up with a few
+cases where soft errors are a good idea, then they're a good idea.
+
+I feel like the form of your argument is analogous to this: "Driving a car is
+perfectly safe.  Of course, some people are killed driving cars, but that's a
+separate discussion." Heh?  ;-)
+
+Anyway, I include both existing incompatibilities (which we should consider
+repealing) and future ones where we're tempted, in this discussion.
+
+> The main problem (as I've said before) is that for "hard" errors, the
+> program cannot be executed. Thus, we don't have to define any
+> semantics for such execution. For "soft" errors, however, we *do* have
+> to define semantics for execution, as the program can be executed (at
+> least in one language-defined mode).
+
+Yes, we all agree that the run-time semantics has to be well defined in the
+presence of soft errors.  That's the case for Arno's example -- we already have
+wording that defines the semantics of param passing.
+
+> Among other things, this means that soft errors would require a new
+> kind of ACATS test, which would combine the features of a B-Test and a
+> C-Test --
+
+I can't get excited about that.
+
+> both messages would need to be output *and* the execution would have
+> to finish properly. That's a substantial complication and cost for the ACATS.
+> (I happen to think that a similar cognitive complication would also
+> exist for *users* of Ada, but that's not so clear-cut. I also note
+> that this idea bears a lot of resemblance to the whole argument about
+> unreserved keywords
+> -- which also went nowhere.)
+
+Those are a perfect example of a soft error.  It went nowhere, I assume, because
+people were uncomfortable with the fact that you could do confusing things (e.g.
+"type Interface is interface...") with the compiler remaining silent.  With my
+proposal, you would get an error message.
+
+> Anyway, this fact makes "soft" errors most useful for methodological
+> restrictions as opposed to semantic restrictions. The problem is that
+> Ada doesn't have many methodological restrictions.
+>
+> Just a quick look at some common kinds of incompatibilities in Ada 2012:
+>
+> (1) Adding new entities to a language-defined package (examples:
+> A.4.5(88.e/3), A.18.2(264.c/3), D.14(29.c/3)). Soft errors would not
+> be helpful for these incompatibilities (redoing resolution rules in
+> order to avoid the incompatability would be nasty and bizarre).
+>
+> (2) Changing the profile of a language-defined subprogram (I didn't
+> remember an Ada 2012 example off-hand). End with careful use of
+> default parameters, these have incompatibilities with renames and
+> 'Access uses (as the profile is different). Again, I don't think soft
+> errors would be of any value, as defining multiple profiles would be a massive
+> compilation in the language.
+>
+> (3) Incompatibilities required by semantic consistency. (examples:
+> 4.5.2(39.k/3)) These are cases where we could not make a sensible
+> definition of the language without the incompatibility. I don't see
+> how soft errors would help such cases, as the semantics would need to
+> be well-defined in order to have a soft error.
+>
+> (4) Nonsense semantics in previous standards. [This is pretty similar
+> to the above, but its not caused by a language change.] (Examples:
+> 10.2.1(28.l/3), 12.7(25.e/3), B.3.3(32.b/3)). Soft errors would not
+> help here, as it wouldn't make sense to define the nonsense semantics formally.
+>
+> (5) Runtime inconsistencies. Obviously, soft errors will not help in
+> any way with these.
+
+I agree with you about 1,2,4,5.  I think I disagree on 3 -- run-time semantics
+is well defined, albeit potentially confusing.
+
+>...I'd like to see more compelling
+> examples than the one Arnaud posted before doing that
+
+What?!  What on earth could be more compelling than examples of real code that
+ran perfectly fine in Ada 2005, and is now broken in Ada?
+
+>... (or eliminating the
+> check altogether), but that's a separate discussion.
+>
+> The problem with incompatibilities caused by methodological
+> restrictions is that they're easily avoided by not having the
+> restriction. We don't need soft errors to do that!
+
+Apparently, we do.  Tucker was quite insistent on the new 'out' param rules, and
+refused to go along with 'out'-allowed-on-functions without it.  Hence an
+incompatibility (affecting real code!) that could have been avoided by soft
+errors.
+
+> I think the most valuable use of soft errors would be in properly
+> restricting the contents of assertions, which we decided not to do
+> because we couldn't find a rule that wasn't too restrictive. That
+> would be less of a problem with soft errors, as there would always be
+> the option to ignore the error and do the dubious thing anyway.
+> Similarly, the question of invariants of types with visible components
+> could be dealt with using soft errors (so that the cases of generics would not
+> have to be rejected).
+
+Yes, I agree -- with soft errors (or required warnings), we can freely impose
+far more stringent requirements, and that's a good thing.
+
+P.S. Have a good vacation.  Don't do anything I would do.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September  3, 2013  9:46 AM
+
+> Apparently, we do.  Tucker was quite insistent on the new 'out' param
+> rules, and refused to go along with 'out'-allowed-on-functions without
+> it.  Hence an incompatibility (affecting real code!) that could have
+> been avoided by soft errors.
+
+I'd like to provide a little more background on the "OUT" param rule.
+It actually wasn't my idea.  I was mostly focused on worrying about order of
+evaluation and how it affected having (in) out parameters of functions.  The
+idea of including a check on the case of multiple OUT parameters was someone
+else's idea, as far as I know.
+
+Furthermore, at least some of us *were* sensitive to the incompatibility, and Ed
+Schonberg did an experiment to determine whether there seemed to be any issue
+with this case.  Here is his comment about it, and Robert Dewar's response to
+that:
+
+Ed> a) I implemented the check on multiple in-out parameters in a
+Ed> procedure, where the actuals of an elementary type overlap.  In the
+Ed> 15,000 tests in our test suite I found two occurrences of  P (X, X)
+Ed> or near equivalent.  One of them (in Matt Heaney's code!) appears
+Ed> harmless. The other one is in a program full of other errors, so
+Ed> unimportant. So application of this rule should not break anything.
+
+Robert> I guess I can tolerate this rule, of course Ed's experiment also
+Robert> shows that it is almost certainly useless, so just another case
+Robert> of forcing compiler writers to waste time on nonsense.
+
+So I don't think the ARG was being irresponsible here.  It turns out after all
+that there are some uses of "Ignore_Out_Param" multiple times for the same call.
+I realize that any incompatibility is potentially painful, but at least in this
+case we did attempt to check whether it was a real problem, or only a
+theoretical one.  We missed an interesting category, but we didn't act
+irresponsibly in my view.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, September  3, 2013 10:29 AM
+
+For the purposes of testing this on a larger sample of code, does anyone know
+whether the latest (v7.1.2) GNAT compiler actually does this checking? It only
+seems to do it if -gnatw.i ("Activate warnings on overlapping actuals") is used,
+which isn't included under the -gnatwa activate (almost) all warnings list, and
+even then it only gives a warning not an error.
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Tuesday, September  3, 2013  11:29 AM
+
+In the current version of the compiler illegal overlaps are reported as errors.
+The debugging switch --gnatd.E  transforms the error back into a warning, but
+the default is as per the RM.
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Tuesday, September  3, 2013  11:48 AM
+
+Try using -gnat2012 with 7.1.2.  As Ed mentions, current versions of GNAT
+(wavefronts designated by version 7.2.0w and any later releases) do this by
+default, because Ada 2012 is now the default.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, September  3, 2013  12:11 PM
+
+Sorry  should have said, I'm using the -gnat12 switch (on 7.1.2).  -gnatw.i
+appears to be a red herring as it also reports overlaps between an in and an
+out.
+
+By "current" do I take it that you mean a wave-front, not the latest release
+(7.1.2)?
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Tuesday, September  3, 2013  12:50 PM
+
+Right, in wavefront versions, not the latest release.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, September  3, 2013  12:04 PM
+
+> The subject matter of this AI is incompatibilities -- in particular, a
+> mechanism to reduce the need/desire for them.
+
+The thread is about "nonfatal errors", a *specific* feature. Uses of it are
+ancillary.
+
+> (And I started the thread, so I get to define what it's about. ;-))
+
+Then (channeling one Bob Duff), use an appropriate subject line. :-)
+
+> Below, you point out some cases where soft errors could help, but
+> brush those aside with "that's a separate discussion" and "whole
+> 'nuther discussion".
+> No, that's THIS discussion.  If we can come up with a few cases where
+> soft errors are a good idea, then they're a good idea.
+
+In the specific cases I mentioned, the question is whether there *is* a
+significant compatibility error (which I doubt), and if so, whether that means
+that there should be no error at all (hard, soft, or kaiser :-), or whether some
+sort of error is still valuable. That's all very specific to a particular case,
+and should discussed separately under a thread about that particular rule
+(6.4.1(16.6/3)). It has nothing to do with the general idea of soft errors.
+
+...
+> Anyway, I include both existing incompatibilities (which we should
+> consider repealing) and future ones where we're tempted, in this
+> discussion.
+
+If we want to repeal some rule, we ought to discuss that (on a case-by-case
+basis). It cannot be sensibly done in some general discussion. We ought to
+include the possibility of *partially* repealing the rule using soft errors, as
+one of the options under discussion. If in fact we find some case where soft
+errors are useful, then we should add them to the language. But that doesn't
+belong in a general discussion.
+
+...
+> > both messages would need to be output *and* the execution would have
+> > to finish properly. That's a substantial complication and cost for
+> > the ACATS.
+> > (I happen to think that a similar cognitive complication would also
+> > exist for *users* of Ada, but that's not so clear-cut. I also note
+> > that this idea bears a lot of resemblance to the whole argument
+> > about unreserved keywords -- which also went nowhere.)
+>
+> Those are a perfect example of a soft error.  It went nowhere, I
+> assume, because people were uncomfortable with the fact that you could
+> do confusing things (e.g. "type Interface is interface...") with the
+> compiler remaining silent.  With my proposal, you would get an error
+> message.
+
+To me, it says that people are uncomfortable with the idea of conditional
+language design.
+
+...
+> > (3) Incompatibilities required by semantic consistency. (examples:
+> > 4.5.2(39.k/3)) These are cases where we could not make a sensible
+> > definition of the language without the incompatibility. I don't see
+> > how soft errors would help such cases, as the semantics would need
+> > to be well-defined in order to have a soft error.
+...
+> I agree with you about 1,2,4,5.  I think I disagree on 3 -- run-time
+> semantics is well defined, albeit potentially confusing.
+
+It might be well-defined, but it's essentially unimplementable. I would be
+strongly opposed to ever allowing such a program to execute. Besides, it's the
+little incompatibility here; the runtime incompatibility is many times more
+likely to cause problems.
+
+> >...I'd like to see more compelling
+> > examples than the one Arnaud posted before doing that
+>
+> What?!  What on earth could be more compelling than examples of real
+> code that ran perfectly fine in Ada 2005, and is now broken in Ada?
+
+I don't believe that the example he gave occurred more than once (I'd be amazed
+if it occurred at all, in fact, because it requires three separate bad design
+decisions, as I outlined last week). Moreover, I have a hard time getting
+excited about bugs caused in real code that should never have been written in
+the first place. He claimed this is "very common", but his example is completely
+unbelievable to me. I'd like to see *real*, believable examples where this is
+causing a problem. (They probably would have to be far more complete in order to
+be believable.) But as I've said before, this does not belong in this thread,
+and I'm leaving soon anyway.
+
+> >... (or eliminating the
+> > check altogether), but that's a separate discussion.
+> >
+> > The problem with incompatibilities caused by methodological
+> > restrictions is that they're easily avoided by not having the
+> > restriction. We don't need soft errors to do that!
+>
+> Apparently, we do.  Tucker was quite insistent on the new 'out' param
+> rules, and refused to go along with 'out'-allowed-on-functions without
+> it.  Hence an incompatibility (affecting real code!) that could have
+> been avoided by soft errors.
+
+Tucker was insistent on 'out' parameter rules *for functions*!! I thought it was
+weird to only have such rules on functions, so I extended them to all calls when
+I wrote up a specific proposal. We attempted to check if that was a problem (see
+Tucker's response), and the answer was 'no'. So we left the more restrictive
+rule. But we could just as easily have met the original goal by only having
+6.4.1(16.6/3) apply in function calls. And no 'soft errors' are needed to do
+that. (Again, this should be a separate discussion.) There was no language need
+for the incompatibility; it just seemed more consistent to have it and we
+believed that it was harmless.
+
+> P.S. Have a good vacation.  Don't do anything I would do.
+
+I'm probably going to spend the first day virtually arguing with you.
+Wonderful. :-(
+
+I'm here now because I forgot to reprogram my GPS yesterday (it only holds about
+1/3rd of the maps of the US, so I have to reprogram it any time I'm going to go
+a long ways). That takes several hours, so I still have time to argue with you.
+:-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, September  3, 2013  12:45 PM
+
+> Furthermore, at least some of us *were* sensitive to the
+> incompatibility, and Ed Schonberg did an experiment to determine
+> whether there seemed to be any issue with this case.  Here is his
+> comment about it, and Robert Dewar's response to that:
+>
+> Ed> a) I implemented the check on multiple in-out parameters in a
+> Ed> procedure, where the actuals of an elementary type overlap.  In
+> Ed> the 15,000 tests in our test suite I found two occurrences of  P
+> Ed> (X, X) or near equivalent.  One of them (in Matt Heaney's code!)
+> Ed> appears harmless. The other one is in a program full of other
+> Ed> errors, so unimportant. So application of this rule should not break
+> Ed> anything.
+
+>
+> Robert> I guess I can tolerate this rule, of course Ed's experiment
+> Robert> also shows that it is almost certainly useless, so just
+> Robert> another case of forcing compiler writers to waste time on
+> Robert> nonsense.
+
+Hmm.  I think what happened is that we implemented the rule incorrectly for that
+experiment.  And then ACATS tests appeared, and we "beefed up" the rule, making
+more things illegal.  And then more user code became illegal.  Then we added a
+switch to turn the error into a warning. (So GNAT already treats this as a soft
+error -- we have a mode in which the program can run, and another in which it
+can't run, and we give a diagnostic message in both modes.)
+
+To Ed Schonberg:  Is the above true?
+
+> So I don't think the ARG was being irresponsible here.
+
+I agree.  Sorry if I implied that we were being irresponsible AT THAT TIME.  I
+think at the time ARG was thinking:
+
+    1. This error is extremely unlikely to occur in real code.
+    2. If it does occur, it's certainly a real bug.
+    3. The only choices are "legal" and "illegal" (i.e. the idea
+       of soft errors hadn't occured to us).
+
+Now, with 20-20 hind sight, I think we were mistaken:
+
+    1. It DOES occur in real code.
+    2. It's probably a real bug, but not in all cases.
+       The case Arno showed is perfectly legitimate.  In fact,
+       it's even deterministic, despite the nondeterminism implied
+       by the run-time semantics.
+    3. At least some of us are open to a middle ground ("soft errors").
+
+>...  We missed an interesting category, but we didn't  act
+>irresponsibly in my view.
+
+Right, but I think we made a mistake, and we should consider correcting it via
+soft errors.  I also think that if we had had the concept of soft errors in
+mind, we would/should have used it several times during Ada 2005 and 2012.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, September  3, 2013  12:56 PM
+
+> If we want to repeal some rule, we ought to discuss that (on a
+> case-by-case basis).
+
+OK, then let's postpone this general discussion.  If I have time, I'll inspect
+the existing incompatibilities, and open separate threads about the ones I think
+we maybe should repeal via soft errors (or maybe even repeal altogether).
+
+>... It cannot be sensibly done in some general discussion.
+
+Well, some folks are saying "soft error" is a useless concept, because there are
+no cases where it should apply.  So I've been giving examples as part of the
+general discussion.  I will now quit doing that, and hopefully open separate
+threads for each such example.  But I don't want to hear anybody reply to those
+threads with "Hey, there's no such thing as a soft error. There's only legal and
+illegal, and that's the way it's always been and always should be.  Tradition!".
+
+> > I agree with you about 1,2,4,5.  I think I disagree on 3 -- run-time
+> > semantics is well defined, albeit potentially confusing.
+>
+> It might be well-defined, but it's essentially unimplementable.
+
+OK, if that's true, then we can't use soft error there.
+
+> I'm probably going to spend the first day virtually arguing with you.
+> Wonderful. :-(
+
+No need -- I promised above to quit the general discussion until I've opened
+separate discussions of particular examples. And I probably won't get around to
+that right away.
+
+> I'm here now because I forgot to reprogram my GPS yesterday (it only
+> holds about 1/3rd of the maps of the US, so I have to reprogram it any
+> time I'm going to go a long ways). That takes several hours, so I
+> still have time to argue with you. :-)
+
+Call me a luddite, but I still use fold-out paper maps.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September  3, 2013  1:00 PM
+
+I am somewhat neutral on the "soft error" concept.  It does allow us to
+introduce incompatibilities without "officially" doing so, but our attempts to
+do that with "unreserved keywords" always ran into trouble with WG-9.  I suspect
+they would be the stumbling block here again, though we could bring it up at the
+next WG-9 meeting explicitly, before we waste a lot of time debating it in the
+ARG.
+
+I am probably more tolerant of certain incompatibilities than some folks, as it
+seems that if you are upgrading to a new version of the language, you should
+expect to do some work to get the benefit.  Of course the down side is if the
+extra work is too much, then it becomes an entry barrier to upgrading.  And some
+of our incompatibilities in the past have not had a good work-around (such as
+the fixed-point multiplication/division problem we created in Ada 95 as part of
+trying to provide better support for decimal fixed point).
+
+Soft errors might at least "officially" reduce the entry barrier, but many
+serious organizations consider warnings to be (hard) errors, and presumably
+"soft errors" would also be considered "hard" errors by such organizations.
+
+I do think the "soft error" concept is worth considering, and WG-9 is probably
+the first place to discuss it.  We may have to have an agreed-upon criteria for
+specifying a soft error rather than a hard error, and I wonder if soft errors
+would be soft only for one revision cycle of the language, at which point they
+would mutate to being hard...
+
+****************************************************************
+
+From: Arnaud Charlet
+Sent: Tuesday, September  3, 2013  1:05 PM
+
+> Soft errors might at least "officially" reduce the entry barrier, but
+> many serious organizations consider warnings to be (hard) errors, and
+> presumably "soft errors" would also be considered "hard"
+> errors by such organizations.
+
+Actually in our experience at AdaCore, most customers do tolerate warnings
+(because they have too many of them to have a no warning hard rule) and do not
+consider warnings as hard errors.
+
+In other words, some of our customers are using -gnatwe, but many/the majority
+do not.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, September  3, 2013  1:35 PM
+
+> I am somewhat neutral on the "soft error" concept.  It does allow us
+> to introduce incompatibilities without "officially" doing so, but our
+> attempts to do that with "unreserved keywords" always ran into trouble with WG-9.
+
+Now THAT is totally irresponsible.
+
+But soft errors seem different.  People can reasonably be uncomfortable with
+compilers silently ignoring errors.  But soft errors are NOT silent.  And note
+that my latest proposal requires two modes, one in which the program can run,
+and one in which it can't.  It would take an unreasonable degree of stubornness
+to say "I like the no-run mode, so I don't want other people to have a yes-run
+mode."  Especially since implementers can always implement any modes they like
+in a NONstandard mode.  (And GNAT did so.)
+
+>...I
+> suspect they would be the stumbling block here again, though we could
+>bring  it up at the next WG-9 meeting explicitly, before we waste a lot
+>of time  debating it in the ARG.
+
+Good idea.  But I think they'll want some convincing examples.
+
+And they should be reminded that they don't actually have any control over what
+implementers do.  Like it or not, AdaCore is going to do what AdaCore wants (in
+nonstandard modes).
+
+> I do think the "soft error" concept is worth considering, and WG-9 is
+> probably the first place to discuss it.  We may have to have an
+> agreed-upon criteria for specifying a soft error rather than a hard
+> error, and I wonder if soft errors would be soft only for one revision
+> cycle of the language, at which point they would mutate to being hard...
+
+I don't think "mutate to being hard" is a good idea.  Look how slowly people
+migrated from Ada 95 -- some still use it.
+
+It's like obsolescent features.  We will never remove them entirely.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, September  3, 2013  2:06 PM
+
+> I am probably more tolerant of certain incompatibilities than some
+> folks, as it seems that if you are upgrading to a new version of the
+> language, you should expect to do some work to get the benefit.  Of
+> course the down side is if the extra work is too much, then it becomes
+> an entry barrier to upgrading.  And some of our incompatibilities in
+> the past have not had a good work-around (such as the fixed-point
+> multiplication/division problem we created in Ada 95 as part of trying to
+> provide better support for decimal fixed point).
+
+The extra work is reasonable if the incompatibility is
+
+a) really useful
+b) unavoidable
+
+Any other incompatibility comes in the gratuitous category. And you really can't
+guess what will cause trouble and what will not. The multiplication stuff did
+not even surface in the presentation on difficulties at Ada UK, wherase making
+Interface reserved caused months of very difficult coordinating work for them.
+
+> Soft errors might at least "officially" reduce the entry barrier, but
+> many serious organizations consider warnings to be (hard) errors, and
+> presumably "soft errors" would also be considered "hard" errors by such organizations.
+>
+> I do think the "soft error" concept is worth considering, and WG-9 is
+> probably the first place to discuss it.  We may have to have an
+> agreed-upon criteria for specifying a soft error rather than a hard
+> error, and I wonder if soft errors would be soft only for one revision cycle of the language, at which point they would mutate to being hard...
+
+I find it bizarre to introduce the completely unfamiliar term soft error, when
+we have a perfectly good term "warning message" which we already use in the RM.
+
+I also think this whole discussion is overblown, it would be just fine to have
+implementation advice that advised issuing a warning in certain circumstances.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, September  3, 2013  2:13 PM
+
+> I am somewhat neutral on the "soft error" concept.  It does allow us
+> to introduce incompatibilities without "officially" doing so, but our
+> attempts to do that with "unreserved keywords" always ran into trouble
+> with WG-9.
+
+That's just a lack of competent political lobbying IMO!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, September  3, 2013  2:13 PM
+
+> I don't think "mutate to being hard" is a good idea.  Look how slowly
+> people migrated from Ada 95 -- some still use it.
+
+"mutate to hard" is a good idea ONLY if customers clamour for it, otherwise it
+is just a sop to aesthetic concers of the designers.
+
+What do you mean "some still use it". The GREAT majority of our users use Ada 95
+(only in the very most recent version has the default changed to Ada 2012, we
+never had Ada 2005 as a default, too few people moved to Ada 2005 to have made
+that a reasonable choice). Ada 2012 seems more worth the price of admission for
+the contract stuff.
+
+> It's like obsolescent features.  We will never remove them entirely.
+
+We will never remove them at all, Annex J is completely normative.
+It is no longer even possible to reject Annex J stuff under control of the
+restriction pragma, after the unwise decision to dump all the pragmas there.
+This is one requirement in Ada 2012 that GNAT just completely ignores, and will
+continue to do so as far as I am concerned.
+
+We have loads of customers using pragma Restrictions (No_OBsolescent_Features),
+who use the existing pragmas extensively. It would be insanity in my view to
+cause them trouble by adhering to the letter of the standard.
+
+Again the whole of Annex J is really all about aesthetic concerns of the
+designers overriding the reality of users. But as long as it is just meaningless
+decoaration in the RM it is harmless I suppose :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, September  3, 2013  3:14 PM
+
+...
+> We have loads of customers using pragma Restrictions
+> (No_OBsolescent_Features), who use the existing pragmas extensively.
+> It would be insanity in my view to cause them trouble by adhering to
+> the letter of the standard.
+
+FYI, the letter of the standard says that No_Obsolescent_Features does not have
+to detect use of the pragmas. See 13.12.1(4/3). We've previously discussed this
+(twice). So GNAT *is* following the letter of the standard, the only insanity is
+claiming that it is not.
+
+****************************************************************
+
+From: Joyce Tokar
+Sent: Tuesday, September  3, 2013  4:22 PM
+
+Do you want to bring this up as a discussion topic at the next WG-9 Meeting?
+Or leave it within the ARG to come forward with a proposal?
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, September  4, 2013  3:37 AM
+
+First thoughts are that WG 9 could have a brief discussion to see what the
+consensus is on whether it's worth investigating, and if so then ask the ARG to
+come up with a proposal.
+
+Personally my first choice would be that overlapping out/in out parameters stays
+an error, and second choice that it (and any other potential "soft errors")
+becomes implementation advice to raise a warning.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, September  4, 2013  3:58 AM
+
+Well I've put several millions of lines through GNAT v7.1.2 using -gnat12
+-gnatw.i and it comes out at one warning per 25K lines of code. I suspect that
+most are cases where an actual is used once as an in parameter and once as an
+out, rather than the out/in out combinations that this discussion is about,  but
+I haven't time to check through them all. But anyway it's down at the level of
+new errors for a new compiler release (due to better checking), never mind what
+one might expect for a language revision.
+
+I also think it's better in principle to keep it an error.  When the C++ camp
+are fighting back, their main technical argument is "what about all the order
+dependencies?".  The new rules help here.
+
+Also, though a weaker argument, I don't think that programmers should easily
+ignore out parameters, they are probably there for a reason, say a flag to
+indicate whether another out parameter's value is valid, or whether the solution
+to some complex algorithm has converged.  To ignore two out parameters is doubly
+bad.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, September  4, 2013  6:59 AM
+
+> Also, though a weaker argument, I don't think that programmers should
+> easily ignore out parameters, they are probably there for a reason,
+> say a flag to indicate whether another out parameter's value is valid,
+> or whether the solution to some complex algorithm has converged.  To
+> ignore two out parameters is doubly bad.
+
+The regressions in our test suite, there were three tests affected (out of many
+thousands), were all legitimate cases of ignoring out parameters deliberately,
+and using the same "discard" variable for two parameters, easy to fix of course.
+But sometimes even the most trivial of source changes can be a problem.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, September  4, 2013  7:45 AM
+
+> if you are upgrading to a new version of the language, you should
+> expect to do some work to get the benefit.
+
+I agree with that.  That's a good argument in favor of tolerating some
+incompatibilities.  But it's not a good argument in favor of _gratuitous_
+incompatibilities.
+
+If there's a technically acceptable way to avoid a particular incompatibility,
+then we should do so.
+
+> I do think the "soft error" concept is worth considering, and WG-9 is
+> probably the first place to discuss it.
+
+Are you going to the WG9 meeting?
+
+I think examples are key.  If you just introduce the "soft error"
+idea in the abstract, many people react with "Well, I can't think of any cases
+where that would be useful, so what's the point?"
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, September  4, 2013  7:54 AM
+
+> I agree with that.  That's a good argument in favor of tolerating some
+> incompatibilities.  But it's not a good argument in favor of
+> _gratuitous_ incompatibilities.
+>
+> If there's a technically acceptable way to avoid a particular
+> incompatibility, then we should do so.
+
+I am not personally convinced that labeling something a "soft error" or a
+"required warning" is avoiding an incompatibility.  But it does soften the blow
+and thereby reduce the entry barrier to upgrading.
+
+>> I do think the "soft error" concept is worth considering, and WG-9 is
+>> probably the first place to discuss it.
+>
+> Are you going to the WG9 meeting?
+
+Yes, I plan to be there.
+
+> I think examples are key.  If you just introduce the "soft error"
+> idea in the abstract, many people react with "Well, I can't think of
+> any cases where that would be useful, so what's the point?"
+
+Agreed, one good example is worth many thousands of words of impassioned
+oratory.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, September  4, 2013  7:57 AM
+
+> Do you want to bring this up as a discussion topic at the next WG-9 Meeting?
+> Or leave it within the ARG to come forward with a proposal?
+
+I won't be at the WG9 meeting.  I'm flying to Pittsburgh that Friday morning, in
+time for the ARG meeting that afternoon.  Anyway, if people don't understand why
+gratuitous incompatibilities are so bad, I don't know how to convince them.
+Using words like "totally irresponsible" isn't going to work.  ;-)
+
+Tucker's idea of discussing with WG9 is fine with me.
+Robert and Tucker are both better debaters than I am.
+
+I really do think that it is totally irresponsible to place minor aesthetic
+concerns like "I don't like the concept of unreserved keywords" above
+compatibility issues that cost real money.
+
+I'd like to know who is opposed to unreserved keywords, and what their reasoning
+is.  Maybe those prople don't think it's "minor".
+
+I would think making those keywords a "soft error" would be more palatable to
+those people, because then at least the compiler has a mode in which those
+keywords ARE reserved.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, September  4, 2013  8:00 AM
+
+> Well I've put several millions of lines through GNAT v7.1.2 using
+> -gnat12 -gnatw.i ...
+
+I think version 7.2 wavefronts implement the rule more correctly (more
+stringently), so you might get more errors.  I'm not sure about that.
+
+Ed?  Robert?  (I don't remember who implemented this stuff, but it wasn't me.)
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Wednesday, September  4, 2013  8:20 AM
+
+Yes, the latest version has has made warnings into "hard" errors. we kept some
+of the overlap checks as warnings for a year, but in June Robert removed the
+critical question marks from the error strings. Javier, Robert, and myself had a
+hand on the full implementation. Javier also extended the checks to the other
+constructs that have order of elaboration issues, such as aggregates.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, September  4, 2013  9:18 AM
+
+> I wonder if soft errors would be soft only for one revision cycle of the
+> language, at which point they would mutate to being hard...
+
+Could Annex J be treated similarly?  (Maybe two cycles would be more realistic).
+Indeed could the ability to specify the same actual for multiple in out
+parameters be regarded as an obsolescent feature?
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, September  4, 2013  9:20 AM
+
+> But sometimes even the most trivial of source changes can be a
+> problem.
+
+Hmm, yes, but in those contexts you are generally not allowed to change compiler
+version (not even compiler options). The incompatibility is then irrelevant.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, September  4, 2013  1:25 PM
+
+Well it is interesting to read the presentation from BAE on the effort of
+transitioning to Ada 2005. By far the worst hit was Interface as a keyword,
+because they had a company-wide convention that each package had a child
+xxx.Interface that defined the cross-system interface for the package. That
+meant they had to change all packages in all systems across all projects in a
+coordinated manner, and it was coordinating the change between different
+projects that was hard.
+
+The one line in 25,000 for this particular issue (which is BTW at this stage
+water under the bridge anyway) is minor compared to this.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, October  4, 2013  7:24 AM
+
+>> Soft errors might at least "officially" reduce the entry barrier, but
+>> many serious organizations consider warnings to be (hard) errors, and
+>> presumably "soft errors" would also be considered "hard"
+>> errors by such organizations.
+>
+> Actually in our experience at AdaCore, most customers do tolerate
+> warnings (because they have too many of them to have a no warning hard
+> rule) and do not consider warnings as hard errors.
+
+
+In an old compiler of mine, we had 3 categories of warnings, selectable by
+compiler switch:
+ stern warnings -- almost certainly a bug
+ warnings -- run-of-the-mill warnings
+ light warnings -- verbose, only for paranoid people
+
+The big advantage of "stern warnings" vs. (legality) errors is that the language
+design can be much more liberal.
+
+E.g., in the case at hand the "stern warning condition" could be about aliased
+parameters and there is NOT a precise language definition given when the warning
+is to be issued. It depends entirely on the cleverness of the compiler and the
+particular example whether or not the warning appears. Of course, one could
+introduce the current rules as "at least" rules for the warning, but the "at
+most" nature of legality errors can be nicely ignored by the language
+definition.
+
+For legality errors, the need to narrow down to the always decidable situations
+is a real disservice to the user. In that sense, I like the notion of "soft
+errors", but I hate the term.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, October  4, 2013  12:45 PM
+
+We turn on nearly all optional warnings, but then process them to sort them into
+three or four categories of our choosing, possibly similar to Erhard's. This
+does mean though that we sometimes have to update our tool when the wording of a
+warning message changes. For legacy code with a good track record in use usually
+only the highest category of warnings would be fixed as a matter of urgency, for
+new code hopefully the only warnings allowed would be those either with a
+recorded justification or of the lowest category.
+
+****************************************************************
