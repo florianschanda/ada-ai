@@ -77,7 +77,7 @@ operand object to the target subtype (which might raise Constraint_Error), excep
 if the object is of an {elementary}[access] type and the view conversion is passed
 as an out parameter; in this latter case, the value of the operand object {may be}[is]
 used to initialize the formal parameter without checking against any constraint of the
-target subtype ({as described more precisely in}[see] 6.4.1). 
+target subtype ({as described more precisely in}[see] 6.4.1).
 
 [We have to use "may be used to initialize" here in order that this is not a lie in
 the case of scalar subtypes without Default_Values, which are uninitialized. This has
@@ -87,7 +87,7 @@ read 6.4.1 for the actual rules.]
 Modify AARM 4.6(56.a):
 
 This ensures that even an out parameter of an {elementary}[access] type is
-initialized reasonably. 
+initialized reasonably.
 
 Append to end of 6.4.1 Legality Rules section:
 
@@ -135,9 +135,9 @@ with
 
 The value of an elementary view conversion is that of its operand.
 
-We want the value of an elementary view conversion to be a 
-well defined value of the target type of the conversion if 
-the target type is either an access type or a scalar type for 
+We want the value of an elementary view conversion to be a
+well defined value of the target type of the conversion if
+the target type is either an access type or a scalar type for
 whose Default_Value aspect has been specified.
 
 4.6(56) is supposed to define this, but it isn't close to correct. First, it was
@@ -169,15 +169,15 @@ we disallow such scalar view conversions in cases where either
    - an object of the type of the operand might not have a well
      defined value.
 
-The rule that was chosen to accomplish this is that the two 
-types must have a common ancestor type and, in the scalar 
+The rule that was chosen to accomplish this is that the two
+types must have a common ancestor type and, in the scalar
 case, the operand type's Default_Value aspect must be specified.
 
 This is expressed both as a Legality Rule (which handles most cases
-statically) and as a runtime check (which handles certain 
-obscure cases involving generic instance bodies which make it 
-past the legality rule). For an implementation which 
-macro-expands instance bodies, the outcome of this runtime 
+statically) and as a runtime check (which handles certain
+obscure cases involving generic instance bodies which make it
+past the legality rule). For an implementation which
+macro-expands instance bodies, the outcome of this runtime
 check is always known statically.
 
 The runtime check would be triggered in examples like the following:
@@ -721,5 +721,473 @@ trigger this Bounded Error for a derived type that has derived subprograms
 because of the infamous 13.1(10/3). Any case where the programmer wrote this
 explicitly would be better written with an explicit temporary (so they can leave
 it uninitialized if that's OK, or initialize explicitly however they need).
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, November 1, 2013  6:57 PM
+
+This AI was approved in Berlin but has been reopened largely because of the
+discovery of related problems involving access types (the original AI was about
+scalars).
+
+We have essentially the same problem with access types that this AI already
+addresses for scalars. As with a scalar type that has a default value, we want
+to ensure that the value that is passed in for an out-mode parameter of an
+access type will be a valid value of the type (but perhaps not the subtype) of
+the formal parameter.
+
+In the case where the actual parameter is a view conversion, several possible
+violations of this rule have been identified, as illustrated by the following
+examples:
+
+    -- a discriminant problem
+    declare
+       type T (D : Boolean := False) is -- no partial view
+          record
+             case D is
+                when False => null;
+                when True  => Foo : Integer;
+             end case;
+          end record;
+
+       type Unconstrained_Ref is access all T;
+       type Constrained_Ref is access all T (True);
+
+       X : aliased T;
+       X_Ref : Unconstrained_Ref := X'Access;
+
+       procedure P (X : out Constrained_Ref) is
+       begin
+          X.Foo := 123;
+            --  We don't want to require a discriminant
+            --  check here.
+          X := null;
+       end;
+    begin
+       P (Constrained_Ref (X_Ref));
+    end;
+
+    -- a tag problem
+    declare
+       type Root is tagged null record;
+       type Ext is new Root with record F : Integer; end record;
+
+       type Root_Ref is access all Root'Class;
+       type Ext_Ref is access all Ext;
+
+       procedure P (X : out Ext_Ref) is
+       begin
+          X.F := 123;
+            -- No tag check is performed here and
+            -- we don't want to add one.
+          X := null;
+       end;
+
+       R : aliased Root;
+       Ptr : Root_Ref := R'Access;
+    begin
+       P (Ext_Ref (Ptr));
+    end;
+
+    -- an accessibility problem
+    declare
+       type Int_Ref is access all Integer;
+       Dangler : Int_Ref;
+       procedure P (X : out Int_Ref) is
+       begin
+          Dangler := X;
+            -- No accessibility checks are performed here.
+            -- We rely here on the invariant that
+            -- a value of type Int_Ref cannot designate
+            -- an object with a shorter lifetime than Int_Ref.
+          X := null;
+       end;
+
+       procedure Q is
+          Local_Int : aliased Integer;
+          Standalone : access Integer := Local_Int'Access;
+       begin
+          P (Int_Ref (Standalone));
+       end;
+    begin
+       Q;
+       Dangler.all := 123;
+    end;
+
+Randy points out that there may also be implementation-dependent cases where a
+value of one general access type cannot be meaningfully converted to another
+type (e.g., given some notion of memory segments for some target, an
+implementation might choose to support a smaller type which can only point into
+one fixed "segment" and a larger type which can point into any "segment"; a
+value of the larger type which points into the wrong segment could not be
+meaningfully converted to the smaller type).
+
+What do we want to do with these cases?
+
+Analogous scalar cases are disallowed statically (by this AI). Dynamic checks
+are required in some corner cases involving expanded instance bodies, but the
+outcome of these checks is always known statically if an implementation
+macro-expands instances.
+
+Do we want to take the same approach here?
+
+Alternatively, we could allow these cases and, at runtime, pass in null (only in
+these cases that we would otherwise have to disallow).
+
+This would be inconsistent with our treatment of scalars, but it would also be
+less incompatible (compatibility was less of a concern in the scalar case
+because the Default_Value aspect was introduced in Ada2012). One could argue
+that access types have a null value, scalar types do not, and that this
+difference justifies the inconsistency.
+
+Opinions?
+
+I'd like to also mention one possible change that would apply to scalars too.
+In 4.6(56), should we add ", predicate, or null exclusion" in
+    without checking against any constraint {, predicate, or null exclusion} ?
+
+This is not essential since we get this right in 6.4.1 and the proposed wording
+for 4.6(56) does say "as described more precisely in 6.4.1". Perhaps the present
+(i.e. as given in version 1.5 of the AI) wording is fine. TBD.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 1, 2013  7:10 PM
+
+> Randy points out that there may also be implementation-dependent cases
+> where a value of one general access type cannot be meaningfully
+> converted to another type (e.g., given some notion of memory segments
+> for some target, an implementation might choose to support a smaller
+> type which can only point into one fixed "segment" and a larger type
+> which can point into any "segment"; a value of the larger type which
+> points into the wrong segment could not be meaningfully converted to
+> the smaller type).
+
+I don't consider this a valid implementation of general access types.
+Furthermore, it concerns architectures that are of interest only in museums. I
+do not think this concern should influence our thinking in any way.
+
+At the most, I would allow this as an AI-329^^^^^^RM 1.1.3(6) issue
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 1, 2013  7:38 PM
+
+...
+> > Randy points out that there may also be implementation-dependent
+> > cases where a value of one general access type cannot be
+> > meaningfully converted to another type (e.g., given some notion of
+> > memory segments for some target, an implementation might choose to
+> > support a smaller type which can only point into one fixed "segment"
+> > and a larger type which can point into any "segment"; a value of the
+> > larger type which points into the wrong segment could not be
+> > meaningfully converted to the smaller type).
+>
+> I don't consider this a valid implementation of general access types.
+
+Why not?
+
+> Furthermore, it concerns architectures that are of interest only in
+> museums.
+
+The x86 machine on my desk has segments. I'm pretty sure it's not in a museum.
+I've used code on this machine that used segments.
+
+The original problem came from a word-addressed machine. The C compiler used
+byte addresses for its pointers, and thus C convention general access types
+needed to use that representation. OTOH, Ada had no need for byte addresses
+(anything aliased could be word aligned) so it used much cheaper word pointers
+for it's (Ada convention) general access types. Ada allows these types to be
+interconverted, so the problem comes up. Admittedly, the machine on which this
+was a concern is (or should be) in a museum, but I thought there still were such
+machines in use.
+
+> I do not think this concern should influence our thinking in any way.
+
+I don't think it matters, because the problem also exists for scalar types and
+there are also the other issues that Steve identifies. I'd expect all of these
+problems (there are at least 6 separate problem cases) to be solved the same
+way, so whether or not *one* of them is critical isn't really the issue. It's
+the weight of the entire group.
+
+> At the most, I would allow this as an RM 1.1.3(6) issue
+
+That goes without saying, IMHO. It would be silly to insist that Ada use slower
+machine instructions if it doesn't have to do so. If the Standard did say that,
+I would expect any competent implementer to ignore it.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 1, 2013  8:13 PM
+
+>> Furthermore, it concerns architectures that are of interest only in
+>> museums.
+>
+> The x86 machine on my desk has segments. I'm pretty sure it's not in a
+> museum. I've used code on this machine that used segments.
+
+No modern code ever uses segments any more, the whole segmentation thing was a
+giant kludge to get more than 128K of memory on the original 8086. It was a
+brilliant invention, given Intel's insistence on maintainting 16-bit
+addressability ("no one could possibly need more than 64K memory, but just in
+case, we will split data and code to go up to 128K"). But using segmentation
+once you move to 32-bit addressing is IMO a total nonsense.
+
+> The original problem came from a word-addressed machine. The C
+> compiler used byte addresses for its pointers, and thus C convention
+> general access types needed to use that representation. OTOH, Ada had
+> no need for byte addresses (anything aliased could be word aligned) so
+> it used much cheaper word pointers for it's (Ada convention) general
+> access types. Ada allows these types to be interconverted, so the
+> problem comes up. Admittedly, the machine on which this was a concern
+> is (or should be) in a museum, but I thought there still were such machines in
+> use.
+
+Not as far as I know ... and as I said, if you have sufficiently weird
+architectures, you can always appeal to AI-327.
+
+> I don't think it matters, because the problem also exists for scalar
+> types and there are also the other issues that Steve identifies. I'd
+> expect all of these problems (there are at least 6 separate problem
+> cases) to be solved the same way, so whether or not *one* of them is
+> critical isn't really the issue. It's the weight of the entire group.
+
+Fair enough, and indeed it would be comfortable if all these problems have a
+common solution, which is what things seem to be tending to!
+
+>> At the most, I would allow this as an RM 1.1.3(6) issue
+>
+> That goes without saying, IMHO. It would be silly to insist that Ada
+> use slower machine instructions if it doesn't have to do so.
+
+These days, smooth interoperation with C and C++ is an absolute requirement in
+nearly all real world Ada applications, so in practice you use the C ABI for
+everything (In GNAT we even use the C++ ABI for dispatching operations etc, so
+that we can interoperate with C classes).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 1, 2013  7:49 PM
+
+...
+> What do we want to do with these cases?
+>
+> Analogous scalar cases are disallowed statically (by this AI).
+> Dynamic checks are required in some corner cases involving expanded
+> instance bodies, but the outcome of these checks is always known
+> statically if an implementation macro-expands instances.
+>
+> Do we want to take the same approach here?
+>
+> Alternatively, we could allow these cases and, at runtime, pass in
+> null (only in these cases that we would otherwise have to disallow).
+>
+> This would be inconsistent with our treatment of scalars, but it would
+> also be less incompatible (compatibility was less of a concern in the
+> scalar case because the Default_Value aspect was introduced in
+> Ada2012). One could argue that access types have a null value, scalar
+> types do not, and that this difference justifies the inconsistency.
+
+I don't like the idea of "deinitializing" an object to null if it fails one of
+these checks. This is the same problem that caused us to decide to go with a
+static check in the scalar case.
+
+Steve apparently does not like my original suggested solution, because he never
+seems to mention it even though I mention it in every private e-mail he has.
+
+That is, I think that such cases should be a bounded error, with the choices of
+Constraint_Error, Program_Error, or works without data loss. This would not
+necessarily depend on the value in question, so an implementation could always
+unconditionally raise Program_Error in such a case (hopefully with a warning
+that it is doing so), or the implementation could make the non-constraint checks
+on the way in and raise Constraint_Error if they fail.
+
+For the access case in particular, simply mandating that all of the
+non-constraint, non-exclusion checks are made on the way in would also work. The
+main reason we didn't want to do that for scalars was the possibility of invalid
+values, but for access types those can only happen from Chapter 13 stuff or from
+erroneous execution (access values are always initialized). This would require a
+bit of rewording in 4.6 and 6.4.1, but I think that was always the intent and
+the wording just doesn't reflect it.
+
+So there are at least 4 reasonable answers here; Steve is providing a false
+choice. (There is even a fifth choice, combining Bob's soft errors and some sort
+of runtime check if they are ignored.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, November 3, 2013  9:40 AM
+
+> ... Analogous scalar cases are disallowed statically (by this AI).
+> Dynamic checks are required in some corner cases involving expanded
+> instance bodies, but the outcome of these checks is always known
+> statically if an implementation macro-expands instances.
+>
+> Do we want to take the same approach here?
+
+Yes.
+
+> Alternatively, we could allow these cases and, at runtime, pass in
+> null (only in these cases that we would otherwise have to disallow).
+>
+> This would be inconsistent with our treatment of scalars, but it would
+> also be less incompatible (compatibility was less of a concern in the
+> scalar case because the Default_Value aspect was introduced in
+> Ada2012). One could argue that access types have a null value, scalar
+> types do not, and that this difference justifies the inconsistency.
+>
+> Opinions?
+
+Make the rule essentially identical to the scalar case, and not worry about the
+extremely obscure compatibility issue.  If anything, substituting "null" is
+scarier in my view, and not really "compatible" as far as run-time semantics.
+
+>
+> I'd like to also mention one possible change that would apply to scalars too.
+> In 4.6(56), should we add ", predicate, or null exclusion" in
+>     without checking against any constraint {, predicate, or null exclusion}
+> ?
+
+Seems fine.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, November 3, 2013  9:44 AM
+
+> For the access case in particular, simply mandating that all of the
+> non-constraint, non-exclusion checks are made on the way in would also work. ...
+
+I like this idea.  Basically, ensure that, after conversion, it will be a legal
+value of the *type* but not necessarily of the subtype.
+
+I am also fine with treating them identically to scalars.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, November 3, 2013  10:15 AM
+
+> Make the rule essentially identical to the scalar case, and not worry
+> about the extremely obscure compatibility issue.  If anything,
+> substituting "null" is scarier in my view, and not really "compatible" as far
+> as run-time semantics.
+
+Do we have data on the "extremely obscure" here, how many existing programs
+would be affected?
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, November 4, 2013  11:53 AM
+
+> I don't like the idea of "deinitializing" an object to null if it
+> fails one of these checks. This is the same problem that caused us to
+> decide to go with a static check in the scalar case.
+
+I agree with you, but "deinitializing" is one of the fall-back options if we
+decide that the  compatibility issues are different enough in the access case
+that the reasoning we used in the scalar case does not apply.
+
+I favor treating access values and scalars consistently (i.e., in the way that
+we have already settled on for scalars), but other alternatives do seem worth
+mentioning.
+
+> Steve apparently does not like my original suggested solution, because
+> he never seems to mention it even though I mention it in every private
+> e-mail he has.
+>
+> That is, I think that such cases should be a bounded error, with the
+> choices of Constraint_Error, Program_Error, or works without data loss.
+
+You're right, I don't like this (for the obvious portability reasons).
+
+> For the access case in particular, simply mandating that all of the
+> non-constraint, non-exclusion checks are made on the way in would also work.
+
+I agree that converting the incoming value to the base type of the parameter
+(not to the first named subtype) would work. The point of the
+basetype/first-named-subtype distinction is that subtype-specific properties
+(e.g., predicates, null exclusions) would be ignored while type-specific
+properties (e.g., designated subtype, accessibility level) would be checked,
+which is just what we need.
+
+As a variation on this approach, we could have a dynamic semantics rule that the
+you get copy-in if this conversion succeeds and null (instead of an exception)
+if the incoming value is not convertible to the basetype. Would silently passing
+in null be preferable to raising an exception?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, November 4, 2013  12:09 PM
+
+> As a variation on this approach, we could have a dynamic semantics
+> rule that the you get copy-in if this conversion succeeds and null
+> (instead of an exception) if the incoming value is not convertible to
+> the basetype. Would silently passing in null be preferable to raising
+> an exception?
+
+No, not as far as I am concerned.  Problems like this should be advertised, not
+silently ignored in my view.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 4, 2013  12:21 PM
+
+> > As a variation on this approach, we could have a dynamic semantics
+> > rule that the you get copy-in if this conversion succeeds and null
+> > (instead of an exception) if the incoming value is not convertible
+> > to the basetype. Would silently passing in null be preferable to
+> > raising an exception?
+>
+> No, not as far as I am concerned.  Problems like this should be
+> advertised, not silently ignored in my view.
+
+I agree with Tuck here. And this is likely to be a rare case (conversion of an
+out parameter in a call to an access type with different properties - remember
+this is only for "out" parameters, "in out" is unchanged).
+
+The problem with the compile-time check is that it will reject programs which
+are perfectly fine (where the object is null, for instance). And while this
+should be rare, this problem has been in the language back to Ada 83, so there
+is a vast universe of code that could be affected. It's hard to know what the
+result is when you multiply a very small number (probability of occurrence)
+times a very large number (all Ada code ever written).
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, November 4, 2013  1:13 PM
+
+>> No, not as far as I am concerned.  Problems like this should be
+>> advertised, not silently ignored in my view.
+>
+> I agree with Tuck here.
+
+As noted previously, my first choice is to be consistent with the treatment of
+scalars (I think the three of us agree on this point) and deal with the issue
+statically.
+
+But let's still take a look at pass-in-null vs. raise-an-exception.
+
+> The problem with the compile-time check is that it will reject
+> programs which are perfectly fine
+
+This argues for pass-in-null over raise-an-exception.
+
+99% of the time (and even more often among programmers who bathe and floss
+regularly) the incoming value of an out-mode parameter of an elementary type is
+dead (I'm talking about "real" code here, not compiler tests).
+
+Raising an exception, as opposed to silently passing in null, penalizes the
+overwhelmingly common case.
 
 ****************************************************************
