@@ -1,0 +1,416 @@
+!standard 5.5.2(10/3)                                  13-11-12  AI05-0093-1/01
+!class binding interpretation 13-11-12
+!status work item 13-11-12
+!status received 13-11-04
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Iterator with discriminated cursor
+
+!summary
+
+** TBD.
+
+!question
+
+Consider a cursor with a discriminant (the following example is simplified
+from a cursor that returned a variable length string, for a real example):
+
+with
+  Ada.Iterator_Interfaces;
+
+package Discriminated is
+   type Cursor (<>) is private;
+   function Has_Element (Position : Cursor) return Boolean;
+
+   package Iterator is new Ada.Iterator_Interfaces
+     (Cursor, Has_Element);
+   function Create return Iterator.Forward_Iterator'Class;
+
+private
+   type Cursor (Length : Natural) is
+      record
+         Value  : String (1..Length);
+      end record;
+end Discriminated;
+
+package body Discriminated is
+
+   type Null_Iterator is new Iterator.Forward_Iterator with Null record;
+   function First (Object : Null_Iterator) return Cursor;
+   function Next  (Object : Null_Iterator;
+                   Position : Cursor) return Cursor;
+
+   function First (Object : Null_Iterator) return Cursor is
+   begin
+      return (Length => 3, Value => "One");
+   end First;
+
+   function Next (Object : Null_Iterator;
+                  Position : Cursor) return Cursor is
+      pragma Unreferenced (Object);
+      pragma Unreferenced (Position);
+   begin
+      return (Length => 0, Value => "");
+   end Next;
+
+   function Has_Element (Position : Cursor) return Boolean is
+   begin
+      return Position.Length /= 0;
+   end Has_Element;
+
+   function Create return Iterator.Forward_Iterator'Class is
+   begin
+      return Null_Iterator'(null record);
+   end Create;
+end Discriminated;
+
+with Discriminated;
+procedure T_Discriminated is
+   use Discriminated;
+begin
+   for C in Create loop
+      null;
+   end loop;
+end T_Discriminated;
+
+According to 5.5.2(10/3), the loop parameter is first created, then successive
+values are assigned to it by calls to Next. If the objects return by Next have
+a discriminant that is not equal to the one of the object returned by First,
+Constraint_Error is raised because of the discriminant check. Is this intended
+behaviour? (No.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+GNAT raises Constraint_Error as described on this example.
+
+This example seems quite a natural use of cursors, it happened in a cursor that
+was intended to parse a parameter string and return successive parameters. It
+could be fixed by saying that a new loop parameter is elaborated each time
+around the loop.
+
+[Editor's note: It's completely clear that cursors were intended to be
+definite; the original specification of the package didn't allow indefinite
+types. The wording reflected this. When the last-minute change to use a
+generic incomplete type was made, we inadvertently allowed indefinite types.
+
+There seem to be two clear fixes: (1) to add back the restriction that the
+type be definite. (Note that this seems to be a problem with generic formal
+incomplete types in general; it's unlikely to occur only with this example.
+It will happen any time something is generalized by replacing a generic
+formal private type with a generic formal incomplete type.) (2) redo the
+semantics to allow indefinite types. This would complicate the memory
+management and finalization of the object. (Steve pointed out that the
+accessibility of this object isn't defined, and that matters for finalization
+purposes.) There isn't a clear choice between these; the later is more
+capable for users but much more complicated for implementors. End Editor's
+note.]
+
+!ASIS
+
+No changes needed.
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Jean-Pierre Rosen
+Sent: Monday, November 4, 2013  6:34 AM
+
+[This was version /01 of the AI (without the "** TBD"s and Editor's notes),
+and nothing else.]
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, November 4, 2013  3:08 PM
+
+> According to 5.5.2(10/3), the loop parameter is first created, then
+> successive values are assigned to it by calls to Next. If the objects
+> return by Next have a discriminant that is not equal to the one of the
+> object returned by First, Constraint_Error is raised because of the
+> discriminant check. Is this intended behaviour?
+
+Whether it was intended or not, it appears that this follows from the current
+wording.
+
+We've got
+   In a forward generalized iterator, the operation First of the
+   iterator type is called on the loop iterator, to produce the
+   initial value for the loop parameter.
+
+In the case where the Cursor type is indefinite, this wording doesn't explicitly
+say that the loop parameter is constrained by its initial value, but I think
+this is clear (although I wouldn't argue against an AARM note to clarify this
+point).
+
+There is a similar micro-issue with the rule that
+   The tag of an object of a class-wide tagged type is that of its
+   initialization expression.
+in the case where the Cursor type is class-wide. It also appears to go without
+saying that the tag is inherited from the initialization expression in the
+class-wide case.
+
+The wording for successive iterations then explicitly talks about
+assignment:
+   "... to produce the next value to be assigned to the loop parameter".
+There is no suggestion that any special kind of assignment is used here; the
+usual checks are performed and you get your Constraint_Error.
+
+Seems clear to me.
+
+P.S. Strictly speaking, I don't see a definition for the accessibility level of
+the loop parameter. Still strictly speaking, this calls into question the
+finalization of the loop parameter (recall that finalization of a master, such
+as a loop statement, includes finalization of "each object whose accessibility
+level is the same as that of the master").
+
+I'm reluctant to deal with accessibility questions by just appealing to common
+sense (this might be a bit of an understatement). I'd like to see a definition
+for this case (or perhaps it is already there and I'm just missing it); this
+definition would presumably also cover the case of an iterator_specification
+which occurs in a quantified expression.
+
+I doubt that any of this will affect a line of code in any comnpiler (other than
+perhaps to remind implementors that the case exists) but accessibility levels
+still ought to be defined explicitly.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, November 4, 2013  3:29 PM
+
+> According to 5.5.2(10/3), the loop parameter is first created, then
+> successive values are assigned to it by calls to Next. If the objects
+> return by Next have a discriminant that is not equal to the one of the
+> object returned by First, Constraint_Error is raised because of the
+> discriminant check. Is this intended behaviour?
+
+I would say that we didn't consider this case, but that it would be preferable
+if each iteration got a new object, which was finalized at the end of the
+iteration.  This would eliminate this problem, as well as the one that Steve
+mentioned relating to class-wide types.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 4, 2013  3:43 PM
+
+> > According to 5.5.2(10/3), the loop parameter is first created, then
+> > successive values are assigned to it by calls to Next. If the
+> > objects return by Next have a discriminant that is not equal to the
+> > one of the object returned by First, Constraint_Error is raised
+> > because of the discriminant check. Is this intended behaviour?
+>
+> Whether it was intended or not, it appears that this follows from the
+> current wording.
+
+Right. And the current wording stems from the fact that the intent was that type
+Cursor is definite. A cursor is supposed to be a reference to some data, not the
+data itself, and as such it doesn't really make sense for it to be indefinite
+(especially as we need to declare an object of the type). Moreover, to keep loop
+overhead to a minimum, we want to allocate only one loop object (not one per
+iteration).
+
+Early versions of the AI (I'm looking at version 1.11) had "type Cursor is
+private", which does not match an indefinite type (12.5.1(6/3)).
+
+It appears that we started allowing indefinite types when we changed the Cursor
+type to incomplete. That was an inadvertent change, I think (the entire formal
+incomplete thing was a last-minute change to address container issues).
+
+The question will have to remain whether we actually want to support such types
+(as J-P is advocating) or whether we want to leave the wording alone and have
+the fact that such types are allowed remain a useless curiosity. (I lean toward
+the latter.) It's unfortunate that we don't have a way to force Cursor to be
+definite given that it is incomplete. (That seems like a more general issue than
+just in this specification, but whether we actually want to fix it I don't
+know.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 4, 2013  3:47 PM
+
+> I would say that we didn't consider this case, but that it would be
+> preferable if each iteration got a new object, which was finalized at
+> the end of the iteration.  This would eliminate this problem, as well
+> as the one that Steve mentioned relating to class-wide types.
+
+We didn't consider it because type Cursor is supposed to be definite, as
+outlined in my last message. I'd prefer to reintroduce that restriction, but how
+to accomplish that is an interesting problem. I don't like the "one object per
+interation" semantics because it would cause a lot more loop overhead, and it's
+an abuse of Cursor (which means "reference", after all) to actually include the
+data as in J-P's example.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, November 5, 2013  2:50 AM
+
+> Whether it was intended or not, it appears that this follows from the
+> current wording.
+Sure. That's why I wrote an AI rather than send a bug report to AdaCore (which
+was my initial intent).
+
+Randy:
+> We didn't consider it because type Cursor is supposed to be definite,
+> as outlined in my last message. I'd prefer to reintroduce that
+> restriction, but how to accomplish that is an interesting problem. I
+> don't like the "one object per interation" semantics because it would
+> cause a lot more loop overhead, and it's an abuse of Cursor (which
+> means "reference", after all) to actually include the data as in J-P's example.
+
+1) I would say it is a use of cursors that we didn't anticipate. As a naive and
+casual user (almost), I found it convenient to get the values directly off the
+cursor, instead of requiring a Get function. Sometimes, it happens that you
+design a feature and discover later that it is more powerful than you initially
+thought.
+
+2) The reelaboration on each iteration is closer to what happens with a regular
+loop, with a constant whose value changes each time around. OK, you can argue
+that it's not a constant but a constant view of a variable...
+
+3) The overhead you mention is needed only in the case of indefinite types.
+Seems to me that a compiler could easily optimize out the reelaboration for
+definite types.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, November 5, 2013  3:09 AM
+
+The idea of an indefinite cursor seems bizarre to me.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, November 5, 2013  8:46 AM
+
+> 1) I would say it is a use of cursors that we didn't anticipate. As a
+> naive and casual user (almost), I found it convenient to get the
+> values directly off the cursor, instead of requiring a Get function.
+> Sometimes, it happens that you design a feature and discover later
+> that it is more powerful than you initially thought.
+
+I agree that that happens pretty frequently.  Whether we want to encourage this
+particular "extension" of the cursor idea is a good question.
+
+> 2) The reelaboration on each iteration is closer to what happens with
+> a regular loop, with a constant whose value changes each time around.
+> OK, you can argue that it's not a constant but a constant view of a variable...
+
+Interestingly, once you start considering "parallel" loops, each iteration
+definitely needs its own copy of the loop variable, since the iterations might
+be proceeding concurrently with one another.  This comes up in "ParaSail," and
+each iteration is treated more like an invocation of a subprogram, where the
+loop variable is like an IN parameter to the loop body.
+
+> 3) The overhead you mention is needed only in the case of indefinite
+> types. Seems to me that a compiler could easily optimize out the
+> reelaboration for definite types.
+
+Good point.  This is certainly a pretty straightforward optimization.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, November 5, 2013  9:15 AM
+
+> Interestingly, once you start considering "parallel" loops, each
+> iteration definitely needs its own copy of the loop variable, since
+> the iterations might be proceeding concurrently with one another.
+> This comes up in "ParaSail," and each iteration is treated more like
+> an invocation of a subprogram, where the loop variable is like an IN
+> parameter to the loop body.
+
+For parallel loops, I would say not necessarily that each iteration needs its
+own copy, but there can be multiple copies, one for each worker, where a worker
+might be responsible for its "chunk" of iterations, which is the approach that I
+take in the Paraffin open source project.
+
+But when it comes to parallel loops, one might view this as separate loop
+instances where each loop has its own single loop variable, so I am not sure
+that parallelism impacts the original concept of a single loop variable instance
+across multiple iterations.
+
+>
+> > 3) The overhead you mention is needed only in the case of indefinite
+> > types. Seems to me that a compiler could easily optimize out the
+> > reelaboration for definite types.
+>
+> Good point.  This is certainly a pretty straightforward optimization.
+
+I think J.P's suggestion seems like it could be a good one so long as it doesn't
+impact overhead of loops for the general case. If it does, then I think the
+appeal of this idea drops quickly.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 12, 2013  8:23 PM
+
+...
+> > We didn't consider it because type Cursor is supposed to be
+> > definite, as outlined in my last message. I'd prefer to reintroduce
+> > that restriction, but how to accomplish that is an interesting
+> > problem. I don't like the "one object per interation" semantics
+> > because it would cause a lot more loop overhead, and it's an abuse
+> > of Cursor (which means "reference", after all) to actually include the data as in J-P's example.
+>
+> 1) I would say it is a use of cursors that we didn't anticipate. As a
+> naive and casual user (almost), I found it convenient to get the
+> values directly off the cursor, instead of requiring a Get function.
+> Sometimes, it happens that you design a feature and discover later
+> that it is more powerful than you initially thought.
+
+We (at least *I*) considered and rejected such uses of cursors. Such things are
+not *cursors* by any stretch of imagination; if we wanted to support that sort
+of functional programming we would have needed very different terminology.
+
+> 2) The reelaboration on each iteration is closer to what happens with
+> a regular loop, with a constant whose value changes each time around.
+> OK, you can argue that it's not a constant but a constant view of a
+> variable...
+
+Yes, but...
+
+> 3) The overhead you mention is needed only in the case of indefinite
+> types. Seems to me that a compiler could easily optimize out the
+> reelaboration for definite types.
+
+Not easily, because the reelaboration includes having to finalize and
+re-initialize the object on every iteration. That's visible even for definite
+types. One could special case "definite types that only involve trivial
+finalization", I suppose, but that's going to be a fairly large chunk of code
+that would have to repeated. Twice as many chances for errors and the like.
+Three times if you want to avoid using dynamic allocation of some sort for the
+loop parameter (definite w/o finalization, definite w/ finalization,
+indefinite).
+
+The primary point of the existing semantics is to avoid finalization overhead
+for cursor objects other that at the end of the loop, and to make the memory
+allocation simple.
+
+I can see the utility of allowing indefinite types in loops (it's always better
+for the user to allow the maximum possible), but we never considered any of the
+ramifications of that. I'd be stunned if there aren't lots of problems that come
+from that. I'm very much against a large expansion of the capabilities here
+without much consideration simply because of a last-minute change that was
+insufficiently considered.
+
+P.S. Doesn't the use of a formal incomplete type allow limited types to match as
+well? How does that work?
+
+****************************************************************
