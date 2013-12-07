@@ -1,4 +1,4 @@
-!standard 3.2.4(6/3)                              13-06-15    AI12-0071-1/02
+!standard 3.2.4(6/3)                              13-11-14    AI12-0071-1/03
 !class binding interpretation 13-05-31
 !status work item 13-05-31
 !status received 13-02-12
@@ -30,58 +30,125 @@ Should we define the order in which this evaluation is performed? (Yes.)
 
 !wording
 
+This wording assumes AI12-0054/2 (which defines the Predicate_Failure aspect).
+---
+
 Modify AARM 3.2.4(14.b/3) "cam" => "can".
 
-Modify 3.2.4(6/3):
-    "The predicate of a subtype consists of all predicate specifications
-     that apply, and-ed together {as described below};"
+In 3.2.4(4/3) replace
+  For a (first) subtype defined by a derived type declaration
+with
+  For a (first) subtype defined by a type_declaration
 
-Insert before 3.2.4(30/3) [the beginning of the dynamic semantics section]:
+[I believe there is no problem here with anonymous subtypes,
+even though an anonymous task/protected type can have progenitors
+that have predicates].
 
-   Testing whether a given value satisfies the predicate of a given
-   subtype consists of a series of other tests,
-   performed in the order described below. If any one of these
-   tests fails, then the value does not satisfy the predicate
-   of the subtype and no further evaluation is performed.
-   If all the these tests pass, then the value satisfies the
-   predicate of the subtype.
+Delete 3.2.4(6/3) (see dynamic semantics)
+   The predicate of a subtype consists of all predicate specifications
+   that apply, and-ed together; if no predicate specifications apply,
+   the predicate is True [(in particular, the predicate of a base
+   subtype is True)].
 
-   First, a test is performed that the value satisfies any constraints or
-   null exclusions of the given subtype. This test need not be performed
-   in the case of a predicate test for one subtype that is part (as
-   described below) of a predicate test for another subtype,
-   [If S2 is a subtype of S1 and we have already established that the
-    constraints and null exclusions of S2 are satisfied, testing those
-    of S1 would be redundant.]
+Replace 3.2.4(30-33/3) (the entire Dynamic Semantics section, including
+AARM notes) with:
 
-   Next:
-     - For a (first) subtype defined by a derived type declaration,
-       test (in an unspecified order) whether the value satisfies the
-       predicate of the parent subtype and of each of the progenitor
-       subtypes.
+  If any of the above Legality Rules is violated in an instance of a
+  generic unit, Program_Error is raised at the point of the violation.
 
-     - For a subtype defined by a subtype indication, test whether
-       the value satisfies the predicate of the subtype denoted
-       by the subtype_mark.
+  To determine whether a value *satisfies the predicates* of a subtype S,
+  the following tests are performed in the following order, until one of
+  the tests fail, in which case the predicates are not satisfied and no further
+  tests are performed, or all of the tests succeed, in which case the
+  predicates are satisfied:
 
-    Finally, if the subtype is defined by a declaration to which
-    at least one predicate specification applies, test (in an
-    unspecified order [if both a static and a dynamic predicate
-    are specified]) whether evaluation of each of the specified
-    predicates yields True for the given value.
+     * the value is first tested whether it satisfies any constraints or
+       any null exclusion of S;
 
-    [In other words, constraints and null exclusions are checked first,
-     then inherited predicates (recursively applying the same
-     ordering rules) and finally directly specified predicates.
-     In the case of declaring a subtype S2 of a subtype S1 where,
-     for example, the predicate of S2 passes the current
-     instance to a function whose formal parameter subtype is S1,
-     this ordering means that the function will not be invoked until
-     after the given value's membership in S1 has been established.]
+     * then:
 
-AARM Ramification: Of course, a compiler can always reorder the operations
-if it can prove that doing so doesn't change the result of the program (a
-so-called "as-if" optimization).
+         + if S is the first subtype of a derived type, the value is tested
+           whether it satisfies the predicates of the parent subtype and
+           of any of the progenitor subtypes of S (in an arbitrary order);
+
+         + if S is defined by a subtype_indication, the value is tested
+           whether it satisfies the predicates of the subtype denoted by
+           the subtype_mark of the subtype_indication;
+
+     * finally, if S is defined by a declaration to which
+       one or more predicate specifications apply, the predicates
+       are evaluated (in an arbitrary order) to test that all of them yield
+       True for the given value.
+
+    [AARM Discussion: It is important to stop on the first failing test as
+     later tests might presume that the earlier tests had succeeded.]
+
+   If predicate checks are enabled for a given subtype, then:
+
+     * On every subtype conversion, a check is performed that the operand
+       satisfies the predicates of the target subtype. This includes all
+       parameter passing, except for certain parameters passed by
+       reference, which are covered by the following rule: After normal
+       completion and leaving of a subprogram, for each in out or out
+       parameter that is passed by reference, a check is performed that
+       the value of the parameter satisfies the predicates of the subtype
+       of the actual. For an object created by an object_declaration
+       with no explicit initialization expression, or by an
+       uninitialized allocator, if any subcomponents have
+       default_expressions, a check is performed that the value of the
+       created object satisfies the predicates of the nominal subtype.
+
+     * If any of the predicate checks fail, Assertion_Error is raised, unless
+       the subtype whose directly-specified predicate aspect evaluated
+       to False also has a directly-specified Predicate_Failure aspect.
+       In that case, the specified Predicate_Failure expression is
+       evaluated; if the evaluation of the Predicate_Failure expression
+       propagates an exception occurrence, then this occurrence is
+       propagated for the failure of the predicate check; otherwise,
+       Assertion_Error is raised, with an associated message string
+       defined by the value of the Predicate_Failure expression. In the
+       absence of such a Predicate_Failure aspect, an
+       implementation-defined message string is associated with the
+       Assertion_Error exception.
+
+
+Modify 4.5.2(29/3-30-3) as follows:
+
+  The membership_choice is a subtype_mark, the tested type is scalar,
+  the value of the simple_expression belongs to the range of the named
+  subtype, and the {value satisfies the} predicate{s} of the named
+  subtype [evaluates to True].
+
+  The membership_choice is a subtype_mark, the tested type is not
+  scalar, the value of the simple_expression satisfies any constraints
+  of the named subtype, the {value satisfies the} predicate{s} of the
+  named subtype [evaluates to True], and:
+
+BIG NOTE: We need to look for all uses of "predicate" and uniformly talk about
+"satisfying the predicates of a subtype" rather than "evaluating the predicate."
+A search for "predicate" finds about 7 places that will need to be fixed.
+
+In 13.9.2(3/3),
+
+   X'Valid
+   Yields True if and only if the object denoted by X is normal and
+   has a valid representation, and {then, if the preceding conditions
+   hold, the value of X also satisfies} the predicate{s} of the nominal
+   subtype of X [evaluates to True].
+
+In 13.9.2(12), replace
+   X'Valid is not considered to be a read of X; hence, it is not an
+   error to check the validity of invalid data.
+with
+   Determining whether X is normal and has a valid representation
+   as part of the evaluation of X'Valid is not considered to include
+   an evaluation of X; hence, it is not an error to check
+   the validity of an object that is invalid or abnormal.
+   [Determining whether X satisfies the predicates of its nominal
+   subtype may include an evaluation of X, but only after
+   it has been determined that X has a valid representation.]
+
+   If X is volatile, the evaluation of X'Valid is considered a read of X.
 
 !discussion
 
@@ -613,5 +680,27 @@ Ok to mention raise_expressions in this way?
 In 3.2.4(31/3), slap square brackets around
      Assertions.Assertion_Error is raised if any of these checks fail.
 because this is now redundant.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, November 14, 2013  11:32 PM
+
+Here is a re-write of AI12-0071.  Steve proposed some wording, but I ended up
+pretty much rewriting it completely.  I also adopted the phraseology of "value
+satisfies the predicates of subtype S".  Note the use of the plural "predicates"
+and the term "satisfies" (which Steve also proposed) rather than talking about a
+predicate "evaluating to True."
+
+[Editor's note: This is version /03 of the AI.
+
+Steve had written the following in his incomplete draft:
+
+The chapter 13 wording below is post-Berlin stuff we have not discussed
+previously. I was talking about validity/volatility interactions
+with Randy and he pointed out that this AI would be a good place to
+address those issues.
+
+End Editor's notes]
 
 ****************************************************************
