@@ -1,15 +1,15 @@
-!standard 5.5.2(10/3)                                  13-11-12  AI05-0093-1/01
-!class binding interpretation 13-11-12
+!standard 5.5.2(10/3)                                  13-11-16  AI05-0093-1/02
+!class ramification 13-11-12
 !status work item 13-11-12
 !status received 13-11-04
 !priority Low
 !difficulty Medium
 !qualifier Omission
-!subject Iterator with discriminated cursor
+!subject Iterator with indefinite cursor
 
 !summary
 
-** TBD.
+No special rules are defined to allow indefinite cursors to work properly.
 
 !question
 
@@ -80,39 +80,71 @@ a discriminant that is not equal to the one of the object returned by First,
 Constraint_Error is raised because of the discriminant check. Is this intended
 behaviour? (No.)
 
-!recommendation
-
-(See Summary.)
-
-!wording
-
-** TBD.
-
-!discussion
+!response
 
 GNAT raises Constraint_Error as described on this example.
 
-This example seems quite a natural use of cursors, it happened in a cursor that
-was intended to parse a parameter string and return successive parameters. It
-could be fixed by saying that a new loop parameter is elaborated each time
-around the loop.
+The fix suggested by the questioner was that we redo the definition to say
+that a new loop parameter is elaborated each time around the loop. However,
+that does not work, because the Next function takes the previous cursor as
+a parameter, and returns the new cursor. The implementation would have to
+have two cursor objects, and switch between them for iterations; or we
+could define some sort of required tail-recursion optimization. Neither of
+these seems at all appealing.
 
-[Editor's note: It's completely clear that cursors were intended to be
-definite; the original specification of the package didn't allow indefinite
-types. The wording reflected this. When the last-minute change to use a
-generic incomplete type was made, we inadvertently allowed indefinite types.
+Moreover, cursors were intended to be definite; the original specification of
+the package didn't allow indefinite types. The wording reflected this. When
+the last-minute change to use a generic incomplete type was made, we
+inadvertently allowed indefinite types.
 
-There seem to be two clear fixes: (1) to add back the restriction that the
-type be definite. (Note that this seems to be a problem with generic formal
-incomplete types in general; it's unlikely to occur only with this example.
-It will happen any time something is generalized by replacing a generic
-formal private type with a generic formal incomplete type.) (2) redo the
-semantics to allow indefinite types. This would complicate the memory
-management and finalization of the object. (Steve pointed out that the
-accessibility of this object isn't defined, and that matters for finalization
-purposes.) There isn't a clear choice between these; the later is more
-capable for users but much more complicated for implementors. End Editor's
-note.]
+So we make no change to the defined semantics. The loop parameter is defined
+as a variable which of which we have a constant view (the only assignments
+are part of the loop). We add a pair of AARM ramifications to more clearly
+define the accessibility of the loop parameter and the initialization of
+the loop parameter.
+
+As this was being written up, it was noted that formal incomplete types match
+the category of ALL types -- see 12.5.1(18.1/3). That means that LIMITED types
+also could be used as a cursor. While the instantiation would be legal, the
+expansion into a loop would be illegal because the implicit assignment to the
+loop parameter described in 5.52(10/3) is illegal. A note was also added to
+this effect.
+
+!wording
+
+Add after 5.5.2(8/3):
+
+AARM Ramification: The loop parameter of a generalized iterator has the same
+accessibility as the loop statement. This means that the loop parameter object
+is finalized when the loop statement is left. (It also may be finalized as
+part of assigning a new value to the loop parameter.) For array component
+iterators and container element iterators, the loop parameter directly denotes
+an element of the array or container and has the accessibility of the
+associated array or container.
+
+Add after 5.5.2(10/3):
+
+AARM Ramification: The loop parameter of a generalized iterator is a variable
+of which the user only has a constant view. It follows the normal rules for a
+variable of its nominal subtype. In particular, if the nominal subtype is
+indefinite, the variable is constrained by its initial value. Similarly, if
+the nominal subtype is class-wide, the variable (like all variables) has the
+tag of the initial value. Constraint_Error may be raised by a subsequent
+iteration if Next or Previous return an object with a different tag or
+constraint.
+
+Note that the cursor type of a generalized iterator can be a limited type.
+The instantiation and subsequent use of the interfaces in an instance of
+Ada.Iterator_Interfaces is still legal in that case because a limited type
+matches the formal incomplete type of the generic. But any use of an iterator
+type descended from such an interface in a loop will be illegal, because the
+implicit assignment to the loop parameter implied by such an interface is
+illegal.
+End AARM Ramification.
+
+!discussion
+
+(See response.)
 
 !ASIS
 
@@ -120,7 +152,8 @@ No changes needed.
 
 !ACATS test
 
-** TBD.
+None needed specifically for this AI. (One could test that a loop involving
+a limited cursor is illegal, but that seems to be of little value.)
 
 !appendix
 
@@ -181,7 +214,7 @@ for this case (or perhaps it is already there and I'm just missing it); this
 definition would presumably also cover the case of an iterator_specification
 which occurs in a quantified expression.
 
-I doubt that any of this will affect a line of code in any comnpiler (other than
+I doubt that any of this will affect a line of code in any compiler (other than
 perhaps to remind implementors that the case exists) but accessibility levels
 still ought to be defined explicitly.
 
@@ -412,5 +445,17 @@ insufficiently considered.
 
 P.S. Doesn't the use of a formal incomplete type allow limited types to match as
 well? How does that work?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, November 16, 2013  10:21 PM
+
+Attached is a rewrite of this AI as discussed today. [This is version /02 of
+the AI - Ed.]
+
+Note that if one thinks that the indefinite cursor case is weird, the limited
+cursor case is weirder. But again the effect can follow directly from the
+expansion of the rules in 5.5.2(10/3). Perhaps this is *too* weird.
 
 ****************************************************************
