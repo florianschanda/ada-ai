@@ -1,4 +1,4 @@
-!standard 3.2.4(6/3)                              13-11-14    AI12-0071-1/03
+!standard 3.2.4(6/3)                              13-11-15    AI12-0071-1/04
 !class binding interpretation 13-05-31
 !status work item 13-05-31
 !status received 13-02-12
@@ -9,10 +9,14 @@
 
 !summary
 
-If multiple predicates, constraints, and exclusions apply to a subtype when a
-check is required, the predicates, constraints, and exclusions are checked in
-the order that they are declared (the order is unspecified within a single
-declaration and between checks for different subtypes.
+If multiple predicates apply to a subtype when a check is required, then
+after checking the constraints and exclusions, the predicates
+are checked in an order that ensures that a predicate is not evaluated
+until any prior predicates evaluate to True. The order is unspecified
+for predicates that are defined or inherited as part of a single declaration.
+
+The phrase "satisfies the predicates of a subtype" means that all relevant
+predicates evaluate to True.
 
 !question
 
@@ -30,28 +34,24 @@ Should we define the order in which this evaluation is performed? (Yes.)
 
 !wording
 
-This wording assumes AI12-0054/2 (which defines the Predicate_Failure aspect).
----
+Modify 3.2.4(4/3):
+  For a (first) subtype defined by a [derived type declaration]
+  {type_declaration}
 
-Modify AARM 3.2.4(14.b/3) "cam" => "can".
-
-In 3.2.4(4/3) replace
-  For a (first) subtype defined by a derived type declaration
-with
-  For a (first) subtype defined by a type_declaration
-
-[I believe there is no problem here with anonymous subtypes,
+[Steve says: I believe there is no problem here with anonymous subtypes,
 even though an anonymous task/protected type can have progenitors
 that have predicates].
 
-Delete 3.2.4(6/3) (see dynamic semantics)
+Delete 3.2.4(6/3) (see dynamic semantics), which says the following:
+
    The predicate of a subtype consists of all predicate specifications
    that apply, and-ed together; if no predicate specifications apply,
    the predicate is True [(in particular, the predicate of a base
    subtype is True)].
 
-Replace 3.2.4(30-33/3) (the entire Dynamic Semantics section, including
-AARM notes) with:
+Modify AARM 3.2.4(14.b/3) "cam" => "can".
+
+Replace the dynamic semantics section 3.2.4(30/3-33/3) with:
 
   If any of the above Legality Rules is violated in an instance of a
   generic unit, Program_Error is raised at the point of the violation.
@@ -61,6 +61,7 @@ AARM notes) with:
   the tests fail, in which case the predicates are not satisfied and no further
   tests are performed, or all of the tests succeed, in which case the
   predicates are satisfied:
+
 
      * the value is first tested whether it satisfies any constraints or
        any null exclusion of S;
@@ -80,8 +81,9 @@ AARM notes) with:
        are evaluated (in an arbitrary order) to test that all of them yield
        True for the given value.
 
-    [AARM Discussion: It is important to stop on the first failing test as
-     later tests might presume that the earlier tests had succeeded.]
+    [AARM Discussion: It is important to stop on the first of the above steps
+     that fails, as later steps might presume that the earlier steps had
+     succeeded.]
 
    If predicate checks are enabled for a given subtype, then:
 
@@ -111,6 +113,44 @@ AARM notes) with:
        implementation-defined message string is associated with the
        Assertion_Error exception.
 
+Add a NOTE after 3.2.4(33/3):
+
+       No predicates apply to the base subtype of a scalar type, so
+       every value of a scalar type T is considered to satisfy the
+       predicates of T'Base.
+
+Modify 3.5.5(7.1/3-7.3/3) as follows:
+
+  For every static discrete subtype S for which there exists at least
+  one value belonging to S that satisfies [any] {the} predicate{s} of S, the
+  following attributes are defined:
+
+    S'First_Valid
+
+      S'First_Valid denotes the smallest value that belongs to S and
+      satisfies the predicate{s} of S. The value of this attribute is of
+      the type of S.
+
+    S'Last_Valid
+
+      S'Last_Valid denotes the largest value that belongs to S and
+      satisfies the predicate{s} of S. The value of this attribute is of
+      the type of S.
+
+Modify 3.8.1(10.1/3) as follows:
+
+  * A discrete_choice that is a subtype_indication covers all values
+    (possibly none) that belong to the subtype and that satisfy the static
+    predicate{s} of the subtype (see 3.2.4).
+
+Modify 3.8.1(15/3) as follows:
+
+  * If the discriminant is of a static constrained scalar subtype then,
+    except within an instance of a generic unit, each non-others
+    discrete_choice shall cover only values in that subtype that satisfy
+    its predicate{s}, and each value of that subtype that satisfies its
+    predicate{s} shall be covered by some discrete_choice (either explicitly
+    or by others);
 
 Modify 4.5.2(29/3-30-3) as follows:
 
@@ -124,22 +164,56 @@ Modify 4.5.2(29/3-30-3) as follows:
   of the named subtype, the {value satisfies the} predicate{s} of the
   named subtype [evaluates to True], and:
 
-BIG NOTE: We need to look for all uses of "predicate" and uniformly talk about
-"satisfying the predicates of a subtype" rather than "evaluating the predicate."
-A search for "predicate" finds about 7 places that will need to be fixed.
+Modify 4.6(51/3) as follows:
+
+    After conversion of the value to the target type, if the target
+    subtype is constrained, a check is performed that the value
+    satisfies this constraint. If the target subtype excludes null, then
+    a check is made that the value is not null. If predicate checks are
+    enabled for the target subtype (see 3.2.4), a check is performed
+    that the {value satisfies the} predicate{s} of the target subtype
+    [is satisfied for the value].
+
+Modify 4.9.1(10/3):
+
+  * both subtypes are static, every value that satisfies the predicate{s}
+    of S1 also satisfies the predicate{s} of S2, and it is not the case that
+    both types each have at least one applicable predicate specification,
+    predicate checks are enabled (see 11.4.2) for S2, and predicate checks
+    are not enabled for S1.
+
+Modify 5.4(7/3) as follows:
+
+  * If the selecting_expression is a name (including a type_conversion,
+    qualified_expression, or function_call) having a static and
+    constrained nominal subtype, then each non-others discrete_choice
+    shall cover only values in that subtype that satisfy its predicate{s}
+    (see 3.2.4), and each value of that subtype that satisfies its
+    predicate{s} shall be covered by some discrete_choice (either explicitly
+    or by others).
+
+Modify 5.5(9/3) as follows:
+
+    ... Otherwise, the sequence_of_statements is executed once for each
+    value of the discrete subtype defined by the discrete_subtype_
+    definition that satisfies the predicate{s} of the subtype (or until
+    the loop is left as a consequence of a transfer of control). ...
 
 In 13.9.2(3/3),
 
    X'Valid
-   Yields True if and only if the object denoted by X is normal and
-   has a valid representation, and {then, if the preceding conditions
-   hold, the value of X also satisfies} the predicate{s} of the nominal
-   subtype of X [evaluates to True].
+     Yields True if and only if the object denoted by X is normal and
+     has a valid representation, and {then, if the preceding conditions
+     hold, the value of X also satisfies} the predicate{s} of the
+     nominal subtype of X [evaluates to True].
 
-In 13.9.2(12), replace
+In 13.9.2(12), replace:
+
    X'Valid is not considered to be a read of X; hence, it is not an
    error to check the validity of invalid data.
-with
+
+ with:
+
    Determining whether X is normal and has a valid representation
    as part of the evaluation of X'Valid is not considered to include
    an evaluation of X; hence, it is not an error to check
@@ -149,6 +223,38 @@ with
    it has been determined that X has a valid representation.]
 
    If X is volatile, the evaluation of X'Valid is considered a read of X.
+
+Modify K.2(73.1/3-73.2/3), as follows:
+
+  S'First_Valid
+     For every static discrete subtype S for which there exists at least
+     one value belonging to S that satisfies [any] {the} predicate{s} of S:
+
+     S'First_Valid denotes the smallest value that belongs to S and
+     satisfies the predicate{s} of S. The value of this attribute is of the
+     type of S. See 3.5.5.
+
+Modify K.2(107.1/3-107.2/3), as follows:
+
+  S'Last_Valid
+     For every static discrete subtype S for which there exists at least
+     one value belonging to S that satisfies [any] {the} predicate{s} of S:
+
+     S'Last_Valid denotes the largest value that belongs to S and
+     satisfies the predicate{s} of S. The value of this attribute is of the
+     type of S. See 3.5.5.
+
+Modify K.2(262-263), as follows:
+
+  X'Valid
+     For a prefix X that denotes a scalar object (after any implicit
+     dereference):
+
+     Yields True if and only if the object denoted by X is normal and
+     has a valid representation, and {then, if the preceding conditions
+     hold, the value of X also satisfies} the predicate{s} of the
+     nominal subtype of X [evaluates to True].  The value of this
+     attribute is of the predefined type Boolean. See 13.9.2.
 
 !discussion
 
@@ -212,11 +318,12 @@ If the predicate of Read_File_Type is evaluated first, then (2) would raise
 Status_Error if My_File is not open, whereas the expected result is for the
 membership to return False.
 
-Thus we define that the constraints and exclusions are evaluated first when
-checking whether a value satisfies a subtype, and then the predicates are
-evaluated in the order that the subtypes are declared. This has no effect on the
-order of checks when multiple checks are needed (as in a subprogram call with
-multiple parameters); that is still unspecified.
+Thus we define that the constraints and exclusions are evaluated first
+when checking whether a value satisfies a subtype, the predicates are
+then checked in an order that ensures that a predicate is not evaluated
+until any prior predicates evaluate to True. This has no effect on the
+order of checks when multiple checks are needed (as in a subprogram call
+with multiple parameters); that is still unspecified.
 
 !ACATS Test
 
@@ -692,7 +799,7 @@ satisfies the predicates of subtype S".  Note the use of the plural "predicates"
 and the term "satisfies" (which Steve also proposed) rather than talking about a
 predicate "evaluating to True."
 
-[Editor's note: This is version /03 of the AI.
+[Editor's notes: This is version /03 of the AI.
 
 Steve had written the following in his incomplete draft:
 
@@ -702,5 +809,15 @@ with Randy and he pointed out that this AI would be a good place to
 address those issues.
 
 End Editor's notes]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, November 15, 2013  10:23 PM
+
+Here is the full updated AI.  It turns out that progenitor *subtype* was already
+defined (in 3.9.4).
+
+[Editor's notes: This is version /04 of the AI.]
 
 ****************************************************************
