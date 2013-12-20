@@ -1,4 +1,6 @@
-!standard 4.4 (7/3)                                 13-05-17  AI05-0066-1/00
+!standard 4.4(7/3)                                 13-12-18  AI05-0066-1/01
+!standard A.10.8(8)
+!standard A.10.9(13)
 !class confirmation 13-05-17
 !status received 13-03-27
 !priority Low
@@ -8,8 +10,8 @@
 
 !summary
 
-This AI serves as a holder for questions that are not answered by the RM,
-but for which no one doubts the intent.
+This AI serves as a holder for questions that are not answered (or answered
+incorrectly) by the RM, but for which no one doubts the intent.
 
 !question
 
@@ -21,6 +23,14 @@ semantics rules defined in 4.4 or anywhere else.
 direct_name (that is, without a prefix)? There does not seem to be
 any rule that specifies that it is the current instance (although that
 has been assumed by all since Ada 83).
+
+(3) When Ada.Text_IO.Get reads a integer number without a Width parameter,
+what gets read if the input is "2#101010"? A.10.8(8) says "reads the longest
+possible sequence of characters matching the syntax of a numeric literal
+without a point." Read literally, that means reading has to stop after reading
+the "2", as the entire value does not match the syntax of a numeric literal.
+That requires effectively infinite lookahead. The ACATS requires reading the
+entire string. Is this intended? (No.)
 
 !response
 
@@ -78,6 +88,19 @@ we ought to know that D refers to the discriminant of the current instance.
 Of course, everyone "knows" this is the meaning, so adding explicit wording
 simply would more likely get this wrong and it wouldn't have any effect on
 implementations.
+
+(3) A friendly reading of the wording is that characters are read so long as
+the string read could be legal (if incomplete) syntax of a numeric literal.
+This matches the behavior of the ACATS (and ACVC before it) have always
+required reading the entire value of "2#101010".
+
+Since this wording has existed since Ada 83, and the strict reading in the
+question requires nonsense (implementing the effect of infinite lookahead would
+be expensive and would have undesirable effects on interactive reading),
+we believe that there is no real issue with the wording. Fixing it just would
+just make the wording more complex and introduce more opportunities for problems.
+
+A.10.9(13) raises similar issues for real literals.
 
 !appendix
 
@@ -144,7 +167,7 @@ component to that as a discriminant is always a constant):
 From: Steve Baird
 Sent: Thursday, March 28, 2013  2:38 PM
 
-> All we have to prove is that the current instance is somehow involved 
+> All we have to prove is that the current instance is somehow involved
 > with writing "Stack_Head" in the example above.
 
 I think you are right that the rule you are looking for is missing, and that
@@ -166,7 +189,7 @@ From: Tucker Taft
 Sent: Thursday, March 28, 2013  3:14 PM
 
 ...
-> I think you are right that the rule you are looking for is missing, 
+> I think you are right that the rule you are looking for is missing,
 > and that it would have been good if it had been stated explicitly. ...
 
 I agree, it seems to be missing.  There are some places where we come close
@@ -185,6 +208,249 @@ vote it no action ultimately (on the basis that a fix would be more likely to
 introduce bugs than clarify the semantics for a reader); that way, the issues
 will be on-the-record somewhere in case others are searching for the
 information.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, December 17, 2013  8:12 PM
+
+[Part of a message in an adminstrative ARG thread.]
+
+...
+> As I said, it's not just obscurity: (1) Some things are untestable in
+> the context of the ACATS (like treatment of volatile objects), but are
+> important nevertheless. (2) Some things are just wording
+> clarifications for which no new test ought to be needed. We could of
+> course forget fixing wording when it is unclear (Bob has advocated
+> this), but I think that leaves us with a iffy foundation where there
+> is too much assumed knowledge. I don't think it is a good idea to have
+> the test suite (or worse, "common sense") substitute for Standard language.
+
+The test suite always substitutes for the Standard language. In some cases the
+language is defined by the test suite, rather than the RM, e.g. I think we
+never fixed the Text_IO problem (that requires reading just the 2 if a line
+contains 2#01010101010101010 [no closing #), but the ACATS test (and hence
+all compilers), read the whole thing, and raise data error. The unlimited
+lookahead required by the RM is nonsense.
+
+Or historically in the Ada 83 standard,
+
+    subtype R is integer 1 .. dynamic-value;
+
+was clearly illegal from the RM, but required by common sense and the test
+suite. Yes, it got fixed in the RM, the pragmatic value of fixing it, precisely
+zero, that fix never had any impact on any compiler.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, December 17, 2013  8:47 PM
+
+I believe that we've fixed as many of those cases that we know about. I don't
+doubt that some are left, but there really shouldn't be any - it been quite a
+while since one has turned up.
+
+I just looked up the wording in the RM for the above example, and I don't
+believe that it requires infinite lookahead. The Ada 95 wording says that
+Data_Error is raised if the "sequence finally input is not a lexical element".
+It's open to interpretation, but I think that means you read first and
+interpret later. Anyway, that's not particularly important. (My recollection
+about the above is that it was the ACATS, not the RM, that was requiring
+unjustifiable lookahead, but it was so long ago that I could very well be
+wrong).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, December 18, 2013  4:47 AM
+
+Your recollection is wrong, somewhere the RM used to say that the longest
+possible valid sequence of characters constituting an integer literal was read,
+e.g. if you have 123ABC, read just the 123. I am surprised if we ever fixed
+this, the quote above is irrelevant, since the issue is what sequence is
+finally input, there must be something else in the RM defining this!
+Otherwise 123ABC might raise data error.
+
+The ACVC test always required diagnosing a misssing # as per my example.
+
+(not relevant to this thread strictly, but interesting history)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 18, 2013  5:38 PM
+
+> The ACVC test always required diagnosing a misssing # as per my
+> example.
+
+Your recollection of the rules is correct, in that A.10.8(8) has the words
+you remember.
+
+> (not relevant to this thread strictly, but interesting history)
+
+I'm not sure I agree that those words would cause the problem that you
+describe, since the # is part of the syntax of a numeric literal, so I would
+expect that 2#10101 would all be read. Perhaps the example you are thinking
+of is slightly different.
+
+Anyway, as you say, it's not relevant to this discussion.
+
+Plus I think that I was wrong in denying it in the first place. I'm now
+keeping a list of wording problems that we're not planning to fix (because
+the potential harm is greater than the value) [AI12-0066-1, "If it ain't
+broke..."] Obviously those are effectively defined by the ACATS because those
+features (parenthesized expressions and direct use of components in the current
+instance) have no wording whatsoever in the RM defining them.
+
+I'm keeping track of such things so that we have a list of such things for any
+future editor that wants to clean them up (and hopefully to prevent future
+questions on the topics, as they'll now be discoverable when searching the
+AIs).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, December 18, 2013  6:01 PM
+
+> I'm not sure I agree that those words would cause the problem that you
+> describe, since the # is part of the syntax of a numeric literal, so I
+> would expect that 2#10101 would all be read. Perhaps the example you
+> are thinking of is slightly different.
+
+But that's not what the words say, they say
+
+"then reads the longest possible sequence of characters
+             matching the syntax of a numeric literal without a point"
+
+and 2#10101 does not match the syntax of a numeric literal!
+So the RM requires reading the 2 and then stopping (requiring arbitrary look
+ahead).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 18, 2013  6:36 PM
+
+Yes, an unfriendly reading of the words could lead to such an interpretation.
+But of course such a reading clearly violates the Dewar rule (unlimited
+lookahead is clear nonsense), so I'd argue that the ACATS is just following
+what the RM actually means. That of course brings up the question of whether
+or not the RM ought to be changed whenever we have to invoke the Dewar rule.
+I think we agree that's not always necessary.
+
+Still, I suppose I should put this on the list of things in AI12-0066-1 that
+we're not going to fix as insufficiently broken. Ideally, we'd at least have
+any such known issues in the system, so that we don't have to argue about
+whether they exist. :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, December 19, 2013   7:31 AM
+
+> Yes, an unfriendly reading of the words could lead to such an
+> interpretation. But of course such a reading clearly violates the
+> Dewar rule (unlimited lookahead is clear nonsense)
+
+Well it's easy enough to implement unlimited look ahead, just not a very good
+idea all things considered. remember it can't go beyond a line mark, and reading
+in line by line is perfectly sensible IMO.
+
+Furthermore, I can't imagine what a "friendly" reading might be, and it is not
+obvious to me how you write the substitute text.
+
+We obviously have to be able to read one character ahead, to deal with
+
+    123.4E
+
+which might be
+
+    123.4E2	OK
+    123.4EA	Error? Stop at the E?
+
+To me this is actually something that should have been fixed probably at this
+stage, since it is presumably well defined by all implementations, not so
+important.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, December 19, 2013   9:12 AM
+
+My interpretation is that you keep reading as long as it *might* be a numeric
+literal, and if you bump into a syntax error, then you raise an exception.  You
+never need to backtrack.  This is what AdaMagic and all its spin-offs
+implemented, including Patriot Ada, SHARKAda, ObjectAda, and AdaMulti.  I
+believe this is what our Ada 83 compiler (the AIE) implemented as well.
+
+I agree that the reference manual wording is ambiguous.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 19, 2013   7:08 PM
+
+Gee, I thought I was done with this. :-)
+
+Robert Dewar writes:
+> > Yes, an unfriendly reading of the words could lead to such an
+> > interpretation. But of course such a reading clearly violates the
+> > Dewar rule (unlimited lookahead is clear nonsense)
+>
+> Well it's easy enough to implement unlimited look ahead, just not a
+> very good idea all things considered. remember it can't go beyond a
+> line mark, and reading in line by line is perfectly sensible IMO.
+
+Not that sensible, as line length is essentially unbounded. I have CSV (Comma
+Separated Value) files with lines of several thousand characters (a line
+represents a spreadsheet row, so adding additional line breaks isn't possible),
+and those files (full of numbers) are precisely the sort of thing that someone
+might want to read with Get. It obviously can be done with heroic efforts, but
+that is so strange that it couldn't possibly be intended.
+
+> Furthermore, I can't imagine what a "friendly" reading might be...
+
+And Tucker writes:
+
+> My interpretation is that you keep reading as long as it *might* be a numeric
+> literal, and if you bump into a syntax error, then you raise an exception.
+
+Which of course is precisely the reading that I have of that text (which is why
+I initially thought you had gotten the example wrong). This is how parsing
+works, and it would be beyond bizarre for Text_IO to require something else. To
+me, this is defining application of the Dewar rule: you have one possible
+reading which is clear nonsense, and one possible reading which makes perfect
+sense -- in such cases, you ignore the nonsense reading! Of course, there is
+something unusual about appealing to the Dewar rule when Dewar disagrees that it
+applies. :-)
+
+>, and it is not obvious to me how you write the substitute text.
+
+Probably something like Tucker's description:
+
+...then reads the longest possible sequence of characters {that might
+match}[matching] the syntax of a numeric literal without a point.
+
+Possibly with an AARM note explaining the consequences. Something like:
+
+This means that you read the text so long as the input might have the syntax of
+a numeric literal. For instance, if the input is "2#10101T", reading stops
+before the 'T' and Data_Error is raised. It's not necessary to backtrack to the
+'#', even though the fragment "2#10101" itself does not have the syntax of a
+numeric literal. The fragment is potentially the first part of a numeric literal
+(it would be fine if the T had been a '#'), so it is all read.
+
+...
+> To me this is actually something that should have been fixed probably
+> at this stage, since it is presumably well defined by all
+> implementations, not so important.
+
+Right. It's so unimportant that I put it into the AI of things we won't fix. But
+of course, if someone wants to take a stab at fixing some of them, it's fine by
+me. Are you asking that this be put on the agenda as an ultra-low priority AI?
+
+P.S. We don't actually have such a thing as "ultra-low" priority. Hopefully
+"low" is good enough.
 
 ****************************************************************
 
