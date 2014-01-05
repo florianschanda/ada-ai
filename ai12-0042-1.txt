@@ -1,8 +1,10 @@
 !standard 7.3.2(6/3)                                 13-12-11    AI12-0042-1/08
+!standard 7.3.2(17/3)
 !standard 7.3.2(18/3)
 !standard 7.3.2(19/3)
 !class binding interpretation 12-11-29
 !status Corrigendum 2014 13-12-11
+!status work item 12-12-17
 !status ARG Approved 6-0-2  13-11-17
 !status work item 12-11-29
 !status received 12-04-09
@@ -128,6 +130,21 @@ If a private extension occurs at a point where a private operation of
 some ancestor is visible and inherited, and a Type_Invariant'Class expression
 applies to that ancestor, then the inherited operation shall be
 abstract or shall be overridden.
+
+!comment We neeed to delete the extra "and" for the merged version of AI12-0042-1
+!comment and AI12-0044-1. We'll do that here for good measure. (Perhaps this
+!comment should do the merge in the AI directly.) See the merge file for
+!comment the bulk of the change.
+!corrigendum 7.3.2(17/3)
+
+@drepl
+@xinbull<is declared within the immediate scope of type @i<T> (or by an instance
+of a generic unit, and the generic is declared within the immediate scope of
+type @i<T>), and>
+@dby
+@xinbull<is declared within the immediate scope of type @i<T> (or by an instance
+of a generic unit, and the generic is declared within the immediate scope of
+type @i<T>),>
 
 !corrigendum 7.3.2(18/3)
 
@@ -1377,6 +1394,1005 @@ Sent: Saturday, November 16, 2013  10:40 PM
 Here is a rewrite of AI12-0042. [Editor's note: This is version /06 of the AI.]
 I reorganized a bit, and then handled the case of a private/private-extension
 type differently from a record extension.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 11, 2013  7:08 PM
+
+In working on the minutes for AI12-0042-1, I'm not sure that an issue that I
+raised was adequately addressed. So let me raise it again here.
+
+From the minutes:
+
+Randy worries that this definition means that new primitive operations of a
+record extension are not checked against an inherited class-wide type invariant.
+If the programmer later derives a private extension from that type, the
+operation would suddenly get checking. That's similar to the private case where
+we require overriding. Tucker claims that there is no issue, since there is no
+privacy breaking going on in this case.
+
+The sort of case I had in mind is the following (using an example from the
+meeting as a starting point):
+
+   package Pack1 is
+      type T1 is tagged private with Type_Invariant'Class => Is_Ok (T1);
+      function Is_Ok (X1 : T1) return Boolean;
+      procedure Op (X : in out T1);
+   private
+      type T1 is tagged record F1, F2 : Natural := 0; end record;
+      function Is_Ok (X1 : T1) return Boolean is (X1.F1 <= X1.F2);
+   end Pack1;
+
+   with Pack1;
+   package Pack2 is
+      type T2 is new Pack1.T1 with null record; -- Record extension.
+      -- Op is inherited here, with checks of Is_OK.
+      procedure Op2 (X : in out T2); -- Does not enforce the invariant.
+   end Pack2;
+
+   with Pack2;
+   package Pack3 is
+      type T3 is new Pack2.T2 with private; -- Private extension.
+      -- Op is inherited here, with checks of Is_OK.
+      -- Op2 is inherited here, now checking Is_OK to enforce the invariant.
+   private
+      type T3 is new Pack2.T2 with null record;
+   end Pack3;
+
+The inheritance of Op2 adds checks not known to the body of the original Op2.
+
+Tucker's response of "this is OK because there is no privacy breaking" seems
+irrelevant, given the discussion in AI12-0042-1.
+
+       If a private extension inherits from some ancestor both a
+       Type_Invariant'Class and a private operation, then we've
+       added a rule that the operation must be either overridden or
+       abstract. The point is that the class-wide Type_Invariant of
+       the ancestor didn't apply to the original operation (because
+       it was a private operation) but it applies to the inherited
+       operation.
+
+       As a general rule, we require overriding (or abstractness)
+       in the case of inherited subprograms that have different
+       contracts (this includes pre/post-conditions as well as
+       type_invariants) than the "original" ancestor subprogram.
+       We don't want an implicitly-declared inherited subprogram
+       that performs checks that were not performed by the original
+       subprogram.
+
+       This is just to avoid surprising behavior, not because of any
+       real definitional problem. It also spares implementations from
+       having to generate wrapper routines.
+
+This "general rule" surely would apply to the example I gave, as it has nothing
+to do with privacy.
+
+So either the case I outlined above ought to be covered, or the discussion
+explaining why we added the rule for private operations is wrong, and we need a
+different explanation (and maybe a different rule). I'm not sure why privacy
+should matter (as the original problem can only happen in private child
+packages, which by definition are part of the private part, and as such they
+cannot break any privacy).
+
+I admit that the discussion is wrong, at least in the sense that we *don't* make
+such a requirement for class-wide postconditions. We require wrappers in the
+case that further postconditions are added on inheritance.
+
+I'd argue, however, that the general rule is right, and in fact the rules for
+class-wide postconditions are wrong as well. The reason is that we ought not
+want to be able to silently add requirements to existing subprograms. For
+instance, I don't think it is a good idea that a derivation that adds an
+interface can add requirements (class-wide postconditions in this case) to an
+existing subprogram. If that existing subprogram was proved to meet its
+postconditions, adding requirements could require the inherited version to be
+proved again (and potentially would require modifications to meet those
+additional requirements). That's especially bad for reusable code (where
+modifying a body could affect many programs). With rules allowing the adding of
+requirements, the only way to be certain that a subprogram meets all of its
+postconditions and invariants is to check the entire program - proof of a part
+doesn't guarantee anything. (Obviously, this can be made to work, but it
+effectively weakens contracts.)
+
+I'd state the general rule as "Inheritance cannot add requirements
+(postconditions and invariants) to an existing subprogram; subprograms have to
+be overridden to add requirements." (I'd suggest that this be a language-design
+principle, in fact.)
+
+I know my view is colored by my opinion that for proof to be generally used, it
+has to be effective on a per-unit basis. (Which requires strong contracts.)
+Otherwise, it will be impractical to prove large systems simply because of the
+combinatorial explosion that results without those strong boundaries. Perhaps
+there will be some magic that will allow proving million line systems without
+strong boundaries, but I wouldn't want to wait for that to be found.
+
+Anyway, if we don't want the general rule, then we certainly shouldn't explain
+the overriding rule in terms of it. And honestly, I can't see any good reason to
+ban this particular case and allow others. They're all bad, or all tolerable.
+
+Arguably, this would be a methodological restriction that could be a
+suppressible error (given that the semantics are well-defined, if surprising, in
+its absence). Not sure if that makes any sense.
+
+Thoughts??
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 11, 2013  7:40 PM
+
+...
+> So either the case I outlined above ought to be covered, or the
+> discussion explaining why we added the rule for private operations is
+> wrong, and we need a different explanation (and maybe a different
+> rule).
+
+I neglected to mention that the easiest fix to preserve the "general rule" in
+this case is simply to have any inherited type invariants apply to any new
+visible primitive operations of a record extension as well as any inherited
+ones. That's what I would have expected in any case (assuming we're allowing
+record extensions of types that have class-wide invariants). I think the
+important thing is that any class-wide invariant apply to all visible primitive
+operations of any extension, regardless of where the primitive operations
+originate. I find it weird otherwise.
+
+(I realize that if the extension is not in a package specification, then any new
+operations won't be primitive, and the invariant would not apply. But that
+oddity is well-understood - to the extent that anything about derivation is
+understood - and the new operations cannot be dispatching operations in that
+case, so there's no weird mixture of operations.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December 14, 2013  4:50 PM
+
+Your argument is convincing.  I would agree that when a class-wide invariant
+becomes newly relevant to an inherited operation, it should be overridden.
+
+An alternative in this case is to make inherited class-wide type invariants
+apply to *all* visible primitive operations of the descendant type, independent
+of whether the descendant type is itself a private extension, presuming the type
+is declared in the visible part of a package.  I think that might actually make
+more sense in this case.  We would still only allow you to define a new type
+invariant on a private type or private extension, but it seems a bit odd to have
+these "holes" in the record extensions of private types, where the inherited
+type invariant applies to some but not all of the visible operations.
+
+I also think your general language-design principle makes sense, though I'm not
+quite convinced that we want to force overriding when inheriting an operation
+from the parent and inheriting a class-wide postcondition from a progenitor.  It
+seems like we are interfering with what might be legitimate implementation
+inheritance.  On the other hand, you can always override the inherited operation
+with a wrapper that calls the parent's operation, so perhaps this should not be
+a big concern.  This would have the net effect of making the user aware of the
+wrapper that it is likely the compiler would have to create anyway, to insert
+the class-wide postcondition check.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 11, 2013  8:00 PM
+
+A secondary issue with AI12-0042-1: when Tucker created wording for this, he didn't use the draft future standard. If he looked there, he would have see that we'd already modified 7.3.2(19/3) [for the function call problem].
+Unfortunately, I don't see how to merge those successfully (at least without a
+lot of change).
+
+AI12-0042-1 gives the following wording change:
+
+Modify 7.3.2(16/3-19/3) as follows:
+
+   * An invariant is checked upon successful return from a call on any
+     subprogram or entry that:
+
+      * is declared within the immediate scope of type T (or by an
+        instance of a generic unit, and the generic is declared within the
+        immediate scope of type T), and
+
+     [* is visible outside the immediate scope of type T or overrides an
+        operation that is visible outside the immediate scope of T, and]
+
+      * has a result with a part of type T, or one or more parameters
+        with a part of type T, or an access to variable parameter whose
+        designated type has a part of type T[.]{,}
+
+     {* and either:
+
+        * T is a private type or a private extension and the subprogram
+          or entry is visible outside the immediate scope of type T or
+          overrides an inherited operation that is visible outside the
+          immediate scope of T, or
+
+        * T is a record extension and the subprogram or entry is a primitive
+          operation that corresponds to a visible operation of a private
+          or private extension ancestor to which the same (class-wide)
+          invariant applies.}
+
+And AI12-0044-1 has the following wording change:
+
+  * has a result with a part of type T, or one or more {OUT or IN OUT}
+    parameters with a part of type T, or an access{-to-object}[ to variable]
+    parameter whose designated type has a part of type T[.]{;
+
+  * is a procedure or entry and has an IN parameter with a part of type T.}
+
+The obvious combination gives:
+
+   * An invariant is checked upon successful return from a call on any
+     subprogram or entry that:
+
+      * is declared within the immediate scope of type T (or by an
+        instance of a generic unit, and the generic is declared within the
+        immediate scope of type T), and
+
+     [* is visible outside the immediate scope of type T or overrides an
+        operation that is visible outside the immediate scope of T, and]
+
+      * has a result with a part of type T, or one or more {OUT or IN OUT}
+        parameters with a part of type T, or an access{-to-object}[ to variable]
+        parameter whose designated type has a part of type T[.]{;}
+
+     {* is a procedure or entry and has an IN parameter with a part of type T,}
+
+     {* and either:
+
+        * T is a private type or a private extension and the subprogram
+          or entry is visible outside the immediate scope of type T or
+          overrides an inherited operation that is visible outside the
+          immediate scope of T, or
+
+        * T is a record extension and the subprogram or entry is a primitive
+          operation that corresponds to a visible operation of a private
+          or private extension ancestor to which the same (class-wide)
+          invariant applies.}
+
+But the semicolon ending the revised 7.3.2(19/3) seems out of place -- all of
+the other bullets are combined with "and"; the two from AI12-0044-1 are really
+combined with "or".
+
+I suppose we could try something similar to what Tucker already did to pull the
+"or"s out:
+
+   * An invariant is checked upon successful return from a call on any
+     subprogram or entry that:
+
+      * is declared within the immediate scope of type T (or by an
+        instance of a generic unit, and the generic is declared within the
+        immediate scope of type T), [and]
+
+     [* is visible outside the immediate scope of type T or overrides an
+        operation that is visible outside the immediate scope of T, and]
+
+     {* and either:}
+
+         * has a result with a part of type T, or one or more {OUT or IN OUT}
+           parameters with a part of type T, or an access{-to-object}[ to variable]
+           parameter whose designated type has a part of type T[.]{, or}
+
+        {* is a procedure or entry and has an IN parameter with a part of type T,}
+
+     {* and either:
+
+        * T is a private type or a private extension and the subprogram
+          or entry is visible outside the immediate scope of type T or
+          overrides an inherited operation that is visible outside the
+          immediate scope of T, or
+
+        * T is a record extension and the subprogram or entry is a primitive
+          operation that corresponds to a visible operation of a private
+          or private extension ancestor to which the same (class-wide)
+          invariant applies.}
+
+or maybe even split up the bullets of the middle part (so all of the "or"s are at the same level):
+
+   * An invariant is checked upon successful return from a call on any
+     subprogram or entry that:
+
+      * is declared within the immediate scope of type T (or by an
+        instance of a generic unit, and the generic is declared within the
+        immediate scope of type T), [and]
+
+     [* is visible outside the immediate scope of type T or overrides an
+        operation that is visible outside the immediate scope of T, and]
+
+     {* and either:}
+
+        {*} has a result with a part of type T, or
+        {*} one or more {OUT or IN OUT} parameters with a part of type T, or
+        {*} an access{-to-object}[ to variable]
+            parameter whose designated type has a part of type T[.]{, or}
+        {* is a procedure or entry and has an IN parameter with a part of type T,}
+
+     {* and either:
+
+        * T is a private type or a private extension and the subprogram
+          or entry is visible outside the immediate scope of type T or
+          overrides an inherited operation that is visible outside the
+          immediate scope of T, or
+
+        * T is a record extension and the subprogram or entry is a primitive
+          operation that corresponds to a visible operation of a private
+          or private extension ancestor to which the same (class-wide)
+          invariant applies.}
+
+It appears that the main problem is with the AI12-0044-1 wording, not so much
+with the AI12-0042-1 wording. Anyway, I don't like the double "and either". Any
+better ideas???
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December 14, 2013  4:51 PM
+
+> A secondary issue with AI12-0042-1: when Tucker created wording for
+> this, he didn't use the draft future standard. If he looked there, he
+> would have see that we'd already modified 7.3.2(19/3) [for the function call problem].
+> Unfortunately, I don't see how to merge those successfully (at least
+> without a lot of change).
+> ...
+>
+>     * An invariant is checked upon successful return from a call on any
+>       subprogram or entry that:
+>
+>        * is declared within the immediate scope of type T (or by an
+>          instance of a generic unit, and the generic is declared within the
+>          immediate scope of type T), [and]
+>
+>       [* is visible outside the immediate scope of type T or overrides an
+>          operation that is visible outside the immediate scope of T,
+> and]
+>
+>       {* and either:}
+>
+>          {*} has a result with a part of type T, or
+>          {*} one or more {OUT or IN OUT} parameters with a part of type T, or
+>          {*} an access{-to-object}[ to variable]
+>              parameter whose designated type has a part of type T[.]{, or}
+>          {* is a procedure or entry and has an IN parameter with a
+> part of type T,}
+>
+>       {* and either:
+>
+>          * T is a private type or a private extension and the subprogram
+>            or entry is visible outside the immediate scope of type T or
+>            overrides an inherited operation that is visible outside the
+>            immediate scope of T, or
+>
+>          * T is a record extension and the subprogram or entry is a primitive
+>            operation that corresponds to a visible operation of a private
+>            or private extension ancestor to which the same (class-wide)
+>            invariant applies.}
+
+This version seems better, but with my recent answer to your prior note, I would
+suggest we can simplify this a bit and treat record extensions and private
+extensions the same as it relates to applicability of class-wide invariants.
+This means it might be possible to merge the last two paragraphs, and eliminate
+the second "and either."
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, December 17, 2013  10:03 AM
+
+As a minimum we should change to the "pull the "or"s out version".
+The "split up the bullets" version would be better still, but the "has" should be repeated for the "OUT or IN OUT" and "access" cases.
+"that has an IN parameter" would seem clearer to me than "and has an IN parameter" and cut the mounting count of "and"s and "or"s.
+I think a comma is needed after "T is a private type or a private extension".
+Giving:
+
+   * An invariant is checked upon successful return from a call on any
+     subprogram or entry that:
+
+      * is declared within the immediate scope of type T (or by an
+         instance of a generic unit, and the generic is declared within the
+         immediate scope of type T), [and]
+
+     [* is visible outside the immediate scope of type T or overrides an
+          operation that is visible outside the immediate scope of T, and]
+
+     {* and either:}
+
+        {*} has a result with a part of type T, or
+        {*   has} one or more {OUT or IN OUT} parameters with a part of type T, or
+        {*   has} an access{-to-object}[ to variable]
+               parameter whose designated type has a part of type T[.]{, or}
+        {* is a procedure or entry that has an IN parameter with a part of type T,}
+
+     {* and either:
+
+        * T is a private type or a private extension, and the subprogram
+           or entry is visible outside the immediate scope of type T or
+           overrides an inherited operation that is visible outside the
+           immediate scope of T, or
+
+        * T is a record extension and the subprogram or entry is a primitive
+           operation that corresponds to a visible operation of a private
+           or private extension ancestor to which the same (class-wide)
+           invariant applies.}
+
+I think merging the last two paragraphs as Tucker suggests would just get rid
+with of the "either" rather than the "and either", but what exactly would be the
+result?
+
+     {* and:
+
+        * T is a private type, a private extension, or a record extension, and the subprogram
+           or entry is ?WHAT?}
+
+It's getting a bit beyond me now.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, December 17, 2013  10:54 AM
+
+> I think merging the last two paragraphs as Tucker suggests would just get rid
+> with of the "either" rather than the "and either", but what exactly would be
+> the result?
+>
+>       {* and:
+>
+>          * T is a private type, a private extension, or a record extension,
+>             and the subprogram or entry is ?WHAT?}
+
+I would also move this in front of the prior "and-either" construct.
+
+Once we group record and private extensions together, we can simplify this to
+(roughly):
+
+    * T is a private type, or a type extension declared immediately
+      within the visible part of a package, and the subprogram or entry
+      is visible outside the immediate scope of type T or overrides an
+      inherited operation that is visible outside the immediate scope of T
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, December 17, 2013  11:23 AM
+
+Thanks Tuck.  Hopefully we're near a conclusion, it seemed worth a final push.
+
+7.3.2 16/3 - 19/3:
+
+* An invariant is checked upon successful return from a call on any
+     subprogram or entry that:
+
+      * is declared within the immediate scope of type T (or by an
+         instance of a generic unit, and the generic is declared within the
+         immediate scope of type T), [and]
+
+     [* is visible outside the immediate scope of type T or overrides an
+          operation that is visible outside the immediate scope of T, and]
+
+     {* T is a private type, or a type extension declared immediately
+          within the visible part of a package, and the subprogram or entry
+          is visible outside the immediate scope of type T or overrides an
+          inherited operation that is visible outside the immediate scope of T,}
+
+     {* and either:}
+
+        {*} has a result with a part of type T, or
+        {*   has} one or more {OUT or IN OUT} parameters with a part of type T, or
+        {*   has} an access{-to-object}[ to variable]
+               parameter whose designated type has a part of type T[.]{, or}
+        {* is a procedure or entry that has an IN parameter with a part of type T.}
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, December 17, 2013  11:34 AM
+
+> Thanks Tuck.  Hopefully we're near a conclusion, it seemed worth a final push.
+
+This looks OK, but it doesn't seem to have parallel construction when written
+out this way, and is perhaps redundant in various ways.  I think this needs to
+be assigned to someone to work out.  E-mail exchanges can only go so far. ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, December 17, 2013  4:17 PM
+
+I agree. (Of course, you're getting dangerously close to being the one so
+assigned. :-)
+
+In any case, there is no rush. Since we've seriously changed the conclusion that
+we voted on in Pittsburgh, the AI will have to be reopened. (It's not clear to
+me whether only primitive operations or all visible operations should be
+involved for record extensions, so I think we need a bit more consideration. See
+my next message.) Since that's the case, there is no particular rush to work
+out the wording (we've got until June).
+
+I needed something to put into the draft Standard, and I've got that. [Note that
+since I've already added AI12-0042-1 to the draft Standard, I won't take it out,
+since I presume we'll do something similar and it makes no sense to redo the
+work twice more (first to take it out, then to put it back). But it doesn't have
+to be perfect today.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, December 17, 2013  4:34 PM
+
+...
+>      {* and either:}
+>
+>         {*} has a result with a part of type T, or
+>         {*   has} one or more {OUT or IN OUT} parameters with a part of type T, or
+>         {*   has} an access{-to-object}[ to variable]
+>              parameter whose designated type has a part of type T[.]{, or}
+>         {* is a procedure or entry that has an IN parameter with a part of type T.}
+
+This reminds me of a question: does T'Class have a part of type T? Does
+Root'Class (if T is visibly derived from Root)? Does NT'Class (if NT is visibly
+derived from T)?
+
+The definition of "part" doesn't make a clear answer, at least in my mind:
+
+"Similarly, a *part* of an object or value is used to mean the whole object or
+value, or any set of its subcomponents."
+
+So what is a part of type T, anyway? I've always thought it was an object or
+subcomponent of an object of type T. T'Class does NOT have one of those. OTOH,
+T'Class does have a set of subcomponents that happen to be the same set of
+subcomponents as type T has. (But these are different types, so there's nothing
+formally said about the relationship.) Perhaps one could claim that T'Class has
+a parent part of type T, although that's not literally true. But then NT'Class
+would seem to not be involved.
+
+A couple of the AARM notes for 7.3.2 seem to imply that these rules do in fact
+apply to class-wide types. If that's the case, I think we need to be much more
+explicit about that. (And which ones.) At least with an AARM note, and perhaps
+better with a user note.
+
+The reason this matters is the point I mentioned in my previous message. If an
+inherited class-wide invariant does not apply to class-wide types, then the only
+operations that matter are primitives of the type, which is the group that can
+be inherited and have problems with future changes in whether or not the
+invariant applies. Non-primitives (like class-wide operations) do not have these
+problems and as such there is a much weaker case for including them. Especially
+as the concerns about allowing holes in the model do not apply in any event to
+record extensions (they are by definition a large hole in the model, the exact
+size of that hole is not relevant).
+
+OTOH, if class-wide operations are intended to be covered by invariants of
+private types, then there would be a consistency issue. (And that does seem
+desirable in order to prevent holes in the model for private types. But unless
+Root'Class is covered [and I can't see any way for that to be the case], there
+is still a pretty large hole in the model, so I don't know if it matters again
+how large that hole is.)
+
+Which I why I'm confused by Tucker's leap to all routines (not just primitives).
+But maybe it's right.
+
+Anyone have any enlightenment?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, December 17, 2013  5:00 PM
+
+> ... Which I why I'm confused by Tucker's leap to all routines (not
+> just primitives). But maybe it's right.
+
+I didn't actually mean to make *that* leap, and that was one reason I am
+uncomfortable doing this wording by e-mail exchanges.  I was really trying to
+eliminate the "hole" that a visible record extension could create when you have
+a sequence of extensions, some private and some record.  It seems that all of
+these should be treated the same, since *most* of the components may still be
+private.
+
+Since we aren't changing the inherited invariant, but only adding primitive
+operations to which it should apply, it seems fine (and useful) if it applies to
+objects manipulated by primitive operations that were added as part of doing a
+record extension.
+
+> Anyone have any enlightenment?
+
+Well, back to your question about whether T'Class has a part of type T.  I think
+the answer is that it should.  Similar questions apply to all class-wide types
+rooted at descendants of T.  I think yes for those as well.
+
+Then finally there is T0'Class, where T is a descendant of T0, and the actual
+object of type T0'Class happens to have a tag that identifies T (or some
+descendant of T).  For those, I think "no" for legality rules and static
+semantics.  I suppose there are some dynamic semantics rules where it might make
+sense to consider an object of nominal type T0'Class to have a part of type T,
+but that would be exceptional.
+
+I agree we should try to sort all of this class-wide stuff out, at least in
+cases where it might really matter.  Certainly we need to decide to what objects
+and/or parts of objects we apply an invariant check.
+
+It seems like type invariants are in danger of turning into the rat-hole that
+streams were for Ada 95...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, December 17, 2013  6:13 PM
+
+> > ... Which I why I'm confused by Tucker's leap to all routines (not
+> > just primitives). But maybe it's right.
+>
+> I didn't actually mean to make *that* leap, and that was one reason I
+> am uncomfortable doing this wording by e-mail exchanges.  I was really
+> trying to eliminate the "hole" that a visible record extension could
+> create when you have a sequence of extensions, some private and some
+> record.  It seems that all of these should be treated the same, since
+> *most* of the components may still be private.
+
+Right. Of course, when I tried to raise this point in Pittsburgh (because it was
+immediately obvious to me), you said it wasn't a problem and we moved on. So I
+guess meetings aren't the best place to do this wording, either. :-)
+
+> Since we aren't changing the inherited invariant, but only adding
+> primitive operations to which it should apply, it seems fine (and
+> useful) if it applies to objects manipulated by primitive operations
+> that were added as part of doing a record extension.
+
+That makes sense. Including class-wide operations also would make some sense,
+but that isn't as important because they can't change later.
+
+> > Anyone have any enlightenment?
+>
+> Well, back to your question about whether T'Class has a part of type
+> T.  I think the answer is that it should.  Similar questions apply to
+> all class-wide types rooted at descendants of T.  I think yes for
+> those as well.
+
+I concluded the same as well. But my question was really "does T'Class already
+have a part of T, or do we need wording to make it true"?
+
+> Then finally there is T0'Class, where T is a descendant of T0, and the
+> actual object of type T0'Class happens to have a tag that identifies T
+> (or some descendant of T).  For those, I think "no" for legality rules
+> and static semantics.  I suppose there are some dynamic semantics
+> rules where it might make sense to consider an object of nominal type
+> T0'Class to have a part of type T, but that would be exceptional.
+>
+> I agree we should try to sort all of this class-wide stuff out, at
+> least in cases where it might really matter.
+> Certainly we need to decide to what objects and/or parts of objects we
+> apply an invariant check.
+>
+> It seems like type invariants are in danger of turning into the
+> rat-hole that streams were for Ada 95...
+
+Really, that's all of the assertions. (Think 'Old, and predicate ordering, and
+Predicate_Failure, and raise expressions...) And it's not that surprising, given
+we started from a blank sheet of paper. Hard to imagine that we'd get all of the
+details right on the first try.
+
+Anyway, to give us a concrete example to think about class-wide checks:
+
+   package P is
+       type Root is abstract tagged ...
+
+       function Calc_It (Obj : in Root) return Natural is abstract;
+
+       function Is_OK (Obj : in Root) return Boolean is abstract;
+   end P;
+
+   with P;
+   package Q is
+       type T is new P.Root with private
+          with Type_Invariant => Is_OK (T);
+
+       function Calc_It (Obj : in T) return Natural; -- No invariant check (function).
+
+       function Is_OK (Obj : in T) return Boolean; -- No invariant check (function).
+
+       function Create return Root'Class; -- No invariant check (? - no part of T).
+
+       function Create_T return T'Class; -- Invariant check on result.
+
+   end Q;
+
+   with P, Q;
+   procedure Main is
+       Obj : P.Root'Class := Q.Create; -- Obj potentially is not Is_OK (invariant not checked).
+   begin
+       if P.Calc_It (Obj) > 10 then -- Dispatching call into Q with an object that was never checked and
+                                    -- might not meet the invariant for type T.
+           ...
+   end Main;
+
+Note that Create_T would have an invariant check (assuming we follow Tucker's
+advice), but not Create. Thus Create could return a value of type T that doesn't
+meet the invariant. (It also could return a value that isn't of type T at all,
+but let's focus on the case where the value is in fact of type T.) Note that I
+was very careful to avoid any conversion to type T that might in fact trigger
+one of the other invariant checks. (I say "might" because figuring out when
+those rules apply make my head hurt, so I didn't try to figure them out again by
+avoiding any conversions at all.)
+
+This would seem to provide an easy way around the checking of an invariant. The
+basic idea is that "leaking" a value outside of the package without getting a
+check should be difficult. (There are ways involving access-to-subprogram types
+and call-backs within the package body, but to trigger one of those you really
+have to want to break the guarantees - it wouldn't happen by accident - so one
+imagines that even quick code review would catch the problem. This is not like
+that.) So I would think that we would want to plug this opening somehow.
+
+(Of course, the Root'Class could also be a parameter of some sort, passed a
+value of T that is then corrupted so it doesn't meet the invariant.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, December 19, 2013  2:36 PM
+
+>     with P, Q;
+>     procedure Main is
+>         Obj : P.Root'Class := Q.Create; -- Obj potentially is not
+> Is_OK (invariant not checked).
+>     begin
+>         if P.Calc_It (Obj) > 10 then -- Dispatching call into Q with
+> an object that was never checked and
+>                                      -- might not meet the invariant
+> for type T.
+
+I think this dispatching call involves an implicit conversion to type T, and so
+should involve an invariant check.
+>             ...
+>     end Main;
+>
+> Note that Create_T would have an invariant check (assuming we follow
+> Tucker's advice), but not Create. Thus Create could return a value of
+> type T that doesn't meet the invariant. (It also could return a value
+> that isn't of type T at all, but let's focus on the case where the
+> value is in fact of type T.) Note that I was very careful to avoid any
+> conversion to type T that might in fact trigger one of the other invariant checks. (I say "might"
+> because figuring out when those rules apply make my head hurt, so I
+> didn't try to figure them out again by avoiding any conversions at all.) ...
+
+I think we tried to design the conversion rules to catch some of these holes.
+It is easy to believe we missed some.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 19, 2013  4:38 PM
+
+...
+> >         if P.Calc_It (Obj) > 10 then -- Dispatching call into Q with
+> > an object that was never checked and
+> >                                      -- might not meet the invariant
+> > for type T.
+>
+> I think this dispatching call involves an implicit conversion to type
+> T, and so should involve an invariant check.
+
+Maybe, I can never remember the rules for that. I was thinking that a
+dispatching call just called the right routine, without necessarily converting
+(formally) the operands, just as happens with a statically bound call. But
+perhaps there is a conversion in there somewhere.
+
+...
+> > Note that Create_T would have an invariant check (assuming we follow
+> > Tucker's advice), but not Create. Thus Create could return a value
+> > of type T that doesn't meet the invariant. (It also could return a
+> > value that isn't of type T at all, but let's focus on the case where
+> > the value is in fact of type T.) Note that I was very careful to
+> > avoid any conversion to type T that might in fact trigger one of the
+> > other invariant
+> > checks. (I say "might" because figuring out when those rules apply
+> > make my head hurt, so I didn't try to figure them out again by
+> > avoiding any conversions at all.) ...
+>
+> I think we tried to design the conversion rules to catch some of these
+> holes.  It is easy to believe we missed some.
+
+BTW, this AI got assigned back to you as you were the author of record on it.
+Since a significant part of the redo involves wording, it is right in your
+wheelhouse. If you would prefer that someone else take it on, please tell me so
+that we can find a different victim, er, author.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, December 19, 2013  5:03 PM
+
+> Maybe, I can never remember the rules for that. I was thinking that a
+> dispatching call just called the right routine, without necessarily
+> converting (formally) the operands, just as happens with a statically
+> bound call. But perhaps there is a conversion in there somewhere.
+
+This one is actually pretty simple.  On any call, every actual parameter is
+converted to the subtype of the formal parameter if it is a by-copy IN or IN OUT
+parameter, or is a by-reference parameter of any mode (this latter conversion is
+a view conversion).
+
+...
+> BTW, this AI got assigned back to you as you were the author of record
+> on it. Since a significant part of the redo involves wording, it is
+> right in your wheelhouse. If you would prefer that someone else take
+> it on, please tell me so that we can find a different victim, er, author.
+
+Not a problem.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, December 19, 2013  5:18 PM
+
+> This one is actually pretty simple.
+
+Nothing is simple.  ;-)
+
+>...On any call, every actual parameter is converted to the subtype of
+>the formal parameter if it is a by-copy IN or IN OUT parameter, or is
+>a by-reference parameter of any mode (this latter conversion is a view
+>conversion).
+
+What makes this one not quite as simple as you might think is that by-copy vs.
+by-ref is implementation dependent. There is a special rule for predicates,
+which is necessary because we didn't want the places where predicates are
+checked to inherit this implementation dependence.  So we can't "simply" say
+that every subtype conversion involves a predicate check.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 19, 2013  5:47 PM
+
+> > Maybe, I can never remember the rules for that. I was thinking that
+> > a dispatching call just called the right routine, without
+> > necessarily converting (formally) the operands, just as happens with
+> > a statically bound call. But perhaps there is a conversion in there somewhere.
+>
+> This one is actually pretty simple.  On any call, every actual
+> parameter is converted to the subtype of the formal parameter if it is
+> a by-copy IN or IN OUT parameter, or is a by-reference parameter of
+> any mode (this latter conversion is a view conversion).
+
+To which Bob replied:
+
+> Nothing is simple.  ;-)
+
+I think Bob's right. The rule for view conversions only applies outside of the
+scope of T. 7.3.2(12/3). You are saying that it applies to a dispatching call
+(which makes sense).
+
+But now think a bit about the implementation of this. At the point of the call,
+we don't know statically the type of T. That means that we have to dispatch
+(somehow) to make the needed invariant check; moreover, we have to do this for
+any dispatching call, whether or not any invariants are involved (absent full
+program compilation), because some future descendant (not necessarily written
+yet) might add an invariant. And we have to pass some sort of indication as to
+where this call occurred, because we don't know what T is, so we certainly can't
+determine if we are outside of the scope of T at the point of the call. (After
+all, we might be in the scope of some descendant of T.)
+
+On top of this, the rule is supposed to be applied recursively, for every
+ancestor of T that you have to pass through. AARM note 14.c/3 mentions this, but
+neglects to mention that being "outside of the scope of T" doesn't necessarily
+mean that you're outside of the scope of T's parent.
+
+You could somehow fold this information into extra parameters for the target of
+the call to avoid extra dispatching, but this would not only be distributed
+overhead, but also would make the profiles differ for 'Access and the like.
+Presumably, this would all have to be stuck into a wrapper for every dispatching
+routine that exists, since someone could add a new package deriving from the
+type and add an invariant. (If Ada had "final", it could be mitigated somewhat,
+but it still sounds awful.)
+
+This sounds to me like we had drunk too much scotch in Edinburgh when we came up
+with this one. :-)
+
+I hope I have missed something obvious about the interaction of these rules and
+dispatching, but the existence of 7.3.2(14.c/3) suggests that we thought this
+complication was just peachy. Please enlighten me!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, December 19, 2013  9:48 PM
+
+> This is at best distributed overhead.
+
+I would have written
+
+This is at best unacceptable distributed overhead.
+
+We don't want new features in the language to EVER add distributed overhead to
+programs that don't use these features!
+
+If we have to do this, we have to add a restriction to get back to where we
+were, and it is unpleasant to have to do this on an all-or-nothing full program
+basis.
+
+I really think this needs fixing!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 19, 2013  10:28 PM
+
+I was assuming that I misunderstood something, and Tucker or Erhard would
+straighten me out. And I did have one thing wrong, in that the effect doesn't
+happen on inbound parameters, but rather on the return from the routines. Same
+problems though. I'll try to create a full example tomorrow to show the effect
+at its nastiest.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 19, 2013  10:12 PM
+
+Here's a summary of changes that appear to be required to AI12-0042-1; hopefully
+this will help Tucker out on this AI. (This is from the previous mail thread,
+which I just finished filing.)
+
+[A] Add a language design principle along the lines of:
+
+"Inheritance cannot add requirements (postconditions and invariants) to an
+existing subprogram; subprograms have to be overridden to add requirements."
+(I'd suggest that this be a language-design principle, in fact.)"
+
+[Or perhaps just for invariants.] The reason is that the existence of an
+explicit body provides a key to provers (both human and automatic) that a new
+proof is required (which it is whenever a new requirement is added).
+
+[B] An inherited class-wide invariant should apply to any primitive operations
+of a record extension, but not to other subprograms that happen to be in the
+package specification. The merged wording that was proposed covered too many
+subprograms. Here's wording that's correct (I hope) but definitely needs
+wordsmithing. (Note that the last bullet includes "primitive operation" while
+the penultimate bullet does not.)
+
+   * An invariant is checked upon successful return from a call on any
+     subprogram or entry that:
+
+      * is declared within the immediate scope of type T (or by an
+         instance of a generic unit, and the generic is declared within the
+         immediate scope of type T), [and]
+
+     [* is visible outside the immediate scope of type T or overrides an
+          operation that is visible outside the immediate scope of T, and]
+
+     {* and either:}
+
+        {*} has a result with a part of type T, or
+        {*   has} one or more {OUT or IN OUT} parameters with a part of type T, or
+        {*   has} an access{-to-object}[ to variable]
+               parameter whose designated type has a part of type T[.]{, or}
+        {* is a procedure or entry that has an IN parameter with a part of type T,}
+
+     {* and either:
+
+        * T is a private type or a private extension, and the subprogram
+           or entry is visible outside the immediate scope of type T or
+           overrides an inherited operation that is visible outside the
+           immediate scope of T, or
+
+        * T is a record extension, and the subprogram or entry is a primitive
+           operation visible outside the immediate scope of type T or
+           overrides an inherited operation that is visible outside the
+           immediate scope of T.}
+
+[C] The new wording for 7.4.3(6/3) has to cover the case of record extensions as
+well, since with this new wording, the same thing can happen on record extension
+inheritance.
+
+[D] The summary and discussion ought to be updated as needed.
+
+[E] There is something weird about the rules for dispatching calls and view
+conversions. The view conversion check is only performed outside of the scope of
+T -- but that means it depends on the location of the call. OTOH, the check
+needed is only known via dispatching (because the actual target type isn't
+known). So it seems like there is no place where we know both the visibility and
+the types involved. Moreover, when multiple checks are needed because multiple
+types are crossed, it seems like not all of the checks might be needed depending
+on where the call is. Perhaps the wording is confusing the issue. In any case,
+it sounds like implementation trouble. Possibly that should be a separate AI.
+
+[Note that this afternoon's rant from me on this topic is also confused, because
+I was talking about "in" parameter conversions, but invariant checks on those
+appear to always be performed. The real problem is with back conversions via "in
+out" parameters. I have a specific example in mind right now, perhaps I'll write
+it up tomorrow.]
 
 ****************************************************************
 
