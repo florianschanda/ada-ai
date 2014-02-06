@@ -2318,12 +2318,411 @@ at its nastiest.
 
 ****************************************************************
 
+From: Tucker Taft
+Sent: Friday, December 20, 2013  2:19 PM
+
+>>> ...
+>>>>>           if P.Calc_It (Obj) > 10 then -- Dispatching call into Q
+>>>>> with an object that was never checked and
+>>>>>                                        -- might not meet the
+>>>>> invariant for type T.
+>>>>
+>>>> I think this dispatching call involves an implicit conversion to
+>>>> type T, and so should involve an invariant check.
+
+I am not so sure about this anymore.  We don't want to interpret 7.3.2(11/3) to
+imply that we recheck the invariant on *every* call even when the actual is
+already of type T.  I think 11/3 needs to be modified to say:
+
+   * After successful conversion to type T {where the operand is not of type T},
+     the check is performed on the result of the conversion;
+
+and perhaps modified further to say:
+
+   * After successful conversion to type T {where the operand is not of type T
+     nor, if tagged, has a tag that identifies T}, the check is performed on the
+     result of the conversion;
+
+If we make this further modification, then we need to make sure that on
+conversion *to* a class-wide type from inside the immediate scope of T, that the
+operand satisfies the invariant, unless it is T'Class itself and we check the
+invariant on those on the way out of the immediate scope.  My temptation would
+now be to avoid any special handling of class-wide types at the interface, and
+do it all on the conversion *to* a class-wide type from T when *inside* the
+immediate scope.  Essentially we would treat viewing an object as a class-wide
+type as effectively stepping "outside" the area where invariant violations are
+permitted, sort of like returning the value from a visible function.
+
+>>>
+>>> Maybe, I can never remember the rules for that. I was thinking that
+>>> a dispatching call just called the right routine, without
+>>> necessarily converting (formally) the operands, just as happens with
+>>> a statically bound call. But perhaps there is a conversion in there somewhere.
+>>
+>> This one is actually pretty simple.  On any call, every actual
+>> parameter is converted to the subtype of the formal parameter if it
+>> is a by-copy IN or IN OUT parameter, or is a by-reference parameter
+>> of any mode (this latter conversion is a view conversion).
+>
+> To which Bob replied:
+>
+>> Nothing is simple.  ;-)
+>
+> I think Bob's right. The rule for view conversions only applies
+> outside of the scope of T. 7.3.2(12/3). You are saying that it applies
+> to a dispatching call (which makes sense).
+
+There are two rules about conversions, one applies in all cases where we are
+converting *to* T, whether a value or a view conversion, and whether we are
+inside or outside the scope of T (7.3.2(11/3)).
+
+The other one only applies to view conversions, which go *from* T (or a
+descendant thereof), to a "proper" ancestor of T, and only when the view
+conversion is the LHS of an assignment (13/3), or upon subprogram return when
+the view conversion is an OUT or IN OUT actual parameter (14/3).  In both of
+these cases (13/3 and 14/3), the underlying object has a part that is of type T,
+but the value being assigned does *not* have a part that is of type T, so we
+need to check that updating this ancestor part of T doesn't foul up the
+invariant on T.
+
+> But now think a bit about the implementation of this. At the point of
+> the call, we don't know statically the type of T.
+
+I think you mean we don't know statically whether the object's tag identifies T.
+
+In any case, this is the case where the actual is of type Root'Class.  In that
+case, we might be triggering 11/3 (depending on how we end up modifying it), but
+we are definitely not triggering 12/3.
+
+> I hope I have missed something obvious about the interaction of these
+> rules and dispatching, but the existence of 7.3.2(14.c/3) suggests
+> that we thought this complication was just peachy. Please enlighten me!
+
+12/3-14/3 only apply when converting *from* T, not *to* T, and only upon
+assignment or returning from a subprogram with an OUT or IN OUT parameter of
+some proper ancestor of T. So I don't think these apply to the Root'Class case.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, December 20, 2013  5:56 PM
+
+...
+> >>>> I think this dispatching call involves an implicit conversion to
+> >>>> type T, and so should involve an invariant check.
+>
+> I am not so sure about this anymore.  We don't want to interpret
+> 7.3.2(11/3) to imply that we recheck the invariant on *every* call
+> even when the actual is already of type T.  I think 11/3 needs to be
+> modified to say:
+>
+>    * After successful conversion to type T {where the operand is not of
+>      type T}, the check is performed on the result of the conversion;
+>
+> and perhaps modified further to say:
+>
+>    * After successful conversion to type T {where the operand is not of
+>      type T nor, if tagged, has a tag that identifies T}, the check is
+>      performed on the result of the conversion;
+
+Ignoring the merits of the change, as soon as you make this conversion
+conditional, you are making it much harder to implement the check inside of the
+subprogram body (or wrapper, as appropriate). In particular, for a dispatching
+call, when you reach the body, you know longer know the type of the operand.
+
+I think you're trying to mitigate that by using the tag, but that would have the
+effect of checking some invariants in statically bound calls that you wouldn't
+otherwise check. Or you're requiring different bodies (really, different
+wrappers) for the target of dispatching calls vs. normal calls.
+
+In any case, I don't think it matters too much how this gets changed until we
+figure out how to make 7.3.2(12/3) implementable without distributed overhead.
+Your message is primarily answering my confused message, which doesn't help any.
+
+Let's look at longer and very painful (with the current wording) example:
+
+    package PR is
+        type Root is abstract tagged ...
+        procedure Op (P : in out Root) is abstract;
+    end PR;
+
+    with PR;
+    package P1 is
+        type T1 is new PR.Root with private
+           with Type_Invariant => Exp1(T1);
+        procedure Op (P : in out T1);
+    private
+        ...
+    end P1;
+
+    with PR, P1;
+    package P2 is
+        type T2 is new P1.T1 with private
+           with Type_Invariant => Exp2(T2);
+        procedure Op (P : in out T2);
+        procedure Do_It (P : in out Root'Class);
+    private
+        ...
+    end P2;
+
+    package body P2 is
+        procedure Do_It (P : in out Root'Class) is
+        begin
+           P.Op; -- (1)
+        end Do_It;
+        ...
+    end P2;
+
+    with P2, PR;
+    package P3 is
+        type T3 is new P2.T2 with private
+           with Type_Invariant => Exp3(T3);
+        procedure Op (P : in out T3);
+        function Leaky return PR.Root'Class; -- Might leak out an unchecked object of T3
+    private
+        ...
+    end P3;
+
+    with PR, P2, P3;
+    procedure Main is
+        Obj2 : P3.T3 := P3.T3(P3.Leaky); -- Assume Leaky returns an object with the tag of type T3.
+        Obj3 : PR.Root'Class := P3.Leaky; -- Assume Leaky returns an object with the tag of type T3.
+        Obj4 : P2.T2'Class := P2.T2'Class(P3.Leaky); -- Assume Leaky returns an object with the tag of type T3.
+    begin
+        P2.Do_It (Obj2); -- (2)
+        P2.Do_It (Obj3); -- (3)
+        P2.Do_It (Obj4); -- (4)
+    end Main;
+
+The explicit conversion to P3.T3 checks the invariant of T3. There is no check
+for Obj3, of course.
+
+Call (2) does not check any invariants of Obj, as there is no invariant on the
+target of the implicit conversion of the parameter of Do_It which is Root'Class.
+Nor does call (3), as there is no (non-trivial) conversion.
+
+The dispatching call at (1) [with the existing 7.3.2(11.3) wording] will check
+the invariant of T3 (Exp3(T3)) during the inbound call. So far, so good.
+
+Let's now consider the rule of 7.3.2(12-14/3). My original concern was how that
+interacts with dispatching calls. I think I've convinced myself (in writing this
+note), that it can never be triggered in a dispatching call (such as (1)). The
+reason is that a dispatching call always has an actual of some class-wide type,
+which is then converted to some specific descendant type. So the view conversion
+must always go from some ancestor to some descendant, and as such cannot trigger
+7.3.2(12-14/3). That at least means that there isn't any distributed overhead
+here.
+
+7.3.2(12-14/3) *is* triggered by (2). We know both the target (Root'Class) and
+source (T3) types, we're clearly outside of the scope of either, and we'll need
+to check each invariant in turn (Exp1, Exp2, Exp3) when the call returns. (T3
+being a descendant of T2 and T1, so we need to check them all.)
+
+It appears to me that 7.3.2(12-14/3) is not triggered by call (3), because the
+source and target types are the same (Root'Class).
+
+I'm not quite sure what is supposed to happen for call (4). The AARM note
+7.3.2(14.c/3) implies that the check depends on the actual tag of the object
+-- but nothing in the wording seems to imply that. The wording appears to say
+that we have a view conversion from T2'Class to Root'Class, so we need to check
+Exp1 and Exp2 on return. That's implementable, because the rule can be
+determined for each type that's involved.
+
+Note that if we move call (4) into the body of package P2 (as part of a
+class-wide routine, perhaps), then we would *not* check the invariant of T2 (as
+we'd be in its scope), but we still would check the invariant of T1 (because we
+wouldn't be in its scope).
+
+If the rule did somehow depend on the actual tag, we wouldn't know at
+compile-time which rules to check, and a simple dispatching routine as described
+in the note wouldn't work right, either, because we also have to check whether
+we're within the scope at each step. I don't think that we can get back inside
+if we are once outside, so at least it would be possible to start in the middle
+somehow.
+
+If we imagine that Op and Do_It have only an "out" parameter, then it seems that
+we'd have made the needed checks to prevent leaking, but only when the target
+object has type T3. If it has some other type with the tag of T3, we'd still be
+leaking the value, but a later implicit conversion should make the check before
+it gets back inside.
+
+All this means that I think we're OK so long as we keep the runtime tags out of
+it. But perhaps there is an example where including them is necessary (I haven't
+been able to find it).
+
+P.S. Man, this stuff is hard to understand, made worse because the
+7.3.2(12-14/3) necessarily has the conversion described backwards (since it is
+the return conversion that we're checking).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, December 22, 2013  9:59 PM
+
+> Ignoring the merits of the change, as soon as you make this conversion
+> conditional, you are making it much harder to implement the check
+> inside of the subprogram body (or wrapper, as appropriate). In
+> particular, for a dispatching call, when you reach the body, you no
+> longer know the type of the operand.
+
+Good point.  It might be better to leave it as is, and then give an
+implementation permission to omit the check when the tag identifies T or the
+type of the operand is already T.
+
+I still like the idea of requiring that all objects of a class-wide type have
+already had the invariant checked, as part of converting to the class-wide type.
+What that means is that you can rely on all class-wide objects already obeying
+the invariant of their tag-identified type.
+
+> I think you're trying to mitigate that by using the tag, but that
+> would have the effect of checking some invariants in statically bound
+> calls that you wouldn't otherwise check. Or you're requiring different
+> bodies (really, different wrappers) for the target of dispatching calls vs. normal calls.
+>
+> In any case, I don't think it matters too much how this gets changed
+> until we figure out how to make 7.3.2(12/3) implementable without
+> distributed overhead. Your message is primarily answering my confused
+> message, which doesn't help any.
+>
+> Let's look at longer and very painful (with the current wording) example:
+>
+>      package PR is
+>          type Root is abstract tagged ...
+>          procedure Op (P : in out Root) is abstract;
+>      end PR;
+>
+>      with PR;
+>      package P1 is
+>          type T1 is new PR.Root with private
+>             with Type_Invariant => Exp1(T1);
+>          procedure Op (P : in out T1);
+>      private
+>          ...
+>      end P1;
+>
+>      with PR, P1;
+>      package P2 is
+>          type T2 is new P1.T1 with private
+>             with Type_Invariant => Exp2(T2);
+>          procedure Op (P : in out T2);
+>          procedure Do_It (P : in out Root'Class);
+>      private
+>          ...
+>      end P2;
+>
+>      package body P2 is
+>          procedure Do_It (P : in out Root'Class) is
+>          begin
+>             P.Op; -- (1)
+>          end Do_It;
+>          ...
+>      end P2;
+>
+>      with P2, PR;
+>      package P3 is
+>          type T3 is new P2.T2 with private
+>             with Type_Invariant => Exp3(T3);
+>          procedure Op (P : in out T3);
+>          function Leaky return PR.Root'Class; -- Might leak out an
+>						-- unchecked object of T3
+
+It won't "leak" if we require the invariant being checked on conversion to a
+class-wide type.
+
+>      private
+>          ...
+> ...
+> All this means that I think we're OK so long as we keep the runtime
+> tags out of it. But perhaps there is an example where including them
+> is necessary (I haven't been able to find it).
+
+I didn't follow your complete example, but I agree that we are OK.  I still
+think we need to settle the question of whether inherited class-wide invariants
+apply to all primitives of a record extension or just the ones that correspond
+to primitives of the nearest private (extension) ancestor.  I have come around
+to thinking it should apply to all of them.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 23, 2013  4:40 PM
+
+> Good point.  It might be better to leave it as is, and then give an
+> implementation permission to omit the check when the tag identifies T
+> or the type of the operand is already T.
+>
+> I still like the idea of requiring that all objects of a class-wide
+> type have already had the invariant checked, as part of converting to
+> the class-wide type.  What that means is that you can rely on all
+> class-wide objects already obeying the invariant of their
+> tag-identified type.
+
+Careful: when talking about class-wide types, you have to worry about ancestor
+class-wide types (like Root'Class in these examples). If you require an
+invariant check on those, that has to be a dispatching call to an invariant
+check subprogram, and that would be a sort of distributed overhead in that you'd
+have to do it whether or not the type itself has an invariant (because some
+extension could add it).
+
+If you only have it apply to descendant class-wide types (as it arguably does
+now), you avoid that problem, but then there is a possibility of holes using the
+root type. (At least we haven't seen an example with a clear hole yet, so maybe
+that's more of a worry than a real problem.) In any case, we need to determine
+whether descendant class-wide types are covered by the current wording or not
+(it's not clear to me) -- this is mainly about T'Class in a package defining T
+(remember that T is formally a descendant of itself).
+
+...
+> I didn't follow your complete example, but I agree that we are OK.  I
+> still think we need to settle the question of whether inherited
+> class-wide invariants apply to all primitives of a record extension or
+> just the ones that correspond to primitives of the nearest private
+> (extension) ancestor.  I have come around to thinking it should apply
+> to all of them.
+
+Certainly it should apply to all (at least in my view), because it avoids
+surprises that could otherwise come via dispatching. I suppose we'll need to
+settle that at a meeting, but as far as this e-mail thread is concerned, I think
+it is settled. (At least until someone else joins in!)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, December 23, 2013  9:51 PM
+
+> Careful: when talking about class-wide types, you have to worry about
+> ancestor class-wide types (like Root'Class in these examples). If you
+> require an invariant check on those, that has to be a dispatching call
+> to an invariant check subprogram, and that would be a sort of
+> distributed overhead in that you'd have to do it whether or not the
+> type itself has an invariant (because some extension could add it)...
+
+I meant that the invariant check occurs on conversion from a *specific* type to
+a class-wide type.  At that point you know which invariant to apply.  The one
+you are converting *from*.  And the check only needs to occur when this
+conversion happens *within* the immediate scope of the type.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 26, 2013  1:08 PM
+
+I'm not even sure that we're talking about the same problems anymore.
+Anyway, I think it would be best if you sat down and figured out what you think
+we need to do and present it in the clear way that you can (and I can't,
+unfortunately). Then I can try to figure out whether or not it makes sense to
+me. Rather than us talking about slightly different issues and confusing
+everyone (including ourselves).
+
+****************************************************************
+
 From: Randy Brukardt
 Sent: Thursday, December 19, 2013  10:12 PM
 
 Here's a summary of changes that appear to be required to AI12-0042-1; hopefully
 this will help Tucker out on this AI. (This is from the previous mail thread,
-which I just finished filing.)
+which I just finished filing. [But note: the last six messages above came after
+this summary was created - Editor.])
 
 [A] Add a language design principle along the lines of:
 
@@ -2388,11 +2787,13 @@ types are crossed, it seems like not all of the checks might be needed depending
 on where the call is. Perhaps the wording is confusing the issue. In any case,
 it sounds like implementation trouble. Possibly that should be a separate AI.
 
-[Note that this afternoon's rant from me on this topic is also confused, because
-I was talking about "in" parameter conversions, but invariant checks on those
-appear to always be performed. The real problem is with back conversions via "in
-out" parameters. I have a specific example in mind right now, perhaps I'll write
-it up tomorrow.]
+[Note that there is later discussion on this point, filed above. - Editor]
+
+[There is also an issue with how invariants are checked for class-wide
+operations. It appears that class-wide invariants need to apply to
+operations and objects of descendant class-wide types, as well as the
+specific types. The current wording is unclear. See end of thread
+above. - Editor]
 
 ****************************************************************
 
