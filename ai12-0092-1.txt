@@ -1854,3 +1854,905 @@ new code hopefully the only warnings allowed would be those either with a
 recorded justification or of the lowest category.
 
 ****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, November 19, 2013  9:18 AM
+
+Part of the discussion has been about whether there are cases where such a
+feature would be useful in practice.
+
+One such case could be related to AI05-0144-2 (Detecting dangerous order
+dependencies)
+
+The discussion in the AI suggests that the following should be illegal in Ada
+2012.
+
+  procedure Do_It (Double, Triple : in out Natural) is
+  begin
+     Double := Double * 2;
+     Triple := Triple * 3;
+  end Do_It;
+
+  Var : Natural := 2;
+
+  Do_It (Var, Var); -- Illegal by new rules.
+
+Yet this code compiles in my current version of GNAT.
+
+It does produce 'warning: writable actual for "Double" overlaps with actual for
+"Triple"' as a compiler warning.
+
+So it appears that GNAT already is treating this as a suppressable error.
+
+This also seems to be an example where a suppressable error would have been
+preferrable over introducing a backwards incompatibility.
+
+Maybe we could have gone further to rule out more dangerous order dependencies
+if we had the suppressable error mechanism.
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Tuesday, November 19, 2013  9:35 AM
+
+> Yet this code compiles in my current version of GNAT.
+
+Actually the current version reports this as an error, you must have a slightly
+older version.
+
+> It does produce 'warning: writable actual for "Double" overlaps with actual for "Triple"' as a compiler warning.
+>
+> So it appears that GNAT already is treating this as a suppressable error.
+
+We were concerted that this would be a potentially serious disruption, but found
+very few instances of such potential problems in our test suite, so we decided
+that better be fully conformant and treat this as a error, in particular because
+it is really aimed at functions with in-out parameters, of which there are few
+examples so far :-)!
+
+> This also seems to be an example where a suppressable error would have
+> been preferrable over introducing a backwards incompatibility.
+>
+> Maybe we could have gone further to rule out more dangerous order
+> dependencies if we had the suppressable error mechanism.
+
+Once a new mechanism is in place I'm sure we'll find many uses for it!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  10:05 AM
+
+After all there is no difference between
+
+an error that can be suppressed
+
+a warning that can be made into an error.
+
+given that the nice implementation of suppressing errors is to make them into
+warnings, at least as an option.
+
+And yes, mandating warnings is something that should be done much more often in
+the RM, and if it makes people happy to call them suppressible errors fine
+(reminds me of the ACA which plays this kind of trick with taxes and penalties).
+
+(btw that's the spelling, not suppressable)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, November 19, 2013  10:09 AM
+
+> This also seems to be an example where a suppressable error would have
+> been preferrable over introducing a backwards incompatibility.
+
+Yes, I agree.  AdaCore has had some customer complaints about this.
+A typical case is two 'out' params, which sometimes contain useful results, but
+sometimes the caller wants to ignore them, and so writes:
+
+    Do_Something(X, Y, Ignored_Out_Param, Ignored_Out_Param);
+
+> Maybe we could have gone further to rule out more dangerous order
+> dependencies if we had the suppressable error mechanism.
+
+Maybe.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, November 19, 2013  10:25 AM
+
+> And yes, mandating warnings is something that should be done much more
+> often in the RM, and if it makes people happy to call them
+> suppressible errors fine
+
+It makes people happy to call them SOMEthing that sounds "bad".
+I'm not sure "suppressible error" is the right term, because
+(1) I'm not sure it fits into the "Classification of Errors"
+section in chap 1, and (2) "suppress" sounds like it means "don't print the
+message", whereas what we really mean is "allow the program to run in spite of
+the error".
+
+"Warning" is apparently not strong enough for most people.
+You buy an electric hedge trimmer, and you read all sorts of silly "warnings"
+about how you shouldn't use it in the bath tub etc, leading people to believe
+"warning" means "something I shouldn't bother paying attention to".  ;-)
+
+> (reminds me of the ACA which plays this kind of trick with taxes and
+> penalties).
+>
+> (btw that's the spelling, not suppressable)
+
+Thanks, I didn't know that!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 19, 2013  2:41 PM
+
+> "Warning" is apparently not strong enough for most people.
+> You buy an electric hedge trimmer, and you read all sorts of silly
+> "warnings" about how you shouldn't use it in the bath tub etc, leading
+> people to believe "warning" means "something I shouldn't bother paying
+> attention to".  ;-)
+
+To me, the advantage of "suppressible error" over warnings is two-fold:
+
+(1) The default in standard mode is that it is an error (the program is not
+allowed to execute). You can use a configuration pragma to allow the program to
+execute (probably modeled as a compiler switch, but of course the RM has nothing
+to say about switches). The advantage of the configuration pragma is that it can
+be "compiled into the environment" without needing to modify any source code
+(which is critical in the case of incompatibilities). "Warning" implies the
+opposite (that the program is allowed to execute by default).
+
+(2) The name (and default) makes it clear that these are errors, which we only
+support allowing of the execution for the purposes of compatibility with
+previous versions of Ada. "Warning" is not so clear.
+
+Of course, if someone has a better name than "suppressible error" (with the same
+intent and connotation), I'd be happy to support that too.
+
+The case that we talked about in Pittsburgh (the bad view conversion of access
+types), the runtime semantics is that of making the parameter value abnormal
+(such that reading it would cause the program to be erroneous). Generally, we'd
+prefer to prevent that by a Legality Rule, rather than allowing a potential time
+bomb. But since the bug has persisted since Ada 95 (and the construct is an Ada
+83 one), it's possible it exists in code. So we could use a suppressible error
+for this case, and one expects that the error would be suppressed only in the
+case where someone has existing code that they can't modify.
+
+I do think this is a mechanism that we could use in a variety of cases,
+especially if we're willing to define execution to be erroneous if it is
+suppressed (in many cases, defining the semantics is hard or impossible). It's
+certainly worth pursuing.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  2:53 PM
+
+> (1) The default in standard mode is that it is an error (the program
+> is not allowed to execute). You can use a configuration pragma to
+> allow the program to execute (probably modeled as a compiler switch,
+> but of course the RM has nothing to say about switches). The advantage
+> of the configuration pragma is that it can be "compiled into the
+> environment" without needing to modify any source code (which is critical in the case of incompatibilities). "Warning"
+> implies the opposite (that the program is allowed to execute by default).
+
+That's meaningless, compilers are free to provide whatever defaults they like.
+They just have to have a mode which is strictly conforming (I doubt many GNAT
+programmers know the full details of specifying this strictly conforming mode,
+since it is in practice useless except for running ACATS tests :-))
+
+> (2) The name (and default) makes it clear that these are errors, which
+> we only support allowing of the execution for the purposes of
+> compatibility with previous versions of Ada. "Warning" is not so clear.
+
+Yes, of course in many cases I disagree that these are errors, they prevent well
+defined perfectly reasonable programs from executing :-)
+
+> Of course, if someone has a better name than "suppressible error"
+> (with the same intent and connotation), I'd be happy to support that too.
+
+Well to me, it's finally a way of recognizing that compatibility is more
+important than asthetic consistency of the semantic model, and if we can use
+these, whatever they are called, to reduce incompatibilites in the future, that
+would be a step forward.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, November 19, 2013  3:14 PM
+
+> ... I do think this is a mechanism that we could use in a variety of
+> cases, especially if we're willing to define execution to be erroneous
+> if it is suppressed (in many cases, defining the semantics is hard or impossible).
+> It's certainly worth pursuing.
+
+We at least mentioned the possibility of assigning unique identifiers to
+suppressible legality errors, and then presumably defining a pragma that allows
+individual (or collections of?) suppressible errors to be suppressed.
+
+It might be nice to eventually assign unique identifiers to all legality errors,
+whether or not they should be considered suppressible, if only for documentation
+purposes (might be particularly useful for ACATS B tests).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  3:23 PM
+
+> We at least mentioned the possibility of assigning unique identifiers
+> to suppressible legality errors, and then presumably defining a pragma
+> that allows individual (or collections of?) suppressible errors to be suppressed.
+
+Don't over-engineer, this has no place in a language standard, it may or may not
+make sense for an implementation. Right now, the debug flag in GNAT that
+suppresses errors of this kind is indiscriminate and that's proved adequate in
+practice.
+
+> It might be nice to eventually assign unique identifiers to all
+> legality errors, whether or not they should be considered
+> suppressible, if only for documentation purposes (might be particularly useful
+> for ACATS B tests).
+
+Not in the language standard please! I can promise you that GNAT would ignore
+these if it was done, since it would be a HUGE effort to implement for VERY
+little gain.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, November 19, 2013  3:32 PM
+
+I did not mean to imply compilers would have to do anything with these.  Rather,
+we might indicate in the comments of an ACATS B test, which particular legality
+rule we were checking.  Right now there is not a simple process (that I am aware
+of) to check for coverage of legality rules by B tests.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  3:39 PM
+
+Ah OK! I thought we just used RM para numbers? Otherwise sounds like a LOT of
+effort even just in the RM for little gain. After all ACATS coverage is SO
+incomplete, and likely to remain so, as Randy will tell you, so it seems
+premature to be worrying about air tight mechanisms to get to 100% coverage.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 19, 2013  3:58 PM
+
+> > I did not mean to imply compilers would have to do anything with
+> > these.  Rather, we might indicate in the comments of an ACATS B
+> > test, which particular legality rule we were checking.  Right now
+> > there is not a simple process (that I am aware of) to check for
+> > coverage of legality rules by B tests.
+>
+> Ah OK! I thought we just used RM para numbers?
+
+Well, actually sentence numbers within RM paragraph numbers. (The SAIC coverage
+just used paragraph numbers and managed to miss a number of rules that way; some
+Legality Rule paragraphs have as many as 4 testable rules in them.)
+
+And of course there are rules that take multiple paragraphs to describe
+(bulleted lists are like that).
+
+> Otherwise
+> sounds like a LOT of effort even just in the RM for little gain. After
+> all ACATS coverage is SO incomplete, and likely to remain so, as Randy
+> will tell you, so it seems premature to be worrying about air tight
+> mechanisms to get to 100% coverage.
+
+I don't see a lot of value to an RM rule designation. It's easy enough to figure
+coverage of ACATS B-Tests to Legality Rules in 95% of the cases. As with many
+things, it's the coverage of C-Tests that's hard to quantify (because any
+individual program depends on dozens of RM rules to execute).
+
+If there is anything interesting about B-Tests, it is making it easier to grade
+them. The one thing that's easier for C-Tests is grading them, because they
+either report Passed or don't. B-Tests require some sort of error message
+analysis, a lot harder problem.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  4:07 PM
+
+> If there is anything interesting about B-Tests, it is making it easier
+> to grade them. The one thing that's easier for C-Tests is grading
+> them, because they either report Passed or don't. B-Tests require some
+> sort of error message analysis, a lot harder problem.
+
+Well how often will this get done. In our context, we have a set data base of
+expected B-test output, and only when there are discrepancies do we have to look
+at it, which is seldom! Would be even more seldom if fewer incompatible changes
+were made :-) :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 19, 2013  4:53 PM
+
+It's not a major problem for a vendor, because we can compare against a known
+good set of results. But anyone that wants to do their own testing has to do
+this. Based on my correspondence, there are a number of people that want to do
+so. (And of course, any formal testing has to do this as well, it's a
+significant part of the expense of formal testing.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 19, 2013  3:52 PM
+
+...
+> > To me, the advantage of "suppressible error" over warnings is two-fold:
+> >
+> > (1) The default in standard mode is that it is an error (the program
+> > is not allowed to execute). You can use a configuration pragma to
+> > allow the program to execute (probably modeled as a compiler switch,
+> > but of course the RM has nothing to say about switches). The
+> > advantage of the configuration pragma is that it can be "compiled
+> > into the environment" without needing to modify any source code
+> > (which is critical in the case of incompatibilities). "Warning"
+> > implies the opposite (that the program is allowed to execute by default).
+>
+> That's meaningless, compilers are free to provide whatever defaults
+> they like. They just have to have a mode which is strictly conforming
+> (I doubt many GNAT programmers know the full details of specifying
+> this strictly conforming mode, since it is in practice useless except
+> for running ACATS tests :-))
+
+It's not meaningless even if ignored, because it conveys the intent of the
+language designers that these are errors. And it conveys the intent of the
+language designers as to appropriate defaults. Compilers that stray too far from
+Standard mode by default are trouble. (GNAT does this with not having overflow
+checking enabled by default; this causes no end of questions from newbies on
+comp.lang.ada. It would be better if the free GNAT was much closer to standard
+mode than it is.)
+
+> > (2) The name (and default) makes it clear that these are errors,
+> > which we only support allowing of the execution for the purposes of
+> > compatibility with previous versions of Ada. "Warning" is not so clear.
+>
+> Yes, of course in many cases I disagree that these are errors, they
+> prevent well defined perfectly reasonable programs from executing :-)
+
+Amazing! You can see the future and already disagree with it! :-)
+
+Since we haven't designated a single error to be a "suppressible error", and
+we've only talked about two very different cases as potential "suppressible
+error", it's impossible to say anything about what the effect of the errors are.
+
+Unless you meant to make a blanket statement about all Ada Legality Rules (as
+one can argue in many cases that there is some sensible semantics for illegal
+constructs, one example would be class-wide arguments to controlling arguments
+of statically bound routines).
+
+> > Of course, if someone has a better name than "suppressible error"
+> > (with the same intent and connotation), I'd be happy to support that too.
+>
+> Well to me, it's finally a way of recognizing that compatibility is
+> more important than asthetic consistency of the semantic model, and if
+> we can use these, whatever they are called, to reduce incompatibilites
+> in the future, that would be a step forward.
+
+I still think these will not reduce the incompatibilities very much, since there
+are so many cases where they wouldn't help. But some help is likely to be better
+than no help.
+
+Note that the configuration pragma is essentially to enable obsolescent
+features; it might even make sense to place it there. The core language wouldn't
+have to acknowledge these at all. So we get both "asthetic consistency of the
+semantic model" (as obsolescent features are ignored for this purpose) and
+compatibility. Sounds like a win-win.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  4:04 PM
+
+> It's not meaningless even if ignored, because it conveys the intent of
+> the language designers that these are errors. And it conveys the
+> intent of the language designers as to appropriate defaults. Compilers
+> that stray too far from Standard mode by default are trouble.
+
+Sure I understand, though I still think that in some cases, e.g. warning about
+overlapping parameters, these should NOT be considered as errors, the effect is
+well defined, and they are absolutely in warning territory to me. Same with
+several other cases.
+
+> (GNAT does this with not having
+> overflow checking enabled by default; this causes no end of questions
+> from newbies on comp.lang.ada. It would be better if the free GNAT was
+> much closer to standard mode than it is.)
+
+Probably so, but compatibility always looms large :-)
+
+>>> (2) The name (and default) makes it clear that these are errors,
+>>> which we only support allowing of the execution for the purposes of
+>>> compatibility with previous versions of Ada. "Warning" is not so clear.
+>>
+>> Yes, of course in many cases I disagree that these are errors, they
+>> prevent well defined perfectly reasonable programs from executing :-)
+>
+> Amazing! You can see the future and already disagree with it! :-)
+
+I am thinking of past cases where we would have used this (or at least I hope we
+would have used it), e.g. overlapping parameters, or reaching further back,
+static expressions like 9/0.
+
+> Unless you meant to make a blanket statement about all Ada Legality
+> Rules (as one can argue in many cases that there is some sensible
+> semantics for illegal constructs, one example would be class-wide
+> arguments to controlling arguments of statically bound routines).
+
+The idea does not come out the blue, it comes out of a discussion context, and I
+am commenting in the scope of that context.
+
+> I still think these will not reduce the incompatibilities very much,
+> since there are so many cases where they wouldn't help. But some help
+> is likely to be better than no help.
+
+We will see
+
+> Note that the configuration pragma is essentially to enable
+> obsolescent features; it might even make sense to place it there. The
+> core language wouldn't have to acknowledge these at all. So we get
+> both "asthetic consistency of the semantic model" (as obsolescent
+> features are ignored for this purpose) and compatibility. Sounds like a win-win.
+
+Not sure what you are suggesting wrt obsolescent features. It would be
+*awful* to have to use a configuration parameter in order to be able to say
+Ascii.LF, or to use size clauses instead of size aspects???
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 19, 2013  4:58 PM
+
+> Not sure what you are suggesting wrt obsolescent features. It would be
+> *awful* to have to use a configuration parameter in order to be able
+> to say Ascii.LF, or to use size clauses instead of size aspects???
+
+I was just thinking out loud. The configuration pragma to suppress suppressible
+errors would primarily be intended for compatibility with older versions of Ada.
+That's really the purpose of the obsolescent features annex (provide features
+for compatibility), so arguably, that pragma could be defined there. In which
+case it wouldn't appear in the core, leaving a clean(er) semantic model. I was
+*only* talking about the ability to suppress suppressible errors, and not any
+other feature of the language (now or in the future). In any event, it's not a
+big deal either way.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  5:10 PM
+
+AH, I see, just define the pragma there, OK .. I don't care, I have always
+thought Annex J to be useless :-)
+
+And we still have a nasty unresolved problem with Annex J, which is that we
+moved all the pragmas there. It is of course totally unrealistic to expect
+everyone to switch to using only aspects, so 98% of all Ada programs will be
+using the obsolescent pragmas and aspects.
+
+That means that if No_Obsolescent_Features excludes them, we have a BIG
+compatibility problem.
+
+For GNAT, we have just ignored this, and the NOF restriction does not include
+this new stuff.
+
+Maybe violating this restriction with rep attributes and pragmas should be a
+suppressible error :-) :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 19, 2013  5:43 PM
+
+...
+> And we still have a nasty unresolved problem with Annex J, which is
+> that we moved all the pragmas there. It is of course totally
+> unrealistic to expect everyone to switch to using only aspects, so 98%
+> of all Ada programs will be using the obsolescent pragmas and aspects.
+>
+> That means that if No_Obsolescent_Features excludes them, we have a
+> BIG compatibility problem.
+
+But this problem was resolved long ago, because you complained about it 2 years
+ago. (This is the fourth time you've made this comment!) Specifically,
+13.12.1(4/3) defines No_Obsolescent_Features as:
+
+There is no use of language features defined in Annex J. It is implementation
+defined whether uses of the renamings of J.1 and of the pragmas of J.15 are
+detected by this restriction. This restriction applies only to the current
+compilation or environment, not the entire partition.
+
+> For GNAT, we have just ignored this, and the NOF restriction does not
+> include this new stuff.
+
+GNAT is following the letter of the Standard, see above.
+
+> Maybe violating this restriction with rep attributes and pragmas
+> should be a suppressible error :-) :-)
+
+That probably would have been better than making it implementation-defined, but
+I don't see any reason to change. (And note that representation attributes are
+*not* obsolescent.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  6:07 PM
+
+> But this problem was resolved long ago, because you complained about
+> it 2 years ago. (This is the fourth time you've made this comment!)
+> Specifically,
+> 13.12.1(4/3) defines No_Obsolescent_Features as:
+>
+> There is no use of language features defined in Annex J. It is
+> implementation defined whether uses of the renamings of J.1 and of the
+> pragmas of J.15 are detected by this restriction. This restriction
+> applies only to the current compilation or environment, not the entire partition.
+>
+>> For GNAT, we have just ignored this, and the NOF restriction does not
+>> include this new stuff.
+>
+> GNAT is following the letter of the Standard, see above.
+
+Ah, I didn't know that, good! Although I must say this seems an unnecessary
+non-portability. I suspect in practice that any other implementation would copy
+GNAT in this regard :-)
+
+>> Maybe violating this restriction with rep attributes and pragmas
+>> should be a suppressible error :-) :-)
+>
+> That probably would have been better than making it
+> implementation-defined, but I don't see any reason to change. (And
+> note that representation attributes are *not* obsolescent.)
+
+Ah ok, thanks for clarification, though it puzzles me to make Component_Size
+attribute specification non-obsolescent and pragma Pack obsolescent.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 19, 2013  6:16 PM
+
+> Ah ok, thanks for clarification, though it puzzles me to make
+> Component_Size attribute specification non-obsolescent and pragma Pack
+> obsolescent.
+
+The reason is that you can put a attribute_definition_clause in a private part,
+and thus reference items that you aren't allowed to mention in a similar aspect
+specification. So there are legal things that you can't write as an aspect
+specification but can write as an attribute_definition_clause (whether writing
+such things is a good idea is a separate issue).
+
+OTOH, the pragmas don't take expressions (just the name of the entity), and thus
+any legal pragma can be written as an aspect specification. Ergo, there is no
+need for the pragmas, new code should only use aspect specifications.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  6:27 PM
+
+> OTOH, the pragmas don't take expressions (just the name of the
+> entity), and thus any legal pragma can be written as an aspect
+> specification. Ergo, there is no need for the pragmas, new code should only
+> use aspect specifications.
+
+I disagree with the ergo here. To me a pragma Pack can often be regarded as an
+implementation detail, and thus better confined to the private part.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Tuesday, November 19, 2013  1:49 PM
+
+...
+>> Yet this code compiles in my current version of GNAT.
+>
+> Actually the current version reports this as an error, you must have a
+> slightly older version.
+
+How recent, Ed? The Latest GAP version did not generate an error.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 19, 2013  4:14 PM
+
+More recent than the latest GAP version indeed!
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, November 20, 2013  3:43 AM
+
+I see the suppressible errors as a variation on the theme of obsolescent
+features. I also think that No_Obsolescent_Features should have an optional
+parameter of language revision so that a user could get himself up-to-date with
+Ada 2005 now and leave getting up-to-date with Ada 2012 for some time in the
+future.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Wednesday, November 20, 2013  7:53 AM
+
+As much as I would like to see suppressable errors for all situations, where any
+generally undecidable error situation is decided by the compiler anyhow, I am
+seriously worried about the ARG politics of providing the capability. I.e., I am
+really eager to strengthen warnings, but I am not at all in favor of weakening
+error messages.
+
+Slightly overstating my case, are we ever going to close safety loopholes again
+with declaring something plain illegal, when we have the easy way out in
+declaring it suppressably illegal?
+
+Statements like
+
+On 19.11.2013 21:53, Robert Dewar wrote:
+> Well to me, it's finally a way of recognizing that compatibility is
+> more important than asthetic consistency of the semantic model, and if
+> we can use these, whatever they are called, to reduce incompatibilites
+> in the future, that would be a step forward.
+
+which also have been made at the meeting - so it is not just Robert - make we
+worry that indeed almost all newly discovered errors will become suppressable
+for fear of rendering an existing program illegal. To me, that is clearly the
+wrong way, including the wrong message to the user community. "Ada 2012 with
+Suppressable Safety", hmmm.
+
+Note that the aliasing problem is methodological to prevent unexpected results
+(it would have been a really good candidate for a suppressable error and a much
+broader definition). The case of violating discriminant constraints, which was
+the case discussed by the ARG, is a safety issue. When it comes to safety, I do
+not want suppressable errors.
+
+Moreover, while compiler producers have the liberty to suppress errors to their
+liking in non-standard mode, e.g., to achieve compatibility to
+"pre-ARG-decided-error"-status of the language, language definers are not free
+to ignore specifying the actual semantics of code in the presence of suppressed
+errors. I would love to avoid that.
+
+The analogy to suppressed checks doesn't quite work. One can suppress checks
+rather surgically and individually; plus, there is only a small number of them.
+Suppressable errors so far are an all-or-nothing proposition.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, November 20, 2013  8:07 AM
+
+I think we should reserve "suppressible" errors mostly for what might be called
+"methodological" errors.  Examples that come to mind are the Ada 2012 aliasing
+checks for OUT parameters, the Ada 95 illegality of out-of-range static values,
+and perhaps something like the Ada 95 requirement of having all or no
+dynamically-tagged operands in a dispatching call.
+
+This bizarre OUT parameter case for access types and view conversions is right
+on the border.  It doesn't inevitably lead to erroneousness -- only if the OUT
+parameter's initial value is read.
+
+In any case, I think the language-defined configuration pragma for suppressing
+these should be very specific, uniquely identifying the legality error that is
+being suppressed. Implementations could of course define their own pragmas to be
+more sweeping in nature.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 20, 2013  8:16 AM
+
+> which also have been made at the meeting - so it is not just Robert -
+> make we worry that indeed almost all newly discovered errors will
+> become suppressable for fear of rendering an existing program illegal.
+> To me, that is clearly the wrong way, including the wrong message to
+> the user community. "Ada 2012 with Suppressable Safety", hmmm.
+
+pragma Suppress already has that "problem" if you think it is a problem!
+
+> Note that the aliasing problem is methodological to prevent unexpected
+> results (it would have been a really good candidate for a suppressable
+> error and a much broader definition). The case of violating
+> discriminant constraints, which was the case discussed by the ARG, is a safety issue.
+> When it comes to safety, I do not want suppressable errors.
+
+But you can totally suppress discriminant checks anyway!
+
+> The analogy to suppressed checks doesn't quite work. One can suppress
+> checks rather surgically and individually; plus, there is only a small
+> number of them. Suppressable errors so far are an all-or-nothing
+> proposition.
+
+Not at all, I think there should be fine grained control over suppressing
+errors, using the scope model of Suppress, and we are only talking here about a
+very small number of errors that are candidates for suppression.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 20, 2013  8:22 AM
+
+> I think we should reserve "suppressible" errors mostly for what might
+> be called "methodological" errors.  Examples that come to mind are the
+> Ada 2012 aliasing checks for OUT parameters, the Ada 95 illegality of
+> out-of-range static values, and perhaps something like the Ada 95
+> requirement of having all or no dynamically-tagged operands in a dispatching call.
+
+I agree completely
+
+> This bizarre OUT parameter case for access types and view conversions
+> is right on the border.  It doesn't inevitably lead to erroneousness
+> -- only if the OUT parameter's initial value is read.
+
+I agree completely
+
+> In any case, I think the language-defined configuration pragma for
+> suppressing these should be very specific, uniquely identifying the legality
+> error that is being suppressed.  Implementations could of course define
+> their own pragmas to be more sweeping in nature.
+
+I agree completely, and doubt that sweeping stuff is a good idea. We currently
+use an undocumented debug switch for this purpose, and it would be good to
+replace it with something less sweeping. Currently our debug switch looks like:
+
+>    --  d.E  Turn selected errors into warnings. This debug switch causes a
+>    --       specific set of error messages into warnings. Setting this switch
+>    --       causes Opt.Error_To_Warning to be set to True. The intention is
+>    --       that this be used for messages representing upwards incompatible
+>    --       changes to Ada 2012 that cause previously correct programs to be
+>    --       treated as illegal now. The following cases are affected:
+>    --
+>    --          Errors relating to overlapping subprogram parameters for cases
+>    --          other than IN OUT parameters to functions.
+>    --
+>    --          Errors relating to the new rules about not defining equality
+>    --          too late so that composition of equality can be assured.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Wednesday, November 20, 2013  11:42 AM
+
+> The case that we talked about in Pittsburgh (the bad view conversion
+> of access types), the runtime semantics is that of making the
+> parameter value abnormal (such that reading it would cause the program to be erroneous).
+
+This is exactly right, in my opinion. This involved out parameters, where it
+typically does not matter if the value is abnormal, as it will get overwritten
+anyway. Moreover, failing any language-defined check in a procedure updating a
+composite variable may make it abnormal. So, this is just another case where we
+cannot avoid a particular set of errors at compile time, unless we make a set of
+programs with well-defined behavior illegal.
+
+> Generally, we'd prefer to prevent that by a Legality Rule, rather than
+> allowing a potential time bomb. But since the bug has persisted since
+> Ada 95 (and the construct is an Ada 83 one), it's possible it exists
+> in code. So we could use a suppressible error for this case, and one
+> expects that the error would be suppressed only in the case where
+> someone has existing code that they can't modify.
+
+Sometimes seems that far too much effort is put into preventing programmers of
+shooting themselves in the foot with complicated contraptions, while ignoring
+the minefield of real problems in concurrent programs. We're happy to make any
+concurrent I/O erroneous (including where the file argument is implicit) even
+though languages such as C use implicit locking to avoid undefined behavior.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 20, 2013  3:46 PM
+
+I agree 100% with this, I think for example it is really bad that separate tasks
+can't do Put_Line safely. In fact there is an internal ticket here at AdaCore to
+fix that :-) So that at least GNAT will behave nicely, even if Ada does not!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 20, 2013  11:51 AM
+
+...
+> > The analogy to suppressed checks doesn't quite work. One can
+> > suppress checks rather surgically and individually; plus, there is
+> > only a small number of them. Suppressable errors so far are an
+> > all-or-nothing proposition.
+>
+> Not at all, I think there should be fine grained control over
+> suppressing errors, using the scope model of Suppress, and we are only
+> talking here about a very small number of errors that are candidates
+> for suppression.
+
+I had suggested something like that during the ARG meeting. Tucker made the good
+point that using local error suppression would require modifying the source
+code. And if you are allowed to modify the source code, you should just get rid
+of the offending code (all of the cases we've discussed to date have easy local
+workarounds) rather than suppressing an error. He thought it was more valuable
+to have the user specify what errors they wanted suppressed (globally), so that
+they don't have to suppress all or nothing. But they need global suppression so
+that they don't have to modify the source (just the build environment).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 20, 2013  3:48 PM
+
+Well how easy it is to modify the source code to eliminate the error is not
+clear, and you can probably justify special local suppress additions easier than
+other code changes.
+
+But note I said we should follow the Suppress model, and of course that model
+allows global control as well via configuration pragmas.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 20, 2013  12:06 PM
+
+...
+> Sometimes seems that far too much effort is put into preventing
+> programmers of shooting themselves in the foot with complicated
+> contraptions, while ignoring the minefield of real problems in
+> concurrent programs. We're happy to make any concurrent I/O erroneous
+> (including where the file argument is implicit) even though languages
+> such as C use implicit locking to avoid undefined behavior.
+
+Full Ada is not really a concurrent language; there are far too many ways to
+shoot yourself in the head (not foot!). (It's more of a cooperating sequential
+processes sort of language.) Implicit locking is *way* down the list of those
+priorities. (I think that the project that Brad and Steve are working on might
+present some help in this area.)
+
+Implicit locking for language-defined subprograms is a massive minefield. We
+tried to come up with a definition of it for the containers, but failed (too
+many deadlock and livelock cases). Earlier, we had tried to include implicit
+locking in Claw, but again there were too many deadlock and livelock cases.
+Maybe it could be made to work with a limited subset of I/O, but I'm skeptical
+that we could even make that work without lots and lots of work.
+
+I would guess that we'll have to define purpose-built libraries to support
+concurrent I/O, probably using new categorizations defined by the
+multiprocessing working group. (My guess is that C is delusional if they think
+that implicit locking will always work on their full libraries, but probably no
+one will care because they don't use (or will learn to avoid) the problem
+areas.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 20, 2013  3:49 PM
+
+> Full Ada is not really a concurrent language; there are far too many
+> ways to shoot yourself in the head (not foot!).
+
+For the record, I find this a totally absurd (and rather
+damaging) statement!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 20, 2013  4:47 PM
+
+I really should have said "parallel" rather than "concurrent". But my point
+still stands: Ada has far too many constructs that don't allow concurrent
+execution (or don't work reliably for concurrent execution), so it takes a lot
+of effort to write code that can be executed in parallel - and the language
+provides virtually no help. A language doesn't have to be that way (see
+Parasail, for example); more could be done for Ada. (For instance, note Geert's
+comments during the recent meeting about Pure and Pure_Function allowing too
+much for parallel/concurrent execution.)
+
+P.S. Please note that I won't make a statement like the above in a public forum;
+it would be too easily taken the wrong way. Ada surely handles concurrency
+better than other mainstream languages. But that's a very low bar!
+
+****************************************************************
+
