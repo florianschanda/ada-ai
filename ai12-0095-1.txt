@@ -1,0 +1,382 @@
+!standard 3.10.2.(27.2/3)                              14-02-12  AI05-0095-1/01
+!standard 4.6(24.16/2)
+!standard 6.4.1(6.2/3)
+!standard 12.5.1(15)
+!class binding interpretation 14-02-12
+!status work item 14-02-12
+!status received 13-12-04
+!priority Medium
+!difficulty Easy
+!qualifier Omission
+!subject Generic bodies assume-the-worst whether formal type have constrained partial views
+!summary
+
+Within a generic body, we assume-the-worst whether formal type have constrained partial views
+whether a subtype has a constrained partial view. In particular, we assume
+that untagged formal private and derived types have such a view.
+
+!question
+
+6.4.1(6.2/3) says:
+
+If the formal parameter is an explicitly aliased parameter, the type of the
+actual parameter shall be tagged or the actual parameter shall be an aliased
+view of an object. Further, if the formal parameter subtype F is untagged:
+
+* the subtype F shall statically match the nominal subtype of the actual object;
+  or
+
+* the subtype F shall be unconstrained, discriminated in its full view, and
+  unconstrained in any partial view.
+
+Consider applying this rule in a generic body:
+
+   generic
+      type P (D : Natural) is private;
+      Obj : P;
+   package G is
+      procedure Proc (Param : aliased in P);
+   end G;
+
+   package body G is
+      procedure Proc (Param : aliased in P) is ...
+
+   begin
+       declare
+          O1 : aliased P(1) := Obj;
+          type AP is access all P;
+          OAP : AP;
+       begin
+          Proc (O1); -- Legal?
+          OAP := O1'Access; -- Not legal.
+       end;
+   end G;
+
+(Ignore the possibility of the declaration of O1 raising Constraint_Error for
+the moment; that has no effect on Legality.)
+
+O1'access is not legal by 3.10.2(27.2/3), which says:
+
+   D shall be discriminated in its full view and unconstrained in any partial
+   view, and the designated subtype of A shall be unconstrained. For the
+   purposes of determining within a generic body whether D is unconstrained in
+   any partial view, a discriminated subtype is considered to have a constrained
+   partial view if it is a descendant of an untagged generic formal private or
+   derived type.
+
+The second sentence is an "assume-the-worst" rule for generic bodies, because of
+which the nominal subtype has to statically match in such cases.
+
+The rules in 6.4.1(6-6.2/3) are intended to be similar, so that an aliased
+parameter doesn't provide a way to "launder" an object and allow it to be the
+prefix of 'Access when the object directly would not allow that. But for some
+reason, the second sentence of 3.10.2(27.2/3) didn't make it into 6.4.1(6.2/3).
+Perhaps that's because it was added by AI05-0041-1, so maybe it appeared later
+than the 6.4.1 wording.
+
+Should this be fixed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Delete the last sentence of 3.10.2(27.2/3):
+
+   For the purposes of determining within a generic body whether D is
+   unconstrained in any partial view, a discriminated subtype is considered to
+   have a constrained partial view if it is a descendant of an untagged generic
+   formal private or derived type.
+
+Add an AARM Note after 3.10.2(27.2/3), 4.6(24.16/2), and 6.4.1(6.2/3):
+
+AARM Discussion: We assume-the-worst in a generic body whether a subtype has a
+constrained partial view; specifically, in a generic body a discriminated
+subtype is considered to have a constrained partial view if it is a
+descendant of an untagged generic formal private or derived type (see 12.5.1
+for the formal definition of this rule).
+
+Modify 6.4.1(6.d/3):
+
+This accessibility check (and its dynamic cousin as well) can only fail {if
+the master of the function call (which is defined in the Heart of Darkness,
+or 3.10.2 if you prefer) is different than the master directly enclosing
+the call}[the function call is used to directly initialize a built-in-place
+object with a master different than that enclosing the call]. The
+{most likely}[only] place {where this will occur}[all of those conditions exist]
+is in the initializer of an allocator; in {almost}[all] other cases this check
+will [always] pass.
+
+[Editor's note: The other semi-likely case where this could happen is when
+a function with an anonymous access return type is directly converted into
+a long-lived (probably library-level) access type. Someone (OK, me, it was
+one of my ARG assigned tests) wrote an ACATS test with this case as well as
+the one mentioned in the note, so implementers are going to be aware of it.
+There are also cases involving a function call whose result is immediately
+returned (which can't fail a static check, and there shouldn't be a dynamic
+check in such cases) and access discriminants (which I didn't try to analyze).
+Should any of these be mentioned in this note, or should the last sentence
+be eliminated, or leave it as I've written it?]
+
+Add after 6.4.1(6.2/3):
+
+In addition to the places where Legality Rules normally apply (see 12.3), these
+rules apply also in the private part of an instance of a generic unit.
+
+Add after 12.5.1(15):
+
+When enforcing Legality Rules, for the purposes of determining within a generic
+body whether a type is unconstrained in any partial view, a discriminated
+subtype is considered to have a constrained partial view if it is a descendant
+of an untagged generic formal private or derived type.
+
+!discussion
+
+It was pointed out that there is a similar rule for access type conversions
+in 4.6(24.16/3). This exists for the same reason - an access type conversion
+should not be able to "launder" an access value that could not be created
+directly with 'access.
+
+Since this rule occurs (at least) 3 times in the Standard, we add a blanket
+rule to 12.5.1 rather than duplicating the wording in all three places. This
+should avoid future maintenance mistakes.
+
+We add the generic boilerplate to 6.4.1(6.2/3). It already applies to all
+3.10.2 Legality Rules for the access attribute, and it was added by AI12-0027-1
+to all type conversion rules. As noted above, we want these all to work the
+same way.
+
+Note that the author had (half-heartedly) proposed in AI05-0041-1 that
+we define the term "known to be unconstrained" for this purpose. (This would
+be defined as the entire 3.10.2(27.2/3) bullet.) That would be an alternative to
+the chosen solution, but it was rejected as it would potentially be confused
+with "known to be constrained". [I've laid out this solution
+in more detail in the !appendix, in case it is preferred, perhaps using a
+different term. - Editor. Remove this note once we decide on the form of
+solution.]
+
+This change to the rules is incompatible for the type conversion and aliased
+parameter cases. In both cases, this is similar to the incompatibility
+introduced for the prefix of 'Access by AI05-0041-1, except that it is even
+less likely in these cases. For aliased parameters (new to Ada 2012), there
+probably isn't enough use of them for the incompatibility to be significant.
+For type conversions (the rule in it's current form was introduced in
+Ada 2005), the likelihood of problems is low, as a generic formal private
+or derived type with discriminants is required, along with a type conversion
+from one access type to another with the same designated type that does
+not statically match.
+
+While working on this AI, we also noticed that the AARM Note 6.4.1(6.d/3) is
+wrong, as "master of the function call" defines other cases where the master of
+the function = master of the return object is not the same as the master of the
+execution of the call. This note probaly predates the definition of "master of
+the function call" by AI05-0234-1; we've also corrected it.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An example like that in the Question should appear in an ACATS B-Test.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, December 4, 2013  6:06 PM
+
+I'm working on my ACATS homework, which requires me to read rules more closely
+than I have in a long time.
+
+6.4.1(6.2/3) says:
+
+If the formal parameter is an explicitly aliased parameter, the type of the
+actual parameter shall be tagged or the actual parameter shall be an aliased
+view of an object. Further, if the formal parameter subtype F is untagged:
+
+* the subtype F shall statically match the nominal subtype of the actual object;
+  or
+
+* the subtype F shall be unconstrained, discriminated in its full view, and
+  unconstrained in any partial view.
+
+Consider applying this rule in a generic body:
+
+   generic
+      type P (D : Natural) is private;
+      Obj : P;
+   package G is
+      procedure Proc (Param : aliased in P);
+   end G;
+
+   package body G is
+      procedure Proc (Param : aliased in P) is ...
+
+   begin
+       declare
+          O1 : aliased P(1) := Obj;
+          type AP is access all P;
+          OAP : AP;
+       begin
+          Proc (O1); -- Legal?
+          OAP := O1'access; -- Not legal.
+       end;
+   end G;
+
+(Ignore the possibility of the declaration of O1 raising Constraint_Error for
+the moment; that has no effect on Legality.)
+
+O1'access is not legal by 3.10.2(27.2/3), which says:
+
+"D shall be discriminated in its full view and unconstrained in any partial
+view, and the designated subtype of A shall be unconstrained. For the purposes
+of determining within a generic body whether D is unconstrained in any partial
+view, a discriminated subtype is considered to have a constrained partial view
+if it is a descendant of an untagged generic formal private or derived type."
+
+The second sentence is an "assume-the-worst" rule for generic bodies, because of
+which the nominal subtype has to statically match in such cases (and it's hard
+to write one where it does not - it took me 15 minutes to come up with this
+case).
+
+The rules in 6.4.1(6-6.2/3) are intended to be similar, so that an aliased
+parameter doesn't provide a way to "launder" an object and allow it to be the
+prefix of 'Access when the object directly would not allow that. But for some
+reason, the second sentence of 3.10.2(27.2/3) didn't make it into 6.4.1(6.2/3).
+Perhaps that's because it was added by AI05-0041-1, so maybe it appeared later.
+Or perhaps we convinced ourselves that the case was impossible (I had briefly
+thought so too, until I hit on the above example).
+
+Anyway, I think we need to add a similar sentence to 6.4.1(6.2/3):
+
+"For the purposes of determining within a generic body whether F is
+unconstrained in any partial view, a discriminated subtype is considered to have
+a constrained partial view if it is a descendant of an untagged generic formal
+private or derived type."
+
+AI05-0041-1 also added the generic boilerplate, "In addition to the places where
+Legality Rules normally apply (see 12.3), these requirements apply also in the
+private part of an instance of a generic unit.", which we probably want here,
+too. (There is only one known case where we *don't* want the boilerplate to
+apply where the rule actually could have a different effect for the generic and
+the instance.)
+
+Thoughts?
+
+P.S. Somewhat unrelated note for the editor: the Ramification 6.4.1(6.d/3) is
+wrong, as "master of the function call" defines other cases where the master of
+the function = master of the return object is not the same as the master of the
+execution of the call. In particular, a direct conversion of an access result
+could have this property. (There is an example in my partially completed ACATS
+test.) There's probably an access discriminant case as well, but those make my
+head explode so I don't want to try to work that out. I think those additional
+cases came after AI05-0142-4 which is why the note doesn't take them into
+account -- but in any case the note ought to be fixed.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, December 4, 2013  7:05 PM
+
+> Thoughts?
+
+I agree about the problem you've identified.
+
+Does 4.6(24.16/2) need something similar?
+
+Perhaps this rule should be written just once in 12.5.1 or some such place; or
+perhaps we can phrase things somehow in terms of "known to be constrained"
+(which handles the generic body case).
+
+It's really ugly repeating this stuff.
+
+I suppose 4.8(6/3) is fine, because it is effectively a dynamic semantics rule
+even though it occurs in a "Static Semantics" section.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 4, 2013  7:31 PM
+
+...
+> Does 4.6(24.16/2) need something similar?
+
+Probably. We don't want to be allowing more in a generic body than anywhere
+else, and without the assume-the-worst rule, it seems that we are. At least we
+don't need the boilerplate in 4.6 -- it's already there because of AI12-0027-1.
+
+[BTW, it's amazing that you remembered that there are other similar rules. I
+only remembered the 'access one, and that was because it was the motivating
+reason for the 6.4.1 rules.]
+
+> Perhaps this rule should be written just once in 12.5.1 or some such
+> place; or perhaps we can phrase things somehow in terms of "known to
+> be constrained" (which handles the generic body case).
+>
+> It's really ugly repeating this stuff.
+
+Yeah, I agree. "Known to be constrained" would not work in most of these cases,
+which are about types, while "known to be constrained" is about (views of)
+objects. (I would guess that we tried that in the past.) So wording in 12.5.1
+would be best (removing the 3.10.2 wording). OTOH, we'd probably want an AARM
+note pointing to 12.5.1 from each of these cases (so the question doesn't arise
+again), so it wouldn't simplify the Standard that much.
+
+Something like:
+
+"When enforcing Legality Rules, for the purposes of determining within a generic
+body whether a type is unconstrained in any partial view, a discriminated
+subtype is considered to have a constrained partial view if it is a descendant
+of an untagged generic formal private or derived type."
+
+But we'd still need to add the generic boilerplate to 6.4.1, after 6.4.1(6.3/3).
+And remove the last sentence of 3.10.2(27.2/3). Plus an AARM note added after
+3.10.2(27.2/3), 6.4.1(6.2/3), and 4.6(24.16/2):
+
+"AARM Discussion: We assume-the-worst in a generic body whether a subtype has a
+constrained partial view; in a generic body, a discriminated subtype is
+considered to have a constrained partial view if it is a descendant of an
+untagged generic formal private or derived type (see 12.5.1)."
+
+> I suppose 4.8(6/3) is fine, because it is effectively a dynamic
+> semantics rule even though it occurs in a "Static Semantics" section.
+
+Yes, I agree here too.
+
+****************************************************************
+
+Editor's note: The "known to be unconstrained" solution would look like:
+
+Define "known to be unconstrained" somewhere (possibly in 3.10.2 just before
+the definition of 'Access):
+
+A subtype S is *known to be unconstrained* if the type of S is discriminated
+in its full view and unconstrained in any partial view, and S is unconstrained.
+For the purposes of determining within a generic body whether the type of S
+is unconstrained in any partial view, a discriminated subtype is considered
+to have a constrained partial view if it is a descendant of an untagged
+generic formal private or derived type.
+
+Replace the entire bullet 3.10.2(27.2/3) by:
+
+* The designated subtype of A shall be known to be unconstrained
+  (see <whereever it is defined>).
+
+Replace 4.6(24/16/2) by:
+* the designated subtype shall be known to be unconstrained
+  (see <whereever it is defined>);
+
+Replace 6.4.1(6.2/3) by:
+
+* the subtype F shall be known to be unconstrained (see <whereever it is defined>).
+
+[Note that these are short enough that we could fold the bullets back into a
+single paragraph, but I don't think that is a great idea because it would
+make this a lot harder to parse.]
+
+The generic boilerplate would still need to be added after 6.4.1(6.2/3) and
+the AARM notes would still need to be added (although with different text
+for the first one).
+
+****************************************************************
