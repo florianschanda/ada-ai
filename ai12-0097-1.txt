@@ -1,0 +1,185 @@
+!standard 6.5(8/3)                                     14-02-12  AI05-0097-1/01
+!class binding interpretation 14-02-12
+!status work item 14-02-12
+!status received 14-01-29
+!priority Low
+!difficulty Easy
+!qualifier Clarification
+!subject Tag of the return object of a simple return expression
+!summary
+
+The tag of a return object is that of the return type if that is specific.
+Otherwise, it is that the return expression of a simple return statement,
+or the initializing expression of an extended return statement, unless
+that statement has a subtype_indication of a specific type, then the
+tag of that type is used.
+
+!question
+
+The second sentence of 6.5(8/3) was modified by AI05-0032-1 to say:
+
+"If the result type is class-wide, the tag of the return object is that of the
+type of the subtype_indication if it is specific, or otherwise that of the
+value of the expression."
+
+Consider the case of a simple return statement (this rule applies to any return
+statement from a function). What "subtype_indication" are we talking about?
+There could be one somewhere in the expression (say in an allocator or slice),
+or even more than one, or there may not be one at all. This wording seems to
+imply that there is only one.
+
+Probably this wording was crafted assuming that it only applies to an
+extended_return_statement, but that's not the case. Should the wording be
+clarified? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 6.5(8/3):
+
+If the result type of a function is a specific tagged type, the tag of the
+return object is that of the result type. If the result type is class-wide,
+the tag of the return object is that of the {value of the expression, unless
+the return object is defined by an extended_return_object_declaration with a
+subtype_indication that is specific, in which case it is that of the type of
+the subtype_indication}[type of the subtype_indication if it is specific, or
+otherwise that of the value of the expression]. A check is
+made that the master of the type identified by the tag of the result includes
+the elaboration of the master that elaborated the function body. If this check
+fails, Program_Error is raised.
+
+Add an AARM Note:
+
+AARM To Be Honest: The expression here is the return expression if the return
+statement is a simple_return_statement, and the initializing expression
+of teh extended_return_object_declaration if the return statement is an
+extended_return_statement (ignoring any inner simple_return_statements, which
+necessarily cannot have an expression, and any other expressions inside of the
+extended_return_statement).
+
+!discussion
+
+Clearly, we have to cover the case of a simple_return_statement, and we do not
+want the effect of that to be different than it was in Ada 2005. So the wording
+has to make it clear that the only subtype_indication being talked about is
+the one directly part of an extended_return_statement.
+
+Note that we use the relatively new syntax term extended_return_object_declaration
+in this wording, so there is no confusion about which subtype_indication we're
+talking about -- the current syntax of an extended_return_statement doesn't
+directly include any subtype_indication.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS
+
+Existing ACATS test C390004 contains a subtest that the tag is correct for
+a simple return statement returning a class-wide type. We could try cases
+with slices or allocators to provide a subtype_indication to improperly
+use, but someone actually implementing the incorrect rule verbatum seems
+unlikely (as it clearly violates the Dewar rule).
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, January 29, 2014  9:57 PM
+
+The second sentence of 6.5(8/3) was modified by AI05-0032-1 to say:
+
+"If the result type is class-wide, the tag of the return object is that of the
+type of the subtype_indication if it is specific, or otherwise that of the
+value of the expression."
+
+Consider the case of a simple return statement (this rule applies to any return
+statement from a function). What "subtype_indication" are we talking about?
+There could be one somewhere in the expression (say in an allocator or slice),
+or even more than one, or there may not be one at all. This wording seems to
+imply that there is only one.
+
+There is also the case of a parameterless return inside of an
+extended_return_statement; in that case, we are interested in the subtype
+of the extended return and not the non-existent one of the inner return.
+
+I think we meant the subtype_indication of an
+extended_return_object_declaration, which always exists. AI05-0032-1 never
+appears to even consider that 6.5(8/3) applies to any kind of return statement.
+
+It's also not 100% clear which expression is being talked about. In the case of
+the extended return, it's the initializing expression, and in the case of a
+simple return, it's the return expression. These aren't the same thing!
+
+I think we need to clarify this wording somehow. The obvious fix isn't very
+appealing:
+
+"If the result type is class-wide, the tag of the return object is that of
+the type of the subtype_indication{ of the extended_return_object_declaration}
+if {one is present and }it is specific, or otherwise that of the value of the
+expression."
+
+Perhaps we should stick in an "unless" instead:
+
+"If the result type is class-wide, the tag of the return object is that [of
+the type of the subtype_indication if it is specific,] of the value of the
+expression{, unless the return is an extended_return_statement and the type
+of the subtype_indication is specific, in which case is that of the type of
+that subtype_indication."
+
+Ugh, that doesn't work very well, either. And I'm not sure either of these
+are quite right in the case of an inner (parameterless) return that ends an
+outer extended_return. Nor does either clarify the expression in question.
+Oh joy. :-)
+
+Probably just have to give up on the combination and separate the parts
+completely:
+
+If the result type is class-wide, for a simple_return_statement with an
+expression, the tag of the return object is that of the expression; otherwise
+the tag of the return object is that of the type of the subtype_indication
+of the applicable extended_return_object_declaration if it is specific, or
+otherwise is that of the value of the expression of the applicable
+extended_return_object_declaration.
+
+AARM Ramification: The return statement could be a simple_return_statement
+without an expression that occurs inside of an extended_return_statement.
+In this case, the tag of the result comes from the extended_return_statement;
+there can only be one such applicable statement in a legal function.
+
+Perhaps there is a way to simplify this mess.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, January 30, 2014  3:23 PM
+
+> The second sentence of 6.5(8/3) was modified by AI05-0032-1 to say:
+>
+> "If the result type is class-wide, the tag of the return object is 
+> that of the type of the subtype_indication if it is specific, or 
+> otherwise that of the value of the expression."
+>
+> Consider the case of a simple return statement (this rule applies to 
+> any return statement from a function). ...
+> Perhaps there is a way to simplify this mess.
+
+Either of your suggestions seem just about right.  Here is another attempt,
+which is almost identical to one of yours:
+
+    If the result type of a function is a specific tagged type,
+    the tag of the return object is that of the result type.
+    If the result type is class-wide, the tag of the return
+    object is that of the value of the expression, unless the
+    return object is defined by an extended_return_statement
+    with a subtype_indication that is specific, in which case
+    it is that of the type of the subtype_indication.  ...
+
+I don't see a problem with the expression-less return statement inside an
+extended return, because we are talking about the "return object" and those
+nested return statements have nothing to say about the return object.
+
+****************************************************************
+
