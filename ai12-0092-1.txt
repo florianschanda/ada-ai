@@ -2756,3 +2756,2908 @@ better than other mainstream languages. But that's a very low bar!
 
 ****************************************************************
 
+From: Robert Dewar
+Sent: Friday, November 22, 2013  1:59 PM
+
+Here is a nice example of why the rule about overlapping parameters should be
+suppressible. Of course all four calls make perfect semantic sense.
+
+>      1. procedure X is
+>      2.    procedure Xchg (A, B : in out Integer) is
+>      3.       T : constant Integer := A;
+>      4.    begin
+>      5.       A := B;
+>      6.       B := T;
+>      7.    end;
+>      8.
+>      9.    function Ident (R : Integer) return Integer
+>     10.    is begin return R; end;
+>     11.
+>     12.    Data : array (1 .. 10) of Integer;
+>     13.    M, N : constant Integer := 4;
+>     14.    P, Q : constant Integer := Ident (4);
+>     15.    R, S : Integer;
+>     16.
+>     17. begin
+>     18.    Xchg (Data(2), Data(2));
+>                  |
+>         >>> writable actual for "A" overlaps with actual for "B"
+>
+>     19.    Xchg (Data(M), Data(N));
+>                  |
+>         >>> writable actual for "A" overlaps with actual for "B"
+>
+>     20.    Xchg (Data(P), Data(Q));
+>     21.    Xchg (Data(R), Data(S));
+>     22. end X;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 22, 2013  2:27 PM
+
+Humm. We actually considered this exact case when contemplating the overlapping
+parameters rule, and we thought that it was likely that *statically* overlapping
+parameters in a case like this represented a bug, rather than being intentional.
+Why would someone write a complicated call that does nothing on purpose?
+Replacing the calls with "null;" makes more sense (or "delay 0.0001;" if the
+point is to waste time).
+
+Since the rule doesn't trigger when the parameters are calculated (as in the P
+and Q case), the normal reasons for this occurring would not be illegal. It's
+only illegal when the parameters are statically overlapping,
+
+Anyway, there is an argument for making procedure parameter overlapping
+suppressible (not functions, that's new to Ada 2012 so there can be no
+compatibility problem, and the dangers are much worse when multiple calls are
+involved); I'd still like to see a real user case that was convincing (every
+example that has been posted so far seems unlikely or contrived to me) but the
+suppressible error idea has the right connotations (get rid of the problem if
+you can, it's really a problem in 95% of the cases and it's tricky code to avoid
+in the other 5%) so I would not object to that. (Presuming Bob gets a real
+proposal written up someday soon.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, November 22, 2013  2:39 PM
+
+> ... I'd still like to see a real user case that was convincing
+
+We did have a customer complain.  They had two OUT parameters, and were ignoring
+both of them.  They passed the same variable named "Ignore" to both.
+
+It is certainly easy to work around (just create an Ignore1 and Ignore2), but as
+is to be expected, people hate to make any change to code that is already
+working just to make the compiler happy.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 22, 2013  2:56 PM
+
+Understood. My problem with that example is that I can't imagine any
+well-designed interface having two out parameters of the same type that you
+might want to ignore. I can imagine it happening very rarely (not every
+interface is well-designed!), but I can't get very interested in making bad code
+easier to write.
+
+In any case, the suppressible error idea seems to have the right presentation
+(the default is an error, the error can be turned off for compatibility
+reasons), so I wouldn't object to changing the rule that way. But first we need
+a full proposal for suppressible errors.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 22, 2013  2:59 PM
+
+> We did have a customer complain.  They had two OUT parameters, and
+> were ignoring both of them.  They passed the same variable named "Ignore" to
+> both.
+
+There was one active complaint, and actually two other similar instances in our
+test suite.
+
+> It is certainly easy to work around (just create an Ignore1 and
+> Ignore2), but as is to be expected, people hate to make any change to
+> code that is already working just to make the compiler happy.
+
+And it is an ugly work around!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 22, 2013  3:01 PM
+
+I think the exchange example is instructive.
+Yes, you can say, well it's stupid to call exchange with two identical
+parameters, but it can often arise in the case of conditional and parametrized
+complation that you execute some silly code in some cases of parametrization.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 22, 2013  3:31 PM
+
+> Understood. My problem with that example is that I can't imagine any
+> well-designed interface having two out parameters of the same type
+> that you might want to ignore. I can imagine it happening very rarely
+> (not every interface is well-designed!), but I can't get very
+> interested in making bad code easier to write.
+
+Given that the language does not have optional out parameters, it seems
+perfectly  reasonable to have a procedure that supplies a bunch of output
+information which might not be needed in every case.
+
+The language should not be designed around Randy's idiosyncratic ideas of what
+he thinks is or is not "bad code". I found the customers code in each of these
+cases perfectly reasonable.
+
+> In any case, the suppressible error idea seems to have the right
+> presentation (the default is an error, the error can be turned off for
+> compatibility reasons), so I wouldn't object to changing the rule that way.
+> But first we need a full proposal for suppressible errors.
+
+As usual I find mumbling about defaults to be totally bogus, defaults are up to
+an implementation, not the language design. The only requirement is that an
+implementation have *A* mode in which the RM semantics hold. Whether this is the
+default mode is up to the implementation.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, November 22, 2013  3:41 PM
+
+> Understood. My problem with that example is that I can't imagine any
+> well-designed interface having two out parameters of the same type
+> that you might want to ignore. I can imagine it happening very rarely
+> (not every interface is well-designed!), but I can't get very
+> interested in making bad code easier to write.
+
+I rather strongly disagree with that point of view.  Compatibility is about
+compatibility of all code, not just code where ARG approves of the style.
+
+And not just code where Randy approves of the style.  You have every right to
+scorn code that has two 'out' parameters of the same type. But I and others
+don't share that view.  We need to avoid letting personal stylistic preferences
+override compatibility concerns. Even if you convinced me that that code is
+evil, it's not about making it "easier to write" -- that code is already
+written, and (in some environments) might be expensive to modify.
+
+For example, I am rabidly opposed to indenting code using TAB characters.  But
+if I were to propose making them illegal, you would rightly consider that to be
+completely irresponsible!
+
+> In any case, the suppressible error idea seems to have the right
+> presentation (the default is an error, the error can be turned off for
+> compatibility reasons), so I wouldn't object to changing the rule that way.
+
+Right, this is exactly what the concept I've been pushing for is for. You and I
+can't necessarily agree whether "two 'out' parameters of the same type" =
+"Evil".  This way, we don't NEED to agree on that; a "suppressible error" can
+satisfy us both.  The concept can defuse all sorts of unnecessary arguments.
+
+> But first we need a full proposal for suppressible errors.
+
+Understood.  ;-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, November 22, 2013  3:57 PM
+
+> As usual I find mumbling about defaults to be totally bogus, defaults
+> are up to an implementation, not the language design. The only
+> requirement is that an implementation have *A* mode in which the RM
+> semantics hold. Whether this is the default mode is up to the
+> implementation.
+
+From a formal point of view, you are of course correct.  But I think Randy is
+correct to want the RM worded in a way that implies that the "error" is the main
+thing, and "Oh by the way, if you really want to, you can run the illegal
+program anyway, and get well-defined semantics."  That's better than, "You can
+do whatever you like, and oh by the way, the compiler must give a warning".
+
+Formally, those are two ways of expressing the same thing, but the first way
+makes it sound like we're taking these things seriously.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 22, 2013  4:31 PM
+
+OK in principle, but in practice you have been making clear warning situations
+(like overlapping params) into errors :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 22, 2013  4:29 PM
+
+> > Understood. My problem with that example is that I can't imagine any
+> > well-designed interface having two out parameters of the same type
+> > that you might want to ignore. I can imagine it happening very
+> > rarely (not every interface is well-designed!), but I can't get very
+> > interested in making bad code easier to write.
+>
+> Given that the language does not have optional out parameters, it
+> seems perfectly  reasonable to have a procedure that supplies a bunch
+> of output information which might not be needed in every case.
+
+It's a bad idea to have two non-equivalent parameters of the same type in any
+subprogram interface, because that means that the compiler can't help you ensure
+that the parameters are properly matched. (Coding rules can help with this, by
+requiring named notation in calls where there are multiple parameters, but even
+that isn't a full cure.) Obviously, you can't always avoid having parameters of
+the same type ("-" comes to mind).
+
+> The language should not be designed around Randy's idiosyncratic ideas
+> of what he thinks is or is not "bad code". I found the customers code
+> in each of these cases perfectly reasonable.
+
+Since I've never had the chance to see the customer code, only very abbreviated
+summaries of it, I have no way to decide if I agree or not. It's quite possible
+that I'd agree with you if I actually saw the interface itself. I realize that
+you probably can't release the customer code, so I probably will never see any
+real code like this -- and your descriptions are not at all convincing.
+
+I've said since the beginning that I want to see a *real* example of this
+problem, not a sanitized summary of one (which eliminates anything that would
+make such an example convincing). Since no one is willing/able to provide such
+an example, I continue to think this is much ado about very little. But I remain
+willing to be convinced otherwise -- just show a convincing example that
+actually looks like real-life code.
+
+> > In any case, the suppressible error idea seems to have the right
+> > presentation (the default is an error, the error can be turned off
+> > for compatibility reasons), so I wouldn't object to changing the
+> > rule that way. But first we need a full proposal for suppressible errors.
+>
+> As usual I find mumbling about defaults to be totally bogus, defaults
+> are up to an implementation, not the language design. The only
+> requirement is that an implementation have
+> *A* mode in which the RM semantics hold. Whether this is the default
+> mode is up to the implementation.
+
+(A) When I'm talking about "default", I'm talking about the default in terms of
+the language rules, not necessarily implementations. That has much more to do
+with the perception of the language and its safety rather than what any
+individual implementation does. Obviously, we can't control implementations, but
+we can control the message that we send both programmers and implementers.
+
+(B) I'd caution any implementer that thinks that they know better than the
+language designers that they are usually wrong. The language designers have
+considered far more cases (use cases, implementation costs, portability issues,
+etc.) than an implementer is likely to have encountered. (I know this from
+personal experience!) It's certainly possible for a default to be better than
+the language (GNAT's static elaboration rules come to mind, because they take an
+obscure runtime check and replace it with compile-time rules -- that's almost
+always better), but that's the rare case. The cost in interoperability with
+other compilers and with the language description makes most such differences
+bad choices. Thus, having the defaults differ substantially from the language
+definition is generally a bad idea.
+
+(C) The attitude you give above is exactly why we don't want to call these
+warnings. Implementers might very well decide to hide warnings by default, but
+they'd have a harder case (especially for a "safe" language like Ada) in hiding
+errors. That's not the message that we want to give to Ada users, and I don't
+think most implementers would want to give that message either.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 22, 2013  4:47 PM
+
+> It's a bad idea to have two non-equivalent parameters of the same type
+> in any subprogram interface, because that means that the compiler
+> can't help you ensure that the parameters are properly matched.
+> (Coding rules can help with this, by requiring named notation in calls
+> where there are multiple parameters, but even that isn't a full cure.)
+> Obviously, you can't always avoid having parameters of the same type ("-"
+> comes to mind).
+
+Total Nonsense IMO
+
+> Since I've never had the chance to see the customer code, only very
+> abbreviated summaries of it, I have no way to decide if I agree or
+> not. It's quite possible that I'd agree with you if I actually saw the
+> interface itself. I realize that you probably can't release the
+> customer code, so I probably will never see any real code like this --
+> and your descriptions are not at all convincing.
+
+I really don't care AT ALL if you agree. Whether you think code is good or bad
+is not even interesting to me, let alone a valid input to the language design
+
+> I've said since the beginning that I want to see a *real* example of
+> this problem, not a sanitized summary of one (which eliminates
+> anything that would make such an example convincing). Since no one is
+> willing/able to provide such an example, I continue to think this is
+> much ado about very little. But I remain willing to be convinced
+> otherwise -- just show a convincing example that actually looks like real-life
+> code.
+
+I really don't see why we should go to this bother, given your peculiar ideas,
+you may be impossible to convince, but the point is to design a language to use
+by everyone not just Randy.
+
+> (B) I'd caution any implementer that thinks that they know better than
+> the language designers that they are usually wrong. The language
+> designers have considered far more cases (use cases, implementation
+> costs, portability issues, etc.) than an implementer is likely to have
+> encountered. (I know this from personal experience!) It's certainly
+> possible for a default to be better than the language (GNAT's static
+> elaboration rules come to mind, because they take an obscure runtime
+> check and replace it with compile-time rules -- that's almost always
+> better), but that's the rare case. The cost in interoperability with
+> other compilers and with the language description makes most such
+> differences bad choices. Thus, having the defaults differ substantially from
+> the language definition is generally a bad idea.
+
+Actually I think the language designers are often far too compiler oriented, and
+NOT sufficiently actual user oriented. How many ARG members are actually in the
+business of building big critical Ada systems?
+
+I think for instance that the dynamic model of elaboration is pretty horrible,
+and definitely it is better that GNAT defaults to the static model.
+
+> (C) The attitude you give above is exactly why we don't want to call
+> these warnings. Implementers might very well decide to hide warnings
+> by default, but they'd have a harder case (especially for a "safe"
+> language like Ada) in hiding errors. That's not the message that we
+> want to give to Ada users, and I don't think most implementers would want to
+> give that message either.
+
+Weak argument IMO, defaults are chosen in response to customer needs not some
+vague idea of what is or is not safe.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, November 27, 2013  10:16 AM
+
+> Actually I think the language designers are often far too compiler oriented,
+> and NOT sufficiently actual user oriented. How many ARG members are actually
+> in the business of building big critical Ada systems?
+
+That's kind of my day job.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  10:42 AM
+
+Indeed, and your presence is most welcome!
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Thursday, November 28, 2013  10:03 AM
+
+Is the checking for overlapping out or in out parameters definitely in the GNAT
+v7.2 "preview"? I've been through the code for multiple projects across 3 sites
+without hitting any examples.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, November 28, 2013   7:53 PM
+
+Yes, and that is not surprising!
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, November 22, 2013  4:31 PM
+
+> Here is a nice example of why the rule about overlapping parameters
+> should be suppressible.
+> Of course all four calls make perfect semantic sense.
+>
+>>      1. procedure X is
+>>      2.    procedure Xchg (A, B : in out Integer) is
+>>      3.       T : constant Integer := A;
+>>      4.    begin
+>>      5.       A := B;
+>>      6.       B := T;
+>>      7.    end;
+
+Yes. And it come close to being the ONLY program where these calls make perfect
+sense (well, actually, all programs are o.k. where the intended semantics are
+identity of the pre- and post-values of all parameters in the case of aliased
+parameters).
+
+With a minor change, as in:
+
+>>      1. procedure X is
+              with invariant A + B = A'old + B'old
+                -- forgive my syntax
+>>      2.    procedure Xchgplusminus (A, B : in out Integer) is
+>>      3.       T : constant Integer := A;
+>>      4.    begin
+>>      5.       A := B + 1;
+>>      6.       B := T - 1;
+>>      7.    end;
+
+aliasing already screws up royally (and with results that depend on the order of
+the write-backs - what may have worked on one target in the user's view, fails
+on the other target -- not that the above could have worked in anybody's view on
+any target).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 22, 2013  4:49 PM
+
+> aliasing already screws up royally (and with results that depend on
+> the order of the write-backs - what may have worked on one target in
+> the user's view, fails on the other target -- not that the above could
+> have worked in anybody's view on any target).
+
+By the way, it has always puzzled me how much the Ada designers like
+non-determinism. Yes, in the language the order of write back of out parameters
+is non-deterministic. Why? I can't figure out ANY advantage of making something
+like this non-deterministic!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, November 22, 2013  5:00 PM
+
+The real concern for me is that the order is not obvious in the source code, so
+if correct functioning of the algorithm relies on there being a well-defined
+order, that is ultimately misleading.  Something that looks commutative, for
+example, is in fact not commutative.  I agree that for debugging it is nice if
+the order is repeatable, but if anyone starts relying on the order, the
+algorithm becomes fragile to seemingly "harmless" maintenance activities such as
+introducing a temporary; e.g.:
+
+    F(G(X), H(Y)) -->
+
+       HT : constant HH := H(Y);
+       F(G(X), HT)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 22, 2013  5:07 PM
+
+> By the way, it has always puzzled me how much the Ada designers like
+> non-determinism. Yes, in the language the order of write back of out
+> parameters is non-deterministic.
+> Why? I can't figure out ANY advantage of making something like this
+> non-deterministic!
+
+You'd have to ask Jean, as the vast majority of the non-determinism dates back
+to Ada 83.
+
+We've occasionally wondered about reducing some of it, but that would have a
+massive impact on implementations. Implementers have been taking advantage of
+those rules for 30+ years, and finding those places and removing them would be
+virtually impossible as there is nothing particularly special about them. (There
+may not even be comments near such places.)
+
+For one example, I know Janus/Ada uses the non-determinism of parameter
+evaluation to reduce the need to spill registers and the like during the
+evaluation of parameters. We try to evaluate the most complex parameter
+expression first.
+
+Not sure if there is an advantage taken with the order of write-back (I can't
+think of one, either); I suppose it was non-deterministic mainly because the
+order evaluation of the parameters is non-deterministic and one would imagine
+the write-back to be done in reverse.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 22, 2013  5:09 PM
+
+> The real concern for me is that the order is not obvious in the source
+> code, so if correct functioning of the algorithm relies on there being
+> a well-defined order, that is ultimately misleading.  Something that
+> looks commutative, for example, is in fact not commutative.  I agree
+> that for debugging it is nice if the order is repeatable, but if anyone
+> starts relying on the order, the algorithm becomes fragile to seemingly
+> "harmless" maintenance activities such as introducing a temporary;
+
+To me it's even MORE fragile for maintenance if you can have code that has
+worked fine for years and years, and suddently the compiler changes its behavior
+and breaks the code.
+
+In Pascal, the OR and AND operators are weird, it is impl defined if they short
+circuit, and impl defined which order they do things in.
+
+Virtually ALL Pascal compilers did short circuit left to right a la Ada. Then
+brilliant Honeywell created a compiler that short circuited right to left.
+
+ENDLESS problems in porting code!
+
+These days, most Ada programmers don't (can't) read the RM any more, it's just
+too inpenetrable. Most Ada programmers assume that code that goes through the
+compiler and works is "correct". You see this very clearly for example in
+elaboration where typical large programs have just sufficient pragma Elaborate's
+to get them past one particular compilers choice of elaboration order (elab
+order, another case where the language has gratuitous non-deterministic
+semantics).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, November 22, 2013  5:13 PM
+
+It's interesting that there are cases where C is more deterministic than Ada,
+and in such cases, we guarantee the Ada behavior. For instance a+b+c in c always
+means (a+b)+c and it does in GNAT as well, and this is something we guarantee.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, November 22, 2013  5:13 PM
+
+> By the way, it has always puzzled me how much the Ada designers like
+> non-determinism. Yes, in the language the order of write back of out
+> parameters is non-deterministic. Why? I can't figure out ANY advantage
+> of making something like this non-deterministic!
+
+Good question. Does anybody know the answer? My answer to students is:
+because calling conventions differ and you want to match up with the prevalent
+styles. On a stack machine you push and pop, i.e. return right-to-left, ie.e
+deal with your parameters in a LIFO-style. On a "more normal" machine you might
+want to do FIFO (i.e., left-to-right), not LIFO.
+
+But that's only my story. Does anbody have deeper insights?
+Moreover, that's only my curiosity. We agree on that fact that Ada leaves this
+order undefined.
+
+The big difference in my example would merely be that the outcome would be
+predictably wrong with a specified order, but wrong (and unexpected)
+nevertheless.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Sunday, November 22, 2013  10:52 PM
+
+> By the way, it has always puzzled me how much the Ada designers like
+> non-determinism. Yes, in the language the order of write back of out
+> parameters is non-deterministic. Why? I can't figure out ANY advantage
+> of making something like this non-deterministic!
+
+Indeed, this is right up there with the association of addition and subtraction,
+which is implementation defined. This makes it really tricky to write
+expressions that will never overflow.
+
+Consider S being an arbitrary String:
+
+   Len : Natural := (if S'Last < S'First then 0 else S'Last - S'First
+   + 1);
+
+Note how this can overflow if and only if the compiler chooses an evil
+association? In practice, the main effect is to make reasoning about program
+behavior a lot harder. SPARK requires one to always use parentheses in this
+case, but that of course just impedes readability.
+
+Much simpler to require left-to-right associativity. This will affect zero
+existing Ada 2012 compilers, and would be trivial to comply with for any new
+ones (just add parenthesis implicitly, where required). In return, it will allow
+any static analysis tools to do a far better job, and free the programmer from
+having to put tons of otherwise unnecessary parentheses in their code.
+
+I think we should make it a point to go through all such cases and specify
+behavior. Ultimately, this is easier for both users and implementors of Ada
+development tools. Note that this last group also includes code generators (for
+modeling languages) and various analysis tools.
+
+It should never be acceptable to have similar expressions to be be well-defined
+for C, but implementation-defined or erroneous in Ada, whether it is about
+evaluating A + B + C, or writing "Hello" and "World" to standard output in two
+separate threads/tasks.
+
+Maybe it isn't too late for a binding interpretation for Ada 2012 for some of
+these order of evaluation topics? (*)
+
+(*) Note in particular that the associativity can only have a visible effect in
+presence of overflow. So, all we are forbidding is failing an overflow check if
+left-to-right evaluation would not have overflowed.  Doing anything else is just
+evil, isn't it?
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, November 25, 2013  5:26 AM
+
+> It's interesting that there are cases where C is more deterministic
+> than Ada, and in such cases, we guarantee the Ada behavior. For
+> instance a+b+c in c always means (a+b)+c and it does in GNAT as well,
+> and this is something we guarantee.
+
+Huh? Order of evaluation is implementation defined, but associativity is well
+defined: 4.5(8)
+
+****************************************************************
+
+From: Yannick Moy
+Sent: Monday, November 25, 2013  5:48 AM
+
+> Huh? Order of evaluation is implementation defined, but associativity
+> is well defined: 4.5(8)
+
+The problem is the implementation permission in RM 4.5(13):
+
+"For a sequence of predefined operators of the same precedence level (and in the
+absence of parentheses imposing a specific association), an implementation may
+impose any association of the operators with operands so long as the result
+produced is an allowed result for the left-to-right association, but ignoring
+the potential for failure of language-defined checks in either the left-to-right
+or chosen order of association."
+
+In the analysis tools that we develop at AdaCore, we explicitly reject this
+permission, as GNAT never uses it. It would make analysis much more complex if
+we had to take into all possible interleavings.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  7:40 AM
+
+> Note how this can overflow if and only if the compiler chooses an evil
+> association? In practice, the main effect is to make reasoning about
+> program behavior a lot harder. SPARK requires one to always use
+> parentheses in this case, but that of course just impedes readability.
+
+Actually we decided that the extra parens are such an annoyance that they are
+only required when SPARK is operating in a special pedantic mode. Otherwise we
+guarantee left to right association (GNAT itself always makes the same
+guarantee).
+
+> Much simpler to require left-to-right associativity. This will affect
+> zero existing Ada 2012 compilers, and would be trivial to comply with
+> for any new ones (just add parenthesis implicitly, where required). In
+> return, it will allow any static analysis tools to do a far better
+> job, and free the programmer from having to put tons of otherwise
+> unnecessary parentheses in their code.
+
+I definitely agree with this
+
+> I think we should make it a point to go through all such cases and
+> specify behavior. Ultimately, this is easier for both users and
+> implementors of Ada development tools. Note that this last group also
+> includes code generators (for modeling languages) and various analysis
+> tools.
+>
+> It should never be acceptable to have similar expressions to be be
+> well-defined for C, but implementation-defined or erroneous in Ada,
+> whether it is about evaluating A + B + C, or writing "Hello" and
+> "World" to standard output in two separate threads/tasks.
+>
+> Maybe it isn't too late for a binding interpretation for Ada 2012 for
+> some of these order of evaluation topics? (*)
+
+Failing that, in practice for Ada 2012, it would be good enough for now to just
+clearly document the guarantees that GNAT makes, and figure out if it should be
+making more such guarantees (I know Geert is looking at the I/O from tasks
+issue).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  7:44 AM
+
+> Huh? Order of evaluation is implementation defined, but associativity
+> is well defined: 4.5(8)
+
+Yes, well it's even more surprising when someone who is unquestionably an expert
+in Ada can be fooled into thinking this (luckily if you are using GNAT, or
+probably any other Ada compiler around, you won't be fooled in practice). Here
+is the evil paragraph you missed:
+
+> 13  For a sequence of predefined operators of the same precedence
+> level (and in the absence of parentheses imposing a specific
+> association), an implementation may impose any association of the
+> operators with operands so long as the result produced is an allowed
+> result for the left-to-right association, but ignoring the potential
+> for failure of language-defined checks in either the left-to-right or chosen order of association.
+
+And it is this potential for failure of a check that Geert is disturbed by (and
+me too!)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  7:44 AM
+
+> Huh? Order of evaluation is implementation defined, but associativity
+> is well defined: 4.5(8)
+
+Little language thing, Huh reads very aggressive in english, it has the sense of
+"what kind of nonsense are you talking about, you must be an idiot!" Better
+always avoided!
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, November 25, 2013  8:05 AM
+
+Sorry about that, I thought it was more like french "Hein?"
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  8:24 AM
+
+> Sorry about that, I thought it was more like french "Hein?"
+
+No problem, it's definitely more aggressive than Hein, at least to me :-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, November 25, 2013  9:07 AM
+
+> Little language thing, Huh reads very aggressive in english, it has
+> the sense of "what kind of nonsense are you talking about, you must be
+> an idiot!" Better always avoided!
+
+Really?  "Huh?" doesn't come across as agressive to me.
+To me it means "I am confused", which could because you are talking nonsense,
+but also could be because I am missing something.
+
+(I almost wrote "Huh?" instead of "Really?" above.  ;-) Neither one is intended
+to be rude!)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  9:17 AM
+
+I know that it is not intended that way, but to many people it comes accross
+that way (I am not the only one, I have seen people react this way many times).
+
+So the fact that it does not offend EVERYONE is not an argument against avoiding
+it if it offends some! Think of saying Huh in talking, it is hard to say this
+without expressing puzzlement of the kind "do you *really* mean to say that?" I
+almosts NEVER hear people use it in conversation, and there are people who use
+it in email who I think would never use it in conversation.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  8:38 AM
+
+> Yes, well it's even more surprising when someone who is unquestionably
+> an expert in Ada can be fooled into thinking this (luckily if you are
+> using GNAT, or probably any other Ada compiler around, you won't be
+> fooled in practice).
+> Here is the evil paragraph you missed:
+
+By the way, I was also quite surprised to learn of this rule, which I have not
+been aware of till a recent discussion over the parens in SPARK! :-)
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Monday, November 25, 2013  9:22 AM
+
+Despite the discussion of hein, huh and others....
+
+> Order of evaluation is implementation defined, but associativity is
+> well defined: 4.5(8)
+
+JP is absolutely right. Associativity is well defined, so GNAT is only
+implementing the standard by obeying it.
+
+Order of evaluation is quite another thing, and there is significant
+justification for being non-deterministic to allow for better register
+optimization and for HW out-of-order evaluation.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Monday, November 25, 2013  9:28 AM
+
+> JP is absolutely right. Associativity is well defined, so GNAT is only
+> implementing the standard by obeying it.
+
+I stand corrected by the other mail with the para that allows l-t-r
+associativity to be broken. Indeed, who needs that?
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  9:33 AM
+
+> JP is absolutely right. Associativity is well defined, so GNAT is only
+> implementing the standard by obeying it.
+
+Amazing, so, another Ada expert (joining me and JPR) who was unaware that this
+is not the case! This really shows we got the language rules wrong. Once again,
+the issue is that
+
+      X + Y + Z
+
+where X,Y,Z are of type Integer, can be
+evaluated as either
+
+    (X + Y) + Z  or as X + (Y + Z)
+
+even though one might overflow and the other not.
+
+> Order of evaluation is quite another thing, and there is significant
+> justification for being non-deterministic to allow for better register
+> optimization and for HW out-of-order evaluation.
+
+No, this is about associativity, NOT order of evaluation.
+
+Back to order of evaluation for a moment:
+I wonder though, yes, I know that it is the compiler writer's mantra that this
+is a worthwhile freedom, I would like to see actual figures to justify this (to
+me unneccessary) non-determinism. Most optimizations are disappointing :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  9:33 AM
+
+> I stand corrected by the other mail with the para that allows l-t-r
+> associativity to be broken. Indeed, who needs that?
+
+Especially who needs it when it is a surprise even to the experts! I wonder if
+any compiler actually does this in practice?
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, November 25, 2013  9:50 AM
+
+>> 13  For a sequence of predefined operators of the same precedence
+>> level (and in the absence of parentheses imposing a specific
+>> association), an implementation may impose any association of the
+>> operators with operands so long as the result produced is an allowed
+>> result for the left-to-right association, but ignoring the potential
+>> for failure of language-defined checks in either the left-to-right or
+>> chosen order of association.
+>
+> And it is this potential for failure of a check that Geert is
+> disturbed by (and me too!)
+
+My understanding is that this is an "as if" rule, presumably related to allowing
+X**4 to be computed as (X*X)*(X*X); I would not go as far as saying that
+associativity is not defined in Ada! Especially, it would not allow A * B / C to
+be computed as A * (B / C), since it would not be "an allowed result for the
+left-to-right association".
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  10:36 AM
+
+Yes, well of course, this is a strawman, no one thinks you can reassociate
+A*B/C!
+
+But the rule we are talking about is not an "as if" since it can introduce an
+overflow error where none existed before.
+
+The "as if" does not need a special rule
+
+Note that in the case of X**4, we need a special rule because in general x*x*x*x
+is not equal to (x*x)**2 for floating-point (the first form is more accurate in
+the general case). For FPT, the rule really does not apply, since almost any
+reassociation will change model interval results.
+
+Note that you are of course allowed to reassociate even if there are parens if
+you know it will not change the result and will not introduce or eliminate an
+exception, that's the normal as if rule. For example in
+
+     subtype R is integer range 1 .. 10;
+     A,B,C,D : R;
+
+     ...
+
+     A := (B + C) + D;
+
+it is fine to compute this as
+
+     A := B + (C + D);
+
+that's the normal as-if in action. But this special rule allows the introduction
+of overflow errors where none would exist in the canonical order. THAT's the
+surprise.
+
+In general it is a surprise to find that the two following expressions are not
+equivalent:
+
+   (A + B) + C
+   A + B + C
+
+****************************************************************
+
+From: Brad Moore
+Sent: Monday, November 25, 2013  10:47 AM
+
+I don't know if I speak for Canada or not, but I also pick up an aggressive tone when huh? is used in written form.
+This is not the case however when used in spoken form I would say.
+
+It comes across equivalent to "Are you nuts?", in writing though.
+
+It is interesting to note that for the similar form "eh?", I would interpret as being aggressive neutral, somewhat equivalent to "whats that you say?" or "somethings not right here". I don't know if that is a Canadianism, as apparently we say "eh?" a lot, though I dont notice this generally.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, November 25, 2013  11:04 AM
+
+I agree "Eh?" seems like a neutral "What do you mean?".
+And Canadians seem to use it at the end of a sentence as some sort of
+punctuation, as in "Nice and warm today, eh?".  ;-)
+
+What about "Heh?"  That's how I sometimes spell (and pronounce) "Huh?".  Guess
+I'd better quit using either.
+
+Back to the topic:  For what it's worth, I am strongly in favor of determinism.
+I think determinism should be tolerated only when there's an important
+efficiency (or other) benefit.
+
+For example, the fact that elaboration order is implementation defined has zero
+efficiency benefit, and in practice is one of the top 3 or so portability issues
+we see at AdaCore.  But I suppose we can't really fix that one after the fact.
+
+But we could fix the associativity thing, I think.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, November 25, 2013  11:07 AM
+
+> Note that in the case of X**4, we need a special rule because in
+> general x*x*x*x is not equal to (x*x)**2 for floating-point (the first
+> form is more accurate in the general case).
+
+I think the second form is more accurate.  Fewer multiplies --> fewer roundings.
+
+> ...
+> exception, that's the normal as if rule.
+
+I like to call it the "as if meta-rule", because it's not a rule of the
+language, it's a rule about how to interpret the rules of the language (any
+high-level language, not just Ada).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  11:19 AM
+
+>> Note that in the case of X**4, we need a special rule because in
+>> general x*x*x*x is not equal to (x*x)**2 for floating-point (the
+>> first form is more accurate in the general case).
+>
+> I think the second form is more accurate.  Fewer multiplies
+> --> fewer roundings.
+
+SUCH a common misconception. Just goes to show once again that fpt stuff is
+hard. Yes, fewer multiplications, BUT both operands of the last multiplication
+have already been rounded, whereas in the first form, one of the operands of
+each multiplication is exact.
+
+It was exactly this misconception that caused the screwup in the Ada 83
+definition that required repeated multiplication.
+
+If the **2 form was more accurate, then normal "as if" would allow the
+substitution, but it's not always more accurate.
+
+>> ...
+>> exception, that's the normal as if rule.
+>
+> I like to call it the "as if meta-rule", because it's not a rule of
+> the language, it's a rule about how to interpret the rules of the
+> language (any high-level language, not just Ada).
+
+Right, and sometimes language standards have a nasty habit of unneccessarily
+stating an as-if rule for one particular part of the language, bogusly implying
+that it does not appear elsewhere.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, November 25, 2013  11:31 AM
+
+> But the rule we are talking about is not an "as if"
+> since it can introduce an overflow error where none existed  before.
+
+Precisely, the only visible difference is whether an exception is raised or not;
+therefore I find unfair to say that C is more precise than Ada in the way it
+defines associativity - except if you consider that C is more precise than Ada
+in defining where exceptions are raised: nowhere! ;-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  11:39 AM
+
+No, that's just plain wrong thinking IMO.
+
+In C, overflow is undefined, but if in C we write
+
+    a + b + c
+
+where a,b,c are int, we are guaranteed that this is evaluated as (a + b) + c and
+will be well defined if neither addition causes overflow. In C, we are NOT
+allowed to evaluate this as a + (b + c) if b+c could cause overflow.
+
+In Ada, we are allowed to evaluate this as a + (b + c) even if b+c causes
+overflow.
+
+True in Ada, the bad effects of this permission are not so bad as they would be
+in C, but C does not allow this abomination in the first place.
+
+So indeed C is more precise than Ada here, no question about it!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  11:41 AM
+
+> Precisely, the only visible difference is whether an exception is
+> raised or not; therefore I find unfair to say that C is more precise
+> than Ada in the way it defines associativity - except if you consider
+> that C is more precise than Ada in defining where exceptions are
+> raised: nowhere! ;-)
+
+There are some things that C does better than Ada. This is one example, another
+is that you can do I/O operations from separate threads in C, and things work
+fine. Of course that's more a matter of definition of libraries and threads than
+the C language itself, but the fact of the matter is that a C programmer can do
+printf's from separate threads, and get lines interspersed, but not erroneous
+behavior and rubbish as in Ada.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  11:59 AM
+
+> > Yes, well it's even more surprising when someone who is
+> > unquestionably an expert in Ada can be fooled into thinking this
+> > (luckily if you are using GNAT, or probably any other Ada compiler
+> > around, you won't be fooled in practice).
+> > Here is the evil paragraph you missed:
+>
+> By the way, I was also quite surprised to learn of this rule, which I
+> have not been aware of till a recent discussion over the parens in
+> SPARK! :-)
+
+You shouldn't have been that surprised, given that the rule is an Ada 83 rule
+(11.6(5)) that was just moved in Ada 95 and has been untouched since.
+
+I mainly bring this up to concur that this rule is evil. Back in the Ada 83
+days, our optimizer guy thought it would be good to implement that rule exactly
+as written. (That is, introducing exceptions where none existed initially.) At
+the same time, he implemented a number of other algebraic rules (the interesting
+one for this purpose being "A - C" => "A + (-C)"). The effect of those two rules
+on our runtime was to introduce all kinds of new overflow exceptions (especially
+in code like the Text_IO code for formatting numbers) [once a lot of "-" was
+converted to "+", the association rule could apply]. We wasted quite a bit of
+time debugging before we decided that the rule was evil and could only be
+applied if it couldn't introduce an exception.
+
+> Especially who needs it when it is a surprise even to the experts! I
+> wonder if any compiler actually does this in practice?
+
+I seriously doubt it. We tried and the results were unusable. Thus I think it
+would be OK to kill 4.5(13). (I would not be OK with  requiring an order of
+evaluation of parameters.)
+
+Note, however, that removing that rule would not stop reordering that *removed*
+an exception. (I would be against that, as overflow checks are not free in many
+architectures and we ought to be able to do whatever we can to get rid of them.)
+But we don't need 4.5(13) for that, as other rules allow evaluating intermediate
+expressions with extra precision so no one can count on A + B + C to raise an
+overflow if A + B alone would overflow.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  12:08 PM
+
+...
+> Back to order of evaluation for a moment:
+> I wonder though, yes, I know that it is the compiler writer's mantra
+> that this is a worthwhile freedom, I would like to see actual figures
+> to justify this (to me unneccessary) non-determinism.
+> Most optimizations are disappointing :-)
+
+My guess is that it would be hard to quantify, as it would be difficult to tell
+in most compilers when the non-determism is being used.
+
+I know that in Janus/Ada, we use it in rare cases where we need to spill pending
+floating point results before a function call. That is a quite expensive but
+necessary operation on the X86 architecture (we didn't originally do it, but
+user bug reports forced us to do so as nested calls were running out of
+registers and crashing). By reordering parameters and expressions, we can often
+avoid the need to do that spill.
+
+There are probably other cases where we use it that I don't even know about.
+(Our optimizer guy made aggressive use of Ada's permissions; I had to reign him
+in when it caused problems, as in the introducing overflow case).
+
+P.S. This whole subthread is under the wrong topic -- it doesn't have anything
+to do with "suppressible errors" and I doubt Bob will want it in his AI!
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Monday, November 25, 2013 12:31 PM
+
+> I seriously doubt it. We tried and the results were unusable. Thus I
+> think it would be OK to kill 4.5(13). (I would not be OK with
+> requiring an order of evaluation of parameters.)
+
+Yes, let's do that. I think everyone can agree removing this fixes a nasty wart,
+that is becoming increasingly more important and visible with the new pre- and
+post-conditions, SPARK 2014 and increased use of model-based code generation,
+statical analyzers and provers.
+
+> Note, however, that removing that rule would not stop reordering that
+> *removed* an exception. (I would be against that, as overflow checks
+> are not free in many architectures and we ought to be able to do
+> whatever we can to get rid of them.) But we don't need 4.5(13) for
+> that, as other rules allow evaluating intermediate expressions with
+> extra precision so no one can count on A + B + C to raise an overflow if A + B
+> alone would overflow.
+
+Of course.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, November 25, 2013  1:00 PM
+
+> Consider S being an arbitrary String:
+>
+>    Len : Natural := (if S'Last < S'First then 0 else S'Last - S'First
+>    + 1);
+>
+> Note how this can overflow if and only if the compiler chooses an evil
+> association?
+
+This is not central to the main topic being discussed on this thread, but I
+don't think the permission of 4.5(13) applies to Geert's example and therefore
+no overflow is possible (partly because the condition ensures that S'First is
+positive if the subtraction is evaluated).
+
+You can't associate
+    1 - 2 + 3
+as
+    1 - (2 + 3)
+because that yields the wrong answer.
+
+The permission clearly applies if we replace
+   S'Last - S'First  + 1
+with
+   S'Last + (-S'First) + 1
+
+and all of the rest of Geert's discussion makes sense if we assume this
+substitution. I see this as confirmation of Geert's point that the reassociation
+permission makes it harder to reason about programs.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  2:45 PM
+
+> We wasted quite a bit of time debugging before we decided that the
+> rule was evil and could only be applied if it couldn't introduce an
+> exception.
+
+That's meaningless, the rule is ONLY about introducing exceptions, otherwise it
+has zero content!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  2:46 PM
+
+> My guess is that it would be hard to quantify, as it would be
+> difficult to tell in most compilers when the non-determism is being used.
+
+Why hard to quantify, you disable this optimization and you see whether any
+programs are noticeably affected.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  4:47 PM
+
+Because most compilers don't treat this as something that can be separately
+disabled, or even as an "optimization". It's simply part of the semantics of
+Ada. In our case, we just used it when it was advantageous and certainly there
+isn't anything consistently marking that we're depending on non-determinism
+(it's not something that we would have necessarily mentioned in comments). So
+there isn't any practical way to find out when it was used or what the effect
+was.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  4:51 PM
+
+> > We wasted quite a bit of time debugging before we decided that the
+> > rule was evil and could only be applied if it couldn't introduce an
+> > exception.
+
+"The rule" was the rule in our optimizer about re-association, not any
+particular rule in the RM. You can only apply that rule if no exceptions can be
+introduced, meaning that we decided that we cannot use 4.5(13) to any benefit.
+As you note, it is an "as-if" rule in the absence of exceptions, so the RM need
+not mention it.
+
+> That's meaningless, the rule is ONLY about introducing exceptions,
+> otherwise it has zero content!
+
+That's precisely my point -- the RM rule has zero useful content, because
+introducing exceptions willy-nilly makes it much more difficult to write code
+that won't fail -- I'm not sure that it is even possible to do so in the general
+case.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  5:06 PM
+
+> That's precisely my point -- the RM rule has zero useful content,
+> because introducing exceptions willy-nilly makes it much more
+> difficult to write code that won't fail -- I'm not sure that it is
+> even possible to do so in the general case.
+
+What are you talking about? Just use parentheses!
+You can't reassociate (A+B)+C.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  4:54 PM
+
+> Yes, let's do that. I think everyone can agree removing this fixes a
+> nasty wart, that is becoming increasingly more important and visible
+> with the new pre- and post-conditions, SPARK 2014 and increased use of
+> model-based code generation, statical analyzers and provers.
+
+I presume that you'll be submitting an AI to this effect? A !question and nice
+examples as to why applying this permission would be harmful would be nice. (The
+!wording is easy for a change, so I don't really need that.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  5:05 PM
+
+> Because most compilers don't treat this as something that can be
+> separately disabled, or even as an "optimization". It's simply part of
+> the semantics of Ada. In our case, we just used it when it was
+> advantageous and certainly there isn't anything consistently marking
+> that we're depending on non-determinism (it's not something that we
+> would have necessarily mentioned in comments). So there isn't any
+> practical way to find out when it was used or what the effect was.
+
+Don't speak for "most compilers" you don't have the background to do that :-)
+And specific Ada backends are mostly a thing of the past!
+
+What you say may be idiosyncractically true for your compiler, but I expect
+other compilers could easily test this out. After all a C compiler does not have
+a fixed evaluation order, but a Java compiler does, so any reasonably flexible
+compiler will have both capabilities (e.g. gcc, and it would be a fairly easy
+experiment to carry out).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, November 25, 2013  5:14 PM
+
+>...After all a C compiler does not have a fixed evaluation  order, but
+>a Java compiler does, so any reasonably flexible compiler  will have
+>both capabilities (e.g. gcc, and it would be a fairly  easy experiment
+>to carry out).
+
+Do any other languages have this rule that "A+B+C" can be evaluated as "A+(B+C)"
+even though that might introduce overflow?  I think maybe Fortran does, and I
+think maybe that's where Ada inherited it from.  But I'm not a Fortran lawyer.
+
+I've no idea what gfortran does in this regard.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  5:42 PM
+
+>> ...After all a C compiler does not have a fixed evaluation order, but
+>> a Java compiler does, so any reasonably flexible compiler will have
+>> both capabilities (e.g. gcc, and it would be a fairly easy experiment
+>> to carry out).
+>
+> Do any other languages have this rule that "A+B+C" can be evaluated as
+> "A+(B+C)" even though that might introduce overflow?  I think maybe
+> Fortran does, and I think maybe that's where Ada inherited it from.
+> But I'm not a Fortran lawyer.
+
+Yes Fortran does, even for floating-point, very evil!
+
+> I've no idea what gfortran does in this regard.
+
+I am sure it goes left to right :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  6:04 PM
+
+> > That's precisely my point -- the RM rule has zero useful content,
+> > because introducing exceptions willy-nilly makes it much more
+> > difficult to write code that won't fail -- I'm not sure that it is
+> > even possible to do so in the general case.
+>
+> What are you talking about? Just use parentheses!
+> You can't reassociate (A+B)+C.
+
+For integers, the result of A+B+C and (A+B)+C and A+(B+C) is the same so long as
+there is no exceptions. Our optimizer guy had clearly forgotten the last part,
+so he was ignoring the parens even if present. But we also had problems with
+array indexing code, where there isn't any way the user could add parens -- and
+we wouldn't want to be adding them manually, because that would block various
+optimizations that we do want to make. Indeed, I don't see any value to
+recording parens in the intermediate code for integer expressions (the situation
+is very different for float expressions, of course).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  6:18 PM
+
+> > Because most compilers don't treat this as something that can be
+> > separately disabled, or even as an "optimization". It's simply part
+> > of the semantics of Ada. In our case, we just used it when it was
+> > advantageous and certainly there isn't anything consistently marking
+> > that we're depending on non-determinism (it's not something that we
+> > would have necessarily mentioned in comments). So there isn't any
+> > practical way to find out when it was used or what the effect was.
+>
+> Don't speak for "most compilers" you don't have the background to do
+> that :-) And specific Ada backends are mostly a thing of the past!
+
+Nobody said anything about "back-ends". There are a lot of uses of
+non-determinism in the middle phases of compilation, during the generation of
+and transforming into "better" intermediate code than would occur without it.
+(The generation phase pretty much has to be Ada-specific; transforming may or
+may not be). The back-end certainly isn't the only place where non-determinism
+is used.
+
+I recall someone from Rational making similar points in an ARG discussion years
+ago. I don't think it is just me (or I wouldn't have put it the way I did).
+
+> What you say may be idiosyncractically true for your compiler, but I
+> expect other compilers could easily test this out. After all a C
+> compiler does not have a fixed evaluation order, but a Java compiler
+> does, so any reasonably flexible compiler will have both capabilities
+> (e.g. gcc, and it would be a fairly easy experiment to carry out).
+
+I don't think the majority of Ada implementations also can handle Java or many
+other languages (i.e. Irvine, Rational technology, not sure about ObjectAda).
+That sort of generality is primarily with GNAT, IMHO.
+
+In any case, this is getting *way* off-topic from the already off-topic
+discussion. :-) It doesn't really pay to argue about it, because everyone makes
+the mistake of thinking that their implementation is "typical", when in actual
+fact there pretty much is no such thing (the implementations all vary wildly -
+Rational and ASIS has definitively proved that to me).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  6:29 PM
+
+>>> That's precisely my point -- the RM rule has zero useful content,
+>>> because introducing exceptions willy-nilly makes it much more
+>>> difficult to write code that won't fail -- I'm not sure that it is
+>>> even possible to do so in the general case.
+>>
+>> What are you talking about? Just use parentheses!
+>> You can't reassociate (A+B)+C.
+>
+> For integers, the result of A+B+C and (A+B)+C and A+(B+C) is the same
+> so long as there is no exceptions.
+
+Uh yes, I think we know that, this whole discussion is about exceptions! But
+what I am saying is that your statement that the Ada rule makes it hard to
+write portable code is dubious, since you can just use parens to suppress this
+unwanted flexibility.
+
+> Our optimizer guy had clearly forgotten the
+> last part, so he was ignoring the parens even if present. But we also
+> had problems with array indexing code, where there isn't any way the
+> user could add parens -- and we wouldn't want to be adding them
+> manually, because that would block various optimizations that we do want to make.
+
+Well I have no idea what you are talking about here, sounds like some kind of
+internal chaos in your compiler, definitely not relevant to the discussion here.
+We are talking about standard Ada, not existing compilers with bugs, yes, if you
+have bugs you may have trouble writing portable code!
+
+ > Indeed, I don't
+ > see any value to recording parens in the intermediate code for integer
+ > expressions (the situation is very different for float expressions, of
+ > course).
+
+Well except for the rule we are discussing, and also, depending on what you mean
+by intermediate code, you have to record the exact number of parentheses for
+conformance checking. I have no idea why you think it is important to record
+parens in the fpt case and not in the integer case, that makes zero sense to me.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, November 25, 2013  6:31 PM
+
+> Nobody said anything about "back-ends". There are a lot of uses of
+> non-determinism in the middle phases of compilation, during the
+> generation of and transforming into "better" intermediate code than
+> would occur without it. (The generation phase pretty much has to be
+> Ada-specific; transforming may or may not be). The back-end certainly
+> isn't the only place where non-determinism is used.
+
+Randy you are all over the map here. A moment ago you were talking about
+register allocation, now you are talking about high level transformations in the
+front end. I can't see ANY sensible compiler taking advantage of the
+reassociation rule in the front end.
+
+These kind of reorderings are highly architecture dependent, doing them anywhere
+except in the architecture aware back end makes zero sense.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  6:35 PM
+
+...
+> Nobody said anything about "back-ends". There are a lot of uses of
+> non-determinism in the middle phases of compilation, during the
+> generation of and transforming into "better"
+> intermediate code than would occur without it. (The generation phase
+> pretty much has to be Ada-specific; transforming may or may not be).
+> The back-end certainly isn't the only place where non-determinism is
+> used.
+
+To bring this closer to the original off-topic discussion :-), I believe this
+happens because Ada has rules that effectively require out-of-order evaluation
+of parameters.
+
+For instance, if we have a tagged type like:
+    package P is
+        type Root is tagged...
+        procedure Do_Two (A, B : Root); -- Two controlling operands.
+        function TI return Root; -- Tag-indeterminate function.
+        function CW return Root'Class; -- Dynamically-tagged function.
+    end P;
+
+in the call:
+
+    P.Do_Two (TI, CW);
+
+you have to evaluate the second parameter first in order to find out the tag
+with which T1 needs to dispatch. A strict left-to-right order would require
+evaluating the function call TI before you know the tag with which to dispatch,
+and that isn't going to work.
+
+In cases like this, an Ada compiler is essentially depending on the
+non-determistic evaluation of parameters in order to get the correct Ada
+semantics. If we were to require a deterministic evaluation of parameters, we
+would also have to do something with cases like this one which cannot be
+evaluated in a strict left-to-right order. (Making them illegal would be
+incompatible of course, and making them erroneous is hideous...)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, November 25, 2013  7:23 PM
+
+> > Nobody said anything about "back-ends". There are a lot of uses of
+> > non-determinism in the middle phases of compilation, during the
+> > generation of and transforming into "better" intermediate code than
+> > would occur without it. (The generation phase pretty much has to be
+> > Ada-specific; transforming may or may not be). The back-end
+> > certainly isn't the only place where non-determinism is used.
+>
+> Randy you are all over the map here. A moment ago you were talking
+> about register allocation, now you are talking about high level
+> transformations in the front end. I can't see ANY sensible compiler
+> taking advantage of the reassociation rule in the front end.
+
+I agree, but Geert (and others) were also talking about the more general
+"non-determinism" in Ada, and that's what I was talking about in the quoted
+message. It would be nice if the subjects of these various topics were
+different, but breaking the thread by changing the subject usually just leads to
+more chaos. (And I don't think I ever said anything about "register allocation";
+I've always been talking about higher-level uses of non-determinism.)
+
+> These kind of reorderings are highly architecture dependent, doing
+> them anywhere except in the architecture aware back end makes zero
+> sense.
+
+Not always. First, Ada sometimes requires such reorderings (see my other
+message). Secondly, it can be reasonable to have the middle phases aware of some
+of the more important characteristics of the target architecture. We do that so
+that we don't have to duplicate large chunks of complicated code for each target
+(and of course, a front-end has to be aware of at least some target
+characteristics -- a front-end that didn't know the bounds of Integer would have
+issues with static expression evaluation). We of course keep the target
+characteristics separated from the majority of the compiler code, so it's clear
+when we're depending on them in some way.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, November 26, 2013  5:23 PM
+
+>> Because most compilers don't treat this as something that can be
+>> separately disabled, or even as an "optimization". It's simply part
+>> of the semantics of Ada. In our case, .....
+>
+> Don't speak for "most compilers" you don't have the background to do
+> that :-) And specific Ada backends are mostly a thing of the past!
+
+Let me come to Randy's rescue as the old "I love optimizations" guy. This comes
+from someone who has built backends for C, Modula, Ada, and several proprietary
+languages. Admittedly, I never had to generate code for a language that insisted
+on strict left-to-right order.
+
+All this has absolutely zero to do with Ada back-ends and Randy is still right.
+
+What we are talking about here is a typical way of assessing register pressure
+at an early stage in the back-end. See Bob Morgan's book on how the VAX compiler
+back-ends worked. It is well known that by evaluating the "higher pressure"
+subtree first, you save one register at the level above for unbalanced trees
+(for a uniform class of registers, etc, etc,). This can add up transitively.
+Absent a language prohibition, this is clearly the way to go, among other thing
+because some HW might do it anyway for simple instructions, never mind what
+sequence the compiler produced.
+
+Once you have made the pressure assessment, which was based implicitly on the
+assumption of a particular evaluation order, it is quite risky to generate code
+to evaluate in any other order, since you are violating invariants about the
+validity of your register pressure algorithm. So, what you are asking for is to
+turn off register pressure measuring. Well, what if later phases assume that
+they find meaningful results from that algorithm? (And, to do register pressure
+for l-t-r as an alternative, is not what I would call "turning the optimization
+off", but rather changing the compiler significantly. I never had to need to
+implement l-t-r.)
+
+One is very ill advised to "turn off" the optimization of "heavier-tree first"
+(which, in some folks' eyes is but competent code generation) later on in code
+transformation/generation, if earlier phases already assumed it. I know for
+sure, because we were asked to turn off already implemented optimizations and,
+for a while, the compiler without the optimizations turned out to be flaky as
+hell, because subsequent analyses assumed that the earlier transformations
+(normalizations) or analyses had indeed been done. Null-pointer dereferences
+inside the compiler and bad generated code are among the effects and they are
+nasty bugs, for sure.
+
+Specific case in point:
+If you have established a "heavier-subtree-first" regime (or any regime
+whatsoever, including the left-to-right scheme), it is extremely risky to then
+deviate from this decision during the later phases, because your discovered CSE
+definitions and usages suddenly are invalidated, finding uses of the CSE before
+the Defs in the alternative execution order. While you might find all affected
+places eventually to fix your compiler, secondary derivations, e.g., about the
+goodness of CSEs and the resulting register pressure influences, are next to
+impossible to undo, because they also have implicit premises, e.g., about the
+heaviness of nodes in-between.
+
+So, turning off any "optimization" related to execution order is very risky. I
+would certainly not support the notion without BIG bucks asking for it, because
+I know that chasing the resulting bugs due to violated premises will cost a LOT
+of developer time.
+
+In summary, fooling around with the order of evaluation once established or
+assumed by the back-end is among the most risky compiler options that I know. It
+definitely is not a "oh just turn this optimization off" thing.
+
+Of course, you can build your compiler without optimization, truly
+left-to-right, truly canonical for some definition of canonical, all dead code
+present, etc., as long as nobody asks you to "just turn on the optimizations"
+because, as a result, the compiler will break quite similarly for a few months.
+
+Will the heavier-tree-first optimization buy much? Who knows? With some effort,
+I can write examples where this optimization alone will yield factors on
+multi-core. Of course, the examples would be contrived, causing a global cache
+miss due to an unnecessary spill inside a loop. My claim is just as unsupported
+as the claim that optimizations are generally overrated. I would agree that
+(with a few exceptions such as register allocation) every single one will not
+save the day, but what about a group of 30 well chosen ones? E.g. getting rid of
+95% of constraint checks? Again, who knows?
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, November 26, 2013  5:38 PM
+
+> I can't see ANY sensible compiler
+> taking advantage of the reassociation rule in the front end.
+
+Just curious.... Do you do
+  A + 5 + 8   ===   (A+5) + 8
+or
+  A + 5 + 8   ===   A + 13  (taking advantage of reassociation)
+
+How about
+ 5 + A - A   === (5 + A) - A
+or
+ 5 + A - A  === 5
+
+(Incidentally, I agree that  A * B * C in Float needs to be (A*B)*C.)
+
+My point is that reassociation is not a black-and-white issue (presuming
+that you find the 2.line transforms o.k.).   Of course, one takes
+advantage of it quite often in a compiler, the above certainly in the
+target-independent part of the compiler.
+
+The only soul searching comes when accuracy, exceptions or traps come into play.
+That is where the meat of the discussion ought to be, not on generally damning
+or blessing a particular transformation.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 26, 2013  5:53 PM
+
+>> I can't see ANY sensible compiler
+>> taking advantage of the reassociation rule in the front end.
+
+The reassociation rule we are talking about is the one that allows you to introduce overflow errors. There is no other relevant rule, so the above is to be read *SPECIFICALLY* in that context. I.e. I cannot see ANY sensible compiler taking advantage of the reassociation rule and introducing an overflow error
+>
+> Just curious.... Do you do
+>    A + 5 + 8   ===   (A+5) + 8
+> or
+>    A + 5 + 8   ===   A + 13  (taking advantage of reassociation)
+>
+> How about
+>   5 + A - A   === (5 + A) - A
+> or
+>   5 + A - A  === 5
+
+These are totally irrelevant to the discussion, they are allowed "as if"
+transformations which would be allowed whether or not the reassociation rule is
+present in the RM. So these examples are red herrings in this discussion.
+
+> My point is that reassociation is not a black-and-white issue (presuming
+> that you find the 2.line transforms o.k.).   Of course, one takes
+> advantage of it quite often in a compiler, the above certainly in the
+> target-independent part of the compiler.
+
+It is impossible not to find your examples OK, they are clearly valid. No one
+could possibly dispute that, but they have nothing whatever to do with the
+reassociation rule in the RM.
+
+> The only soul searching comes when accuracy, exceptions or traps come
+> into play. That is where the meat of the discussion ought to be, not
+> on generally damning or blessing a particular transformation.
+
+That's ALL we are discussing, the reassocation rule says you can freely
+reassociation without worrying about exceptions (it has nothing to say about
+allowing you to change the accuracy!)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 26, 2013  6:12 PM
+
+> That's ALL we are discussing, the reassocation rule says you can
+> freely reassociation without worrying about exceptions (it has nothing
+> to say about allowing you to change the accuracy!)
+
+Nit-pick: Actually, it does say that you can't change the accuracy:
+
+"...an implementation may impose any association of the operators with operands
+so long as the result produced is an allowed result for the left-to-right
+association..."
+
+so "nothing to say" is inaccurate. (Pun semi-intended.) (The wording does allow
+a different value [bit pattern], but it has to be in the same model interval,
+which means the required accuracy is unchanged; the AARM notes confirm that).
+
+Which of course doesn't change your point.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, November 26, 2013  7:01 PM
+
+> Nit-pick: Actually, it does say that you can't change the accuracy:
+
+Right, that's what I mean, it has nothing to say about allowing you to change
+the accuracy. Although it you have some amazing fpt proof stuff that allows you
+to show that the model interval is the same or narrower, then as-if allows you
+to reassociate.
+
+> so "nothing to say" is inaccurate. (Pun semi-intended.) (The wording
+> does allow a different value [bit pattern], but it has to be in the
+> same model interval, which means the required accuracy is unchanged;
+> the AARM notes confirm that).
+
+Right, so it has nothing to say, since it says nothing that would not be true
+WITHOUT any statement. That's what I mean.
+
+> Which of course doesn't change your point.
+
+****************************************************************
+
+From: Geert Bosch
+Sent: Tuesday, November 26, 2013  7:45 PM
+
+> What we are talking about here is a typical way of assessing register
+> pressure at an early stage in the back-end. See Bob Morgan's book on
+> how the VAX compiler back-ends worked. It is well known that by
+> evaluating the "higher pressure" subtree first, you save one register
+> at the level above for unbalanced trees (for a uniform class of
+> registers, etc, etc,). This can add up transitively. Absent a language
+> prohibition, this is clearly the way to go, among other thing because
+> some HW might do it anyway for simple instructions, never mind what
+> sequence the compiler produced.
+
+This is a dangerous line of reasoning. You can generate code doing evaluation in
+one order while preserving side effects in another order. They really have not
+much to do with one another. While compilers will interleave evaluation of both
+sides, and, similarly, modern hardware will have hundreds of instructions in
+various stages of execution, but they'll all preserve the semantics of (some)
+sequential execution obeying the semantics of the source language, whether a
+high level language or machine code.
+
+While 1970s compiler technology may not be applicable today, Knuth's
+proclamation that "early optimization is the root of all evil" is still valid
+today. We should forget about small efficiencies most of the time.
+
+The following quote seems particularly applicable and timeless:
+> "The order in which the operations shall be performed in every
+> particular case is a very interesting and curious question, on which
+> our space does not permit us fully to enter. In almost every
+> computation a great variety of arrangements for the succession of the
+> processes is possible, and various considerations must influence the
+> selection amongst them for the purposes of a Calculating Engine.
+> One essential object is to choose that arrangement which shall tend to
+> reduce to a minimum the time necessary for completing the
+> calculation."  Ada Byron's notes on the analytical engine, 1842.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, November 27, 2013  10:24 AM
+
+> By the way, it has always puzzled me how much the Ada designers like
+> non-determinism. Yes, in the language the order of write back of out
+> parameters is non-deterministic. Why? I can't figure out ANY advantage of
+> making something like this non-deterministic!
+
+In our SIL 2 review, the various places where the order of
+evaluation/conversion/assignment is said by the RM to be arbitrary were cited as
+Ada's weaknesses.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  10:42 AM
+
+Indeed, and quite correctly cited too IMO. SPARK by the way completely
+eliminates ALL non-determinism from the language. That was considered an
+essential first step in creating a language suitable for formal reasoning.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  10:46 AM
+
+> In our SIL 2 review, the various places where the order of
+> evaluation/conversion/assignment is said by the RM to be arbitrary
+> were cited as Ada's weaknesses.
+
+One interesting idea would be to create a separate document that creates a
+subset of Ada by specifying orders for all those cases where arbitrary ordering
+is required (*) and then compilers could certify that they followed these
+requirements (possibly by use of some switch).
+
+Probably this document could also require certain behaviors for at least some
+bounded error situations, and perhaps restrict usage that leads to erroneous
+execution???
+
+(*) SPARK would be a subset of this subset, since SPARK often works by
+eliminating the effects of arbitrary ordering rather than specifying an
+ordering. For instance expressions have no side effects, so order of evaluation
+of expressions doesn't matter from a side effect point of view. Of course SPARK
+does not allow reordering that changes results or introduces exceptions!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 27, 2013  3:12 PM
+
+> > What we are talking about here is a typical way of assessing
+> > register pressure at an early stage in the back-end. See Bob
+> > Morgan's book on how the VAX compiler back-ends worked. It is well
+> > known that by evaluating the "higher pressure" subtree first, you
+> > save one register at the level above for unbalanced trees (for a
+> > uniform class of registers, etc, etc,). This can add up
+> > transitively. Absent a language prohibition, this is clearly the way
+> > to go, among other thing because some HW might do it anyway for
+> > simple instructions, never mind what sequence the compiler produced.
+>
+> This is a dangerous line of reasoning. You can generate code doing
+> evaluation in one order while preserving side effects in another
+> order. They really have not much to do with one another. While
+> compilers will interleave evaluation of both sides, and, similarly,
+> modern hardware will have hundreds of instructions in various stages
+> of execution, but they'll all preserve the semantics of (some)
+> sequential execution obeying the semantics of the source language,
+> whether a high level language or machine code.
+
+*This* is a dangerous line of reasoning. Of course, "as-if" optimizations are
+always allowed, both at the compiler level and machine level. But the
+side-effects that matter for this discussion are the ones that (potentially)
+have an external effect, which are directly the result of a machine instruction,
+and which can have an outsized runtime impact:
+
+(1) The side-effects that result from external function calls;
+(2) The effects of accessing volatile objects;
+(3) The place where exceptions are raised, relative to (1) and (2).
+
+If you are presuming a strict evaluation order, then you (a compiler) *cannot*
+move any of these things, under any circumstances. That's because the
+side-effects are tied to the execution of a single machine instruction, which
+cannot be reasonably split.
+
+One could of course inline to mitigate (1), but front-end inlining is the very
+definition of "early optimization", so it can't be considered here (based on
+your next paragraph).
+
+Plus, keep in mind that you *cannot* evaluate parameters in a strict
+left-to-right order in every case and still properly implement Ada semantics (I
+showed such an example on Friday). To eliminate these cases would require
+introducing incompatibilities, and that brings us back to the original subject
+of this thread -- how to *avoid* adding more incompatibilities. I don't see how
+we could reconcile both intents.
+
+> While 1970s compiler technology may not be applicable today, Knuth's
+> proclamation that "early optimization is the root of all evil" is
+> still valid today. We should forget about small efficiencies most of
+> the time.
+
+Pretty much the only meaningful thing that diffentiates compilers (as opposed to
+eco-systems) for a standardized language like Ada is the way that that they find
+(or don't) "small efficiencies". (Aside: And I don't agree that the efficiencies
+in question are necessarily small; the cost of a float spill is the reading and
+writing of 11 dwords of memory and that is going to be significant in any
+event.) Pretty much everything else about a compiler is identical because of the
+requirements of the Standard. If one says that "small efficencies" can't be
+found, then pretty much every compiler will be functionally identical. In such a
+case, there is no business case for there even existing more than one compiler
+for a language (it would make a lot more sense for a small company like mine to
+build tools for GNAT rather than building Ada compiler where the ability to add
+value is very strictly limited) - at least so long as the one that exists is
+open source. And of course in that case, there is no need for Ada
+Standardization, either.
+
+So I conclude that this group *exists* because of the ability of compilers to
+find "small efficiencies" for particular target markets. To dismiss that out of
+hand is essentially dismissing the reason the Ada Standard exists at all.
+
+Note that I say the above even though I don't think Janus/Ada takes much
+advantage of non-canonical orders. We of course do so to implement cases like my
+example on Friday (that's done by introducing temporaries). But generally we try
+to keep side-effects in a canonical order so that optimization doesn't change
+the effect of a program too much. The problem is that I have no idea of where we
+might have taken advantage on non-canonical orders, and there is no practical
+way to find them (as it is a basic rule of Ada that would not require special
+documentation). Nor have we made any attempt to find out what the third-party
+backends do in such cases. So changing this would be a non-starter for me.
+
+P.S. I'm not sure what "strict left-to-right order" means when named notation
+and/or default parameters are used in calls. Our compiler converts all calls to
+positional notation with default expressions made explicit before we start any
+sort of code generation; the back end phases only deal with positional calls. If
+we're talking the order that named parameters exist in the source code, that
+would be *very* expensive to implement in our compiler, as we'd have to
+introduce temporaries for every parameter to get the evaluation order right, or
+abandon the existing invariant that the parameters are in passing order when
+making calls, or ???. I don't know for sure, but I thought that this was a
+common implementation strategy.
+
+****************************************************************
+
+From: Arnaud Charlet
+Sent: Wednesday, November 27, 2013  3:24 PM
+
+> Pretty much the only meaningful thing that diffentiates compilers (as
+> opposed to eco-systems) for a standardized language like Ada is the
+> way that that they find (or don't) "small efficiencies". (Aside: And I
+> don't agree that the efficiencies in question are necessarily small;
+> the cost of a float spill is the reading and writing of 11 dwords of
+> memory and that is going to be significant in any event.) Pretty much
+> everything else about a compiler is identical because of the
+> requirements of the Standard. If one says that
+
+That's certainly not the case, ease of use, quality of error messages, error
+recovery, which host and targets are supported, quality of support,
+responsiveness to bug fixes and enhancements, ability to maintain and document
+known problems, etc... are much more important than micro optimizations to most
+users.
+
+Most of our customers don't really care about performance actually, only a few
+do care (alot sometimes).
+
+Also you started with "as opposed to eco-systems" but that's also a non
+realistic premise: customers don't buy just a compiler these days, they buy a
+whole toolset (if not more) where the compiler is only a small piece, so this is
+not what makes the difference in most cases.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  3:41 PM
+
+> the cost of a float
+> spill is the reading and writing of 11 dwords of memory and that is
+> going to be significant in any event.
+
+what's your model for this odd claim?
+
+) Pretty much everything else about a compiler
+> is identical because of the requirements of the Standard. If one says
+> that "small efficencies" can't be found, then pretty much every
+> compiler will be functionally identical.
+
+This is nonsense, there are lots of opportunities for BIG efficiencies in Ada
+compilers, e.g. handling of a bit-packed array slice (which right now GNAT is
+not good at, but would be a HUGE efficiency gain if implemented). Another
+example is optimization of String'Write to do one big write in the normal case
+rather than the generally required separate element-by-element write. There are
+LOADS of such cases (I would guess we have well over a hundred similar
+enhancement requests filed, and many improvements to the compiler over time are
+in this category). Small fry like order of evaluation of expressions is
+relatively unimportant compared to this.
+
+Other examples are efficient handling of exceptions and controlled types.
+
+> In such a case, there is no business case for there even existing more
+> than one compiler for a language (it would make a lot more sense for a
+> small company like mine to build tools for GNAT rather than building
+> Ada compiler where the ability to add value is very strictly
+> limited) - at least so long as the one that exists is open source. And
+> of course in that case, there is no need for Ada Standardization, either.
+
+Different Ada companies do and have concentrate(d) on different opportunities,
+and there are many reasons why it is a good thing to have more than
+
+> So I conclude that this group *exists* because of the ability of
+> compilers to find "small efficiencies" for particular target markets.
+> To dismiss that out of hand is essentially dismissing the reason the
+> Ada Standard exists at all.
+
+TOTAL NONSENSE (sorry for all upper case) in my opinion.
+
+For one thing, suppose we did have a world where there is only one compiler. The
+standard would be critical for letting a programmer know what is guaranteed to
+be portable across architectures and what is not!
+
+> P.S. I'm not sure what "strict left-to-right order" means when named
+> notation and/or default parameters are used in calls. Our compiler
+> converts all calls to positional notation with default expressions
+> made explicit before we start any sort of code generation; the back
+> end phases only deal with positional calls. If we're talking the order
+> that named parameters exist in the source code, that would be *very*
+> expensive to implement in our compiler, as we'd have to introduce
+> temporaries for every parameter to get the evaluation order right, or
+> abandon the existing invariant that the parameters are in passing
+> order when making calls, or ???. I don't know for sure, but I thought that
+> this was a common implementation strategy.
+
+Surprised! it would be trivial in GNAT, we would test each expression in the
+call in sequence to see if it had side effects, and if so (it's the unusual
+case) eliminate these side effects in left to right order. To do this would take
+about 20 minutes of work, since all the primitives are at hand, it would be
+something like
+
+     A := First_Actual (P);
+     while Present (A) loop
+        Remove_Side_Effects (A);
+        Next_Actual (A);
+     end loop;
+
+well there are probably some details left out, but still, not a big deal once we
+decided what was meant by evaluation in order (as Randy points out there are
+some interesting cases).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 27, 2013  5:07 PM
+
+...
+> > Pretty much the only meaningful thing that diffentiates compilers
+> > (as opposed to eco-systems) for a standardized language like Ada is
+> > the way that that they find (or don't) "small efficiencies". (Aside:
+> > And I don't agree that the efficiencies in question are necessarily
+> > small; the cost of a float spill is the reading and writing of 11
+> > dwords of memory and that is going to be significant in any event.)
+> > Pretty much everything else about a compiler is identical because of
+> > the requirements of the Standard. If one says that
+>
+> That's certainly not the case, ease of use, quality of error messages,
+> error recovery, which host and targets are supported, quality of
+> support, responsiveness to bug fixes and enhancements, ability to
+> maintain and document known problems, etc... are much more important
+> than micro optimizations to most users.
+
+None of those things, other than error messages, are properties of the
+*compiler*, they are properties of the business (that's especially true for
+support which is mainly what you are talking about here). There is no reason
+that some new business could not use the GCC compiler and provide quality
+support, targets, and the like.
+
+...
+> Also you started with "as opposed to eco-systems" but that's also a
+> non realistic premise: customers don't buy just a compiler these days,
+> they buy a whole toolset (if not more) where the compiler is only a
+> small piece, so this is not what makes the difference in most cases.
+
+I agree with this, and that is my point. The main value to customers is in a
+better eco-system. As such, it does not make business sense to build a complex
+piece of software (like a compiler) when one could build an eco-system (and
+support) around an existing open source compiler. An Ada compiler is the hardest
+and most expensive piece of most development eco-systems -- why spend all of
+your energy there (because they're infinite time sinks) when it provides very
+little incremental value to your customers?
+
+Many of us built Ada compilers when the economics was different (especially as
+no open source compiler existed to build around), but that's not true today. I
+keep maintaining Janus/Ada because it's very much like my child and you don't
+abandon your children -- but it certainly doesn't make economic sense to do so.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  5:22 PM
+
+>> That's certainly not the case, ease of use, quality of error
+>> messages, error recovery, which host and targets are supported,
+>> quality of support, responsiveness to bug fixes and enhancements,
+>> ability to maintain and document known problems, etc... are much more
+>> important than micro optimizations to most users.
+>
+> None of those things, other than error messages, are properties of the
+> *compiler*, they are properties of the business (that's especially
+> true for support which is mainly what you are talking about here).
+
+totally wrong
+
+   ease of use		property of the compiler
+   quality of messages	property of the compiler
+   error recovery        property of the compiler
+   ease of fixing bugs   property of the compiler
+   targets supported     property of the compiler
+
+support includes all the above.
+
+>  There is no reason
+> that some new business could not use the GCC compiler and provide
+> quality support, targets, and the like.
+
+Not conceptually right, but in practice this would not be easy
+
+> I agree with this, and that is my point. The main value to customers
+> is in a better eco-system. As such, it does not make business sense to
+> build a complex piece of software (like a compiler) when one could
+> build an eco-system (and support) around an existing open source
+> compiler. An Ada compiler is the hardest and most expensive piece of
+> most development eco-systems).
+
+The compiler might possibly be the single most expensive piece of the
+eco-system, but in the big picture it is still a small part (probably only 20%
+of the development resources at AdaCore, if that, go into the compiler).
+
+And mastering the gcc compiler, for example, at the level necessary to do what
+you suggest, would be a major investment, easily comparable to building a
+compiler from scratch. Of course you would get a lot for that in terms of
+targets, etc. but it would be a lot of work.
+
+> Many of us built Ada compilers when the economics was different
+> (especially as no open source compiler existed to build around), but
+> that's not true today. I keep maintaining Janus/Ada because it's very
+> much like my child and you don't abandon your children -- but it
+> certainly doesn't make economic sense to do so.
+
+Well of course an open source compiler existed, you could have decided to build
+a front end for gcc, just as we did instead of an entire compiler, but as I say,
+I think it would probably have been more work, not less. As for abandoning, part
+of wisdom is learning when to abandon things that should be abandoned :-)
+
+We have certainly abandoned significant chunks of technology as we go along at
+AdaCore, and look for example at the Alsys decision to abandon their compiler
+technology in favor of Ada Magic.
+
+Boy this must be the most off-topic thread for a long time, but it isn't only me
+keeping it alive :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 27, 2013  5:33 PM
+
+> > the cost of a float
+> > spill is the reading and writing of 11 dwords of memory and that is
+> > going to be significant in any event.
+>
+> what's your model for this odd claim?
+
+In Janus/Ada, at least, we have to spill the full extended precision value for
+each float and all of the float flags as well (because of the way float
+exceptions are managed), then the float processor is fully cleared before the
+call; the process then is reversed afterwards.
+
+At least, that's the way it worked before I added the front-end rearrangement of
+code. Since then, I haven't been able to construct an example that the compiler
+wasn't able to reorder to eliminate the need for any float spilling. It
+certainly ought to be possible to construct such a case, but it would be
+fiendishly complex (a massive forest of nested function calls that return
+floats).
+
+The rearrangement of course depends upon the non-determism of subprogram
+parameter ordering.
+
+> ) Pretty much everything else about a compiler
+> > is identical because of the requirements of the Standard. If one
+> > says that "small efficencies" can't be found, then pretty much every
+> > compiler will be functionally identical.
+>
+> This is nonsense, there are lots of opportunities for BIG efficiencies
+> in Ada compilers, e.g. handling of a bit-packed array slice (which
+> right now GNAT is not good at, but would be a HUGE efficiency gain if
+> implemented). Another example is optimization of String'Write to do
+> one big write in the normal case rather than the generally required
+> separate element-by-element write. There are LOADS of such cases (I
+> would guess we have well over a hundred similar enhancement requests
+> filed, and many improvements to the compiler over time are in this
+> category). Small fry like order of evaluation of expressions is
+> relatively unimportant compared to this.
+>
+> Other examples are efficient handling of exceptions and controlled
+> types.
+
+I would have considered those sorts of things covered by the "early
+optimization" that Geert was complaining about. I read his message to say that
+any optimization in the front end is evil, which I agree with you is nonsense.
+
+> > In such a case, there is no business case for there even existing
+> > more than one compiler for a language (it would make a lot more
+> > sense for a small company like mine to build tools for GNAT rather
+> > than building Ada compiler where the ability to add value is very
+> > strictly
+> > limited) - at least so long as the one that exists is open source.
+> > And of course in that case, there is no need for Ada
+> > Standardization, either.
+>
+> Different Ada companies do and have concentrate(d) on different
+> opportunities, and there are many reasons why it is a good thing to
+> have more than
+
+Right, but if we tie the Standard down to the point of requiring everything to
+be evaluated in a canonical order, and to eliminate uncommon implementation
+strategies like generic sharing (which you complain about the standard
+supporting nearly every time I bring it up), there is no longer much chance for
+an Ada company to add value in the compiler proper. In such an environment, one
+could easily concentrate on a "different opportunity" without investing $$$$ in
+a piece that hardly can be different at all from anyone else's.
+
+> > So I conclude that this group *exists* because of the ability of
+> > compilers to find "small efficiencies" for particular target markets.
+> > To dismiss that out of hand is essentially dismissing the reason the
+> > Ada Standard exists at all.
+>
+> TOTAL NONSENSE (sorry for all upper case) in my opinion.
+>
+> For one thing, suppose we did have a world where there is only one
+> compiler. The standard would be critical for letting a programmer know
+> what is guaranteed to be portable across architectures and what is
+> not!
+
+I don't think this is hard to do for a vendor; we always tried to make
+*everything* portable across architectures other than a relatively small list
+outlined in our documentation. The number of choices that the Standard gives us
+where we actually make different choices for different targets is quite small
+(even on targets as diverse as the U2200 and the Windows PC). The Standard
+provides some help, but I don't think it is particularly necessary to that task.
+
+And of course nothing prevents that one compiler vendor from creating a
+standard-like document (especially since there already is a Standard). I just
+don't see much value to a formal process for it in a one vendor world.
+
+> > P.S. I'm not sure what "strict left-to-right order" means when named
+> > notation and/or default parameters are used in calls. Our compiler
+> > converts all calls to positional notation with default expressions
+> > made explicit before we start any sort of code generation; the back
+> > end phases only deal with positional calls. If we're talking the
+> > order that named parameters exist in the source code, that would be
+> > *very* expensive to implement in our compiler, as we'd have to
+> > introduce temporaries for every parameter to get the evaluation
+> > order right, or abandon the existing invariant that the parameters
+> > are in passing order when making calls, or ???. I don't know for
+> > sure, but I thought that this was a common implementation strategy.
+>
+> Surprised! it would be trivial in GNAT, we would test each expression
+> in the call in sequence to see if it had side effects, and if so (it's
+> the unusual case) eliminate these side effects in left to right order.
+> To do this would take about 20 minutes of work, since all the
+> primitives are at hand, it would be something like
+>
+>      A := First_Actual (P);
+>      while Present (A) loop
+>         Remove_Side_Effects (A);
+>         Next_Actual (A);
+>      end loop;
+>
+> well there are probably some details left out, but still, not a big
+> deal once we decided what was meant by evaluation in order (as Randy
+> points out there are some interesting cases).
+
+I was thinking mostly that it would be expensive at runtime as many new memory
+temporaries would be needed. We'd of course want to aggressively eliminate those
+temporaries, which would complicate the implementation as well.
+
+The alternative would be to redesign our intermediate code to support
+interleaving of register temporaries and parameter passing (we didn't allow this
+so that register parameter passing could be sensibly supported); that would of
+course be even a bigger job because it would invalidate many of the invariants
+that the optimizer and back-ends expect. (To Be Honest: I've been considering
+doing this anyway for other optimization reasons -- but I haven't started it
+because of the invariant factor. In any case, it would have to be quite limited
+for x86 targets because of the lack of registers.)
+
+Certainly doing it is possible, but since everything was designed from the
+ground up for Ada (83) with no constraints on evaluation order, there certainly
+would be quite a few bumps.
+
+P.P.S. The idea of creating a profile or something in Annex H to specify that
+everything is evaluated in canonical order (and 11.6 is nullified!) isn't a bad
+one. It would let the standard define these things in a more sensible way but
+would prevent making this into a barrier for adoption of Ada 2012 and beyond.
+(As a specialized needs annex, implementers would not have to support it.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  5:45 PM
+
+>>> the cost of a float
+>>> spill is the reading and writing of 11 dwords of memory and that is
+>>> going to be significant in any event.
+>>
+>> what's your model for this odd claim?
+>
+> In Janus/Ada, at least, we have to spill the full extended precision
+> value for each float and all of the float flags as well (because of
+> the way float exceptions are managed), then the float processor is
+> fully cleared before the call; the process then is reversed afterwards.
+
+You can do FAR better than this, it is really quite easy and much cheaper to
+make the floating-point stack extend to memory automatically. It's interesting
+that Steve Morse in his book claimed this was impossible but I found out how to
+do it, and convinced him that it worked (this is what we did in the Alsys
+compiler).
+
+Of course you should use SSE these days instead of the old junk fpt anyway :-)
+
+> At least, that's the way it worked before I added the front-end
+> rearrangement of code. Since then, I haven't been able to construct an
+> example that the compiler wasn't able to reorder to eliminate the need
+> for any float spilling. It certainly ought to be possible to construct
+> such a case, but it would be fiendishly complex (a massive forest of
+> nested function calls that return floats).
+>
+> The rearrangement of course depends upon the non-determism of
+> subprogram parameter ordering.
+
+> I would have considered those sorts of things covered by the "early
+> optimization" that Geert was complaining about. I read his message to
+> say that any optimization in the front end is evil, which I agree with
+> you is nonsense.
+
+Well if you invent what people say, not surprising you will think it is
+nonsense, he said nothing of the kind!
+
+> Right, but if we tie the Standard down to the point of requiring
+> everything to be evaluated in a canonical order, and to eliminate
+> uncommon implementation strategies like generic sharing (which you
+> complain about the standard supporting nearly every time I bring it
+> up), there is no longer much chance for an Ada company to add value in
+> the compiler proper. In such an environment, one could easily concentrate
+> on a "different opportunity" without investing $$$$ in a piece that hardly
+> can be different at all from anyone else's.
+
+Absurd to think that eliminating generic sharing means this, that's just a
+fantasy Randy! As I say, the idea that all Ada compilers are anywhere NEAR the
+same, or would be the same even with a few more constraints is absurd nonsense,
+I can't imagine ANYONE else agreeing with you on this.
+
+> I don't think this is hard to do for a vendor; we always tried to make
+> *everything* portable across architectures other than a relatively
+> small list outlined in our documentation. The number of choices that
+> the Standard gives us where we actually make different choices for
+> different targets is quite small (even on targets as diverse as the U2200 and the Windows PC).
+> The Standard provides some help, but I don't think it is particularly
+> necessary to that task.
+
+You never were in the business of supporting multiple OS/Target pairs (we
+currently support over 50), or you would not make such an absurd statement IMO.
+
+> And of course nothing prevents that one compiler vendor from creating
+> a standard-like document (especially since there already is a
+> Standard). I just don't see much value to a formal process for it in a one
+> vendor world.
+
+Well you are not a vendor, so it's not surprising that you don't understand. Let
+me assure you that AdaCore finds the standard VERY useful from this point of
+view. If this were not the case we would not support continued work on the
+standard.
+
+> I was thinking mostly that it would be expensive at runtime as many
+> new memory temporaries would be needed. We'd of course want to
+> aggressively eliminate those temporaries, which would complicate the
+> implementation as well.
+
+Well they would not complicate anything for us, and I think the impact of such
+an approach would be small (it would be a trivial experiment to do with GNAT in
+fact).
+
+> P.P.S. The idea of creating a profile or something in Annex H to
+> specify that everything is evaluated in canonical order (and 11.6 is
+> nullified!) isn't a bad one. It would let the standard define these
+> things in a more sensible way but would prevent making this into a
+> barrier for adoption of Ada 2012 and beyond. (As a specialized needs
+> annex, implementers would not have to support it.)
+
+Perhaps the HRG could be persuaded to look at this idea.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 27, 2013  5:55 PM
+
+> >> That's certainly not the case, ease of use, quality of error
+> >> messages, error recovery, which host and targets are supported,
+> >> quality of support, responsiveness to bug fixes and enhancements,
+> >> ability to maintain and document known problems, etc... are much
+> >> more important than micro optimizations to most users.
+> >
+> > None of those things, other than error messages, are properties of
+> > the *compiler*, they are properties of the business (that's
+> > especially true for support which is mainly what you are talking about here).
+>
+> totally wrong
+>
+>    ease of use		property of the compiler
+>    quality of messages	property of the compiler
+>    error recovery        property of the compiler
+>    ease of fixing bugs   property of the compiler
+>    targets supported     property of the compiler
+
+I strongly disagree, but I doubt that I would convince you and this certainly is
+getting way off-topic. For instance, hardly anyone directly runs a compiler
+these days (or ever, for Ada compilers). You use a make tool (GNATMake) or a
+programming environment (GPS) and that's where the ease of use comes from, not
+the compiler. Indeed, the ease of use of the compiler proper is virtually
+irrelevant, so long as it can be invoked from the command line, as you can wrap
+something else around it to make it easy to use.
+
+Similarly, "targets supported" is a business decision, not really about the
+compiler proper. Porting runtimes is relatively easy compared to building an
+entire compiler, and the same is true of building back-ends. (Yes, a really bad
+design could make that hard, but that's unlikely, since every implementer I've
+talked to has had a relatively portable front-end design with relatively small
+back-ends.) ...
+
+> > I agree with this, and that is my point. The main value to customers
+> > is in a better eco-system. As such, it does not make business sense
+> > to build a complex piece of software (like a compiler) when one
+> > could build an eco-system (and support) around an existing open
+> > source compiler. An Ada compiler is the hardest and most expensive
+> > piece of most development eco-systems).
+>
+> The compiler might possibly be the single most expensive piece of the
+> eco-system, but in the big picture it is still a small part (probably
+> only 20% of the development resources at AdaCore, if that, go into the
+> compiler).
+>
+> And mastering the gcc compiler, for example, at the level necessary to
+> do what you suggest, would be a major investment, easily comparable to
+> building a compiler from scratch. Of course you would get a lot for
+> that in terms of targets, etc. but it would be a lot of work.
+
+I wouldn't claim it would be easy, but it would be a lot easier than starting
+from scratch. Especially as other people also contribute to the gcc compiler, so
+you don't have to be able to fix everything. (To get the best quality support,
+you would of course have to do that eventually, but I don't think you'd have to
+start there. Indeed, all you really need is hubris. :-) I unfortunately used all
+of mine in the 1980s -- I know better now which makes me too risk-adverse.)
+
+> > Many of us built Ada compilers when the economics was different
+> > (especially as no open source compiler existed to build around), but
+> > that's not true today. I keep maintaining Janus/Ada because it's
+> > very much like my child and you don't abandon your children -- but
+> > it certainly doesn't make economic sense to do so.
+>
+> Well of course an open source compiler existed, you could have decided
+> to build a front end for gcc, just as we did instead of an entire
+> compiler, but as I say, I think it would probably have been more work,
+> not less.
+
+I don't think gcc was around in 1981.
+
+> As for abandoning, part of wisdom is learning when to abandon things that
+> should be  abandoned :-)
+
+Yeah, but what else would I have? I know it's sad, but Janus/Ada is essentially
+my family (never having married or having children). I've always joked that I
+was married to Ada, and it's pretty true.
+
+(I think I've reached my mid-life crisis at 55! Like always, many years later
+than everyone else.)
+
+Anyway, if I did abandon Janus/Ada, then I'd clearly have to use GNAT like
+everyone else. Which would help push us to the one-compiler situation that I was
+talking about above. (After all, you guys like to repeatedly tell us that there
+is only one Ada 2012 compiler. We have to be careful to not change the Standard
+to the point where that becomes true permanently.)
+
+> We have certainly abandoned significant chunks of technology as we go
+> along at AdaCore, and look for example at the Alsys decision to
+> abandon their compiler technology in favor of Ada Magic.
+>
+> Boy this must be the most off-topic thread for a long time, but it
+> isn't only me keeping it alive :-)
+
+Yeah, it's gotten sort of out of hand. I'm afraid I couldn't let Geert's
+contention that "early optimization" (that is, in the front end) is bad pass. To
+repeat what I said above, we can't change the Standard in such a way that we
+make it uneconomic for multiple vendors to support Ada 2012 and Ada 202x. People
+are not going to completely redesign their front-ends or back-ends just because
+someone thinks its "1970's technology". Anyway, hopefully we can give this a
+rest.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  6:10 PM
+
+>> totally wrong
+>>
+>>     ease of use		property of the compiler
+>>     quality of messages	property of the compiler
+>>     error recovery        property of the compiler
+>>     ease of fixing bugs   property of the compiler
+>>     targets supported     property of the compiler
+>
+> I strongly disagree, but I doubt that I would convince you and this
+> certainly is getting way off-topic. For instance, hardly anyone
+> directly runs a compiler these days (or ever, for Ada compilers). You
+> use a make tool
+> (GNATMake) or a programming environment (GPS) and that's where the
+> ease of use comes from, not the compiler. Indeed, the ease of use of
+> the compiler proper is virtually irrelevant, so long as it can be
+> invoked from the command line, as you can wrap something else around
+> it to make it easy to use.
+
+I begin to think you really don't undestand much about ease of use, so I won't
+bother to try to educate you on this, but from my point of view, ease of use of
+the compiler is a LOT to do with the compiler, e.g avoiding undesirable Ada 83
+library model. We have been very successful in the Ada market because we
+understand this. I think success speaks for itself when comparing compilers.
+
+> Similarly, "targets supported" is a business decision, not really
+> about the compiler proper. Porting runtimes is relatively easy
+> compared to building an entire compiler, and the same is true of
+> building back-ends. (Yes, a really bad design could make that hard,
+> but that's unlikely, since every implementer I've talked to has had a
+> relatively portable front-end design with relatively small back-ends.)
+
+My goodness, your lack of experience shows up again, it is not at ALL easy to
+build new back ends, just take one example, implementing software pipelining,
+essential to a usable ia64 port is FAR from trivial. But that's one of hundreds
+of similar examples. The back end of GCC is incidentally FAR bigger than the Ada
+front end, and represents many hundreds of person years of effort.
+
+> I wouldn't claim it would be easy, but it would be a lot easier than
+> starting from scratch. Especially as other people also contribute to
+> the gcc compiler, so you don't have to be able to fix everything. (To
+> get the best quality support, you would of course have to do that
+> eventually, but I don't think you'd have to start there. Indeed, all
+> you really need is hubris. :-) I unfortunately used all of mine in the
+> 1980s -- I know better now which makes me too risk-adverse.)
+
+You underestimate the task
+
+> I don't think gcc was around in 1981.
+
+Right, 1987 was the first official release
+
+> Anyway, if I did abandon Janus/Ada, then I'd clearly have to use GNAT
+> like everyone else. Which would help push us to the one-compiler
+> situation that I was talking about above. (After all, you guys like to
+> repeatedly tell us that there is only one Ada 2012 compiler. We have
+> to be careful to not change the Standard to the point where that
+> becomes true permanently.)
+
+Well I fear we may already have done that, Ada 2012 was a huge amount of effort,
+and a lot of it was for completely unimportant stuff. In fact I would say nearly
+all of the Ada 2012 changes were unimportant. Read my Dr. Dobbs article for a
+take on that.
+
+> Yeah, it's gotten sort of out of hand. I'm afraid I couldn't let
+> Geert's contention that "early optimization" (that is, in the front
+> end) is bad pass.
+
+You totally misread what Geert was saying!
+
+> To repeat what I said above, we can't change the Standard in such a
+> way that we make it uneconomic for multiple vendors to support Ada
+> 2012 and Ada 202x. People are not going to completely redesign their
+> front-ends or back-ends just because something thinks its "1970's
+> technology". Anyway, hopefully we can give this a rest.
+
+I am flummoxed by this paragraph, I have no idea what you are talking about, I
+guess it must be some Janus idiosyncratic thing, because it makes no general
+sense to me!
+
+In particular, remember that this off topic thread was all about the
+reassociation rule, are you *seriously* saying that eliminiating this
+reassociation rule would be the one thing that made it uneconomic for vendors to
+support Ada 2012?
+
+No one has proposed any other required change to the Ada 2012 standard!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 27, 2013  6:29 PM
+
+> > In Janus/Ada, at least, we have to spill the full extended precision
+> > value for each float and all of the float flags as well (because of
+> > the way float exceptions are managed), then the float processor is
+> > fully cleared before the call; the process then is reversed afterwards.
+>
+> You can do FAR better than this, it is really quite easy and much
+> cheaper to make the floating-point stack extend to memory
+> automatically.
+> It's interesting that Steve Morse in his book claimed this was
+> impossible but I found out how to do it, and convinced him that it
+> worked (this is what we did in the Alsys compiler).
+
+I don't doubt it; I haven't worked on this area in years. The main problem would
+be that you would have to reliably handle the floating point traps in order to
+do this (certainly doing a test before every push would not be "much cheaper"),
+and that we were never able to do. I'm sure that was because early Oses like SCO
+Unix simply didn't handle these things properly. Anyway, we designed a model
+that doesn't depend on using any traps, taking advantage of the various
+permissions for checks and the fact that the bits are sticky to only check for
+problems just before any store.
+
+I've never had any reason to revisit this model (don't have customers with
+critical floating point needs).
+
+> Of course you should use SSE these days instead of the old junk fpt
+> anyway :-)
+
+Right, and *that* would be a much better reason to revisit floating point
+support than trying to get a couple of cycles out of fpt exception checking.
+
+> > I would have considered those sorts of things covered by the "early
+> > optimization" that Geert was complaining about. I read his message
+> > to say that any optimization in the front end is evil, which I agree
+> > with you is nonsense.
+>
+> Well if you invent what people say, not surprising you will think it
+> is nonsense, he said nothing of the kind!
+
+Then I have no idea what he was talking about, unless he was building some sort
+of straw man. There are lots of uses of the unspecified order of evaluation that
+have nothing to do with performance: some calls have to be evaluated out of
+order to meet Ada semantics, and canonicalizing calls with named notation makes
+everything else easier.
+
+> > Right, but if we tie the Standard down to the point of requiring
+> > everything to be evaluated in a canonical order, and to eliminate
+> > uncommon implementation strategies like generic sharing (which you
+> > complain about the standard supporting nearly every time I bring it
+> > up), there is no longer much chance for an Ada company to add value
+> > in the compiler proper. In such an environment, one could easily
+> > concentrate on a "different opportunity"
+> > without investing $$$$ in a piece that hardly can be different at
+> > all from anyone else's.
+>
+> Absurd to think that eliminating generic sharing means this, that's
+> just a fantasy Randy! As I say, the idea that all Ada compilers are
+> anywhere NEAR the same, or would be the same even with a few more
+> constraints is absurd nonsense, I can't imagine ANYONE else agreeing
+> with you on this.
+
+Fair enough. I should point out that I've *always* felt this way, all the way
+back to the early 1980s when we first got into this business. I considered it
+the #1 business risk, in that we might not be able to sufficiently differentiate
+our product from another company with deeper pockets. One of the main reasons
+that we chose generic sharing, dynamic allocation of memory for mutable object,
+and similar decisions is that we wanted the compiler to be as different as
+possible from everyone else's.
+
+And I still feel that way. If I had to remove the generic sharing from the
+compiler, allocate mutable objects to the largest possible size, and so on,
+there would remain absolutely no reason for anyone to want to use Janus/Ada. I
+couldn't compete with AdaCore in terms of support hours or number of targets,
+and I can't really imagine anything that I could compete in. (Especially as
+AdaCore could probably afford to clone anything that we did if it was
+worthwhile.)
+
+> > I don't think this is hard to do for a vendor; we always tried to make
+> > *everything* portable across architectures other than a relatively
+> > small list outlined in our documentation. The number of choices that
+> > the Standard gives us where we actually make different choices for
+> > different targets is quite small (even on targets as diverse as the
+> > U2200 and the Windows PC). The Standard provides some help, but I
+> > don't think it is particularly necessary to that task.
+>
+> You never were in the business of supporting multiple OS/Target pairs
+> (we currently support over 50), or you would not make such an absurd
+> statement IMO.
+
+Sorry, but we always supported multiple OS/Target pairs (still do in fact).
+Admittedly, the majority of our revenue has always come from a single pair, but
+there always have been others, and multiple processors as well (CP/M/Z-80 was
+our first pair, but of course we also had MS-DOS/8086 and CP/M-86/8086; later
+there were 16-bit and 32-bit x86 targets, on MS-DOS and various Unix systems; we
+also did 68020 and SPARC compilers; and of course the U2200 implementation).
+
+So, while it may be "absurd" to you, it was the way I had RRS do business.
+
+> > And of course nothing prevents that one compiler vendor from
+> > creating a standard-like document (especially since there already is
+> > a Standard). I just don't see much value to a formal process
+> for it in a one vendor world.
+>
+> Well you are not a vendor, so it's not surprising that you don't
+> understand. Let me assure you that AdaCore finds the standard VERY
+> useful from this point of view. If this were not the case we would not
+> support continued work on the standard.
+
+I realize this, and my bank account thanks you. :-) And it's true so long as
+customers insist on second-sources that a Standard is helpful. The situation is
+not yet to the single-vendor one that I described, and perhaps it will never get
+there.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 27, 2013  6:36 PM
+
+> In particular, remember that this off topic thread was all about the
+> reassociation rule, are you *seriously* saying that eliminiating this
+> reassociation rule would be the one thing that made it uneconomic for
+> vendors to support Ada 2012?
+>
+> No one has proposed any other required change to the Ada 2012
+> standard!
+
+Then *you* are completely misreading what Geert was saying. We haven't been
+talking about the reassociation rule in *ages* (everyone seems to agree that it
+should be dropped, and I asked Geert to write an AI to that effect). We're
+talking about the much more general fact that the order of evaluation of many
+things is unspecified in Ada. (I've mostly been concentrating on parameters.)
+That's the message that Geert sent that Erhard and I had responded to, and
+that's what Geert was replying to. Geert has on several occasions called for Ada
+to remove all of the non-determinism from the language. I think that would be
+way over the top. (I once called that off-topic to an off-topic discussion, and
+it still is.) Such a rule would certainly make it much harder to use an existing
+Ada technology as the basis for an update-to-date Ada compiler.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  6:46 PM
+
+> I realize this, and my bank account thanks you. :-) And it's true so
+> long as customers insist on second-sources that a Standard is helpful.
+> The situation is not yet to the single-vendor one that I described,
+> and perhaps it will never get there.
+
+Nope, that's not the primary reason for finding the standard useful, it has
+nothing to do with our competitors. It has to do with
+
+a) Letting people know Ada is alive and well and standardized and that the
+standard is progressing ahead with useful new stuff.
+
+b) Defining clearly what people can and cannot expect to hold if they are trying
+to write portable code.
+
+There are a FEW cases in which we guarantee behavior beyond the standard but not
+so many.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  6:48 PM
+
+>> No one has proposed any other required change to the Ada 2012
+>> standard!
+
+Removing all the non-determinism has nothing to do with avoiding all front end
+optimizations, which of COURSE Geert does not propose! Also, no one is proposing
+removing the non-determinism from Ada 2012. As to whether 2020 should be
+stricter, interesting issue indeed! Probably a strict annex such as I suggest
+would be the way to go.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 27, 2013  7:53 PM
+
+> >> No one has proposed any other required change to the Ada 2012
+> >> standard!
+>
+> Removing all the non-determinism has nothing to do with avoiding all
+> front end optimizations, which of COURSE Geert does not propose!
+
+While the Dewar rule certainly applies to the Standard, I don't think one can
+apply it to correspondence. :-) You've certainly never been shy about calling me
+out when I wrote something that you thought was nonsense (even when you
+misinterpreted what I said/meant); I'm not sure why others should be treated
+differently.
+
+> ... Also, no one is proposing removing the non-determinism from Ada 2012.
+
+I'd hope not. But some quotes from Geert's message of Nov 24:
+
+>> By the way, it has always puzzled me how much the Ada designers like
+>>non-determinism.
+...
+>I think we should make it a point to go through all such cases and
+>specify behavior.
+...
+>Maybe it isn't too late for a binding interpretation for Ada 2012 for
+>some of these order of evaluation topics? (*)
+
+These make me think that Geert is in fact asking for this for Ada 2012. Now, I
+grant that it's not 100% clear what "all such cases" applies to. He's talking
+about associativity immediately before this statement, but there is only one
+such case in the Standard and in our correspondence, so "all" would have to mean
+something broader.
+
+In the last statement, "some" hopefully only applies to associativity, but again
+there is only one of those cases, so it seems that Geert meant something
+broader. (And I got the same feeling from talking to him in Pittsburgh, which is
+why I feel justified in applying an expansive interpretation.)
+
+Anyway, I wouldn't have bothered with this discussion at all if I hadn't thought
+that Geert was pushing for a change immediately.
+
+> As to whether 2020 should be
+> stricter, interesting issue indeed! Probably a strict annex such as I
+> suggest would be the way to go.
+
+I think I agree. Less burden on implementers unless they have demand for it (in
+which case the burden is at least justifiable).
+
+P.S. Have good Thanksgiving! And that goes for the rest of the US-based ARG as
+well!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, November 27, 2013  8:12 PM
+
+> While the Dewar rule certainly applies to the Standard, I don't think
+> one can apply it to correspondence. :-) You've certainly never been
+> shy about calling me out when I wrote something that you thought was
+> nonsense (even when you misinterpreted what I said/meant); I'm not
+> sure why others should be treated differently.
+
+You just misinterpreted what Geert was saying, I certainly found him clearer. He
+was saying that things like order of evaluation of expressions do not belong
+being optimized in the front end, and I totally agree with that position. You
+extended that to all optimizations, but that's nonsense, Geert did not say that,
+and of course doesn't think that, and neither do I.
+
+>> ... Also, no one is proposing removing the non-determinism from Ada
+>> 2012.
+>
+> I'd hope not. But some quotes from Geert's message of Nov 24:
+>
+>>> By the way, it has always puzzled me how much the Ada designers like
+> non-determinism.
+> ...
+>> I think we should make it a point to go through all such cases and
+>> specify
+> behavior.
+> ...
+>> Maybe it isn't too late for a binding interpretation for Ada 2012 for
+>> some
+> of these
+>> order of evaluation topics? (*)
+>
+> These make me think that Geert is in fact asking for this for Ada
+> 2012. Now, I grant that it's not 100% clear what "all such cases"
+> applies to. He's talking about associativity immediately before this
+> statement, but there is only one such case in the Standard and in our
+> correspondence, so "all" would have to mean something broader.
+
+He said SOME of these topics, and we already agree on one!
+
+> In the last statement, "some" hopefully only applies to associativity,
+> but again there is only one of those cases, so it seems that Geert
+> meant something broader. (And I got the same feeling from talking to
+> him in Pittsburgh, which is why I feel justified in applying an
+> expansive
+> interpretation.)
+
+I don't know if there are other real problems besides the associativity rule,
+it's a reasonable question to raise.
+
+> Anyway, I wouldn't have bothered with this discussion at all if I
+> hadn't thought that Geert was pushing for a change immediately.
+
+Geert said *EXACTLY* (you quoted him!) that
+
+> Maybe it isn't too late for a binding interpretation for Ada 2012 for
+> some of these order of evaluation topics?
+
+Well you apparently agree with that, since you agree that it is reasonable to
+eliminate the reassociation case. Once we have one that we can agree on, it is
+not a matter of principle any more, but a matter of case by case considering
+whether there are any other sufficiently gratuitous non-determinisms to consider
+putting them in this same category.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 27, 2013  9:02 PM
+
+> You just misinterpreted what Geert was saying, I certainly found him
+> clearer. He was saying that things like order of evaluation of
+> expressions do not belong being optimized in the front end, and I
+> totally agree with that position.
+
+"Order of evaluation of expressions" is the same as "order of evaluation of
+parameters" in Ada, as all expressions in Ada or formally a set of function
+calls. And you cannot correctly implement Ada without reordering parameters (for
+some definition of order) in some cases. Thus an implementer pretty much has to
+do some expression (read parameter) reordering in the front end.
+
+This isn't really "optimization", it's "normalization" (as Erhard noted), and it
+doesn't have anything to do with the target. Claiming that reordering of
+expressions is simply an optimization is just wrong.
+
+> You extended that to all optimizations, but that's nonsense, Geert did
+> not say that, and of course doesn't think that, and neither do I.
+
+I don't see any reason that any optimizations shouldn't be done wherever they
+are easiest to do for a particular implementation, be that front-end, back-end,
+or hind-end. :-) Janus/Ada uses tables of target-specific information to
+determine whether or not to do certain front-end optimizations, which are simply
+intended to get the intermediate code into the preferred form for the back-end.
+These are quite similar to the tables defining the standard data types. I'm not
+sure why any compiler writer is supposed to push things to the target-dependent
+back-end that are easier done earlier in the process (and do them once, rather
+than once per target). It all depends on the compiler architecture, and making
+broad statements about what a compiler should or shouldn't do is bogus. (And
+yes, I've made the same mistake from time-to-time.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Thursday, November 28, 2013  2:16 AM
+
+I am retiring from this thread, IMO it has devolved to being content-free :-(
+and is going around in circles. I am not really interested in what Janus/Ada
+does :-). I suggest Randy take it off line if he wants to pursue it further
+(although I won't contribute any more in any case). Sorry for all the noise.
+
+****************************************************************
+
