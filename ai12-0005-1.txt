@@ -250,7 +250,120 @@ and "shift" are indexed). The omission from Annex Q was on purpose, I think.
 
 ***************************************************************
 
-Editor's note (February 5, 2014): All of the items above this
+Summary of private discussion between Steve Baird and Randy Brukardt,
+Wednesday, February 26, 2014
+
+Baird:
+
+Given
+    X : constant Positive := 0;
+
+is X a static constant?
+
+Brukardt:
+
+Yes, of course
+    X : constant Positive := 0;
+is a static constant that's legal (and raises Constraint_Error at runtime).
+
+It's weird but causes no problems, and any other answer would be incompatible
+(see ACATS test B490001) and very bad for conditional compilation.
+
+It causes no problems because no code/types/whatever that will ever execute
+can depend on the value of X, and the value of the static expression is
+well-defined (so we always know what to do at compile-time).
+
+It's necessary so that conditional compilation works:
+
+    if Static > 0 then
+       declare
+           Bits : constant Positive := Static;
+           type Foo is range 0 .. (2**Bits)-1 with Size => Bits;
+       begin
+           ...
+
+We don't want the legality of Foo to depend on the *value* of Static (which
+it would if Bits is not a static constant when Static = 0), else the entire
+conditional compilation idea falls over.
+
+[4.9(34) causes many other such problems -- 2**Bits shows one of them -- but
+we certainly don't want to introduce any more. Recall the hoops we jumped
+through to allow conditional expressions to work as expected.]
+
+Cases like the above show that the compatibility issue is significant, thus no
+change of any kind is best.
+
+Maybe we want an AARM note, but no more.
+
+Baird:
+
+> It's weird but causes no problems, and any other answer would be 
+> incompatible (see B490001) and very bad for conditional compilation.
+
+B490001's constant declaration would still be legal if we changed the
+definition of "static constant" to include a requirement that the static value
+belongs to the static subtype of the constant.
+
+But your are still right that it could be incompatible.
+
+This example is currently legal, but would become illegal:
+
+    X : constant Positive := 0;
+    function Foo return Natural is ... ;
+  begin
+    case Foo is
+       when X => ...;
+       when Positive => ...;
+    end case;
+
+So I agree that we would need a good reason to make such a change.
+
+Is there any problem with having a static constant whose elaboration raises
+an exception? Does this cause problems with preelaborability, purity, the
+DSA, etc. ?
+
+Brukardt:
+
+I was asking you that! I can't think of any, specifically because the static
+value (presuming the expression is otherwise legal) is well-defined. In this
+case, 0. So the compiler just uses that (which it has to be able to do), and
+nothing that depends on that value can ever actually be executed, so there is
+no real problem.
+
+I suppose you might get funny errors in some cases:
+
+      X : constant Positive := 0;
+
+      B : constant Boolean 10/X; -- Illegal, divide-by-zero
+
+which is of course weird because you divided by a Positive value to ensure that
+you couldn't divide by zero.
+
+But I don't see that as worse than any other conditional compilation related
+errors.
+
+Purity seems to be syntactic (constant vs. variable).
+
+Preelaboration seems to be better with the current rule. If we changed it, then
+preelaboratability could depend on an imported value:
+
+     X : constant Positive := Other_Pkg.Static;
+
+     Y : constant Positive := X + 1; -- Better be static.
+
+If X is not a static constant when Other_Pkg.Static = 0, then Y is not allowed
+in a preelaborable package. That seems like a maintenance hazard (someone
+changes a value, a package far away becomes illegal for an obscure reason, and
+the fix is definitely non-trivial).
+
+Note that C.4(11) seems to cover this case, not requiring no code to be
+executed if the declaration raises an exception during elaboration.
+
+I'm not going to try to figure out DSA.
+
+***************************************************************
+
+Editor's note (February 26, 2014): All of the items above this
 marker have been included in the working version of the AARM.
 
 ****************************************************************
