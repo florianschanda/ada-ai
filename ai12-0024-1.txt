@@ -56,7 +56,8 @@ a static expression with the value True.
 We could also try to define the statements directly following a goto, raise
 statement, or return statement in the same sequence_of_statements in this
 category; but those are probably errors in their own right so it probably
-doesn't pay to do so.]
+doesn't pay to do so. We also need to handle zero-trip loops and aggregate
+expressions with no associated componeents.]
 
 !wording
 
@@ -104,7 +105,7 @@ Thus, we introduced the "statically unevaluated" exception to the rules;
 that means that there is no error at (1).
 
 Note that this is not just a problem with the division rule (which could
-otherwise be dropped). For instance, the editor has a tool containing the
+otherwise be dropped). For instance, the Editor has a tool containing the
 following code:
 
       Command_Len : constant Natural := 8;
@@ -402,6 +403,757 @@ can be characterized in the standard. So you end up with a small subset being
 illegal, and relying on warnings for the rest ahyway. I just don't see enough
 gain in identifying this small subset precisely. It sure sounds like a lot of
 work for this case.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, April 22, 2014  6:01 PM
+
+The issue of code that always raises exceptions has come up repeatedly. Most Ada
+programmers would like for compilers to reject such code rather than accepting
+it and having a runtime error that isn't detected until testing (if ever).
+[Aside: Bob will want to object to my use of the term "reject", which is Ada
+83-speak, but sorry, I find it clearer for informal discussion such as this.
+Presume the right words will be used in the official documents.]
+
+However, Ada uses dead but compilable code as a form of conditional compilation.
+As such, we cannot make code that never executes illegal, else we would have a
+significant compatibility problem. Consider something like:
+
+    Average : Natural := (if Num_Items = 0 then 0 else Count/Num_Items);
+
+If Num_Items is statically 0, then Count/Num_Items will always raise
+Constraint_Error -- but it also will never be executed in this expression. So we
+certainly would not want to make this expression illegal if Num_Items is
+statically 0.
+
+I tried to formally define the idea of statically unevaluated for this purpose
+in my preliminary write-up of AI12-0024-1. (Ada 2012 already has such an idea
+for the purpose of static expressions, which are illegal if they raise an
+exception.) The problem with this is that it gets very complicated, as we want
+to eliminate as many false positives (that is, programs rejected because of a
+range problem that will never be executed). That means defining rules similar to
+the ones for static expressions (which already take up 6 lengthy bullets), along
+with a number of cases that can't occur in static expressions, like zero-trip
+loops, aggregate choices that have no associated elements (others and null
+ranges), code directly following an exception raise or goto [although one might
+decide those are errors anyway and not bother], and hardest of all, subprograms
+that are never called. This looked like enough of a can of worms that the idea
+has not gained much support.
+
+AI12-0024-1 also doesn't go far enough in that it doesn't include other sorts of
+checks like elaboration checks, dynamic accessibility failures, and detected
+bounded errors (which almost always raise Program_Error).
+
+Today I had the idea of taking a completely different approach to this problem.
+Rather than trying to make a lengthy list of examples where we allow rejection,
+perhaps we should simply give an implementation permission to reject code that
+always raises an unhandled exception and let implementations do what they can in
+this area.
+
+So, without further ado, here is some wording expressing the idea (this would go
+into 1.1.5 - "Classification of Errors", following paragraph 11, as it would
+apply to all Ada programs without further mention).
+
+                Implementation Permissions
+
+If any possible execution of a partition would propagate an exception such that
+the partition would be terminated by the exception, the implementation may treat
+the compilation unit that raised the exception or the entire partition as
+illegal.
+
+AARM To Be Honest: "Any possible execution" here means any execution that
+executes normally; it does not mean to take into account outside forces other
+than those defined as external interactions. Examples of such forces include
+power interruption, hardware faults, and cosmic ray disruptions. For instance,
+if the main subprogram body contained "delay 10.0; raise Program_Error;", this
+permission could be invoked even though an execution for which the power switch
+was turned off 5 seconds after the program starts would not propagate an
+exception.
+
+AARM Implementation Notes: "Any possible execution" means that every execution
+taking into account every possible external interaction of the program. For
+instance, an exception raised because of some value read from a file would not
+trigger this rule (unless some exception was raised for any possible value
+read). In particular, this permission never applies to code that is never
+executed. For instance, the following never propagates an exception, even if
+Num_Items is statically known to be zero:
+    Average : Natural := (if Num_Items = 0 then 0 else Count/Num_Items);
+and thus this expression does not trigger this permission.
+
+Note that this wording is written so that it can be applied both at compile-time
+and at link-time. Compile-time application is limited to exceptions raised by
+library-level package elaboration (most likely range checks, length checks, and
+elaboration checks), as that is the only code that can be assumed to execute
+(the only way that it wouldn't execute is if the unit is never included in a
+partition or if some other unit' elaboration previously failed and propagated an
+exception, both cases that can be safely ignored for this purpose). Link-time
+application depends on the cleverness of the compiler; any subprogram that
+unconditionally propagates an exception could trigger the rule if it is
+unconditionally called.
+
+---------------
+
+The only downside I can see to this permission is that it would make programs
+that use unhandled exception to terminate the program potentially illegal. Such
+a program might propagate an exception like "Stop_Program" as Ada doesn't have a
+Halt library subprogram. However, the permission can be avoided by simply
+handling the exception at the end of the main subprogram (or, if visibility of
+the exception is a problem, handling all exceptions there). This is better
+anyway, as it makes it clear that the exception is intended and signals to the
+reader that the program might be terminated this way.
+
+Otherwise, such a permission might make some test programs illegal (although as
+this is a permission, no implementation would have to use it, so a mode for
+unhandled exception testing would be possible), but it's hard to imagine correct
+programs that could be caught by this permission. Moreover, this is written such
+that false positives are not possible (other than the Halt case mentioned above)
+-- the implementation has to prove that all executions will fail before it can
+invoke the permission. This is in contrast to  rules requiring detection other
+than in some dead code cases (as in the AI12-0024-1 proposal) -- these will
+always have some level of false positives -- and false positives == significant
+incompatibility if one happens in your code (incompatibilities in other people's
+code are always less significant :-).
+
+A rule like this would allow GNAT to use some portion of their static
+elaboration model in Standard-conforming mode, and would allow the example in
+AI12-0024-1 to be declared illegal.
+
+If there is a downside, it's that this rule couldn't be applied that often, as
+it would be unlikely to be of use within a subprogram. So it might not be worth
+the effort of using.
+
+What do people here think? Would this catch enough low-hanging fruit (i.e.
+silly errors) to make the implementation worthwhile? Or is there a better way to
+deal with this? Or is this not worth doing at all?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, April 22, 2014  7:49 PM
+
+> What do people here think? Would this catch enough low-hanging fruit (i.e.
+> silly errors) to make the implementation worthwhile? Or is there a
+> better way to deal with this?
+
+Yes, there's a better way to deal with this sort of thing.  My idea of requiring
+a diagnostic message, but still allowing the program to run, is apt.
+
+>... Or is this not worth doing at all?
+
+Yes, in this case.
+
+In any case, I don't think adding Implementation Permissions is of any benefit.
+Implementations can already do that, and many do.
+
+We language designers tend to fall into the trap of thinking that language
+standards require something, and I think you're doing that here.  Standards
+compliance is entirely optional! (In fact I suspect most Implementation
+Permissions fall into this category, including ones I was once in favor of.)
+
+There is nothing wrong with nonstandard modes, especially modes like "treat
+warnings as illegalities", which do no harm to portability. Implementations
+don't need "permission" for that.
+
+I think an Impl Perm is nonresponsive to the supposed problem of
+AI12-0024-1:
+
+    From: Dan Eilers
+    Sent: Monday, February 13, 2012  11:36 AM
+
+    I am proposing that when the bounds of an array or array aggregate are defined
+    using static expressions or static positional notation, then any run-time
+    constraint checks currently required by the language should be performed at
+    compile time.
+
+The original example happened to be at library level, but Dan wants this to be a
+legality error even when the code in question might not be executed.  And he
+doesn't want *permission*, he wants all conforming compilers to do that.
+
+One final point:  There is little value in detecting (at compile time) run-time
+errors that will happen every time the program is run. Even the most minimal
+amount of testing can catch such errors (just run the program once, on any
+input).  Legality errors are useful when they detect errors that might not
+happen during testing.
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Wednesday, April 23, 2014  11:32 AM
+
+I had missed this AI (AI12-0024) before, or else I wasn't paying close
+attention.  But something occurred to me when I read it just now.
+
+In the example in the AI:
+
+    package Annoying is
+       S  : String(1..3) := "abcde";     -- (1)
+       A  : array (1..2, 1..3) of Integer := (1..3 => (1..2 => 0));   -- (2)
+       subtype T1 is Integer range 1 .. 3;
+       X1 : T1 := 5;                     -- (3)
+    end Annoying;
+
+In cases (1) and (2), the declarations involved would raise Constraint_Error
+always, everywhere, no matter what the context of the declarations would be.  It
+seems pretty clear that writing those declarations is an error.
+
+However:
+
+    package Comm_Protocol is
+       Command_Field_Length : constant := 3;
+    end Comm_Protocol;
+
+    package Command_Set is
+       Query_Command : constant String := "QUERY";
+    end Command_Set;
+
+    procedure Send_Simple_Command is
+       S : String(1..Comm_Protocol.Command_Field_Length) :=
+              Command_Set.Query_Command;
+       ...
+
+Now it's not clear that this is a programming error.  For all we know, the rest
+of the program's logic could have arranged things so that Send_Simple_Command is
+called *only* when Command_Field_Length is known to match Query_Command'Length,
+and some other "send" procedure is called in other cases.
+
+The language's definition of "static expression" doesn't distinguish these
+cases, but I'm wondering if it would be useful to define a "literally static
+expression" that is a static expression that doesn't involve any user-defined
+names, and doesn't involve implementation-dependent attributes such as
+Integer'Last.  Then it might be possible to treat cases differently depending on
+whether they involve only "literally static expressions" or not; exceptions such
+as those in cases (1) or (2) could cause a program to be rejected, but those
+that involve named constants (like my second example) or other user-defined or
+implementation-dependent entities wouldn't.  (Case (3) above implicitly involves
+T1'Last, which is an attribute of a user-defined type, so I'd put it in the
+"don't reject" category since it's conceivable that the subtype may be in
+another package and the declaration of X1 could be in a subprogram that the
+program would know not to execute if 5 isn't in the subtype range.)  Maybe the
+definition of "literally static" could be accomplished by copying 4.8, or parts
+of it, and making some simple tweaks.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, April 23, 2014  12:10 PM
+
+I believe putting more into the Ada standard on this is unwise.  Speaking from
+the experience of developing a sophisticated static analyzer for Ada (CodePeer),
+there is a huge amount of "gray" area here, and trying to identify what is and
+is not a bug is just too hard.  Even something as simple as complaining when a
+statically known value is outside the statically-known base range of a type, has
+created controversy and some difficulties for certain Ada coding styles.  Going
+beyond that is just opening a huge can of worms.
+
+Compilers can (and probably should) integrate sophisticated static analyzers to
+help find bugs as early as possible, but I believe it is beyond the state of the
+art, and in some cases actively harmful, for the language standard for a
+language as complex as Ada to try to start legislating exactly what is and is
+not a bug.  It would be fine when first designing a language to build in more
+restrictive legality rules that depend on things like control and data flow
+analysis, but it is too late to do that for Ada, I suspect. And based on the
+experience of trying to define such rules for Java relating to the
+initialization of local variables, writing such legality rules is a big effort!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, April 23, 2014  4:02 PM
+
+> I believe putting more into the Ada standard on this is unwise.
+
+I agree 100%.
+
+None of the actions being discussed here are viable, IMHO:
+
+    - Giving an Implementation Permission is pointless --
+      implementations can already do what they like in this area,
+      and in practice do things much more useful than the I.P.
+      discussed.
+
+    - Requiring implementations to "reject" some subset of programs
+      that will ALWAYS fail, no matter what the input, is also
+      pointless.  That will prevent approximately zero bugs from
+      escaping into the wild, because those bugs WILL be found by
+      testing.  And the cost is rather large language and implementation
+      complexity.
+
+    - Requiring implementations to "reject" some programs that MIGHT
+      fail, or WILL PROBABLY fail is either pointless, or is an
+      unacceptable incompatibility, or both, depending on the exact
+      rules.  Complexity costs as above.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, April 23, 2014  4:43 PM
+
+> > What do people here think? Would this catch enough low-hanging fruit (i.e.
+> > silly errors) to make the implementation worthwhile? Or is there a
+> > better way to deal with this?
+>
+> Yes, there's a better way to deal with this sort of thing.
+> My idea of requiring a diagnostic message, but still allowing the
+> program to run, is apt.
+
+I disagree, see below for why.
+
+> >... Or is this not worth doing at all?
+>
+> Yes, in this case.
+>
+> In any case, I don't think adding Implementation Permissions is of any
+> benefit.  Implementations can already do that, and many do.
+
+No they can't. At least they can't vis-a-vis the ACATS, which is where this
+issue arises. There have been a number of instances where for new ACATS tests,
+compilers are rejecting dubious code that the language requires accepting and
+unconditionally raising an exception. (The GNAT static elaboration model is one
+instance of this sort of thing.) I hate that such ACATS tests require
+implementers to do a lot of work (raising a runtime exception is takes
+considerably more effort in compilers than rejecting code, as one has to figure
+out how to generate proper code in the former case) without any benefit to
+users. But I have to create such tests, as without them the possibility exists
+of the problem not being detected at all. The language does not give me any
+leeway to accept compile-time rejection of such cases as passing behavior -- I
+think it needs to do that, in some limited circumstances.
+
+The point here is that Implementation Permissions serve to reduce the disconnect
+between the ACATS (which is enforcing strict adherence to the Standard) and
+actual practical use of Ada (where detecting a problem, perhaps by the "wrong"
+means, is far more important than how the problem is reported -- the important
+issue is that the problem is detected, not how).
+
+> We language designers tend to fall into the trap of thinking that
+> language standards require something, and I think you're doing that
+> here.  Standards compliance is entirely optional!
+> (In fact I suspect most Implementation Permissions fall into this
+> category, including ones I was once in favor of.)
+
+Standards compliance is not optional if you plan to pass the ACATS. I agree that
+if you don't plan to pass the ACATS, what the Standard says about anything is
+essentially irrelevant - but I don't see any reason that the Standard ought to
+care about such people. I *do* care about implementers that want to pass the
+ACATS -- I see no reason for them to do work that is of little benefit to their
+users simply because the Standard doesn't allow them to do the better thing.
+
+A very good example is elaboration checking in GNAT. GNAT's static elaboration
+model is clearly superior for most uses of Ada, so understandably most of the
+effort goes toward that. However, the ACATS cannot allow that model because its
+not in the Standard. Thus, any tests that are constructed that test elaboration
+checks force GNAT to either (A) spend effort on dynamic checks where their
+static checks are more valuable to their customers or (B) abandon standards
+compliance. That's a terrible choice. I could of course avoid the problem by not
+issuing any tests for dynamic elaboration checks, but then we are leaving a hole
+in the testing coverage, one that could cause other implementers to miss
+required checks altogether.
+
+...
+> I think an Impl Perm is nonresponsive to the supposed problem of
+> AI12-0024-1:
+>
+>     From: Dan Eilers
+>     Sent: Monday, February 13, 2012  11:36 AM
+>
+>     I am proposing that when the bounds of an array or array aggregate are Defined
+>     using static expressions or static positional notation, then any run-time
+>     constraint checks currently required by the language should be performed at
+>     compile time.
+>
+> The original example happened to be at library level, but Dan wants
+> this to be a legality error even when the code in question might not
+> be executed.  And he doesn't want *permission*, he wants all
+> conforming compilers to do that.
+
+Dan's request is best solved with exception contracts (if a subprogram might
+propagate Constraint_Error but does not have a contract allowing that, then
+there is an error). And even then, there will be problems with unreachable code.
+A global setting makes absolutely no sense to me - it would have to be turned
+off in every system I've ever been associated with, meaning it could do no good
+whatsoever.
+
+Errors should be used to reject clearly incorrect or very dubious code. But
+there is nothing dubious about code that might raise a exception so long as that
+code is dead.
+
+A suppressible error, as you suggest, is absolutely wrong in this context.
+Suppressing a suppressible error says that I want to ignore a likely bug. This
+is an mechanism that ought to be strongly restricted in Ada style guides; it
+should be managed like Gotos to be used only very prescribed circumstances. (In
+this case, primarily where modifying the code is not a good idea (such as other
+people's code, or code that is frozen for some reason.) In all other cases, the
+code should be modified to eliminate the suppressible error, not to add some
+suppression mechanism.
+
+That's absolutely not the case here. First, there is no way to avoid these
+errors when they happen; there is no sensible code modification that would
+eliminate a divide-by-zero if it exists in the code. Secondly, these sorts of
+things were anticipated and encouraged by the language design -- Ada had a
+strong aversion to traditional conditional compilation mechanisms and sought to
+make  the language itself serve that purpose as much as possible.
+
+[Aside: The legality rule that static expressions are illegal if they raise an
+exception has periodically bit me. That can be worked around by making the
+expression somehow non-static, but it's a major annoyance in parameterized code.
+It is already a bad idea, and I would be quite opposed to anything that expands
+the effect of values on Legality Rules other than in very limited
+circumstances.]
+
+This proposed check would be 10 times more likely to occur than the static case;
+literally hundreds of times in some of my packages. For many of my packages, I
+have to turn off Janus/Ada's warnings because there are so many of them.
+
+We could do better of course by excepting some of the dead code cases, but I
+think that any rules in that direction are doomed to having far too many false
+positives to be useful. And defining the rules would be a huge mess.
+
+> One final point:  There is little value in detecting (at compile time)
+> run-time errors that will happen every time the program is run.
+> Even the most minimal amount of testing can catch such errors (just
+> run the program once, on any input).  Legality errors are useful when
+> they detect errors that might not happen during testing.
+
+Perhaps my view is colored very much by Claw and the ACATS, but I disagree.
+The instance that I recalled that led to this thread was a problem that happened
+in a little-used Claw package. It was a long time before the anyone constructed
+a test for that package, and it had already been fielded by the time that the
+elaboration bug was detected. (I'm not sure it was ever tested, as there is no
+practical way to automate GUI tests without corrupting the behavior of the
+underlying library, and hand-testing is very time-consuming.)
+
+As far as the ACATS goes, requiring expensive runtime checks when cheap
+compile-time checks would do is a inversion of what we want Ada to be. I don't
+think it's a good idea to require compilers to make compile-time checks here (my
+first idea was an implementation requirement to reject any units that
+unconditionally raise an exception during library-level elaboration -- but
+that's a lot of work), but we certainly should allow them to do so (since there
+is no possible useful program involved).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, April 23, 2014  4:49 PM
+
+...
+> The language's definition of "static expression" doesn't distinguish
+> these cases, but I'm wondering if it would be useful to define a
+> "literally static expression" that is a static expression that doesn't
+> involve any user-defined names, and doesn't involve
+> implementation-dependent attributes such as Integer'Last.  Then it
+> might be possible to treat cases differently depending on whether they
+> involve only "literally static expressions" or not ...
+
+I don't see the point. The number of expressions involving "literally static
+expressions" should be close to zero if the standard advice about avoiding magic
+numbers in your code is followed. As such, it could only help extreme novices
+and (as any proposal in this area would do) would make ACATS testing harder.
+There are probably better ways to help extreme novices, and even if not, I'm
+mostly interested in helping me. ;-) Better make that "Ada programmers of all
+experience levels" - I want new rules to have the potential to help in my code,
+not just novices.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, April 23, 2014  4:53 PM
+
+
+> I believe putting more into the Ada standard on this is unwise.
+> Speaking from the experience of developing a sophisticated static
+> analyzer for Ada (CodePeer), there is a huge amount of "gray" area
+> here, and trying to identify what is and is not a bug is just too
+> hard.  Even something as simple as complaining when a statically known
+> value is outside the statically-known base range of a type, has
+> created controversy and some difficulties for certain Ada coding
+> styles.  Going beyond that is just opening a huge can of worms.
+>
+> Compilers can (and probably should) integrate sophisticated static
+> analyzers to help find bugs as early as possible, but I believe it is
+> beyond the state of the art, and in some cases actively harmful, for
+> the language standard for a language as complex as Ada to try to start
+> legislating exactly what is and is not a bug.  It would be fine when
+> first designing a language to build in more restrictive legality rules
+> that depend on things like control and data flow analysis, but it is
+> too late to do that for Ada, I suspect.
+> And based on the experience of trying to define such rules for Java
+> relating to the initialization of local variables, writing such
+> legality rules is a big effort!
+
+I agree, that's precisely why I suggested an Implementation Permission. I
+believe that we've pretty much reached the point of what we can mandate checks
+for in Ada compilers; almost anything of value is going to be far too complex to
+describe in the Standard.
+
+But I want compilers to be able to use these more advanced techniques to push
+more things to be errors. And I want to be able to do that in Standard mode; in
+particular, I do not want vendors to have to maintain a separate "pedantic" mode
+for the purposes of passing the ACATS. That just requires implementers to do
+extra work and decreases the quality of the testing available to the "usual"
+mode of operation.
+
+A goal like that requires some checks to be implementation-defined as to whether
+they are done at compile-time or at run-time. I see that for exception
+contracts, and I see something similar in this case (which is essentially the
+cases were no contracts are possible -- library-level elaboration). Perhaps this
+vision is not where Ada ought to go, but I really don't see any other way to get
+to where we ought to be going.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, April 23, 2014  5:14 PM
+
+> None of the actions being discussed here are viable, IMHO:
+>
+>     - Giving an Implementation Permission is pointless --
+>       implementations can already do what they like in this area,
+>       and in practice do things much more useful than the I.P.
+>       discussed.
+
+I disagree, for reasons discussed earlier. In particular, we need to allow more
+in the Standard mode so that implementations aren't maintaining two parallel
+versions of their systems -- one for the ACATS, and one for real use. That helps
+no one.
+
+And directly to the point, if a compiler can detect an error that will always
+happen during library-level elaboration, it should be allowed to reject the
+program -- it shouldn't be required to implement an unconditional runtime check
+which is necessarily harder to do and of absolutely no value to anyone.
+
+>     - Requiring implementations to "reject" some subset of programs
+>       that will ALWAYS fail, no matter what the input, is also
+>       pointless.  That will prevent approximately zero bugs from
+>       escaping into the wild, because those bugs WILL be found by
+>       testing.  And the cost is rather large language and implementation
+>       complexity.
+
+I don't see the large language complexity, it's one sentence in the Standard.
+("Any program which unconditionally fails a language-defined check during
+library-level elaboration is illegal." as an Implementation Requirement in
+1.1.5). If the language was newly defined, I would be strongly in favor of such
+a rule.
+
+As far as "WILL be found by testing", sure, but who tests fixes to running
+systems? I certainly don't; I don't have the resources (time or machines) to do
+so. I just field the updated web server or mail filter, keeping the previous
+version around for rollback in emergencies. And I've had multiple failures of
+checks at elaboration time -- which occur so early that no logging of errors is
+possible, so the only effect is that the server doesn't ever start - there is no
+way to find out anything about what happened at elaboration time. Finding those
+mistakes is a major time sink (I have to guess what I could have done wrong to
+cause an error), and having compile-time rejection would have saved a lot of
+time creating a version to install.
+
+Even when you do test systems, such bugs cause extra
+compile-bind-link-package-copy-to-testbed-test-fix cycles, and those take
+significant time, especially as these are bugs in specifications that typically
+require rebuilding the entire system. This is a faster cycle than it used to be,
+but that doesn't make it free!
+
+The only reason that I wouldn't try to require such rejection is simply that
+there is a cost of implementing this in existing compilers (which have already
+implemented the suboptimal and painful runtime checks), and I want to let
+customer demand, rather than the Standard and the ACATS, dictate what effort is
+spent on. New implementations should always do compile-time checks here, if the
+Standard allowed it.
+
+>     - Requiring implementations to "reject" some programs that MIGHT
+>       fail, or WILL PROBABLY fail is either pointless, or is an
+>       unacceptable incompatibility, or both, depending on the exact
+>       rules.  Complexity costs as above.
+
+Certainly both. I agree here, that's why I'm looking for alternatives.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, April 23, 2014  5:32 PM
+
+>> ...
+>> writing such legality rules is a big effort!
+>
+> I agree, that's precisely why I suggested an Implementation
+> Permission. I believe that we've pretty much reached the point of what
+> we can mandate checks for in Ada compilers; almost anything of value
+> is going to be far too complex to describe in the Standard.
+>
+> But I want compilers to be able to use these more advanced techniques
+> to push more things to be errors. And I want to be able to do that in
+> Standard mode; in particular, I do not want vendors to have to
+> maintain a separate "pedantic" mode for the purposes of passing the
+> ACATS. That just requires implementers to do extra work and decreases
+> the quality of the testing available to the "usual" mode of operation. ...
+
+In the limited case of library elaboration checking, I can see some advantage of
+providing an implementation permission to report these at compile time and not
+produce an executable.  But in fact GNAT has to maintain the ability to support
+run-time elaboration checks because the code being compiled might have been
+developed without following the somewhat stricter rules enforced by GNAT's
+static checking.  And sometimes a small change suddenly breaks the GNAT static
+checking rules, and you end up having to fall back to dynamic elaboration
+checking even in a system that was developed most of the way using static
+checking.  So I am not sure GNAT would actually benefit from this permission.
+And I don't think the ACATS tests should be altered to try to match GNAT's more
+restrictive checks.
+
+Any Ada compiler will still need the ability to insert an unconditional raise of
+an exception on occasion, since these permissions will never completely
+eliminate such cases. I doubt we would actually be helping any implementor in
+any significant way with such a permission, and we would certainly make the
+ACATS testing process more complex.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, April 27, 2014  8:44 PM
+
+...
+> In the limited case of library elaboration checking, I can see some
+> advantage of providing an implementation permission to report these at
+> compile time and not produce an executable.
+...
+>   I doubt we would actually be helping any implementor in any
+> significant way with such a permission, and we would certainly make
+> the ACATS testing process more complex.
+
+Obviously the permission idea is not going to get any traction. Perhaps a better
+approach is to suggest a targeted change to the language to require compile-time
+rejection of some failed elaboration checks.
+
+The original issue is something I saw in one of the new ACATS tests. One of the
+tests has (simplified):
+
+   package P is
+      type Priv is private;
+      function F (P : Priv) return Natural;
+      C : constant Priv;
+   private
+      type Priv is record A : Natural; ...
+      Obj : constant Priv := ...;
+      function F (P : Priv) return Natural is
+         (if P = C then 0 else P.A);
+      C : constant Priv := (A => F(Obj), ...);
+   end P;
+
+This is illegal because of freezing; C is frozen when it is used in F before it
+is complete.
+
+However, if we swap the two declarations (perhaps in an attempt to fix the first
+error):
+
+   package P2 is
+      type Priv is private;
+      function F (P : Priv) return Natural;
+      C : constant Priv;
+   private
+      type Priv is record A : Natural; ...
+      Obj : constant Priv := ...;
+      C : constant Priv := (A => F(Obj), ...);
+      function F (P : Priv) return Natural is
+         (if P = C then 0 else P.A);
+   end P2;
+
+this is legal but always raises Program_Error when evaluating F (because the
+completion hasn't been seen yet). I don't think this is helpful (especially if
+warnings are suppressed as they always are in ACATS testing), and the effort to
+implement the check is wasted.
+
+It would be better if we had a rule making "obvious" cases of premature calls
+illegal. (And yes, these have happened to me many times over the years.)
+Something like:
+
+If the prefix of a subprogram call statically denotes a declaration declared in
+the same declarative region as the call, the call is illegal if the declaration
+requires a completion and the completion follows the call in the declarative
+region. For the purposes of this rule, any body stub that the language requires
+to contain the completion of the subprogram is assumed to contain that
+completion.
+
+Ramification: The program will be illegal if the stub doesn't include the
+completion, so we don't need to consider it further.
+
+This would make a number of "obvious" cases of premature call illegal. The
+incompatibility would only matter if it occurred in a subprogram that was never
+called (as any call would cause the problem), and that's hard to get worried
+about.
+
+Thoughts?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, April 28, 2014  9:14 AM
+
+I'm not convinced the benefit outweighs the standardization and implementation
+efforts. Compilers can introduce "serious warning" categories if they want, and
+at least GNAT has a mode where you can specify that all warnings are treated
+like errors.  That seems adequate.  I don't see the need for additional
+standardization here, as it isn't a portability issue.  It is already the case
+that this code isn't going to execute successfully on any conforming compiler.
+
+****************************************************************
+
+From: Cyrille Comar
+Sent: Monday, April 28, 2014  7:59 AM
+
+I don't see any benefit in this suggestion, neither for the compiler writer nor
+for the general user. The compiler writer has to be able to emit checks in
+elaboration code anyway and for the user, it will only catch some of the cases
+and mostly the ones that will be immediately obvious at runtime. I don't see how
+it can be considered worth adding a new rule for that.
+
+by the way, if you C definition becomes:
+
+  C : constant Priv := (A => if some_condition then F(Obj) else C, ...);
+
+then your last statement doesn't seem correct: the incompatibility can
+occur outside of a subprogram that is never called. Here, it is just
+that "some_condition" was not true.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, April 29, 2014  5:51 AM
+
+Although it would be useful, I think this should be left to the vendors.
+Quality and control of error and warning messages is something vendors could
+compete on. GNAT gives a lot of control of turning individual warnings on or
+off, ideally there would be a rules file assigning a priority to each individual
+possible warning, one of which could be treat as error.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, May 7, 2014  11:08 PM
+
+...
+> I'm not convinced the benefit outweighs the standardization and
+> implementation efforts.
+> Compilers can introduce "serious warning" categories if they want, and
+> at least GNAT has a mode where you can specify that all warnings are
+> treated like errors.  That seems adequate.
+> I don't see the need for additional standardization here, as it isn't
+> a portability issue.  It is already the case that this code isn't
+> going to execute successfully on any conforming compiler.
+
+This "argument" makes no sense to me. It's essentially saying that runtime
+checks are good enough, because SOME compiler might be able to help. (And my
+experience with warnings on compilers is uniformly bad, at least with "portable"
+code. GNAT might be better than most, but it still spews bogus warnings in most
+of my existing programs -- and the only fix for that would be to insert
+GNAT-specific pragmas, which would make *other* compilers spew bogus warnings
+about the pragmas. This is NOT a solution to anything! At least Bob's
+"suppressible errors" would be part of the language [including the suppression
+mechanism] and could be used everywhere. I could not use "GNAT's warnings are
+errors mode" on any of my code without destroying any portability.)
+
+I recall the Ada 95 team making a very strong push that compile-time checks are
+better than run-time checks, which are better than no checks. I have to wonder
+what has changed.
+
+Anyway, I can see that this is getting all of the traction of my car's rather
+worn tires in an ice storm, so I'll give up now.
 
 ****************************************************************
 
