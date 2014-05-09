@@ -1,0 +1,158 @@
+!standard 9.7.4(10-13)                              14-05-09    AI12-0098-1/00
+!class ramification 13-05-091
+!status work item 13-05-09
+!status received 13-04-10
+!priority Low
+!difficulty Medium
+!subject Problematic examples for ATC
+!summary
+
+** TBD.
+
+!question
+
+9.7.4 contains two examples demonstrating how asynchronous transfer of control
+can be used. But neither of these examples can be assumed to work as described.
+
+When the entry call or delay is completed, the abortable part is aborted.
+However, this doesn't mean the abortable part stops executing immediately. Ada
+only requires abortion at "abort completion points". (Annex D has additional
+requirements, but these examples are in the core language and should depend
+only on core requirements.)
+
+In the first example, an input operation is not an abort completion point. Thus,
+the abortable part need done complete until some later time.
+
+In the second example, if Horribly_Complicated_Recursive_Function
+contains only calculations, it won't have any abort completion points and
+therefore may not complete when the delay expires.  
+
+Unless the implementation is claiming Annex D support (and thus supporting
+D.6), neither of these examples need work as explained in the standard.
+Do we need some clarification here? (Yes.)
+
+!response
+
+The examples accurately reflect the intent of the use of the feature. However,
+the questioner is correct that neither of these examples are required to work
+usefully in the absence of D.6.
+
+Therefore, something should be done. [The author does not know what, precisely.]
+
+** TBD.
+
+!wording
+
+** TBD.
+
+!discussion
+
+The question came up because the first example did not work on a Windows
+compiler. The initial response from an Ada language designer was that the
+compiler should be fixed. But Windows I/O operations are not interruptable
+in general; there are ways to make I/O operations interruptable but those
+have significant costs in complexity and overhead. Adding overhead to I/O
+in Windows programs just so ATC works are described in the examples would
+be silly and counterproductive.
+
+This is especially true as the formal description of the language does not
+require either of these examples to work. The second example is easily fixed
+(just assume that "delay 0.0;" is occassionally called in the long
+calculation). The first example is essentially unfixable - Get_Line is not
+an abort completion point and requiring it to be one would have unbearable
+costs on Windows (and likely other systems as well).
+
+The original questioner suggests that implementing D.6 for ATC on Windows
+might be difficult, but that is less interesting, as no Ada implementation
+is required to support Annex D. (The D.6 advice to use periodic polling to
+bound the cost of abort seems insane to the author; that requires the
+insertion of a relatively expensive operation into every piece of code
+- at a minimum into every long-running loop and call chain - in order to
+ensure the behavior of a rather rare operation.)
+
+The author sees two possible courses of action for the first example. One
+is to add some weasel words to the first example to the effect of whether
+this can be done depends on the underlying target system. However, I/O
+interruption is problematic on many target systems, so having an expection
+that this will work is bogus -- especially as the formal language of the
+standard certainly does not require it to work. So the other alternative
+(preferred by the author) is to delete this example altogether. Perhaps
+it should be replaced by something that would be required to work (I
+suggest interrupting a listing written with Put_Lines separated by
+delay statements).
+
+The second example needs some words stating that
+Horribly_Complicated_Recursive_Function contains additional abort completion
+points and that it can be assumed to stop only at those points (although
+it could stop earlier).
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test could be created to check this, but it would be of low value.
+
+
+!appendix
+
+!topic Problematic examples in 9.7.4
+!reference 9.7.4(10-13)
+!from Adam Beneschan 14-04-10
+!discussion
+
+RM 9.7.4 contains two examples demonstrating how asynchronous transfer of control can be used:
+
+===============================================================================
+Example of a main command loop for a command interpreter:
+
+      loop
+          select
+              Terminal.Wait_For_Interrupt;
+              Put_Line("Interrupted");
+          then abort
+              -- This will be abandoned upon terminal interrupt
+              Put_Line("-> ");
+              Get_Line(Command, Last);
+              Process_Command(Command(1..Last));
+          end select;
+      end loop;
+
+Example of a time-limited calculation:
+
+      select
+         delay 5.0;
+         Put_Line("Calculation does not converge");
+      then abort
+         -- This calculation should finish in 5.0 seconds;
+         --  if not, it is assumed to diverge.
+         Horribly_Complicated_Recursive_Function(X, Y);
+      end select;
+===============================================================================
+
+The problem is that neither of these examples is guaranteed to work as claimed.  When the entry call or delay is completed, the abortable part is aborted.  However, this doesn't mean the abortable part stops executing immediately.  
+
+In the first example, 9.8 doesn't list an input operation as an abort completion point; also, the discussion of task states in 9(10) implies that the task isn't considered to be "blocked" since it's not held up "as part of some task interaction".  This means that the abortable part doesn't have to complete immediately.  Based on a discussion today on comp.lang.ada, it appears that on the Windows implementation of GNAT, the Get_Line does not terminate immediately when the abortable part is aborted. 
+
+In the second example, if Horribly_Complicated_Recursive_Function
+contains only calculations, it won't have any abort completion points and therefore may not complete when the delay expires.  
+
+(Note that on Windows, according to my understanding, it's not generally possible to force a thread to terminate or to jump out of the code sequence to call an exception handler, except by using API calls that should be used only in emergencies.  The target thread itself has to cooperate by polling for interrupts and using different versions of API calls that perform interruptible I/O operations.  I may not have all the details right.)
+
+Based on this, I think the RM needs to be modified:
+
+(1) The comment "this will be abandoned upon terminal interrupt"
+should be removed, since it's making an assertion that is not necessarily true;
+
+(2) there should be some clarifying text that the examples may not work as shown, except that the second example can be guaranteed to work if Horribly_Complicated_Recursive_Function contains abort completion points, such as "delay 0.0", at strategic times.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, April 10, 2013  1:44 PM
+
+I am reluctant to change these examples. They establish intent for the appropriate use of ATC, and if GNAT doesn't support them on Windows, that should probably be addressed, rather than backpedaling on the intent.
+
+****************************************************************
+
