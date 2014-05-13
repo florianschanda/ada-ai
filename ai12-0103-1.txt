@@ -1,0 +1,278 @@
+!standard 13.14(3/3)                                14-05-12    AI12-0103-1/01
+!class ramification 14-05-12
+!status work item 14-05-12
+!status received 14-04-10
+!priority Low
+!difficulty Medium
+!subject Expression functions that are completions in package specifications
+!summary
+
+Expression functions and null procedures never cause freezing in a package
+specification, even if they are completions.
+
+!question
+
+Consider the following:
+
+package P is
+   type Priv is private;
+
+   Empty_Priv : constant Priv;
+
+   function Is_Empty (A : Priv) return Boolean; -- (1)
+
+private
+
+   type Priv is record
+      Len : Natural;
+      Data: Natural;
+   end record;
+
+   -- Completions still need checking (call case):
+   function Is_Empty (A : Priv) return Boolean is
+      (A = Empty_Priv or else A.Len = 0);     -- (2)
+      -- Not used in this package, so not frozen until the end of the package.
+
+   Empty_Priv : constant Priv := (Len => 0, Data => 0); -- (3) Freezes Priv.
+
+end P;
+
+Is_Empty (2) is an expression function representing a completion, but 13.14(3/3)
+only applies in declarative_parts, while this is a package specification. So the
+expression function Is_Empty is does not cause freezing at (2).
+
+The completion of Empty_Priv at (3) is OK, as there is no requirement that
+Is_Empty uses only complete types.
+
+Erasing the declaration of Is_Empty at (1) has no effect.
+
+This seems to be what we want. If 13.14(3/3) did apply to package
+specifications, then the completion (2) would be illegal (as it is using an
+incomplete deferred constant), but it could be made legal by erasing the
+declaration at (1).
+
+Is this correct? (Yes.)
+
+!response
+
+13.14(3/3) does not apply to package specifications. The reason for the rule, as
+explained by the following AARM notes, is that we want interchangability of
+bodies (of all kinds) with body stubs (which have to be freezing, because we
+can't know their contents).
+
+However, body stubs are not allowed in package specifications. So there is no
+need to have rules that emulate having those. Moreover, moving expression
+functions between specifications and bodies is made easier if the freezing rule
+doesn't apply in the specification.
+
+Therefore, we confirm that the wording in the standard is correct.
+
+!wording
+
+Modify AARM 13.14(3.f/3):
+
+Note that "body" includes null_procedure_declarations and
+expression_function_declarations when those are used as completions, as well as
+entry_bodys (see 3.11.1). These all cause freezing, along with proper_bodys and
+body_stubs{, but only in declarative_parts}.
+
+Add an AARM Ramification after 13.14(3.g/3):
+
+Note that the rule about bodies being freezing only applies in
+declarative_parts. Package specifications do not allow a body_stub (or a
+proper_body), and thus the reason for bodies being freezing is not possible.
+Freezing is annoying to users, so we want as little of it as makes semantic
+sense -- and we already have enough rules so that expression functions that
+are not completions do not cause problems. As such, we don't need to make
+expression functions and null procedures in a package specification
+freezing, even when they are completions.
+
+!discussion
+
+Freezing is something that should be minimized, as it is mysterious to users. In
+particular, we should not be invoking freezing when we don't have to.
+
+In the specific case of expression functions, we already have all of the
+freezing rules we need upon their uses. (Those are necessary to handle
+expression functions that are not completions.) As such, there is no semantic
+need for an expression function that acts as a body to be freezing.
+
+The primary argument for expression functions as completions freezing is for
+consistency with other bodies. But that is misleading, as renames-as-bodies are
+not freezing. So changing from a renames-as-body to an expression function to an
+regular body has to change freezing somewhere. Specifically:
+
+    function Foo return Integer renames Bar; -- Never freezing
+
+    function Foo return Integer is (Bar); -- Freezes sometimes
+               -- (currently only if a completion in declarative_part).
+
+    function Foo return Integer is        -- Always freezes
+    begin
+        return Bar;
+    end Foo;
+
+Before Ada 2012, no subprogram declaration that could appear in a package
+specification was freezing. The various sorts of bodies could not appear in a
+package specification.
+
+Thus it makes sense that a completion that is an expression function or null
+procedure is never freezing (by iteself) when it appears in a package
+specification. The consistency problem only arises when the expression function
+completion occurs in a body of some sort, where it could easily be converted to
+one of the other forms that is explicitly freezing. (If someone was to move an
+expression function from a package body to the package specification, the change
+in freezing would be more flexible, so that is not a problem. If someone was to
+move the expression function from a package specification to a package body, the
+freezing would be stronger, but since everything in the package specification
+already was frozen at the end of the specification, there would be no effect.
+
+Therefore, we adjust the language AARM notes (to make it clear that the wording
+of 13.14(3/3) is intended, but make no changes to the normative wording.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test should be created to check this; it would be similar to
+
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, April 23, 2014  8:21 PM
+
+I recently enhanced a new ACATS test with the following test case (there's an
+illegal case as well, not shown here because its not relevant to this
+discussion):
+
+...
+
+   type Priv is private;
+
+   Empty_Priv : constant Priv;
+
+   function Is_Empty (A : Priv) return Boolean;
+
+private
+
+   type Priv is record
+      Len : Natural;
+      Data: Natural;
+   end record;
+
+   -- Completions still need checking (call case):
+   function Is_Empty (A : Priv) return Boolean is
+      (A = Empty_Priv or else A.Len = 0);     -- OK.
+      -- Not used in this package, so not frozen until the end of the package.
+
+   Empty_Priv : constant Priv := (Len => 0, Data => 0); -- OK. Freezes Priv.
+
+...
+
+[Note: The implementers are anonymous here because the ACAA Technical Agent must
+never identify implementers. In this case, I'm pretty sure everyone would not
+mind being identified, but I'll stick to the rules.]
+
+An implementer E complained that Is_Empty is a body by 3.11.1(1/3), and bodies
+always freeze everything. In such a case, the reference to Empty_Priv in
+Is_Empty is illegal, as Empty_Priv is not yet complete.
+
+Another implementer G said that E was wrong, as the second sentence of
+13.14(3/3) specifies that behavior in a declarative_part, but this is a package
+specification, which is not a declarative_part. Or that possibly the second
+sentence of 13.14(3/3) was wrong because it didn't include package
+specifications.
+
+I agree with G, in that the language as literally written says the above is
+legal. However, it's fairly clear from AI05-0177-1 that the freezing of an
+expression_function used as a body was intended to apply everywhere. AI05-0177-1
+also contains an Editor's Note (really an Editor's Gripe) that freezing of
+expression functions in package specifications was "killing a fly with a
+bazooka"; there's no technical need (one of the problems noted can't happen in a
+package specification and the other is already handled by the last sentence of
+13.14(10.1/3) since it turned out it applied to all expression functions so we
+couldn't ignore it anyway). Moreover, my original intent is that expression
+functions behaved like renames-as-bodies, and those do NOT freeze.
+
+I apparently got what I wanted, but not because we intended it. :-)
+
+It should be noted that an expression function that is not a completion is NOT
+freezing; this rule only applies to expression functions that are completions.
+So it's going to be a bit weird no matter what the rule is - it's not possible
+that all of renames-as-bodies, expression functions that are not completions,
+expression functions that are completions, and function bodies are consistent.
+
+In any case, since there is a problem with the wording, I'll remove this test
+case from the test, so there is no rush to resolve this rather unimportant
+quirk.
+
+There seem to be three possible fixes to the Standard:
+
+(1) Do nothing, leave the wording as it is. There is no technical problem (there
+    is no way to use an unfrozen entity whether or not expression_functions used
+    as completions are freezing). It's a bit inconsistent, because the behavior
+    would be different in specifications and in bodies, but that's justifiable
+    and harmless (no one is moving the entire private part of a package to the
+    body, and moving just the expression function would not show any behavior
+    change). This is more flexible as expression functions would not necessarily
+    have to follow the completions of deferred constants or any representation
+    clauses. OTOH, E complained that their implementation does treat these as
+    freezing and would require some amount of work to change that (they are
+    generating the body at the location of the completion, that would have to be
+    delayed).
+
+(2) Change the wording of 13.14(3/3) so that package specifications are included
+    in the second sentence. This might require reordering of
+    expression_functions used as completions in the private part in some cases.
+    I can't think of any case where that would be impossible, but that might
+    just be a lack of imagination (given there are bounds on where these can be
+    declared because all declarations that they use have to be visible at the
+    point of the expression function). It's possible, however, for that
+    completion to be in the visible part. It would not be possible to reorder
+    that make it legal as the deferred constant completions are necessarily in
+    the private part -- assuming one wanted the expression function to remain
+    visible. However, in that case the declaration is redundant and it could be
+    removed to fix the problem (as noted eariler, an expression function that is
+    NOT a completion is NOT freezing). E would be happy, as this would make his
+    implementation correct. I'm still concerned that doing this would make it
+    much more likely that users would stumble over these rules, but perhaps that
+    isn't very important as I can't find a case where some reordering/removal
+    would not give the intended effect.
+
+(3) Change the rules so completions of expression functions (and null procedures
+    as well, since we've intentionally made these the same) are never freezing;
+    they would act like renames-as-body in that case. A tiny change to
+    13.14(10.1/3) would be needed ("function" => "subprogram" in the first
+    sentence), as procedure calls would also need profile freezing (although the
+    body could only be a null procedure in that case). The downside of this
+    change is that switching from the shorthand expression function form to the
+    full function body form (or vice-versa) would change the freezing behavior,
+    and that might even cause the package body to become illegal in extreme
+    cases.
+
+As you can tell, the differences between these are slight, so this isn't very
+important. [!priority Low] (2) has the advantage of matching the existing
+implementation (and the !discussion of AI05-0177-1). (1) has the advantage of
+matching the intent of the designer (me) and would mean that all forms of
+completion allowed in package specifications -- renames-as-body, null
+procedures, and expression functions would work the same. And for me, freezing
+is one of those things that we want as little of as possible; there is
+definitely less freezing in (1) than in (2).
+
+I'd like a bit a guidance before writing this up. Thoughts?
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, April 29, 2014  8:35 AM
+
+I have some preference for (1) over (2), users don't in general like freezing
+and some think that "freezing rules" are just something that compilers (and
+their vendors) shout when they don't want to admit a bug. But I could live with
+(2).  I don't like (3).
+
+****************************************************************
+
