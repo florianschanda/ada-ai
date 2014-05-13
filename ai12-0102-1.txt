@@ -1,0 +1,247 @@
+!standard A.12.1(5)                                    14-05-12  AI05-0102-1/01
+!class binding interpretation 14-05-12
+!status work item 14-05-12
+!status received 14-04-18
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Stream_IO.File_Type has Preelaborable_Initialization
+!summary
+
+Ada.Stream_IO.File_Type has Preelaborable_Initialization.
+
+!question
+
+As a last minute change to Ada 2012, we made Stream_IO preelaborable so that it
+can be used for logging and persistence in preelaborable packages (especially
+useful in distributed systems).
+
+There was an ACATS test submitted for this, which starts:
+
+with Ada.Streams.Stream_IO;
+package CXAC007_0 with Preelaborate is
+
+   File : Ada.Streams.Stream_IO.File_Type;
+
+   function Is_Open return Boolean is (Ada.Streams.Stream_IO.Is_Open (File));
+end CXAC007_0;
+
+GNAT compiles this without complaint.
+
+Unfortunately, I believe this should be illegal. The declaration of File
+clearly is covered by 10.2.1(9/3): "The creation of an object that is
+initialized by default, if its type does not have preelaborable
+initialization."
+
+Stream_IO defines File_Type (A.12.1(5)) as:
+
+   type File_Type is limited private;
+
+10.2.1(11.2/2) says that "A partial view of a private type ... has
+preelaborable initialization if and only if the pragma
+Preelaborable_Initialization has been applied to them."
+
+No matter how hard I try, I can't see "pragma
+Preelaborable_Initialization(File_Type);" in A.12.1(5) or anywhere else in
+Stream_IO for that matter. We clearly did not consider this when we discussed
+AI05-0283-1.
+
+The majority of other language-defined private types in Pure and Preelaborated
+packages have Preelaborable_Initialization (P_I). Types like Controlled,
+Root_Stream_Type, and Address all have P_I.
+
+Should this type have P_I, making this example legal? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify A.12.1(5):
+
+   type File_Type is limited private;{
+   pragma Preelaborable_Initialization(File_Type);}
+
+!discussion
+
+It would be unusual to not be able to declare a library-level
+Ada.Stream_IO.File_Type object in a preelaborated package. One could still
+use the package (File_Types would have to be declared within subprograms),
+so this isn't an open-and-shut case for a mistake. But it seems more likely
+to be a mistake, especially as types like Controlled have
+Preelaborable_Initialization (P_I). Indeed, nearly all private types in
+language-defined Pure and Preelaborated packages have P_I.
+
+So we declare Ada.Stream_IO.File_Type to have P_I.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test could try this (indeed, the original version of CXAC007 failed
+for this reason on at least one compilers). A modified version of CXAC007 would
+be sufficient.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Friday, April 18, 2014  6:22 PM
+
+As a last minute change to Ada 2012, we made Stream_IO preelaborable so that it
+can be used for logging and persistence in preelaborable packages (especially
+useful in distributed systems).
+
+Geert Bosch submitted a test for this, which starts:
+
+with Ada.Streams.Stream_IO;
+package CXAC007_0 with Preelaborate is
+
+   File : Ada.Streams.Stream_IO.File_Type;
+
+   function Is_Open return Boolean is (Ada.Streams.Stream_IO.Is_Open (File));
+end CXAC007_0;
+
+GNAT compiles this without complaint.
+
+Unfortunately, I believe this should be illegal. The declaration of File
+clearly is covered by 10.2.1(9/3): "The creation of an object that is
+initialized by default, if its type does not have preelaborable
+initialization."
+
+Stream_IO defines File_Type (A.12.1(5)) as:
+
+   type File_Type is limited private;
+
+10.2.1(11.2/2) says that "A partial view of a private type ... has
+preelaborable initialization if and only if the pragma
+Preelaborable_Initialization has been applied to them."
+
+No matter how hard I try, I can't see "pragma
+Preelaborable_Initialization(File_Type);" in A.12.1(5) or anywhere else in
+Stream_IO for that matter. We clearly did not consider this when we discussed
+AI05-0283-1.
+
+It's obvious that the package above should be illegal given the actual rules
+in the Standard. But before reporting a bug to AdaCore, it seems reasonable to
+ask "should it be illegal"?
+
+We can't really invoke the Dewar rule here, as it is perfectly legal and
+reasonable to declare the file objects as parameters or as local to some 
+ubprogram in a preelaborated package. Indeed, a library-level file object is
+pretty rare in my code, while I have a lot of local file objects. So the
+package is plenty usable without being able to declare a library-level file
+object in a preelaborated package.
+
+OTOH, we've added pragma Preelaborable_Initialization (P_I) to a large number
+of private types in the Ada Standard: Address, Root_Storage_Pool, and
+Root_Stream_Type among them. So it seems that consistency would suggest that
+File_Type ought to have the pragma.
+
+Of course, applying the pragma P_I limits what an implementation can do to
+initialize such objects. As such, applying it might cause problems for some
+implementation. Not for Janus/Ada (File_Type is implemented here as an access
+to Taft-amendment incomplete type). And presumably not for GNAT, which is
+already treating it as if it has P_I.
+
+Anyway, I'll have to redo the test to avoid the library-level object, because
+I don't want the tests to get ahead of the Standard (and the update will make
+the test more usage-oriented anyway). But we probably ought to spend a moment
+thinking about applying pragma P_I to Stream_IO.File_Type. (BTW, none of the
+other types in Stream_IO need pragma P_I as none of the others are private.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, April 18, 2014  6:34 PM
+
+Interesting question. I think the problem with making any File_Type
+preelaborable is that you might want to do some cleanup on exit, especially in
+an embedded system; e.g. automatically flush and close the file. I don't think
+we should declare a type to have preelaborable initialization if we expect it
+might need some finalization. That just sounds like it could be pretty hard to
+implement in some cases.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April 18, 2014  6:55 PM
+
+> Interesting question.  I think the problem with making any File_Type 
+> preelaborable is that you might want to do some cleanup on exit, 
+> especially in an embedded system; e.g.
+> automatically flush and close the file.
+
+True, but Limited_Controlled has Preelaborable_Initialization, so having P_I on
+File_Type that doesn't preclude implementing it in terms of a controlled type
+(either as a component, or as an extension). P_I only has an impact on
+*initialization*, not on *finalization*.
+
+> I don't think we
+> should declare a type to have preelaborable initialization if we 
+> expect it might need some finalization.  That just sounds like it 
+> could be pretty hard to implement in some cases.
+
+I think you might be mixing up Preelaboration with the "no code" rules of C.4.
+Those rules explicitly don't apply to controlled types (and a bunch of other
+types as well), should they happen to appear in the elaboration of a
+preelaborated package. (Besides, a File_Type object isn't a constant, so they
+don't apply anyway.)
+
+Moreover, a preelaborated package can have state (its not like Pure where that
+would be impossible). And it certainly can define an overriding for Finalize.
+
+So I don't really see a problem with finalization, at least in the abstract.
+(I wouldn't want to try to make that work for a Pure package, but no one is
+trying to require that.) I can imagine why there might be some cascading
+effects, but the worst of those would be caused by having to make any
+mplementation packages Preelaborable -- and that's already a done deal.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, April 18, 2014  8:17 PM
+
+> Geert Bosch submitted a test for this, which starts:
+>
+> with Ada.Streams.Stream_IO;
+> package CXAC007_0 with Preelaborate is
+>
+>     File : Ada.Streams.Stream_IO.File_Type;
+>
+>     function Is_Open return Boolean is (Ada.Streams.Stream_IO.Is_Open (File));
+>     end CXAC007_0;
+>
+> GNAT compiles this without complaint.
+>
+> Unfortunately, I believe this should be illegal. The declaration of 
+> File clearly is covered by 10.2.1(9/3): "The creation of an object 
+> that is initialized by default, if its type does not have 
+> preelaborable initialization."
+
+This test should clearly be legal (what sheannigans are done to make it legal
+does not really concern me much :-))
+
+Randy for now, I would just modify the test as you suggest, and then there is
+no urgency in doing the fiddling to make this legal, since it is legal now,
+and that is not about to change I suspect!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, April 18, 2014  8:22 PM
+
+> Interesting question.  I think the problem with making any File_Type 
+> preelaborable is that you might want to do some cleanup on exit, especially
+> in an embedded system; e.g. automatically flush and close the file.  I don't
+> think we should declare a type to have preelaborable initialization if we
+> expect it might need some finalization.  That just sounds like it could be
+> pretty hard to implement in some cases.
+
+I see no reason to make a significant change just to accomodate some imagined
+difficulty in implementation, to me it is obvious that the test program should
+be legal, I don't really care how that is achieved.
+
+****************************************************************
