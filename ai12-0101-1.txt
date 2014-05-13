@@ -1,0 +1,224 @@
+!standard 4.5.2(9.8/3)                                    14-05-12  AI05-0101-1/01
+!class binding interpretation 14-05-12
+!status work item 14-05-12
+!status received 14-03-25
+!priority Medium
+!difficulty Medium
+!qualifier Omission
+!subject Incompatibility of hidden untagged record equality
+!summary
+
+
+!question
+
+Consider:
+
+    package P is
+        type Priv is private;
+    private
+        type Priv is record ...
+        function "=" (L, R : Priv) return Boolean;
+    end P;
+
+4.5.2(9.8/3) says that this is illegal. This sort of construct appears fairly
+often in real code.
+
+While there is the possibility of an inconsistency with the result of "=",
+this inconsistency 
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+
+!discussion
+
+The reason that 4.5.2(9.8/3) was originally added was for the freezing case.
+We cannot allow declaration of primitive equality for a untagged record type in
+a package body, since users of the type as a composite component could not know
+about the redefined equality that they must use to construct "=". Any call
+on "=" for the type or any type that has it as a component will freeze the type,
+so that is an appropriate point to stop further redeclarations of "=".
+
+OTOH, the part about not allowing hidden "=" declarations for private types is
+purely about reducing the amount of inconsistency in the runtime behavior of
+"=". For Ada 2012, the meaning of "=" for a record type R cannot depend on
+visibility. If it did, then the effect of "=" for composite types with components
+of R would have to change based on visibility of the full type. Alternatively,
+we could make the composition not depend on visibility and leave the existing
+rule for direct use of "=", but that would open the door for "=" on stand-alone
+R and "=" on R as the only component of a record to give different results.
+
+If we simply delete the second sentence of 4.5.2(9.8/3) (as proposed here),
+then 4.5.2(15/3) comes into effect and any overriding of "=" [before freezing]
+is used as the definition of "=" everywhere. This makes Ada 2012 inconsistent
+with previous versions of Ada.
+
+However, the legality rule makes programs illegal even if they never call
+"=" on the private type (only on the full type). That means that programs
+which will exhibit no inconsistency will be rejecteed unnecessarily.
+Moreover, even if there is an inconsistency, it's likely to fix bugs (the
+original justification for AI05-0123-1). It's hard to imagine why someone
+would want to define "=" (presumably getting a different answer than the
+original predefined "=") and then have it ignored by clients. If they're doing
+this intentionally, it is very tricky code better handled some other way.
+
+Finally, this inconsistency is (ahem) consistent with the inconsistencies
+introduced by AI05-0123-1. One expects users to think that all record
+equality works the same way; there's no value to have one case that still
+works differently (especially as it makes untagged records somewhat less
+capable than their tagged counterparts.
+
+For all of these reasons, we decided to accept a bit more inconsistency
+rather than stomaching an incompatibility which may not be a problem at all.
+
+!corrigendum 4.5.2(9.8/3)
+
+@drepl
+If the profile of an explicitly declared primitive equality operator of an
+untagged record type is type conformant with that of the corresponding
+predefined equality operator, the declaration shall occur before the type is
+frozen. In addition, if the untagged record type has a nonlimited partial
+view, then the declaration shall occur in the visible part of the enclosing
+package. In addition to the places where Legality Rules normally apply (see
+12.3), this rule applies also in the private part of an instance of a generic
+unit. 
+@dby
+If the profile of an explicitly declared primitive equality operator of an
+untagged record type is type conformant with that of the corresponding
+predefined equality operator, the declaration shall occur before the type is
+frozen. In addition to the places where Legality Rules normally apply (see
+12.3), this rule applies also in the private part of an instance of a generic
+unit. 
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test should ensure that the inconsistent Ada 2012 definition is followed.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Tuesday, March 25, 2014  11:44 PM
+
+I recently updated the ACATS test for record equality to reflect the changes of
+AI05-0123-1 in Ada 2012.
+
+One of the existing cases was essentially:
+
+    package P is
+        type Priv is private;
+    private
+        type Priv is record ...
+        function "=" (L, R : Priv) return Boolean;
+    end P;
+
+I changed the expected result of "=" for this case from predefined to primitive
+equality, to reflect 4.5.2(15/3) (which in Ada 2012 applies to all record
+types, not just tagged types).
+
+GNAT compiled and failed this test as the operation still used predefined
+equality.
+
+In researching this, Ed noticed 4.5.2(9.8/3), which says that the hidden
+declaration of "=" is illegal. So I rewrote the test to eliminate the
+violation of 4.5.2(9.8/3), and prepared to write a B-Test to ensure that
+4.5.2(9.8/3) is detected.
+
+Before I did that, however, Ed reported that "our test suite has a few
+instances of private types whose full view is an untagged record and where
+equality is declared in the private part". He thought that the incompatibility
+was unacceptable.
+
+This is an interesting case, as keeping the behavior the same as in Ada 2005 is
+really not a realistic option. Doing so would mean that the dynamic semantics
+of predefined equality for composite types would depend on the visibility of
+the full type declaration. That's different from the normal rule for private
+types, which is that the dynamic semantics is that of the full type, period.
+Or, if we keep visibility out of it, then we get different results when the
+type is used as a component.
+
+As an example of an anomaly, imagine we have the following type and it does
+not have a user-defined "=" (that is, predefined "=" is used):
+
+    type Rec is record
+       C : Priv;
+    end record;
+
+If we have two objects of the type O1 and O2, then O1 = O2 uses primitive
+(hidden user-defined) equality for type Priv (because record equality composes
+in Ada 2012), but the Ada 2005 rule would have O1.C = O2.C being evaluated
+with predefined equality for type Priv. If those have different results
+(which is likely, else why redefine "="?), then it is quite possible that
+O1.C /= O2.C but O1 = O2. (Indeed, that would be exactly the case with the
+ACATS test, where the user-defined equality only depends on a subset of
+components of type Priv.)
+
+We could fix that by also making the predefined equality of type Rec use
+primitive equality of Priv only when the full type of Priv is visible, but
+that means the result of O1 = O2 depends on where it appears in the source.
+That way clearly leads to madness.
+
+So the choice is clearly between incompatibility and inconsistency. There's
+also a third choice of both. To outline the choices:
+
+(1) Incompatibility: Leave the language as currently defined. Prevents
+surprises; user-defined "=" is always visible when it is used. Relatively
+easy to eliminate the problem -- move the stupid declaration of "=". But:
+Makes programs illegal even if they never call "=" on the private type.
+Appears to happen in real programs.
+
+(2) Inconsistency: Repeal the "In addition" sentence of 4.5.2(9.8/3) [the
+other part is needed so that we know how to define "=" when it is potentially
+called, in particular it prevents defining "=" only in a body for a type
+declared in a spec]. 4.5.2(15/3) then applies, so predefined equality uses
+primitive equality if one is defined. Consistent (!) with the handling of
+record equality for tagged types and composite types containing components
+of a record type. Probably fixes bugs (who defines user-defined "=" but wants
+it ignored??). But: Silently changes the behavior of existing programs, which
+is always scary.
+
+(3) Both: Make the second sentence of 4.5.2(9.8/3) a suppressible error.
+(This option is only available if we actually define suppressible errors, of
+course.) Then surprises are prevented, in that in "standard mode" any such late
+definitions of "=" will be flagged. If the programmer determines that they are
+not a problem, they can suppress the error and the semantics would then be as
+described in 4.5.2(15/3). But: The most complex of the solutions (by a small
+amount). Suppressing the error might be as much work as eliminating it (that
+depends very much on how suppressible errors are implemented, especially if
+command line switches are provided).
+
+Given that we already have an inconsistency with Ada 95/2005 when there is no
+declaration of "=" at all (as for type Rec in the example above), it doesn't
+seem too bad to have the same inconsistency when the declaration of "=" is
+hidden. Indeed, we justify the first inconsistency as it is most likely to
+fix bugs as opposed to introduce them; that same justification holds for the
+latter. As such, I don't see much advantage to the compile-time detection of
+this one specific case, especially as it makes programs illegal which don't use
+"=" at all. (I'd feel differently if all of the inconsistencies were detected
+as incompatibilities.) So I'm in favor of (2), which is easy to do in the
+Standard, and matches what Ed said GNAT will be corrected to do.
+
+P.S. Side-issue: 4.5.2(9.8/3) was crafted by Steve Baird as I recall. I didn't
+try very hard to worry about any Bairdian cases involving that rule; it might
+be the case that there is some oddity not otherwise prevented by the language
+rules that the second sentence of 4.5.2(9.8/3). I didn't find any in the AI or
+e-mail, but it's tough sledding. And the first example in the AI05-0123-1
+discussion is nonsense, not only are the parameters to the first "=" missing
+types, but then we have what looks like a completion to an abstract subprogram
+declaration. I don't see any way for this example to legally happen for an
+untagged type.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, March 26, 2014  9:36 AM
+
+I agree, go with (2).
+
+****************************************************************
