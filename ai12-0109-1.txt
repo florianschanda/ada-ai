@@ -1,0 +1,1200 @@
+!standard 13.1(10/3)                                14-05-15  AI05-0109-1/01
+!class binding interpretation 14-05-15
+!status work item 14-05-15
+!status received 14-03-16
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Representation of untagged derived types
+
+!summary
+
+Late representation changes of a parent type are banned if the parent type is
+a by-reference type.
+
+13.1(15/3) is intended even if the aspect has not yet been resolved or
+evaluated.
+
+!question
+
+(1) There appears to be a hole related to 13.1(10/3).
+
+The problem is that there is nothing forbidding specifying a type-related
+representation aspect of the *parent* type (Arr in the example below) after a
+derivation takes place (definition of Arrx), and that will create the same
+situation that 13.1(10/3) is intended to prevent.
+
+For instance:
+
+  procedure rep_clause is
+     package P is
+        type Val is (A, B, C, D, E, F, G, H);
+        type Arr is array (1 .. 16) of Val;
+        procedure xxx (Arg : arr);
+        type Arrx is new Arr;
+        for Arr'Component_Size use 3;  --<< *parent* type aspect
+        Input_Data  : Arrx;
+     end p;
+
+     package body p is
+        procedure xxx (Arg : arr) is null;
+     end p;
+  begin
+     p.xxx (p.Input_Data);
+  end;
+
+If Arr had been a by-reference type, it would have been impossible to do
+conversions between Arr and Arrx (as copying of by-reference types is not
+allowed during parameter passing).
+
+Should this be fixed? (Yes.)
+
+(2) A related question noticed during this is that the inheritance of aspect
+specifications by a derived type is not defined. Specifically, when do aspect
+specifications become inheritable, given that name resolution of aspect
+specifications is deferred in some cases? That is, if you derive from a parent
+type before it has been frozen, and the parent type had some aspect
+specifications, are they all inherited, even if they haven't even undergone name
+resolution?
+
+This should be specified, right? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add after 13.1(10/3):
+
+   Similarly, it is illegal to specify a non-confirming
+   type-related representation aspect for an untagged type
+   after one or more types have been derived from it, if:
+     * the type is a by-reference type; or
+     * the aspect is Small or Machine_Radix, and
+       any user-defined primitive subprograms were
+       inherited by the derived types.
+
+AARM Discussion: By-reference type usually cannot be used in legality rules,
+as it is privacy breaking. Our use here is privacy breaking, but we're stuck
+with it for compatibility reasons. Since representation aspects cannot be
+specified on partial views, privacy breaking only happens when a type includes
+a component of a private type. In that case, whether these rules are triggered
+depends on the full type of the private type -- which is clearly privacy
+breaking.
+
+AARM Reason: The first bullet prevents the need to generate impossible
+conversions between the derived types (a by-reference object cannot be copied
+to change its representation). The second bullet prevents implicit conversions
+that might lose precision (one way necessarily would do so).
+
+[Editor's note: I added the above because the use of the privacy-breaking
+term "by-reference type" should be both justified and called out.
+We could eliminate it by using a formulation similar to that in 4.6, where
+we use "limited", or have "a tagged, private, or volatile subcomponent" to avoid
+the privacy issues. That's probably too incompatible to do, unfortunately.]
+
+Add after AARM 13.1(15.b.1/1): [a Ramification]
+
+If the aspect was specified by an aspect_specification and the parent type has
+not yet been frozen, then inherited aspect will not yet have been resolved and
+evaluated. The implementation will need to have a mechanism to handle such
+an aspect. (We believe that inheriting the unresolved and unevaluated aspect,
+and resolving it later at the normal point for the derived type, will give
+the same results as for the parent type in any legal program. Thus the
+implementation can be as if the aspect was directly specified for the derived
+type).
+
+!discussion
+
+(1)
+
+The rule 13.1(10/3) is a strange combination of a required semantic rule
+and a methodological restriction. It is intended to prevent the need to
+make implicit conversions when calling inherited primitive subprogram.
+
+In some cases (such as limited by-reference types), making a copy of an
+object is prohibited and therefore it is impossible to make any implicit
+conversion. For such cases, a rule like 13.1(10/3) is absolutely required.
+
+For other cases (such as fixed point types with different values of 'Small),
+doing an implicit conversion could be done, but it would have an undesirable
+semantic effect (potential loss of precision, especially when the conversions
+are made both ways as for in out parameters). Here, a rule like 13.1(10/3) is
+definitely desirable.
+
+Finally, there are cases where there is no semantic problem, the conversions
+are semantics-preserving. These mainly are cases where the types have different
+but equivalent representations, such as packed and unpacked versions of an
+untagged record, or arrays with different component sizes. Here, 13.1(10/3)
+provides a purely methodological restriction, preventing potentially expensive
+implicit conversions (but also preventing inexpensive implicit conversions).
+
+Methodological restrictions are always questionable, as they merely prevent a
+programmer from doing something that they may actually want to do. After all,
+there are plenty of operations that can be quite expensive in practice
+(controlled types, equality of composites, and so on). Generally, it's better
+to let knowledgable users write the code that they need (especially given that
+13.6 recommends this approach for representation conversions), and give
+warnings if that leads to overly expensive code.
+
+13.1(10/3) is intended to require explicitly converting between two different
+representations. That seems admirable, until one realizes that the effect is
+to require the elimination of all primitive operations of a (record) type in
+order to use Ada-language conversions. That means that the standard
+organization of putting a type and its operations together in a package cannot
+be followed - the operations have to placed somewhere else in order to take
+advantage of compile-generated representation change. For many types
+(especially ones in packages already in use for which moving operations would
+require changes to many clients), the net effect is that derivation is
+infeasible and the representation changes end up getting written manually by
+the user, with all of the potential for mistakes and higher execution costs
+that entails.
+
+The question shows that users have been clever in finding ways around this
+restriction. Moreover, there is a concern that fixing this hole would have
+significant compatibility effects, because users have been using this loophole
+over the years; it is claimed that GNAT has implemented this "feature" for
+20 years.
+
+As such, we only fix as much of the loophole as necessary to eliminate semantic
+problems. We extend the rules from AI05-0246-1 so that they cover such late
+representation changes, as well as banning them for Small. This is the minimum
+that we can do.
+
+It would be appealing to relax 13.1(10/3) to match the new rule. After all,
+this provides a way to end-run 13.1(10/3), much like generics provided a
+way to end-run the no redefinition of "=" in Ada 83. However, that's going
+beyond the question of the AI, and some misguided people think that the
+methodological restriction is a good idea. Rather than pick a fight with them
+
+An alternative fix would be to ban the derivation of an untagged type with
+primitives in the same package. That would certainly fix the problem, but it
+was judged to be too incompatible.
+
+Another alternative fix would be to say that the representation of the untagged
+derived type with primitives is the same as the parent type if that derivation
+is in the same package as the derived type. For most implementations, that
+would just fix a bug. But it would be inconsistent if in fact the implicit
+conversions were supported, as is claimed for GNAT. Thus it is rejected.
+
+Note that this is a nasty check. It requires rejecting something based
+on how it is used. Typical implementations do not keep track of how things
+are used, so at best implementing this check will require building a data
+structure solely for the purpose of this check (with all the complications
+of a little used data structure). At worst, it would require a brute-force
+search of the package specification for every type-related aspect
+specification. (That could be a significant time hit if the package is
+large and most types have representation clauses -- this describes Claw
+exactly). And it's unfortunate that all of this complication happens for
+something that is quite unlikely.
+
+(2)
+
+13.1(15/3) says:
+
+A derived type inherits each type-related representation aspect of its parent
+type that was directly specified before the declaration of the derived type,
+or (in the case where the parent is derived) that was inherited by the parent
+type from the grandparent type.
+
+It seems clear enough that the aspect is inherited in such a case. It would
+have to be inherited without knowing the actual value. At the point of the
+derivation, the only thing that could be inherited is the unresolved and
+unevaluated expression. An alternative view would have us somehow inheriting
+the future value of the aspect. That would require a substantial implementation
+cost used solely for this rather unlikely case (derivations after freezing
+of the parent type -- including in other packages -- would not use it, the
+current implementation [whatever it is] sufficies in that case). As such, we
+assume the simpler model (which would just reuse the existing aspect mechanism)
+and see where it leads.
+
+There is clearly a possibility of anomolies given that the aspect has neither
+been resolved or evaluated at the point of the derived type (presuming that
+no freezing point of the parent type has occurred).
+
+First of all, inheriting the raw aspect means that the aspect would be
+evaluated twice. This seems like it would be a problem, but it isn't as most
+type-related aspects require static expressions. Those that don't (like
+Storage_Size and Storage_Pool) are not allowed on derived types. Thus we
+conclude that there is no problem from re-evaluation of aspects.
+
+Second, the question arises is to whether the two copies could ultimately get
+different values. We certainly would not want that, as the entire issue with
+13.1(10/3) is to ensure the values are the same. But 13.1.1(13/3) prevents
+that. Anything that would make the values different would also make one
+or the other expressions resolve differently -- and that is illegal.
+
+Third, one wonders if 13.1.1(13/3) could make the inherited aspect illegal
+when the original aspect was legal. But that can't happen because the
+redefinition of an entity would have to follow the derived type in order that
+the inherited aspect is illegal. The first freezing point of the derived type
+would have to be before the redefined entity. But that point must either
+freeze the parent type (in which case it is also illegal) or the parent type
+would have to have been frozen previously (again making it illegal).
+It is possible for the parent type's aspect to be illegal and the derived
+type to be legal, but that isn't related to the derivation so it is irrelevant
+for this purpose.
+
+Thus, we conclude that the model of inheriting the raw (unresolved and
+unevaluated) aspect works. As such, we simply add an AARM note to verify that
+this is the intent and claim victory. :-)
+
+!corrigendum 13.1(10/3)
+
+@dinsa
+For an untagged derived type, it is illegal to specify a type-related
+representation aspect if the parent type is a by-reference type, or has any
+user-defined primitive subprograms.
+@dinss
+Similarly, it is illegal to specify a non-confirming
+type-related representation aspect for an untagged type
+after one or more types have been derived from it, if:
+@xbullet<the type is a by-reference type; or>
+@xbullet<the aspect is Small or Machine_Radix, and any user-defined primitive
+subprograms were inherited by the derived types.>
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS B-Test should be created to check the new rule.
+
+!appendix
+
+From: Tucker Taft
+Sent: Sunday, March 16, 2014  9:47 PM
+
+Robert and others discovered that there is a hole in 13.1 related to paragraph
+10/3:
+
+   For an untagged derived type, it is illegal to
+   specify a type-related representation aspect if
+   the parent type is a by-reference type, or has
+   any user-defined primitive subprograms.
+
+The problem is that there is nothing forbidding specifying a type-related
+representation aspect of the *parent* type (Arr below) after a derivation takes
+place (definition of Arrx), and that will create the same undesirable situation,
+where you will need to do an expensive conversion as part of calling an
+inherited subprogram ("xxx" below), or need to perform an impossible conversion
+between related by-reference types with different representations.  What is
+missing is a corresponding rule to prevent specifying a non-confirming aspect
+after derivation happens.  E.g., add after the above paragraph:
+
+   Similarly, it is illegal to specify a non-confirming
+   type-related representation aspect for an untagged type
+   after one or more types have been derived from it,
+   if the type is a by-reference type, or if any
+   user-defined primitive subprograms were inherited
+   by the derived types.
+
+Below are two example programs indicating the problem.  First one (rep_clause_a)
+is illegal by paragraph 10/3.  Second one (rep_clause_b) is currently legal, but
+would be made illegal by the proposed new paragraph.
+
+      1. procedure rep_clause_a is
+      2.    package P is
+      3.       type Val is (A, B, C, D, E, F, G, H);
+      4.       type Arr is array (1 .. 16) of Val;
+      5.       procedure xxx (Arg : arr);
+      6.       type Arrx is new Arr;
+      7.       for Arrx'Component_Size use 3;  --<< *derived* type aspect
+               |
+         >>> representation item appears too late
+         >>> primitive operations already defined for "arr"
+
+      8.       Input_Data  : Arrx;
+      9.    end p;
+     10.
+     11.    package body p is
+     12.       procedure xxx (Arg : arr) is begin null; end;
+     13.    end p;
+     14. begin
+     15.    p.xxx (p.Input_Data);
+     16. end;
+
+So what's going on here, what's the point of rep_clause_a.adb being
+illegal if rep_clause_b.adb is legal:
+
+      1. procedure rep_clause_b is
+      2.    package P is
+      3.       type Val is (A, B, C, D, E, F, G, H);
+      4.       type Arr is array (1 .. 16) of Val;
+      5.       procedure xxx (Arg : arr);
+      6.       type Arrx is new Arr;
+      7.       for Arr'Component_Size use 3;  --<< *parent* type aspect
+      8.       Input_Data  : Arrx;
+      9.    end p;
+     10.
+     11.    package body p is
+     12.       procedure xxx (Arg : arr) is begin null; end;
+     13.    end p;
+     14. begin
+     15.    p.xxx (p.Input_Data);
+     16. end;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March 17, 2014  10:51 PM
+
+> Robert and others discovered that there is a hole in 13.1 related to
+> paragraph 10/3:
+>
+>    For an untagged derived type, it is illegal to
+>    specify a type-related representation aspect if
+>    the parent type is a by-reference type, or has
+>    any user-defined primitive subprograms.
+>
+> The problem is that there is nothing forbidding specifying a
+> type-related representation aspect of the *parent* type (Arr
+> below) after a derivation takes place (definition of Arrx), and that
+> will create the same undesirable situation, where you will need to do
+> an expensive conversion as part of calling an inherited subprogram
+> ("xxx" below),
+
+I remain unconvinced that is a real problem. If it hurts, don't do it. :-) And
+this rule prevents such conversions even explicitly (at least without an
+unnatural program structure that separates the types from the operations - which
+can be difficult to add after the fact).
+
+I was led to believe that the real problem was the potential loss of precision
+for real (float and fixed) types when converting between different
+representations. There would have been better ways to deal with that problem.
+
+> ...or need to
+> perform an impossible conversion between related by-reference types
+> with different representations.
+
+Which also could have been solved separately. One obvious solution in both cases
+would be to disallow these only when there is a real semantic problem (loss of
+precision, impossible conversions) and let them happen in other cases. Anyway,
+that's probably not happening - sigh.
+
+>...  What is missing is a
+> corresponding rule to prevent specifying a non-confirming  aspect
+>after derivation happens.  E.g., add after the above paragraph:
+>
+>    Similarly, it is illegal to specify a non-confirming
+>    type-related representation aspect for an untagged type
+>    after one or more types have been derived from it,
+>    if the type is a by-reference type, or if any
+>    user-defined primitive subprograms were inherited
+>    by the derived types.
+
+I see the problem, but it's uncomfortable to have a rule that says that some
+unrelated use can change what is legal for a declaration. I suppose it's not as
+bad as it could be since the effect has to happen in the same package. Still,
+I'd prefer to solve this some other way.
+
+The obvious solution is not allow the derivation of an unfrozen untagged
+(corrected-ED) type that has primitives. That would could only make a difference
+in the same package, and as it's illegal by 13.1(10) to change the
+representation, that's a pretty useless thing to do. (The unfortunately common
+use of derivation as a stand-in for type renaming doesn't make sense in the same
+package.) Even so, there is a possible incompatibility.
+
+Probably a better solution is to simply say that for such types, the
+representation attributes of the derived type are the same as the parent type.
+That's what we want anyway (for the reasons that Tucker stated. 13.1(15/3) is a
+very complex way of saying that, why not simplify it in the case of untagged
+derivation with primitives? The effect would be that the parent's aspects would
+be used regardless of how or when they are set.
+
+13.1(15/3) is rather bogus anyway for Ada 2012, as we don't necessarily know the
+values of the aspects when the type is derived. (Aspect specifications aren't
+resolved until the end of the declarative list - 13.1.1(11/3).) That wasn't true
+in Ada 95. For instance:
+
+package P3 is
+   type Val is (A, B, C, D, E, F, G, H);
+   type Arr is array (1 .. 16) of Val with Component_Size => CS;
+   procedure xxx (Arg : arr);
+   type Arrx is new Arr;
+
+   CS : constant Natural := 3;
+   Input_Data : Arrx;
+end P3;
+
+CS isn't even declared until after the derived type, so there is no benefit to a
+rule that requires inheritance only of what's known at that point. For aspects
+evaluated dynamically (like Storage_Pool), we can't even cheat and figure this
+out. We're going to need some sort of retroactive aspect setting for the derived
+type (probably best done at the freezing point).
+
+Anyway, I would like us to consider if there is a better way to do this that
+doesn't depend on usage changing legality down the road. The few cases where
+we've had such rules in Ada, we've usually regretted them ('Class on untagged
+incomplete types comes to mind).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March 17, 2014  11:12 PM
+
+Not sure I follow all the details of Randy's response, but I do think an
+invariant of the final solution should be that we NEVER have expensive implicit
+conversion operations and "don't do that" is not a good enough insurance against
+this happening.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March 17, 2014  11:33 PM
+
+> Not sure I follow all the details of Randy's response, but I
+> do think an invariant of the final solution should be that we NEVER
+> have expensive implicit conversion operations and "don't do that" is
+> not a good enough insurance against this happening.
+
+I've never figured out why "expensive implicit conversions" are so much worse
+than other expensive implicit operations in Ada - controlled types being an
+example - for which "don't do that" is exactly the solution. ("Don't do that"
+can be backed up by tools and/or restrictions, of course.)
+
+But I'm not advocating for any change to this, just griping about this rule that
+makes untagged derived types even more useless than they are naturally. I'm
+pretty sure that whatever solution we adopt will ensure that the representations
+of the parent and the derived type are the same, or the program is illegal.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, March 18, 2014  10:25 AM
+
+> The obvious solution is not allow the derivation of an unfrozen tagged
+> type
+
+Did you mean "unfrozen *un*tagged type"?  This whole issue only arises with
+untagged types.
+
+> that has primitives. That would could only make a difference in the
+> same package, and as it's illegal by 13.1(10) to change the
+> representation, that's a pretty useless thing to do. (The
+> unfortunately common use of derivation as a stand-in for type renaming
+> doesn't make sense in the same
+> package.) Even so, there is a possible incompatibility.
+
+Your suggestion seems much more likely to introduce an incompatibility.  The
+restriction I am suggesting is much less onerous, I believe, and less likely to
+arise.
+
+> Probably a better solution is to simply say that for such types, the
+> representation attributes of the derived type are the same as the
+> parent type. That's what we want anyway (for the reasons that Tucker stated.
+> 13.1(15/3) is a very complex way of saying that, why not simplify it
+> in the case of untagged derivation with primitives? The effect would
+> be that the parent's aspects would be used regardless of how or when they are set.
+
+That would seem worse, as it could produce an inconsistency.
+
+> 13.1(15/3) is rather bogus anyway for Ada 2012, as we don't
+> necessarily know the values of the aspects when the type is derived.
+> (Aspect specifications aren't resolved until the end of the
+> declarative list - 13.1.1(11/3).) That wasn't true in Ada 95. For instance:
+>
+> package P3 is
+>     type Val is (A, B, C, D, E, F, G, H);
+>     type Arr is array (1 .. 16) of Val with Component_Size => CS;
+>     procedure xxx (Arg : arr);
+>     type Arrx is new Arr;
+>
+>     CS : constant Natural := 3;
+>     Input_Data : Arrx;
+> end P3;
+>
+> CS isn't even declared until after the derived type, so there is no
+> benefit to a rule that requires inheritance only of what's known at
+> that point. For aspects evaluated dynamically (like Storage_Pool), we
+> can't even cheat and figure this out. We're going to need some sort of
+> retroactive aspect setting for the derived type (probably best done at the
+> freezing point).
+
+I agree that we should review the wording of 13.1(15) in the context of deferred
+interpretation of aspect specifications.  It does seem somewhat weird now...
+
+> Anyway, I would like us to consider if there is a better way to do
+> this that doesn't depend on usage changing legality down the road. The
+> few cases where we've had such rules in Ada, we've usually regretted
+> them ('Class on untagged incomplete types comes to mind).
+
+I suspect you may be over-thinking this one.  The rule we suggested doesn't seem
+that difficult to enforce or define, and the other fixes you suggest seem likely
+to introduce nastier incompatibilities, and possibly inconsistencies.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, March 18, 2014  4:12 PM
+
+Thinking more about this, I am *strongly* opposed to any incompatible change in
+the language.
+
+Yes, the language is broken, it makes no sense to go to all those efforts to
+forbid expensive implicit conversions in one case, and miss it in the other
+case.
+
+Furthermore, contrary to Randy's thinking, these implicit conversions can be
+terribly expensive, NOTHING else in the language is comparable, e.g. you can end
+up quite unintentionally converting a 100,000 element array from packed to
+unpacked form or vice versa.
+
+But, even though the language is broken, I fear the cure of introducing an
+incompatible change would be much worse than the disease.
+
+After all this bug has been there 30 years, and it was only by accident that I
+noticed it. I don't think it is worth any more time discussing this, since I see
+such discussions as 100% worthless to the Ada community.
+
+What I will do for GNAT is to issue appropriate warnings, that's quite good
+enough.
+
+EVen if the ARG were to introduce an incompatible change here, we would not make
+it the default, but rather, if forced to, e.g. by a misguided ACATS test, have a
+special flag --pedantic or somesuch to enable the inompatible change.
+
+Will be interesting to see how many tests in our test suite (now tens of
+millions of lines of code) will be affected by these new warnings.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, March 18, 2014  4:16 PM
+
+> But I'm not advocating for any change to this, just griping about this
+> rule that makes untagged derived types even more useless than they are
+> naturally.
+
+I think this is bogus, you can always rearrange things to get what you want.
+Unless you want implicit conversions, in which case you are (quite deliberately,
+and desirably, out of luck, though actually given noticing this bug in the
+language, you can probably get any effect you want!)
+
+> I'm pretty sure that whatever solution we adopt will ensure that the
+> representations of the parent and the derived type are the same, or
+> the program is illegal.
+
+I am pretty sure this is wrong, since there is no way to achieve this without
+introducing a possibly quite significant incompatibility.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, March 18, 2014  4:18 PM
+
+>> The obvious solution is not allow the derivation of an unfrozen
+>> tagged type
+
+> Your suggestion seems much more likely to introduce an
+> incompatibility.  The restriction I am suggesting is much less
+> onerous, I believe, and less likely to arise.
+
+I agree this suggestion is a non-starter
+
+>> Probably a better solution is to simply say that for such types, the
+>> representation attributes of the derived type are the same as the
+>> parent type. That's what we want anyway (for the reasons that Tucker
+>> stated. 13.1(15/3) is a very complex way of saying that, why not
+>> simplify it in the case of untagged derivation with primitives?
+>> The effect would be that the parent's aspects would be used
+>> regardless of how or when they are set.
+>
+> That would seem worse, as it could produce an inconsistency.
+
+Yes, definitely another non-starter
+
+> I suspect you may be over-thinking this one.  The rule we suggested
+> doesn't seem that difficult to enforce or define, and the other fixes
+> you suggest seem likely to introduce nastier incompatibilities, and
+> possibly inconsistencies.
+
+I agree, except I think introducing ANY illegality is a non-starter.
+In practice a (suppressible) warning is quite good enough.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March 18, 2014  5:48 PM
+
+> Thinking more about this, I am *strongly* opposed to any incompatible
+> change in the language.
+
+I've come to almost the same conclusion, but probably for different reasons.
+
+> Yes, the language is broken, it makes no sense to go to all those
+> efforts to forbid expensive implicit conversions in one case, and miss
+> it in the other case.
+>
+> Furthermore, contrary to Randy's thinking, these implicit conversions
+> can be terribly expensive, NOTHING else in the language is comparable,
+> e.g. you can end up quite unintentionally converting a 100,000 element
+> array from packed to unpacked form or vice versa.
+
+Sure, but isn't that what warnings are for? It's not like the compiler doesn't
+know that will happen. But why use the worst case to deny the capability when it
+is useful?
+
+The cases where this matters is for derived integer types (since the language
+won't let you have different sizes for subtypes -- I know GNAT can handle this
+case, because Object_Size allows it), and for converting between small records
+with different representations (it's not uncommon to store items in a packed
+format and use them in an unpacked format). These conversions aren't free, but
+they're not very expensive, either.
+
+Yes, you can usually rearrange the code (but not always, if the parent type is
+declared in a package outside of your control). In these cases, the compiler
+probably can do a better job of converting than the programmer can, and in any
+case, the compiler won't make mistakes like swapping components or parameters --
+which a programmer does all the time. The compiler has to be prepared to do them
+explicitly since they're legal if there are no primitives, so it's just silly to
+deny them explicitly to a programmer while still requiring them to work
+implicitly (as in the case of deriving 'Base).
+
+I'd much prefer to use targeted rules to avoid the truly bad cases semantically.
+(By-reference, Small, etc.)
+
+> But, even though the language is broken, I fear the cure of
+> introducing an incompatible change would be much worse than the
+> disease.
+>
+> After all this bug has been there 30 years, and it was only by
+> accident that I noticed it.
+
+I agree this is exceedingly unlikely. But for compatibility to be an issue at
+all, GNAT must have implemented it correctly (that is, with the implicit
+conversions). Is that the case?
+
+If it isn't the case (the conversions don't happen even though the
+representations different or something error happens), then either the case
+never existed at all (so whatever rule is decided on is practically irrelevant)
+or the compiler is generating garbage (in which case some sort of check seems
+like an improvement).
+
+> I don't think it is worth any
+> more time discussing this, since I see such discussions as 100%
+> worthless to the Ada community.
+
+That's not quite true. The by-reference array case is truly broken (it's
+impossible to implement it correctly) and we had previously introduced slightly
+incompatible checks to unrelated array conversion to fix that. If there is still
+a hole in that fix for related types, we need to plug it up, too. The
+alternative is for compilers to generate some sort of garbage (most likely by
+copying by-reference objects). We could make that rule specific to by-reference
+types (which would make the incompatibility non-existent in practice).
+
+The other cases, my preference is to eliminate the root rule other than in cases
+(like the by-reference ones) where there is a semantic problem. That's an
+extension rather than an incompatibility, and it would have the effect of making
+untagged derived types somewhat more useful. It's silly to allow different
+representations only by a number of backdoors -- this is looking a lot like the
+prohibition against redefining "=" in Ada 83 -- in that it doesn't actually
+prohibit anything, it just makes it a lot harder to accomplish.
+
+> What I will do for GNAT is to issue appropriate warnings, that's quite
+> good enough.
+>
+> EVen if the ARG were to introduce an incompatible change here, we
+> would not make it the default, but rather, if forced to, e.g. by a
+> misguided ACATS test, have a special flag --pedantic or somesuch to
+> enable the inompatible change.
+>
+> Will be interesting to see how many tests in our test suite (now tens
+> of millions of lines of code) will be affected by these new warnings.
+
+My guess is zero. Which is why I'd be willing to go so far as ban the derivation
+-- I'd still expect that to be zero occurrences. But we can surely make the
+incompatibility much less than that.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March 18, 2014  5:55 PM
+
+...
+> >> Probably a better solution is to simply say that for such types,
+> >> the representation attributes of the derived type are the same as
+> >> the parent type. That's what we want anyway (for the reasons that
+> >> Tucker stated. 13.1(15/3) is a very complex way of saying that, why
+> >> not simplify it in the case of untagged derivation with primitives?
+> >> The effect would be that the parent's aspects would be used
+> >> regardless of how or when they are set.
+> >
+> > That would seem worse, as it could produce an inconsistency.
+
+This is only inconsistent if implementations actually implement the trailing
+representation clause and the associated implicit conversions. In that case,
+your suggestion is an incompatibility and the inconsistency is hardly worse --
+they're both unacceptable.
+
+If implementations allow the calls and DOESN'T make the conversion, then the
+compiler is generating garbage and the change is merely fixing a bug -- which is
+way better than introducing an incompatibility.
+
+If the compiler is rejecting something, then defining the rule such that it
+makes sense is an extension compared to what the compilers are doing.
+
+And please recall that I was only suggesting this in the case where there are
+primitive operations (not all derived types).
+
+But I'd much prefer to weaken 13.1(10) and allow this in cases where it makes
+semantic sense (at least integer representations and records). That's an
+extension, but it's the least incompatible solution. It seems that what Robert
+wants, too (the least incompatible solution).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, March 18, 2014  6:07 PM
+
+> This is only inconsistent if implementations actually implement the
+> trailing representation clause and the associated implicit
+> conversions. In that case, your suggestion is an incompatibility and
+> the inconsistency is hardly worse
+> -- they're both unacceptable.
+
+GNAT accepts the representation clause and silently generates the associated
+implicit conversion.
+
+> And please recall that I was only suggesting this in the case where
+> there are primitive operations (not all derived types).
+>
+> But I'd much prefer to weaken 13.1(10) and allow this in cases where
+> it makes semantic sense (at least integer representations and
+> records). That's an extension, but it's the least incompatible
+> solution. It seems that what Robert wants, too (the least incompatible solution).
+
+No, Robert wants NO incompatible change AT ALL. And is happy to leave the
+current situation intact, which is inconsistent and a bit odd, but perfectly
+well defined, and implemented at least in all GNAT compilers for over two
+decades.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, March 18, 2014  6:11 PM
+
+> The cases where this matters is for derived integer types (since the
+> language won't let you have different sizes for subtype
+
+That's just wrong, look at the RM rule:
+
+> 10/3 For an untagged derived type, it is illegal to specify a
+> type-related representation aspect if the parent type is a
+> by-reference type, or has any user-defined primitive subprograms.
+
+And size and alignment are subtype related representation aspects, which are not
+affected.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, March 18, 2014  10:26 PM
+
+For interest, here is the new warning output by GNAT. A bit wordy, but it's a
+rather involved situation :-)
+
+>      1. procedure rep_clause1 is
+>      2.    package P is
+>      3.       type Val is (A, B, C, D, E, F, G, H);
+>      4.       type Arr is array (1 .. 16) of Val;
+>      5.       procedure xxx (Arg : arr);
+>      6.       type Arrx is new Arr;
+>      7.       for Arr'Component_Size use 3;
+>               |
+>         >>> warning: representation item for "component_size"
+>             appears after derived type declaration at line 6,
+>             may result in implicit conversions for primitive
+>             operations of "Arr", to change representations when
+>             called with arguments of type "Arrx"
+>
+>      8.       Input_Data  : Arrx := (others => A);
+>      9.    end p;
+>     10.
+>     11.    package body p is
+>     12.       procedure xxx (Arg : arr) is begin null; end;
+>     13.    end p;
+>     14. begin
+>     15.    p.xxx (p.Input_Data);
+>                    |
+>         >>> warning: change of representation required
+>
+>     16. end;
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, March 19, 2014  10:57 AM
+
+In discussing the very old issue relating to deriving one type from another
+where they end up with different representations, we encountered a more
+fundamental issue.  When do aspect specifications become inheritable, given that
+name resolution of aspect specifications is deferred in some cases?  That is, if
+you derive from a parent type before it has been frozen, and the parent type had
+some aspect specifications, are they all inherited, even if they haven't even
+undergone name resolution?
+
+I am presuming the answer is that an aspect is "directly specified" as soon as
+the aspect specification occurs, even if name resolution is deferred.  That
+means it is possible to inherit an aspect specification before the names have
+been resolved, which might require some fancy footwork in the compiler, but
+seems implementable.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March 18, 2014  6:40 PM
+
+...
+> > But I'd much prefer to weaken 13.1(10) and allow this in cases where
+> > it makes semantic sense (at least integer representations and
+> > records). That's an extension, but it's the least incompatible
+> > solution. It seems that what Robert wants, too (the least
+> incompatible solution).
+>
+> No, Robert wants NO incompatible change AT ALL. And is happy to leave
+> the current situation intact, which is inconsistent and a bit odd, but
+> perfectly well defined, and implemented at least in all GNAT compilers
+> for over two decades.
+
+"NO incompatible change AT ALL" isn't possible, unless you prefer to leave a
+mess in the language and in GNAT. In particular, I refer to the situation
+discussed in AI95-0246-1 (and which led to the rules 4.6(24.7/2) and
+4.6(24.9/2). The discussion of that AI says that 13.1(10) prevents the similar
+situation from happening for related types. We now know that isn't true.
+
+Thus we'll need SOME new rule to at least prevent those cases from happening.
+(That rule does not need to go further than that, however -- it certainly does
+not need to go as far as either Tucker's or my suggestions.)
+
+Just to see what happens, I just created a little test program (attached to this
+message) to see what current compilers do with this case.
+
+GNAT 7.2.1 reports:
+
+    72.     P.Check (P.A1(Y1), '1'); -- Value conversion.
+                      |
+        >>> left hand of assignment must not be limited type
+        >>> component type "T" of type "A1" is limited
+
+which is a little weird because there is no assignment here, just a conversion.
+But it gets weirder. If one comments out the calls at lines 72 and 74 (74 being
+essentially the same as 72), the program compiles without complaint. That means
+GNAT accepted the explicit view conversion and all of the implicit conversions
+without complaint. (There is a warning about the component of A1 being padded
+with 56 bits, but that's it. Of course, I don't have a version of GNAT with
+Robert's new warning.)
+
+That was interesting enough that I made the attached self-checking version,
+which when run reports:
+
+--- TestBR - Check what happens when doing implicit conversions of a by-reference type
+-- A1'Component_Size = 64
+-- A2'Component_Size = 8
+** X(2).Ch is 'N' but should be '4'
+** X(2).Ch is 'O' but should be '5'
+*** TestBR Failed
+
+which suggests the implicit conversions were not made at all, and the original
+object (with Component_Size 8) was passed by reference to a routine expecting an
+array with Component_Size 64. Of course making such implicit conversions would
+also be nonsense, copying limited objects. *Something* has to be rejected here.
+
+Janus/Ada rejects the Component_Size clause:
+In File D:\Testing\Win\console\testbr.ada at line 26
+--------------
+   25:          type A2 is new A1;
+   26:          for A1'Component_Size use 64;
+------------------------------------------^
+*ERROR* This size is not supported for this type (6.4.17)
+ Continue <Sp> or Abort <^C>?
+which prevents the problem but the error message isn't very enlightening as to
+why. It in fact rejects all attempts to make this anything other than 8. I
+didn't try to figure out whether that's because of some understanding of this
+problem or just a bug somewhere (honestly, I'd guess the latter is more likely).
+
+Hope this explains why we're going to continue to discuss this, even if "do
+nothing" seems appealing.
+
+----- Test program follows -----
+
+with Ada.Text_IO;
+procedure TestBr is
+    -- Test the combination of the Dewar late representation example and the
+    -- AI95-0246-1 example.
+    -- (This AI claims that 13.1(10) prevents all problems with related type
+    -- conversions, but we now know this is not true.)
+
+    type Result_Kind is (Passed, Failed, NA);
+    Result : Result_Kind := Passed;
+
+    function Two return Integer is
+        V : Integer := 1;
+    begin
+        return V+1;
+    end Two;
+
+    package P is
+        type T is limited record
+            Ch : Character;
+        end record with Size => 8; -- Limited by-reference type
+        type A1 is array (1..2) of T;
+        procedure Succ1 (X : in out A1);
+        procedure Check (X : in A1; C : Character);
+        type A2 is new A1;
+        for A1'Component_Size use 64;
+    end P;
+
+    package body P is
+        procedure Succ1 (X : in out A1) is
+        begin
+            X(1).Ch := Character'Succ(X(1).Ch);
+            X(Two).Ch := Character'Succ(X(Two).Ch);
+        end Succ1;
+
+        procedure Check (X : in A1; C : Character) is
+        begin
+            if X(1).Ch /= C then
+                Result := Failed;
+                Ada.Text_IO.Put_Line ("** X(1).Ch is '" & X(1).Ch &
+                    "' but should be '" & C & "'");
+            end if;
+            if X(Two).Ch /= C then
+                Result := Failed;
+                Ada.Text_IO.Put_Line ("** X(2).Ch is '" & X(2).Ch &
+                    "' but should be '" & C & "'");
+            end if;
+        end Check;
+    end P;
+
+    X8: P.A1 := (others => (Ch => '8'));
+    Y1: P.A2 := (others => (Ch => '1'));
+    Y4: P.A2 := (others => (Ch => '4'));
+
+begin
+    Ada.Text_IO.Put_Line ("--- TestBR - Check what happens when doing implicit" *
+      " conversions of a by-reference type");
+
+    Ada.Text_IO.Put_Line ("-- A1'Component_Size =" & Natural'Image(P.A1'Component_Size));
+    Ada.Text_IO.Put_Line ("-- A2'Component_Size =" & Natural'Image(P.A2'Component_Size));
+
+    if P.A1'Component_Size = P.A2'Component_Size then
+        Ada.Text_IO.Put_Line ("%% Not applicable - Component sizes the same.");
+        Ada.Text_IO.Put_Line ("%% Change the value and try again.");
+        Result := NA;
+    end if;
+
+    -- No conversions:
+    P.Check (X8, '8');
+    P.Succ1 (X8);
+    P.Check (X8, '9');
+
+    -- Explicit conversions:
+    P.Check (P.A1(Y1), '1'); -- Value conversion.
+    P.Succ1 (P.A1(Y1));      -- View conversion.
+    P.Check (P.A1(Y1), '2'); -- Value conversion.
+
+    -- Implicit conversions (calls to inherited primitive routines):
+    P.Check (Y4, '4'); -- Implicit value conversion.
+    P.Succ1 (Y4); -- Implicit value conversion.
+    P.Check (Y4, '5'); -- Implicit view conversion.
+
+    case Result is
+       when Passed => Ada.Text_IO.Put_Line ("--- TestBR Passed");
+       when Failed => Ada.Text_IO.Put_Line ("*** TestBR Failed");
+       when NA     => Ada.Text_IO.Put_Line ("%%% TestBR Not Applicable");
+    end case;
+end TestBr;
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, March 19, 2014  7:21 PM
+
+> "NO incompatible change AT ALL" isn't possible, unless you prefer to
+> leave a mess in the language and in GNAT. In particular, I refer to
+> the situation discussed in AI95-0246-1 (and which led to the rules
+> 4.6(24.7/2) and 4.6(24.9/2). The discussion of that AI says that
+> 13.1(10) prevents the similar situation from happening for related
+> types. We now know that isn't true.
+
+I don't see any mess in GNAT, yes, you can have implicit conversions, so what?
+Not a big deal, especially since you get a nice warning as I showed! The
+semantics is absolutely clear
+
+> Thus we'll need SOME new rule to at least prevent those cases from
+> happening. (That rule does not need to go further than that, however
+> -- it certainly does not need to go as far as either Tucker's or my
+> suggestions.)
+
+Why bother, programs have been able to take advantage of this for 30 years, as
+far as we know, no real programs have taken advantage of this (and we know that
+some compilers other than GNAT do have a bug of not doing the needed
+conversions, so that is probably the strongest argument for turning this into an
+error).
+
+As for a mess in the language, given the unimportance of the issue, I would
+describe this as more like a minor inconsistency.
+
+> which suggests the implicit conversions were not made at all, and the
+> original object (with Component_Size 8) was passed by reference to a
+> routine expecting an array with Component_Size 64. Of course making
+> such implicit conversions would also be nonsense, copying limited
+> objects. *Something* has to be rejected here.
+
+Indeed there is a problem there
+
+> Hope this explains why we're going to continue to discuss this, even
+> if "do nothing" seems appealing
+
+Well the discussion has zero value to Ada programmers, so let's not spend too
+much time on it. As I reported, only one test in our test suite runs into this,
+and it was an artificial test, so likely anything we decide will have zero
+impact. And if you are going to have zero impact, then the most efficient way of
+having zero impact is to do nothing, just write up the issue, declare it a
+pathology, and let it sit without action.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May 15, 2014  5:01 PM
+
+I'm writing up the AI about my least favorite paragraph (OK, to be fair I
+probably dislike the coextension ones more).
+
+13.1(10/3) says:
+
+For an untagged derived type, it is illegal to specify a type-related
+representation aspect if the parent type is a by-reference type, or has any
+user-defined primitive subprograms. \
+
+The problem here is that "by-reference type" is privacy-breaking, and thus we
+shouldn't use it in a legality rule.
+
+I briefly thought this was OK here, because we can't specify a representation
+aspect on a private type. That helps, but we still could break privacy as
+by-reference also depends on the types of the subcomponents. This latter case
+seems potentially troublesome:
+
+   package P1 is
+      type Priv is private;
+   private
+      type Priv is tagged null record; -- (1)
+      -- type Priv is null record; -- (2)
+   end P1;
+
+   with P1;
+   package P2 is
+      type Arr1 is array (1..4) of P1.Priv;
+
+      type Arr2 is new Arr1
+          with Component_Size => 16;  -- (3)
+   end P2;
+
+[BTW, these examples are a lot easier to write using arrays and Component_Size.
+But in the real world, these would records and the second one would have a
+record representation clause. We'd have the same problem.]
+
+13.1(10/3) makes the declaration of (3) illegal if the full type of Priv is (1),
+but it's legal if it is (2).
+
+This seems like a maintenance hazard (as are all privacy breaking issues).
+
+The array conversion rules get around this by banning "a tagged, private, or
+volatile subcomponent", as well as either type being limited, rather than using
+the by-reference definition.
+
+That's almost the same as by-reference, but we assume-the-worst for private
+types. As such, it would be slightly incompatible to apply it to 13.1(10/3) -
+meaning it's probably too late to fix this. (Unfortunately, the by-reference
+case is the one where this rule is really required, so we can't just weaken the
+rule in this case.)
+
+Did we intentionally make 13.1(10/3) break privacy? If so, we surely should have
+documented that in the AARM note.
+
+Are we stuck with this situation? If so, I need to add an AARM note to explain
+it. Otherwise, we should fix it.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, May 15, 2014  5:01 PM
+
+> Did we intentionally make 13.1(10/3) break privacy?
+
+How is this any different than the privacy issues associated with the following
+Ada83 example
+
+    package Pkg is
+       type Private_Type is private;
+    private
+       type Private_Type is new Integer;
+    end record;
+
+    type Rec is
+      record
+         F1, F2 : Pkg.Private_Type;
+      end record;
+
+    for Rec'Size use 2 * Integer'Size;
+
+?
+
+The general principle, I thought, is that we don't worry too much about privacy
+when it comes to checking legality of representation aspect specifications.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May 15, 2014  5:47 PM
+
+The client intentionally broke privacy in this case (probably because
+Private_Type'Size isn't static). There is nothing "private" about Integer'Size.
+
+> The general principle, I thought, is that we don't worry too much
+> about privacy when it comes to checking legality of representation
+> aspect specifications.
+
+I agree that sizes in particular tend to require privacy breaking (logically,
+not actually, as in your example). But not all representation aspects (visibly)
+depend on Size. Consider Pack:
+
+   package P1 is
+      type Priv is private;
+   private
+      type Priv is tagged null record; -- (1)
+      -- type Priv is null record; -- (2)
+   end P1;
+
+   with P1;
+   package P3 is
+      type Rec1 is record
+         B : Boolean;
+         C : P1.Priv;
+      end record;
+
+      type Rec2 is new Rec1 with Pack;  -- (3)
+   end P3;
+
+Whether or not Rec2 is legal depends upon whether the full definition of Priv is
+(1) or (2). And there is nothing about the clients code that is inherently
+privacy breaking - all they're looking for is storage minimization (possibly for
+long-term storage, or for data transport).
+
+If someone changes from (2) to (1), the client (3) is in for a lot of work,
+since they're going to have to eliminate the derivation and write their own
+conversion functions. That's nasty, and it's a lot worse than just updating a
+rep clause as in your original example. The client would have been better off
+had (3) been illegal all along, as then they wouldn't have been hoodwinked into
+thinking that the language was going to help them out here.
+
+Anyway, your response says that you think it is expected that these rules are
+privacy breaking. I certainly can live with that (I apparently have been for a
+long time), but the AARM should note that because there are very, very few
+Legality Rules that break privacy -- and they all should be documented. That's
+what I did for now (pending more responses).
+
+****************************************************************
