@@ -1,0 +1,1502 @@
+!standard 4.9(24)                                   14-05-14  AI05-0108-1/01
+!class binding interpretation 14-05-14
+!status work item 14-05-14
+!status received 14-03-03
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Out-of-range static constants
+
+!summary
+
+** TBD.
+
+!question
+
+Consider the following program:
+
+with Ada.Text_IO;
+procedure SC is
+   Item_Size : constant := 0;
+begin
+   Ada.Text_IO.Put_Line ("Start Static Constant check");
+   if Item_Size > 0 then
+      declare
+         Length : constant Positive := Item_Size; -- (1)
+         type Data_Index is range 1 .. Length; -- (2)
+         type Data_Array is array (Data_Index) of Natural;
+      begin
+         Ada.Text_IO.Put_Line ("Can't get here");
+      exception
+         when Constraint_Error =>
+            Ada.Text_IO.Put_Line ("Can't get here, either");
+      end;
+   else -- Do nothing
+      Ada.Text_IO.Put_Line ("Nothing as expected");
+   end if;
+   Ada.Text_IO.Put_Line ("End Static Constant check.");
+end SC;
+
+The original question was whether Length, as declared at (1), is a static
+constant.
+
+4.9(34/3) only applies to the evaluation of the static expression; the
+conversion to the nominal subtype happens after that evaluation by 3.3.1(17).
+Moreover, 4.9(24) requires that the expression be a static expression and the
+subtype be a static subtype -- there is nothing in that paragraph about
+compatibility of the value with the subtype.
+
+Ergo, Length is legal, and it IS a static constant, at least according to the
+RM. Moreover, there is an Ada 95-era ACATS test which insists that it is legal,
+so it seems likely that all existing Ada 95 compilers allow a declaration like
+Length.
+
+The value of Length is well-defined (its the value of the initializing
+expression), and it makes (some) sense that the range is ignored: after all,
+static values have infinite precision and accuracy, and we don't worry about
+other bounds like overflows -- subtypes are just another form of bound that
+don't need to be enforced until the constant leaves the static realm.
+
+Moreover, no code that can be executed could ever depend on the value of Length
+in this example; the exception could not be handled where Length is visible.)
+
+So it's certainly possible that the intent of the language is as written in
+4.9(24).
+
+OTOH, it's pretty strange to have a static constant that is out of range.
+Perhaps this construct was supposed to be non-static? There surely is no
+indication of that possibility in 4.9(24).
+
+Whether or not (1) is static matters in other uses that require static
+expressions, such as (2). If (1) is non-static, then (2) is illegal. If (1) is
+static with the range ignored (essentially being treated as Positive'Base for
+static purposes), then (2) is legal.
+
+So, is Length as declared at (1) static? (???)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 4.9(24):
+
+** Change TBD.
+
+!discussion
+
+The test program in the question was distributed to as many compiler vendors
+as possible. A summary of the reported results follows:
+
+GNAT: Warning on (1), error on (2).
+Janus/Ada: Warning on (1), error on (2).
+AdaMagic: Compiles with no errors.
+Irvine: Nonsense error on (2).
+OCSystems: Compiles with no errors.
+DDCI: Error on (2).
+
+We didn't get any responses for either Atego Ada compiler (ObjectAda or the old
+Rational compiler).
+
+---
+
+ACATS test C490001 insists that the declaration at (1) is accepted, so we can
+assume that all compilers accept that declaration. Note that the similar:
+
+    Bad : constant Positive := Positive'(Item_Size); -- (3)
+
+is always illegal because it violates 4.9(34/3). That would argue that (1)
+should have been illegal, but since it has been required to be legal since
+1995, changing that would be an unacceptable incompatibility.
+
+Which leaves us two options:
+
+[A] Redo the wording of 4.9(24) to say that a static constant also has to have
+its value in the range of the (static) nominal subtype. If that's not true,
+then the constant is still legal, but it's not static. Since it's not static,
+(2) is illegal.
+
+[B] Leave the wording as it is, and add a note to say that the static value of
+the static constant could be outside of the nominal subtype. Future use of the
+static constant is OK (although no such uses could ever be executed), therefore
+(2) would be legal.
+
+In either case, elaboration of (1) raises Constraint_Error and no use of the
+value could ever be seen at runtime.
+
+[A] has the advantage of being a bit more sensible, but it's still inconsistent
+with the qualified expression case -- (3) above. And it's incompatible with
+the behavior of some existing implementations.
+
+[B] has the advantage of being the most compatible (implementations that
+currently flag an error could accept the code instead, which clearly is
+compatible). The implementation (for implementations that don't already support
+it) is simple: just ignore the possibility of a range error in future uses of
+the constant, and use the value of the initializing expression.
+
+Since a similar named number already has to be supported, there should not
+be any new complications from doing that. In addition, other rules mean that
+the value at least has to be in the base range of the specified type (otherwise
+the expression is already illegal), so no giant values need to be supported
+here -- just the ones that would need to be supported if Positive'Base had been
+used instead of Positive.
+
+There seems to be little to choose between these options, which is why the
+author is not chosing in this initial write-up. [B] makes it slightly less
+likely that code will become illegal based on the value of a constant (a
+significant problem in conditionally compiled code like that in the sample
+program), but neither choice makes that much difference.
+
+The only sensible choice would be to have made (1) illegal, just as (3) and the
+similar type conversion are illegal. But that's unacceptably incompatible --
+so we have to chose something dubious.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS test is needed to match the final decision on this AI; a B-Test for
+[A] and a C-Test for [B].
+
+!appendix
+
+[Editor's note: the original version of the test program was missing
+"constant" in declaration (1). I've eliminated discussion of that
+version of the program from this appendix as it was quickly fixed, the
+messages were confusing and interspersed with useful message, and
+the buggy program and discussion thereof has no bearing on the actual
+problem.]
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  5:59 PM
+
+A seemingly never-ending discussion with Steve suggests that there is a problem
+with the definition of static constant. Fixing it might be a compatibility
+problem. I'll give some analysis in a follow-up message, but let me start with a
+compliable test program:
+
+--- Cut here ---
+
+with Ada.Text_IO;
+procedure SC is
+   Item_Size : constant := 0;
+begin
+   Ada.Text_IO.Put_Line ("Start Static Constant check");
+   if Item_Size > 0 then
+      declare
+         Length : constant Positive := Item_Size; -- (1)
+         type Data_Index is range 1 .. Length; -- (2)
+         type Data_Array is array (Data_Index) of Natural;
+      begin
+         Ada.Text_IO.Put_Line ("Can't get here");
+      exception
+         when Constraint_Error =>
+            Ada.Text_IO.Put_Line ("Can't get here, either");
+      end;
+   else -- Do nothing
+      Ada.Text_IO.Put_Line ("Nothing as expected");
+   end if;
+   Ada.Text_IO.Put_Line ("End Static Constant check.");
+end SC;
+
+--- Cut here ---
+
+For GNAT 7.2.1, I get:
+
+sc.adb:8:31: warning: value not in range of type "Standard.Positive"
+sc.adb:8:31: warning: "Constraint_Error" will be raised at run time
+sc.adb:9:40: non-static expression used for integer type bound
+sc.adb:9:40: "Length" is not static constant or named number (RM 4.9(5))
+
+This doesn't depend on language version setting (-gnat12, -gnat05, -gnat95).
+
+For Janus/Ada 3.1.2, I get:
+
+In File D:\Testing\Win\console\sc.ada at line 8
+--------------
+    7:        declare
+    8:           Length : Positive := Item_Size; -- (1)
+--------------------------------------^
+*WARNING* Expression is always out of range (6.5.1)
+
+
+In File D:\Testing\Win\console\sc.ada at line 9
+--------------
+    8:           Length : Positive := Item_Size; -- (1)
+    9:           type Data_Index is range 1 .. Length; -- (2)
+-----------------------------------------------^
+*ERROR* Value or range must be static (6.4.19) [RM 3.5.4(6)]
+Continue <Sp> or Abort <^C>?
+
+If you have access to some other Ada compiler, please attempt to compile the
+test program above and report what it does.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  7:09 PM
+
+We get from GNAT:
+
+>      1. with Ada.Text_IO;
+>      2. procedure SC is
+>      3.     Item_Size : constant := 0;
+>      4. begin
+>      5.     Ada.Text_IO.Put_Line ("Start Static Constant check");
+>      6.     if Item_Size > 0 then
+>      7.        declare
+>      8.           Length : constant Positive := Item_Size; -- (1)
+>                                                 |
+>         >>> warning: value not in range of type "Standard.Positive"
+>         >>> warning: "Constraint_Error" will be raised at run time
+>
+>      9.           type Data_Index is range 1 .. Length; -- (2)
+>                                                 |
+>         >>> non-static expression used for integer type bound
+>         >>> expression raises exception, cannot be static (RM 4.9(34))
+
+which seems correct and perfectly sensible.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  7:34 PM
+
+It might be sensible, but it's definitely not correct vis-a-vis the actual
+language wording. The whole point of the test program was to find out if it was
+safe to change this wording to the interpretation that you think is "sensible".
+Inserting new errors is incompatible, but of course if all implementations
+already report an error, there is no practical effect.
+
+BTW, Tucker reported elsewhere that AdaMagic compiles the program successfully,
+it does not report an error at either (1) or (2). That does match the language
+wording.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  7:53 PM
+
+...
+> BTW, Tucker reported elsewhere that AdaMagic compiles the program
+> successfully, it does not report an error at either
+> (1) or (2). That does match the language wording.
+
+And Adam just reported that the Irvine compiler gives an error message at (2),
+but that the message doesn't make any sense to him.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March  3, 2014  7:53 PM
+
+> BTW, Tucker reported elsewhere that AdaMagic compiles the program
+> successfully, it does not report an error at either (1) or (2). That
+> does match the language wording.
+
+Well I am find the wording ambiguous as written.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  8:04 PM
+
+> Well I am find the wording ambiguous as written.
+
+Certainly this remark is. ;-)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March  3, 2014  8:15 PM
+
+Yeah, yeah:
+
+   I find the wording of 4.9(24) to be ambiguous as written, because of the
+   implication that a static constant must have a well-defined value.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  8:19 PM
+
+> It might be sensible, but it's definitely not correct vis-a-vis the
+> actual language wording.
+
+As we all know "correct vis-a-vis the actual language wording"
+is not the same as "correct" :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  7:07 PM
+
+A few minutes ago, I distributed the following test program with the hopes of
+finding out about the behavior of as many compilers as possible. Here again is
+the program:
+
+--- Cut here ---
+
+with Ada.Text_IO;
+procedure SC is
+   Item_Size : constant := 0;
+begin
+   Ada.Text_IO.Put_Line ("Start Static Constant check");
+   if Item_Size > 0 then
+      declare
+         Length : constant Positive := Item_Size; -- (1)
+         type Data_Index is range 1 .. Length; -- (2)
+         type Data_Array is array (Data_Index) of Natural;
+      begin
+         Ada.Text_IO.Put_Line ("Can't get here");
+      exception
+         when Constraint_Error =>
+            Ada.Text_IO.Put_Line ("Can't get here, either");
+      end;
+   else -- Do nothing
+      Ada.Text_IO.Put_Line ("Nothing as expected");
+   end if;
+   Ada.Text_IO.Put_Line ("End Static Constant check.");
+end SC;
+
+--- Cut here ---
+
+The origination of the question was whether Length, as declared at (1), is a
+static constant.
+
+My initial reaction is that (1) ought to be illegal, as it is a static
+expression that violates 4.9(34/3).
+
+Steve pointed out that 4.9(34/3) only applies to the evaluation of the static
+expression; the conversion to the nominal subtype happens after that evaluation
+by 3.3.1(17). Moreover, 4.9(24) requires that the expression be a static
+expression and the subtype be a static subtype -- there is nothing in that
+paragraph about compatibility of the value with the subtype.
+
+Ergo, Length is legal, and it IS a static constant, at least according to the
+RM.
+
+Moreover, there is no semantic problem with it being a static constant. The
+value of the static constant is well-defined (as the value of the static
+expression). Additionally, no entity that depends on the value of that static
+constant can ever be elaborated, as the Constraint_Error raised by the
+evaluation of the constant cannot be handled in a scope that can see the
+constant.
+
+We need 4.9(34/3) for cases where the value of the expression is not
+well-defined (like divide-by-zero); it's not necessary in cases where the value
+is well-defined.
+
+Thus the declaration of Length need not be illegal. Moreover, there is an Ada
+95-era ACATS test which insists that it is legal, so it seems likely that all
+existing Ada 95 compilers allow a declaration like Length.
+
+It gets more interesting for declaration (2). As noted above, the RM wording is
+clear that this is a static constant. As such, the declaration at (2) ought to
+be legal as well. There is no semantic problem with this.
+
+Examples of conditionally compiled code like the above are common in Ada code as
+Ada does not have a native conditional compilation facility. It is preferable
+that such code remain legal independent of the value of any constants. (Of
+course, this is not always achievable; dividing by zero has to be illegal in
+static expressions as there can be no value.) When the legality of the code
+depends on a value that is often set far away (and possibly by a different
+team), there is the potential for a maintenance hazard.
+
+One can create similar examples using initialization expressions in
+preelaborated packages. (Those have to be static, so if a declaration can change
+from static to non-static depending on the value, then the legality of the
+package can also change for that reason.) These are less compelling because the
+package cannot be conditional and thus it always would raise an exception in an
+example like the above.
+
+Various people have suggested that allowing (2) was a mistake in the definition
+of "static constant"; it shouldn't be a static constant is it can raise an
+exception, but it still is a legal declaration. That's certainly a possible
+interpretation.
+
+Note that making either (1) or (2) illegal is incompatible with the language
+wording, because of the potential of making programs like the one given above
+illegal when the language says that they are not illegal. The reason for my
+launching a compiler survey is to find out whether existing practice is
+different than the RM wording. If most compilers already are rejecting (2)
+[despite there being no language reason for doing so], then we have a freer hand
+to change the definition of "static constant".
+
+OTOH, even if compilers are rejecting (2), we could still confirm the language,
+because having fewer errors is always compatible (it's effectively an
+extension).
+
+Personally, I would prefer to have as few errors as possible in cases like this,
+so that conditionally compiled code will compile with a minimum of fuss. If
+we're going to have an error, it would be best on the original declaration - (1)
+in this case - as that is where the actual mistake is and it is the place that
+has to be changed to make the program legal. However, it's likely that's too
+incompatible to do, so our choices are either to confirm the language as-is or
+to change the wording to make (2) illegal.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March  3, 2014  7:23 PM
+
+> ...
+> Personally, I would prefer to have as few errors as possible in cases
+> like this, so that conditionally compiled code will compile with a
+> minimum of fuss. If we're going to have an error, it would be best on
+> the original declaration - (1) in this case - as that is where the
+> actual mistake is and it is the place that has to be changed to make
+> the program legal. However, it's likely that's too incompatible to do,
+> so our choices are either to confirm the language as-is or to change the wording to make (2) illegal.
+
+As Steve may have mentioned, I believe the language "as is" is ambiguous.  The
+wording of 4.9 requires that a static constant "have a value defined by ...."
+It does *not* say that a static constant need merely have an initialization
+expression that is static.  So how can a static constant "have a value" if the
+value would violate its subtype constraint? That really doesn't make any sense
+to me.
+
+There is a very simple workaround, by the way -- simply change "X : constant S
+:= E" to:
+
+   X : constant S'Base := E
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  7:49 PM
+
+I don't see this at all. It seems to me to be a case of trying to fit the
+wording to what you want it to be rather than what it is.
+
+The sentence in question is:
+
+A static constant is a constant view declared by a full constant declaration or
+an object_renaming_declaration with a static nominal subtype, having a value
+defined by a static scalar expression...
+
+[The "..." has to do with string constants, which is irrelevant to the present
+discussion, so I left it out.]
+
+Nothing in this sentence says anything about the value having to conform to any
+subtype. There are lots of places in Ada where a value doesn't have to be in the
+range of its nominal subtype (array indicies in particular), so I don't find it
+unusual that that would be the case here. And the wording specifically says that
+the "value is defined by a static scalar expression", it doesn't put any
+conditions on that. After all, the value of a constant is always "defined by"
+its initializing expression; any subtype check happens at runtime and isn't
+relevant to the static semantics in the absence of explicit wording to the
+contrary (not present here).
+
+> There is a very simple workaround, by the way -- simply change "X :
+> constant S := E" to:
+>
+>    X : constant S'Base := E
+
+Right, but that suggests that the original declaration should have been illegal
+(so that the compiler can make a suggestion to change it as you suggest). It
+does no good to wait until some later point to get an error in some unrelated
+declaration; I doubt this is be common enough that compilers would have special
+detection for the later uses (GNAT clearly doesn't have that today).
+
+Besides, I've wasted significant amounts of time trying to get otherwise working
+conditionally compiled code to compile when it is supposedly turned off. I'd
+rather we spend efforts in reducing the amount of legality rules that depend on
+values rather than increasing them.
+
+Clearly not a giant deal either way, but given the amount of time that I've
+wasted answering Steve's never-ending e-mails on the topic, it's one that I'd
+like to see a resolution to.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March  3, 2014  8:13 PM
+
+> ... After all, the value of a constant is always "defined by" its
+> initializing expression; any subtype check happens at runtime and
+> isn't relevant to the static semantics in the absence of explicit
+> wording to the contrary (not present here). ...
+
+Perhaps, but the value is "undefined" if it fails a subtype check, according to
+the model given in 11.6 (everybody's favorite section):
+
+   * An implementation need not always raise an exception when a
+     language-defined check fails. Instead, the operation that
+     failed the check can simply yield an undefined result. ...
+
+So I think if we insist on saying that Length has a value, then I believe that
+value is an "undefined result," so any attempt to use that value at compile-time
+should fail.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  8:16 PM
+
+> My initial reaction is that (1) ought to be illegal, as it is a static
+> expression that violates 4.9(34/3).
+
+Completely wrong in my view
+>
+> Steve pointed out that 4.9(34/3) only applies to the evaluation of the
+> static expression; the conversion to the nominal subtype happens after
+> that evaluation by 3.3.1(17). Moreover, 4.9(24) requires that the
+> expression be a static expression and the subtype be a static subtype
+> -- there is nothing in that paragraph about compatibility of the value
+> with the subtype.
+>
+> Ergo, Length is legal, and it IS a static constant, at least according
+> to the RM.
+
+What we do in GNAT is we have two well defined notions "Is_Static_Expression",
+which means that the expression meets the 4.9 rules, and
+Is_OK_Static_Expression, which means that it meets these rules and also doesn't
+raise an exception. All the cases which require static expressions are
+considered illegal unless the expression meets the Is_OK_Static_Expression test.
+
+I see no earthly point in insisting that these be warnings instead of errors.
+
+> Note that making either (1) or (2) illegal is incompatible with the
+> language wording, because of the potential of making programs like the
+> one given above illegal when the language says that they are not
+> illegal. The reason for my launching a compiler survey is to find out
+> whether existing practice is different than the RM wording. If most
+> compilers already are rejecting
+> (2) [despite there being no language reason for doing so], then we
+> have a freer hand to change the definition of "static constant".
+
+There is a language reason to reject (2), which is that any conclusion that the
+RM does not require this rejection is a violation of the Dewar rule IMO (the RM
+can never be used to justify silly behavior!).
+
+Certainly I would not change the implementation of GNAT here :-)
+
+> Personally, I would prefer to have as few errors as possible in cases
+> like this, so that conditionally compiled code will compile with a
+> minimum of fuss. If we're going to have an error, it would be best on
+> the original declaration - (1) in this case - as that is where the
+> actual mistake is and it is the place that has to be changed to make
+> the program legal. However, it's likely that's too incompatible to do,
+> so our choices are either to confirm the language as-is or to change the
+> wording to make (2) illegal.
+
+I STRONGLY object to having line (1) be illegal, this makes no sense at all, and
+would introduce significant incompatibilities.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  8:21 PM
+
+> I don't see this at all. It seems to me to be a case of trying to fit
+> the wording to what you want it to be rather than what it is.
+
+And that is an admirable goal when the RM is clearly wrong if read in an overly
+aggressive and formal manner. I agree with Tuck, it makes no sense to consider
+that an exception has an in range value!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  8:50 PM
+
+> > I don't see this at all. It seems to me to be a case of trying to
+> > fit the wording to what you want it to be rather than what it is.
+>
+> And that is an admirable goal when the RM is clearly wrong if read in
+> an overly aggressive and formal manner. I agree with Tuck, it makes no
+> sense to consider that an exception has an in range value!
+
+Perhaps I'm beating a dead horse, but...
+
+Considering that both Steve and I read it differently from Tucker (and there is
+no semantic problem with that reading), I would at least like to see a formal
+clarification of the wording. (Which I suppose might end up being a To-Be-Honest
+note, but that's TBD.)
+
+I certainly don't see any static "exception" here. I agree that would be
+nonsense, but 4.9(34/3) makes any case where such a thing would be created
+illegal. The current wording says that value of a static constant is that of the
+static initializing expression. The nominal subtype doesn't enter into that, and
+certainly there is no "exception" as the value of the expression. It *does*
+enter into the runtime effect of elaboration of the constant declaration -- that
+raises an exception. The fact that such constants are supposed to be legal tells
+me that the exception is not involved, because that would certainly violate
+anybodies Dewar rule.
+
+If we did want the exception to be taken into account, then clearly the value
+must not be defined as a "static constant", and the wording needs to say
+(somehow) that.
+
+I do think that putting the error only on following uses is the least friendly
+to Ada programmers, because it makes the error reported elsewhere from the real
+source of the problem, and it makes code legality even more dependent on values.
+But in any event, this is a marginal case so it's not the end of the world to
+have this worse (particularly because most compilers appear to get this wrong,
+including mine, so it isn't going to cause *additional* pain, it will just
+prolong existing pain :-).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  9:00 PM
+
+> Perhaps, but the value is "undefined" if it fails a subtype check,
+> according to the model given in 11.6 (everybody's favorite section):
+>
+>    * An implementation need not always raise an exception when a
+>      language-defined check fails. Instead, the operation that
+>      failed the check can simply yield an undefined result. ...
+>
+> So I think if we insist on saying that Length has a value, then I
+> believe that value is an "undefined result," so any attempt to use
+> that value at compile-time should fail.
+
+I'd argue that 11.6 is only about Dynamic Semantics, and this discussion is only
+about the Static Semantics value of a static expression (which is solely
+determined by the wording in 4.9).
+
+But it would be better to figure out what we want and fix the 4.9 wording to
+give us that, rather than arguing about what it does and does not say. It's
+quite clear to me that it does not say what you want it to say, and you've been
+arguing that it is "ambiguous", and in either case we ought to change it so
+there is no doubt.
+
+BTW, OCSystems reports that their compiler reports no error on the program and
+its runs as expected as well. So far, Error 3, No Error 2. Not exactly
+conclusive.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  9:05 PM
+
+> Perhaps I'm beating a dead horse, but...
+
+Well I don't object to documenting that the horse is dead!
+
+> If we did want the exception to be taken into account, then clearly
+> the value must not be defined as a "static constant", and the wording
+> needs to say (somehow) that.
+
+Yes that seems reasonable
+
+> I do think that putting the error only on following uses is the least
+> friendly to Ada programmers, because it makes the error reported
+> elsewhere from the real source of the problem, and it makes code
+> legality even more dependent on values. But in any event, this is a
+> marginal case so it's not the end of the world to have this worse
+> (particularly because most compilers appear to get this wrong,
+> including mine, so it isn't going to cause
+> *additional* pain, it will just prolong existing pain :-).
+
+There's a warning on the declaration. Only in the minds of lawyers are warnings
+significantly different from errors, but I object to introducing illegalities
+where none have existed before. That's always a pain, and means we have to have
+a debug flag to retain the status quo, and I really don't wnat another of these
+debug flags when as in this case, it would serve no purpose.
+
+Note that GNAT specifically clears the static indication if a static predicate
+fails, so for sure it does not consider those to be static constants.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  9:10 PM
+
+> But it would be better to figure out what we want and fix the 4.9
+> wording to give us that, rather than arguing about what it does and
+> does not say. It's quite clear to me that it does not say what you
+> want it to say, and you've been arguing that it is "ambiguous", and in
+> either case wee ought to change it so there is no doubt.
+
+Well to me, when I implemented static expressions 20 years ago, it was evident
+that we needed two concepts, represented as I say in the compiler by the notions
+of Is_Static_Expression and Is_OK_Static_Expression. I will say that there was a
+fair amount of confusion in the compiler. I am in the process of committing a
+3500 line patch that totally cleans up this confusion, and properly implements
+the notion of statically unevaluated (Randy, I actually made a nice
+comprehensive test, in the form of a Btest, what shall I do with it?)
+
+I will say that in those 20 years, no one every complained about unexpected
+illegalities, and in the process of porting tens of millions (maybe even
+hundreds of millions by now) of code from other compilers to GNAT, this has
+never arisen as an issue, so please don't get in a tizzy about compatibility
+between implementations here!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  9:28 PM
+
+...
+> > I do think that putting the error only on following uses is the
+> > least friendly to Ada programmers, because it makes the error
+> > reported elsewhere from the real source of the problem, and it makes
+> > code legality even more dependent on values. But in any event, this
+> > is a marginal case so it's not the end of the world to have this
+> > worse (particularly because most compilers appear to get this wrong,
+> > including mine, so it isn't going to cause
+> > *additional* pain, it will just prolong existing pain :-).
+>
+> There's a warning on the declaration. Only in the minds of lawyers are
+> warnings significantly different from errors, but I object to
+> introducing illegalities where none have existed before. That's always
+> a pain, and means we have to have a debug flag to retain the status
+> quo, and I really don't wnat another of these debug flags when as in
+> this case, it would serve no purpose.
+>
+> Note that GNAT specifically clears the static indication if a static
+> predicate fails, so for sure it does not consider those to be static
+> constants.
+
+I agree that compatibility (especially as there is an ACATS requiring no error
+on the declaration of the constant) is important, thus reporting an error on the
+constant declaration is not a practical possibility. OTOH, confirming that no
+error is expected on either declaration would be compatible (as it would be
+fewer, not more, errors) and it would also would not introduce a compatibility
+problem into those compilers that do not report any errors currently. How much
+incompatibility is possible really depends on how many compilers currently allow
+this case; we currently know of two (out of five). Hopefully, there will be more
+data on this in a couple of days. It's probably premature to try to determine
+the compatibility impact without more data.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March  3, 2014  10:03 PM
+
+> If we did want the exception to be taken into account, then clearly
+> the value must not be defined as a "static constant", and the wording
+> needs to say (somehow) that.
+
+I agree, the wording is unclear, and in fixing it, I would vote for declaring it
+to be non-static if the value of the initializing expression does not satisfy
+its subtype.
+
+It just seems really weird that, given:
+
+   X : constant S := ...
+
+we would all agree we have a compile-time error if we try to use S'(X) in a
+static expression, but it is fine to use plain old "X".  Normally you would
+expect no semantic effect of qualifying an expression with its nominal subtype,
+other than overload resolution.  But here it would be making the expression
+illegal.  That is just "wrong." ;-) (By the way the nominal subtype of a bound
+of an array is the base subtype of the index type -- see 4.1.4(9/4).)
+
+> I do think that putting the error only on following uses is the least
+> friendly to Ada programmers, because it makes the error reported
+> elsewhere from the real source of the problem, and it makes code
+> legality even more dependent on values....
+
+On the other hand, there are relatively few places that require static
+expressions, and it seems a bit perverse to use this sort of statically
+out-of-range constant in such contexts.  So I don't think this will come up very
+often at all.  And as I mentioned, in the extremely rare case it does come up,
+it is trivial to fix it by adding 'Base.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  10:41 PM
+
+...
+> I agree, the wording is unclear, and in fixing it, I would vote for
+> declaring it to be non-static if the value of the initializing
+> expression does not satisfy its subtype.
+>
+> It just seems really weird that, given:
+>
+>    X : constant S := ...
+>
+> we would all agree we have a compile-time error if we try to use S'(X)
+> in a static expression, but it is fine to use plain old "X". Normally
+> you would expect no semantic effect of qualifying an expression with
+> its nominal subtype, other than overload resolution.  But here it
+> would be making the expression illegal.  That is just "wrong." ;-)
+
+But Tuck, if you write:
+
+    X1 : constant Positive := 0;
+
+the standard and ACATS requires this to work and not be illegal. OTOH, if you
+write:
+
+    X2 : constant Positive := Positive'(0);
+
+the initial expression clearly violates 4.9(34/3) and definitely is illegal.
+This looks suspiously like qualifying an expression with its nominal subtype.
+
+So we already have this problem regardless of what we decide about the
+staticness of X1, and it isn't going away because the compatibility cost of
+making the first thing illegal is too severe.
+
+I find it hard to get excited about Positive'(X1) versus X1 given this reality.
+
+If I was designing this stuff from scratch, I'd definitely except qualified
+expressions from 4.9(34/3) [everywhere!], because here (like static constants),
+the value of the expression is well-defined. There is no pressing need to
+account for the fact that the expression will raise an exception at run-time.
+(Unlike, say divide-by-zero, where the value is not well-defined.) Of course,
+that ship has sailed and we're not changing this now. So this is going to be a
+wart no matter what rule we choose.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March  3, 2014  10:31 PM
+
+> It would have a huge impact on the implementation of GNAT to turn the
+> illegalities into warnings, and would be an excellent example of
+> totally wasted work. In fact I would plain refuse to waste my time on
+> it!
+
+You would not want those following illegalities to be warnings, as there is
+nothing wrong with those declarations, the problem is solely upstream (and you
+already have a warning there).
+
+...
+> Why a big impact? Well at hundreds of points in the front end, we have
+> code that says
+>
+>    if not Is_OK_Static_Expression (Bla) then
+>       error and abandon processing
+>
+>    else
+>       proceed assuming Bla can be statically evaluated
+>
+> now this has to be:
+>
+>    if not Is_Static_Expression (Bla) then
+>       error and abandon processing
+>
+>    elsif not Is_OK_Static_Expression (Bla) then
+>       issue a warning
+>       think carefully about how to proceed without
+>       blowing up, given that Bla cannot be statically
+>       evaluated any more
+>
+>    else
+>       ...
+>    end if;
+
+This is definitely the wrong way to do this. If we were to make this change, the
+fact that the earlier declaration might raise an exception at runtime would be
+irrelevant to the value and processing of it as a static expression. As such,
+uses of such a static constant ought to be treated just like any other static
+constant, and thus Is_OK_Static_Expression should be true for it. Otherwise you
+get a warning cascade, which isn't that likely to help anyone.
+
+I suppose there might be some other usage of the routine for which that would
+cause trouble, but it seems unlikely to me -- the important thing is that the
+components of the static expression have well-defined values. Whether or not
+they raise an exception does not determine that (some exceptions do prevent the
+expression from having a value, others do not).
+
+...
+> And all this work for absolutely NOTHING, since as I say this has
+> never been a portability issue in practice!
+
+Sorry, I don't recall you saying that before. It's never come up as a
+portability problem for me, but that's clearly because Janus/Ada and GNAT handle
+this the same way. I've definitely seen this case in practice, but I simply
+thought that I had to remove it somehow (I didn't realize that the RM said
+something else).
+
+> If necessary, just have an implementation permission that allows
+> compilers to issue an error if they want to. Ugly, but not nearly so
+> ugly as busy work for no good reason!
+> And that way all the compilers would be conforming :-)
+
+I suppose that's an option. I agree that making a work for implementations here
+isn't very appealing, but neither are incompatibilities.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  11:02 PM
+
+> You would not want those following illegalities to be warnings, as
+> there is nothing wrong with those declarations, the problem is solely
+> upstream (and you already have a warning there).
+
+Of course they should be warnings if someone decides that they should not be
+errors, I have no idea what you are thinking?????
+
+> This is definitely the wrong way to do this. If we were to make this
+> change, the fact that the earlier declaration might raise an exception
+> at runtime would be irrelevant to the value and processing of it as a
+> static expression. As such, uses of such a static constant ought to be
+> treated just like any other static constant, and thus
+> Is_OK_Static_Expression should be true for it. Otherwise you get a
+> warning cascade, which isn't that likely to help anyone.
+
+But you can't get the value of the constant, and there is a very strong
+assumption that an Is_OK_Static_Expression can be passed to Expr_Value to obtain
+the value. Applying Expr_Value to a value that raises CE will cause a compiler
+bomb!
+
+>> And all this work for absolutely NOTHING, since as I say this has
+>> never been a portability issue in practice!
+>
+> Sorry, I don't recall you saying that before. It's never come up as a
+> portability problem for me, but that's clearly because Janus/Ada and
+> GNAT handle this the same way. I've definitely seen this case in
+> practice, but I simply thought that I had to remove it somehow (I
+> didn't realize that the RM said something else).
+>
+>> If necessary, just have an implementation permission that allows
+>> compilers to issue an error if they want to. Ugly, but not nearly so
+>> ugly as busy work for no good reason!
+>> And that way all the compilers would be conforming :-)
+>
+> I suppose that's an option. I agree that making a work for
+> implementations here isn't very appealing, but neither are incompatibilities.
+
+The work for implementations is potentially large, and definitely real, worrying
+about the incomaptibilities is IMO sophistry of the worst kind from language
+lawyers. We have spent FAR too much effort in GNAT dealing with things of
+absolutely ZERO significance (like 32-bit characters and leap seconds), and it
+just takes away from time spent doing useful stuff, and thus damages the
+language.
+
+This is really a case of spending time worrying about an issue that is simply
+not an issue. At best it is an entertaining little discussion of no real import.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, March  3, 2014  11:57 PM
+
+> One can create similar examples using initialization expressions in
+> preelaborated packages. (Those have to be static, so if a declaration
+> can change from static to non-static depending on the value, then the
+> legality of the package can also change for that reason.) These are
+> less compelling because the package cannot be conditional and thus it
+> always would raise an exception in an example like the above.
+
+Don't we have the same issue with this:
+
+         Length : Positive := (if Item_Size > 0 then Item_Size else 0);
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  11:48 PM
+
+> Don't we have the same issue with this:
+>
+>           Length : Positive := (if Item_Size > 0 then Item_Size else 0);
+
+If Item_Size is static, and greater than 0, then this is fine, since the 0 of
+else 0 is statically unevaluated.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, March  3, 2014  11:45 PM
+
+I am really trying to wrap my head around Randy's viewpoint here, because I find
+it so hard to understand.
+
+We have the original constant declaration. I *think* Randy would like to make
+this illegal, but as far as I can tell, he agrees that
+
+a) it is not illegal now
+b) it would be too incompatible to make it illegal
+
+For the use, he wants to make it legal, and not even give a warning.
+
+So this means that a likely wrong program, which right now GNAT (which I remind
+people is the only current Ada compiler) diagnoses and refuses to compile, Randy
+would prefer to have handled without a compile time error, and instead head into
+execution. There it may or may not blow up at run-time (because the exception
+might be inevitable, in which case you get a run-time blow up, or perhaps the
+bug remains latent, because in the test programs you run you just don't happen
+to execute this particular path).
+
+This makes zero sense to me, I can't even begin to understand the thinking that
+it is a good idea to change the compiler so that instead of getting a compile
+time error we go into execution and blow up, or perhaps a task just dies
+silently.
+
+Now making the declaration illegal might have been better thinking about this
+originally. It is unlikely to be common that such declarations are useful.
+
+However, making things illegal always causes nasty incompatibilities in
+practice, e.g. making 1/0 illegal in Ada 95 was painful.
+
+So you have to think carefully before making previously legal programs illegal,
+and you can certainly construct cases where the declaration is legitimate, for
+example
+
+     Cases_To_Handle : constant Integer := $X$;
+     --  $X$ here is a preprocessing constant
+
+     if Cases_To_Handle > 1 then
+        declare
+           X : constant Positive := Cases_To_Handle - 1;
+        begin
+           ....
+        end;
+     end if;
+
+This does not seem so far fetched, and could be a usage pattern in current code,
+and I would be very reluctant to make this illegal (as I say it would have to be
+done with a flag to restore the old behavior, and accumulating such flags is
+painful).
+
+Note by the way that we have the notion of statically unevaluated in the
+definition of expressions, but if you think about the above example, we should
+really extend this notion. If you have an IF statement
+
+     if Expr then
+	...
+     end if;
+
+and Expr is statically False, then everything in ... should be statically
+unevaluated. Well I don't seriously suggest going that route, but in the land of
+conditional compilation and preprocessing (the real world very often), it is
+common to have big chunks of essentially statically unevaluated code. What you
+can and cannot do in that statically unevaluated code is a bit delicate, and
+very often it is annoying that you can't do something you would like to. For
+example, if Q is statically zero, you cant have
+
+     if Q /= 0 then
+     declare
+        QR : constant Integer := 1000 / Q;
+     begin
+        ...
+     end;
+
+because you will get:
+
+>      1. procedure t is
+>      2.    X : constant Integer := 0;
+>      3. begin
+>      4.    if X /= 0 then
+>      5.       declare
+>      6.          Y : constant Integer := 10000 / X;
+>                                                |
+>         >>> division by zero
+>         >>> static expression fails Constraint_Check
+>
+>      7.       begin
+>      8.          null;
+>      9.       end;
+>     10.    end if;
+>     11. end;
+
+But right now you *can* say:
+
+     1. procedure t is
+     2.    X : constant Integer := 0;
+     3. begin
+     4.    if X /= 0 then
+     5.       declare
+     6.          Y : constant Positive := X;
+     7.       begin
+     8.          null;
+     9.       end;
+    10.    end if;
+    11. end;
+
+Note by the way that GNAT suppresses the normal warning in this case, because it
+has an internal notion of unevaluated sections of code, and suppresses warnings
+within such code sections (otherwise we get all kinds of annoying false
+positives in code that does conditional compilation).
+
+it's a bit of an inconsistent mess to be sure, aggravated by the Ada 95 changes,
+but it is what it is, and you have to have VERY good reasons for introducing
+incompatible changes.
+
+So the argument for not making the original declaration illegal seems to me
+overwhelming. And I think everyone agrees with this (even Randy).
+
+(hmmm, an interesting gnat extension would be to suppress the Ada 95
+illegalities like 1/0 in staticallly unevaluated code sections, easy to do, and
+I think this would be quite useful for conditional compilation cases ...
+interesting)
+
+Anyway, the focus has to be on uses, to me if we use one of the many pragmas
+that requires a static argument (contrary to an earlier claim there are MANY
+places requiring staticness --there are 278 references to Is_Static_xxx in the
+GNAT front end), then it is definitely desirable to make the use of that pragma
+statically illegal.
+
+Some cases would be really impossible to handle, consider:
+
+    pragma Ident (static_string_EXPRESSION);
+
+which puts an identifying string into the object module.
+Randy would like such uses to be legal even if the static string expression
+raised CE, but then what the heck would you put into the object module if you
+force one to be generated.
+
+OK, this is an extension, but it seems even worse to have to treat a case like
+this specially and inntroduce two notions
+
+a) sensible handling of non-static static constants for implementation-defined
+   stuff.
+
+b) nonsensical handling of non-static static constants for language-defined
+   stuff.
+
+Another example, from language-defined stuff
+
+    type R is range 1 .. X;
+
+now suppose X is one of these raises exception static constants that Randy wants
+to make legally usable.
+
+Well if we make this legal, then R'Size is legal, and for example, what on earth
+would the result returned in ASIS DDA for the size of R be in this case. Answer
+I suppose is that we would have to special case things all over ASIS, UGH! And
+we would have to special case all the -gnatR code that prints out
+representations of types.
+
+The more I think of it, the more I think I seriously UNDERestimated the
+implementation impact of trying to make these things legal.
+
+I seriously wonder what these compilers do which make these declarations legal,
+for example, what they do with R'Size above.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March  4, 2014  2:06 AM
+
+> I am really trying to wrap my head around Randy's viewpoint here,
+> because I find it so hard to understand.
+
+I realize that I'm sort of taking two different viewpoints at the same time.
+So let's just concentrate on one...
+
+...
+> So you have to think carefully before making previously legal programs
+> illegal, and you can certainly construct cases where the declaration
+> is legitimate, for example
+>
+>      Cases_To_Handle : constant Integer := $X$;
+>      --  $X$ here is a preprocessing constant
+>
+>      if Cases_To_Handle > 1 then
+>         declare
+>            X : constant Positive := Cases_To_Handle - 1;
+>         begin
+>            ....
+>         end;
+>      end if;
+>
+> This does not seem so far fetched, and could be a usage pattern in
+> current code, and I would be very reluctant to make this illegal (as I
+> say it would have to be done with a flag to restore the old behavior,
+> and accumulating such flags is painful).
+
+Yes, of course. This is precisely why we couldn't make this declaration illegal.
+But now consider a modification of my sample program:
+
+      Cases_To_Handle : constant Integer := $X$;
+      --  $X$ here is a preprocessing constant
+
+      if Cases_To_Handle > 1 then
+         declare
+            X : constant Positive := Cases_To_Handle - 1;
+            type Cases_Index is range 1 .. X;
+            type Cases_Data is array (Cases_Index) of Natural := (others => 0);
+         begin
+            ....
+         end;
+      end if;
+
+Again, none of this code is executed unless Cases_To_Handle is greater than
+zero. I've definitely written code like this when I want to make sure that the
+data indexes don't get mixed up with anything else.
+
+> Note by the way that we have the notion of statically unevaluated in
+> the definition of expressions, but if you think about the above
+> example, we should really extend this notion. If you have an IF
+> statement
+>
+>      if Expr then
+> 	...
+>      end if;
+>
+> and Expr is statically False, then everything in ... should be
+> statically unevaluated.
+
+I proposed something like this a couple of years ago in the writeup for
+AI12-0024-1 (Compile-time detection of range and length errors). I don't think
+the we've ever seriously considered whether or not it would be a good idea (I
+wasn't as convinced when I got done as when I started).
+
+> Well I don't seriously suggest
+> going that route, but in the land of conditional compilation and
+> preprocessing (the real world very often), it is common to have big
+> chunks of essentially statically unevaluated code. What you can and
+> cannot do in that statically unevaluated code is a bit delicate, and
+> very often it is annoying that you can't do something you would like
+> to.
+
+Yes, I've been saying that since Steve first brought up the subject.
+
+...
+> Randy would like such uses to be legal even if the static string
+> expression raised CE, but then what the heck would you put into the
+> object module if you force one to be generated.
+
+I haven't been thinking about the string case, but I think it's the same as the
+integer case.
+
+Specifically, the value of a static constant that fails a range check is the
+value of the initializing static expression. The Constraint_Error is ignored for
+this purpose. If the initializing static expression would be illegal, then the
+constant is illegal, period, and there is no need to know the value. (This is
+the current rule, so there is no incompatibility with that.)
+
+> OK, this is an extension, but it seems even worse to have to treat a
+> case like this specially and inntroduce two notions
+>
+> a) sensible handling of non-static static constants for
+> implementation-defined stuff.
+>
+> b) nonsensical handling of non-static static constants for
+> language-defined stuff.
+>
+> Another example, from language-defined stuff
+>
+>     type R is range 1 .. X;
+>
+> now suppose X is one of these raises exception static constants that
+> Randy wants to make legally usable.
+
+This is exactly the case in my example program!
+
+      X : constant Positive := 0;
+      type R is range 1 .. X;
+
+In this case, R'Last = 0. But no code can ever determine that at run-time, so it
+actually doesn't matter.
+
+> Well if we make this legal, then R'Size is legal, and for example,
+> what on earth would the result returned in ASIS DDA for the size of R
+> be in this case. Answer I suppose is that we would have to special
+> case things all over ASIS, UGH! And we would have to special case all
+> the -gnatR code that prints out representations of types.
+
+Gosh no. R'Size = R1'Size where R1 is declared as below:
+    type R1 is range 1 .. 0
+
+> The more I think of it, the more I think I seriously UNDERestimated
+> the implementation impact of trying to make these things legal.
+>
+> I seriously wonder what these compilers do which make these
+> declarations legal, for example, what they do with R'Size above.
+
+I explained that above. One could argue that the only way one could tell is via
+implementation-defined stuff (like ASIS, at least from the perspective of the
+Ada Standard), so it really doesn't matter. But even if you think it matters, it
+would be well-defined.
+
+Maybe a better way to think of it is that for something like
+   X : constant Positive := 0;
+the meaning is the same as
+   X : constant Positive'Base := 0;
+with a *runtime* check of Positive at the point of the elaboration of the
+declaration of X. (And that is true for any constant declaration, not just these
+special static ones.)
+
+Uses of X would work as for the second, unconstrained declaration above (with no
+range check at all, and which is clearly static and not controversial). There
+would be absolutely no reason to change anything about subsequent uses of X --
+either they make sense for that unconstrained declaration of the constant and
+they work normally, or they don't work for that declaration, and they give
+whatever error they would have given.
+
+The idea is that the success or failure of the subtype check in a constant
+declaration has no impact whatsoever on the static value of X. (After all,
+static expressions have infinite precision and accuracy, and we don't worry
+about other bounds like overflows -- subtypes are just another form of bound
+that don't need to be enforced until the constant leaves the static realm.)
+Remember that no code that can be executed could ever depend on the value of X
+in a case like this; the exception could not be handled where any uses of X
+exist.
+
+Hope this helps understand what I was proposing.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March  4, 2014  2:13 AM
+
+> > Don't we have the same issue with this:
+> >
+> >           Length : Positive := (if Item_Size > 0 then Item_Size else
+> > 0);
+>
+> If Item_Size is static, and greater than 0, then this is fine, since
+> the 0 of else 0 is statically unevaluated.
+
+Right, we handled that within a single static expression. If in this example,
+Item_Size was 0 (as in my example), this declaration always raises
+Constraint_Error -- and more to the point, it's also always executed. So it
+doesn't matter what definition we use (presuming that we aren't willing to
+change the behavior required by the ACATS, which seems like the best plan in the
+absence of any compelling problem).
+
+The issues show up in larger chunks of conditionally compiled code -- that
+beyond what is considered "statically unevaluated" by today's language rules.
+Those might have many interdependent complex declarations - those are the sorts
+of cases that I'm thinking about.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, March  4, 2014  2:39 AM
+
+> Specifically, the value of a static constant that fails a range check
+> is the value of the initializing static expression.
+
+You mean the value could be something like 10**100_000,
+
+AARGH! that would bring a whole host of different problems with it.
+
+No thank you!
+
+I am definitely determined that the RM were to be changed to make the reference
+legal, then GNAT would simply ignore this part of the RM, we have better things
+to do with our time that invest huge amounts of time in a change that will have
+no substantial advantage for users of the language.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March  4, 2014 12:32 PM
+
+> > Specifically, the value of a static constant that fails a range
+> > check is the value of the initializing static expression.
+>
+> You mean the value could be something like 10**100_000,
+>
+> AARGH! that would bring a whole host of different problems with it.
+
+I don't see that.
+    C1 : constant := 10**100_000;
+is already legal, subject the "impossible or impractical" rules. All I'm
+proposing is to is do the same thing for
+    C2 : constant Positive := 10**100_000;
+
+I'd expect that the compiler would reject the evaluation of 10**100_000 as being
+too large immediately at the declaration of either constant. But if it doesn't
+(as might happen in a more realistic case like 10**30), any context where C2 is
+legal, C1 is legal, so I don't see any *new* problems being created by the
+possibility of C2 (nor any new code needed).
+
+> I am definitely determined that the RM were to be changed to make the
+> reference legal, then GNAT would simply ignore this part of the RM, we
+> have better things to do with our time that invest huge amounts of
+> time in a change that will have no substantial advantage for users of
+> the language.
+
+Duly noted. One is always on shaky ground when judging the implementation effort
+of someone else's implementation. I only mention it because you seem determined
+to make the problem harder than it is -- if I thought the leaving the rules as
+written actually would introduce *new* implementation complications, I wouldn't
+even propose it.
+
+P.S. DDCI reports that their compiler rejects the declaration (2). So the
+current score is 4 compilers do reject (2), 2 do not. There isn't any
+information about Atego's compilers yet.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, March  4, 2014 12:47 PM
+
+> I don't see that.
+>      C1 : constant := 10**100_000;
+> is already legal, subject the "impossible or impractical" rules. All
+> I'm proposing is to is do the same thing for
+>      C2 : constant Positive := 10**100_000;
+
+I may have missed some earlier discussion, but this violates the requirement of
+4.9(35/2):
+
+*  If the expression is not part of a larger static expression and the
+   expression is expected to be of a single specific type, then its value shall
+   be within the base range of its expected type. Otherwise, the value may be
+   arbitrarily large or small.
+
+> ... P.S. DDCI reports that their compiler rejects the declaration (2).
+> So the current score is 4 compilers do reject (2), 2 do not. There
+> isn't any information about Atego's compilers yet.
+
+They use the AdaMagic front end, but have done their own maintenance on it for
+years, so somewhat hard to predict.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, March  4, 2014  3:17 PM
+
+> *  If the expression is not part of a larger static expression and the
+> expression is expected to be of a single specific type, then its value
+> shall be within the base range of its expected type. Otherwise, the
+> value may be arbitrarily large or small.
+
+Thanks, I'd forgotten that. So the "giant value" case is already statically
+illegal and it doesn't need to be considered for implementation purposes.
+
+> > ... P.S. DDCI reports that their compiler rejects the declaration (2).
+> > So the current score is 4 compilers do reject (2), 2 do not. There
+> > isn't any information about Atego's compilers yet.
+>
+> They use the AdaMagic front end, but have done their own maintenance
+> on it for years, so somewhat hard to predict.
+
+They also have the old Rational compiler, and I wouldn't want to even guess what
+that does.
+
+****************************************************************
+
+From: Jon Squire
+Sent: Tuesday, March  4, 2014  5:18 PM
+
+-- an old compiler writers comments:
+-- sc.adb       Check that compiler recognizes Item_Size > 0 is false.
+--              It should not matter if something in a "declare" might
+--              be invalid if the "declare" can not be executed.
+--              This is a compiler design issue, have the syntax checking
+--              pass build the symbol table, save constant values,
+--              evaluate expressions. (Possibly do code removal optimization.)
+with Ada.Text_IO;
+procedure sc is
+   Item_Size : constant := 0; -- 1; compiles and runs begin
+   Ada.Text_IO.Put_Line ("Start Static Constant check");
+   if Item_Size > 0 then -- optimization should replace everything in "if"
+                         -- except printing  "Nothing as expected"
+     declare
+       Length : constant Positive := Item_Size; -- (1)
+       type Data_Index is range 1 .. Length; -- (2)
+       type Data_Array is array (Data_Index) of Natural;
+     begin
+       Ada.Text_IO.Put_Line ("Can't get here");
+     exception
+       when Constraint_Error =>
+         Ada.Text_IO.Put_Line ("Can't get here, either");
+     end;
+   else -- Do nothing
+     Ada.Text_IO.Put_Line ("Nothing as expected");
+   end if;
+   Ada.Text_IO.Put_Line ("End Static Constant check."); end sc;
+
+-- OK, if too expensive to build a modern compiler.
+-- (Not one of the compilers written up in textbooks,
+--  that said optimization should be the last pass!!!)
+
+****************************************************************
