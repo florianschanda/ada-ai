@@ -1,0 +1,407 @@
+!standard 6.1.1(39/3)                                14-05-15  AI05-0113-1/01
+!standard 7.3.2(23/3)
+!class binding interpretation 14-05-15
+!status work item 14-05-15
+!status received 14-04-25
+!priority Medium
+!difficulty Hard
+!qualifier Omission
+!subject Class-wide preconditions and statically bound calls
+!summary
+
+Class-wide preconditions, postconditions, and type invariants are processed
+using the actual types for the parameters of type T (not always using T'Class).
+In particular, for a statically bound call, the calls within the Pre'Class
+expression are statically bound.
+
+!question
+
+6.1.1(7.3) says that, a parameter having type T is interpreted as having type
+T'Class. That interpretation means that any call to a primitive operation of T
+is a dispatching call. Effectively, the parameter has an implicit
+conversion to T'Class.
+
+For a statically bound call when the tag of the parameter identifies a
+different type than its nominal type, this means that a different body would
+be executed than would be executed for the equivalent Pre. That means that
+Pre'Class is not quite equivalent to a set of identical Pre aspects with
+an additional guarentee for future overridden subprograms. But that was
+the intent: that Pre'Class be LSP-safe but otherwise be equivalent to putting
+the same Pre on every related subprogram.
+
+The implicit redispatching implied by 6.1.1(7/3) makes static analysis harder,
+as a tool cannot plug in the body of a subprogram called from Pre'Class even
+if the tool knows the contents of that body, because the call might dispatch
+to some other body.
+
+Should this be corrected somehow? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add after 6.1.1(39/3): [Note: I'm not sure the best place to put this.]
+
+Evaluations of class-wide preconditions and postconditions takes place using
+the actual nominal types for the parameters of type T and of access-to-T. In
+particular, these parameters are not converted to type T'Class or
+access-to-T'Class as the resolution of the expression might imply.
+
+AARM Ramification: This means that calls within the class-wide precondition
+are statically bound for a statically bound call. Calls within the class-wide
+precondition are not redispatching for statically bound calls; they are
+dispatching for dispatching calls.
+
+AARM Implementation Note: This might take care if the class-wide precondition
+check is made at the call site. For class-wide precondition and postcondition
+checks made within the body of a subprogram, this means that the calls are
+statically bound to the type of that subprogram. (A dispatching call will
+execute the correct body for that case.)
+
+** TBD - some similar rule is needed for Type_Invariants. I'll wait to find
+out if the above will fly before going further.
+
+!discussion
+
+Consider two nearly identical hierarchies of types. First:
+
+   package P11 is
+       type Root is abstract tagged private;
+
+       function Is_Valid (P : in Root) return Boolean;
+
+       procedure Proc (P : in Root)
+           with Pre => Is_Valid(P);
+
+       procedure Proc2 (P : in Root);
+   private
+       ...
+   end P11;
+
+   with P11;
+   package P12 is
+       type Child is new P11.Root with private;
+
+       overriding
+       function Is_Valid (P : in Child) return Boolean;
+
+       overriding
+       procedure Proc (P : in Child)
+           with Pre => Is_Valid(P);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P12;
+
+   with P12;
+   package P13 is
+       type GrandChild is new P11.Child with private;
+
+       overriding
+       function Is_Valid (P : in Grandchild) return Boolean;
+
+       overriding
+       procedure Proc (P : in Grandchild)
+           with Pre => Is_Valid(P);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P13;
+
+and the second hierarchy is:
+
+   package P21 is
+       type Root is abstract tagged private;
+
+       function Is_Valid (P : in Root) return Boolean;
+
+       procedure Proc (P : in Root)
+           with Pre'Class => Is_Valid(P);
+
+       procedure Proc2 (P : in Root);
+   private
+       ...
+   end P21;
+
+   with P21;
+   package P22 is
+       type Child is new P21.Root with private;
+
+       overriding
+       function Is_Valid (P : in Child) return Boolean;
+
+       overriding
+       procedure Proc (P : in Child);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P22;
+
+   with P22;
+   package P23 is
+       type GrandChild is new P21.Child with private;
+
+       overriding
+       function Is_Valid (P : in Grandchild) return Boolean;
+
+       overriding
+       procedure Proc (P : in Grandchild);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P23;
+
+The only difference between these hierarchies is that the first uses a specific
+Pre on each declaration of Proc, while the second uses a class-wide Pre on the
+first declaration of Proc and allows it to be inherited on the others.
+
+Our intent is that these behave identically at runtime, with the only difference
+being that there is an additional guarantee that a new descendant of P21.Root
+will also have the Pre'Class expression (that has to be manually added in the
+other hierarchy).
+
+The additional guarantee allows analyzing dispatching calls without knowing the
+exact body that they will reach, as we know that all bodies will have the
+precondition Pre'Class. Such analysis can only be done for the P11 hierarchy
+via full program analysis.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test ought to ensure that no redispatching occurs in statically
+bound calls.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Friday, April 25, 2014  6:43 PM
+
+This is an issue that has been bothering me for a long time. Originally, I
+noticed it in thinking about an ARG discussion toward the end of the Ada 2012
+work. I didn't want to hold up completion of the standard to fix this, so I kept
+it to myself. Since, I think I've mentioned it in conversation periodically, but
+I don't think we've ever opened an AI to address it. So let me bore you to
+tears^H^H^H^H^H^H^H^H^H^H^H explain in detail this issue. (The issue also occurs
+for Post'Class and probably for Type_Invariant'Class but I'm not going to
+explain those here.)
+
+Consider the two nearly identical hierarchies of types. First:
+
+   package P11 is
+       type Root is abstract tagged private;
+
+       function Is_Valid (P : in Root) return Boolean;
+
+       procedure Proc (P : in Root)
+           with Pre => Is_Valid(P);
+
+       procedure Proc2 (P : in Root);
+   private
+       ...
+   end P11;
+
+   with P11;
+   package P12 is
+       type Child is new P11.Root with private;
+
+       overriding
+       function Is_Valid (P : in Child) return Boolean;
+
+       overriding
+       procedure Proc (P : in Child)
+           with Pre => Is_Valid(P);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P12;
+
+   with P12;
+   package P13 is
+       type GrandChild is new P11.Child with private;
+
+       overriding
+       function Is_Valid (P : in Grandchild) return Boolean;
+
+       overriding
+       procedure Proc (P : in Grandchild)
+           with Pre => Is_Valid(P);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P13;
+
+and the second hierarchy is:
+
+   package P21 is
+       type Root is abstract tagged private;
+
+       function Is_Valid (P : in Root) return Boolean;
+
+       procedure Proc (P : in Root)
+           with Pre'Class => Is_Valid(P);
+
+       procedure Proc2 (P : in Root);
+   private
+       ...
+   end P21;
+
+   with P21;
+   package P22 is
+       type Child is new P21.Root with private;
+
+       overriding
+       function Is_Valid (P : in Child) return Boolean;
+
+       overriding
+       procedure Proc (P : in Child);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P22;
+
+   with P22;
+   package P23 is
+       type GrandChild is new P21.Child with private;
+
+       overriding
+       function Is_Valid (P : in Grandchild) return Boolean;
+
+       overriding
+       procedure Proc (P : in Grandchild);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P23;
+
+The only difference between these hierarchies is that the first uses a specific
+Pre on each declaration of Proc, while the second uses a class-wide Pre on the
+first declaration of Proc and allows it to be inherited on the others.
+
+Note that while the expression appears to be the same for P11.Proc'Pre and
+P21.Proc'Pre'Class, there is difference that stems from 6.1.1(7/3). That says
+that in Pre'Class, a parameter (P in this case) having type T (Root in this
+case) is interpreted as having type T'Class (Root'Class). That interpretation
+means that any call to a primitive operation of T (in this case, the call to
+Is_Valid) is a dispatching call. Effectively, the parameter P is has an implicit
+conversion to type Root'Class, so the expression is effectively
+Is_Valid(Root'Class(P)).
+
+Now, my understanding of the intent of this feature is that Pre'Class works just
+like specifying the Pre'Class expression as the Pre of each of the corresponding
+subprograms for each descendant type. The effect is that the P11 hierarchy and
+the P21 hierarchy act the same. But Pre'Class also provides a guarantee that any
+future descendants will also have that precondition; the P11 has no such
+guarantee.
+
+Consider the effect on a dispatching call to Proc. For the P11 hierarchy, the
+Pre expression will be evaluated after dispatching, appropriately for the actual
+body dispatched to. But since there is no guarantee that these are the same, we
+know nothing useful about the precondition at the call site of the dispatching
+call. (Even if they are all the same, as in this example, a future extension
+could change that, so making any assumptions is dangerous absent full program
+analysis.) OTOH, in the case of Pre'Class, we know that any possible body will
+have the Pre'Class applied, so we know at least that much of the precondition at
+the call site. One can confidently use that knowledge in program analysis (be it
+manual or via a program). To get this additional knowledge and confidence is the
+point of Pre'Class.
+
+Note that for a dispatching call, the effect is identical for the P11 and the
+P21 hierarchies. If we have an object Obj of type Root'Class with a tag of type
+T, the call Proc(Obj) in the P11 hierarchy will dispatch to the body for T,
+which will evaluate the Pre expression for T: (Note: I'm prefixing operations
+with "T'" to describe operations of the specific type T.)
+
+   Proc(Obj) ==> T'Proc(Obj) ==> T'Pre(Obj) then T'Proc'Body(Obj) ==>
+       T'Is_Valid(Obj) then T'Proc'Body(Obj)
+
+For the hierarchy P21 we get (remembering the implicit conversion to
+T'Class) in Pre'Class and evaluating Pre'Class at the call site):
+   Proc(Obj) ==> T'Pre'Class(Obj) then T'Proc(Obj) ==>
+     Is_Valid(Root'Class(Obj)) then T'Proc'Body(Obj) ==>
+       T'Is_Valid(Obj) then T'Proc'Body(Obj)
+Note that the effect is ultimately the same either way, in large part because
+all of the dispatching operations dispatch on the same tag.
+
+However, that's not true for a statically bound call. For instance, imagine that
+within the body of P11.Proc2 and P21.Proc2, we have the call Proc(P). This is a
+statically bound call for type Root. Using the same notation as above, the call
+in P11.Proc2 expands to:
+
+   Proc(P) ==> Root'Proc(P) ==> Root'Pre(P) then Root'Proc'Body(P) ==>
+       Root'Is_Valid(P) then Root'Proc'Body(P)
+
+The call in P21.Proc2 expands to:
+   Proc(P) ==> Root'Pre'Class(P) then Root'Proc(P) ==>
+       Is_Valid(Root'Class(P)) then Root'Proc'Body(Obj)
+
+Note that here we're redispatching to the tag of P, so we can't say which body
+is called at runtime. This of course has no negative effect if the tag is
+actually that of Root (but since Root is abstract here, that's not possible).
+But if the tag is something else (which is likely, as Proc2 is inherited for the
+descendant types - the tag would never be Root in any of those inherited
+bodies), we're going to call a different body of Is_Valid.
+
+That means that our initial intent of making these hierarchies act identically
+is not met for a statically bound call. Moreover, it means that using Pre'Class
+damages our ability to statically analyze a statically bound call when it
+enhances our ability to statically analyze a dispatching call -- a trade-off
+that we don't want to be making. (Imagine, for instance, that the bodies of all
+of the Is_Valid functions are expression functions. In that case, a static
+analyzer would know the exact details of the precondition for the P11 hierarchy,
+but know only that some Is_Valid is called for the P21 hierarchy.)
+
+I think it is pretty clear that we don't want this to happen. And the problem is
+pretty clearly the implicit re-dispatch in the Pre'Class expression.  We need to
+eliminate that (while it would still be possible to explicitly introduce
+re-dispatch into Pre and Pre'Class if that is desired, it certainly should not
+be the default behavior).
+
+Without the implicit redispatch, these two hierarchies are completely identical
+(which also shows that such a change is implementable - since we all agree that
+P11 is implementable). And the only difference is the guarantee that future
+descendants will also have the Pre'Class expression (which allows more analysis
+on dispatching calls without making assumptions about the future or having to
+rely solely on full-program analysis).
+
+Lastly, I want to look at how we might accomplish eliminating the implicit
+redispatch.
+
+The first possibility is to just say that it isn't there in the first place.
+That is, 6.1.1(7/3) is just a name resolution rule, it does not have the effect
+that it appears to have on the dynamic semantics. We could probably even do that
+with a To Be Honest note. However, in that case, I'm not sure what the need is
+to even specify the type to be T'Class. I presume we want the dynamically tagged
+vs. statically tagged rules to apply at compile-time, and so on. So I think this
+would be weird.
+
+An alternative would be to craft a rule that says that Pre'Class expressions
+bind just like the call that they are a part of (static binding if the call is
+statically bound, dispatching if the call is dispatching, and so forth). The
+problem here is to ensure that we don't affect calls that aren't primitive on
+the right type.
+
+But perhaps the best solution is to combine these and add a rule to say that the
+type of the name resolution is merely a placeholder and that the expression is
+evaluated for a particular call using the actual types of the parameters. The
+name resolution provides identification of the subprograms involved, but how
+those subprograms are called dynamically depends on the actual types.
+
+I'm not quite sure how to word any of these ideas, so I think I'll stop here.
+I'm sure we can figure this out in Paris over a glass (tumbler??) of Beaujolias.
+:-)
+
+***************************************************************
+
