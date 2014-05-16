@@ -1,0 +1,2159 @@
+!standard A.18.2(97.1/3)                              14-05-15  AI05-0111-1/01
+!class binding interpretation 14-05-15
+!status work item 14-05-15
+!status received 14-02-08
+!priority Medium
+!difficulty Hard
+!qualifier Omission
+!subject Tampering considered too expensive
+!summary
+
+** TBD.
+
+!question
+
+The performance of the standard containers is way less efficient than the C++
+containers. The primary cause of this is tampering checks, and specifically,
+the cost of setting up and tearing down the tampering state.
+
+In a loop, this overhead can be considerable.
+
+Is there anything that the standard can do to reduce this overhead?
+
+[Probably not. But implementations can eliminate most of it with some work.
+- Editor.]
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+Tampering was primarily intended to prevent erroneous/unspecified behavior.
+
+More specifically, tampering with cursors was intended to prevent loops from
+going off the rails because an element was deleted (which might cause an
+iterator to run into non-existent memory) or inserted (which might cause an
+iterator to go into an infinite loop).
+
+Tampering with elements was intended to prevent an element that is actively
+being used from disappearing or being replaced (which might change the "shape"
+of the element).
+
+For an example of the latter, consider:
+
+  package Pkg is
+     type Item is record
+         C : Character := 'R';
+         ...
+     end record;
+     package Item_Vector is new Ada.Containers.Vectors (Element_Type => Item,
+             Index_Type => Positive);
+
+     Item_List : Item_Vector.Vector;
+
+     procedure Process_Item (Obj : in out Item);
+  end Pkg;
+
+  package body Pkg is
+     procedure Process_Item (Obj : in out Item) is
+     begin
+        ...
+        -- Split Item:
+        Item_List.Append (Item'(C => Character'Pred(Obj.C), ...)); -- [1]
+        Obj.C := Character'Succ(Obj.C); -- [2]
+        ...
+     end Process_Item;
+  end Pkg;
+
+  with Pkg;
+  procedure Main is
+  begin
+      Pkg.Item_List.Append (Item'(C => 'M', ...));
+      Pkg.Item_List.Append (Item'(C => 'T', ...));
+      Pkg.Process_Item (Pkg.Item_List(2).all); -- [3]
+  end Main;
+
+The call at [3] uses the Variable_Indexing aspect and expands into
+
+      Pkg.Process_Item (Pkg.Item_List.Reference(2).Element.all);
+
+In this case, tampering with elements is prohibited until the call Process_Item returns. This means that the call at [1] fails a tampering check.
+
+This is important; if the Append call required an expansion of the vector, and
+the vectors' implementation uses a reallocation strategy (as in thes original
+reference implementation of unbounded vectors), then the element Item_List(2)
+will be copied to the new (larger) vector data area, and the original one will
+be freed.
+
+If the parameter Obj is passed by reference (as it must be if Item is a
+by-reference type, for example if it is tagged), then the parameter object no
+longer exists at the location referenced by the parameter, and the modification
+at [2] will occur into memory no longer owned by the container. This is classic
+use of a dangling pointer.
+
+The parameter Obj being passed by copy does not help. In that case, the
+modification at [2] will be OK, but the copy-back after the call will be to
+non-existent memory. Moreover, the problem occurs in the by-copy case even if
+the object is never touched after the tampering call.
+
+Note that at the point of the dereference, there is no problem. The problem
+happens later, AFTER the dereference, but while the reference object exists.
+
+Also note that this is a new problem to the containers; it does not happen with
+arrays. That's because arrays have no way to create or delete or replace
+elements. The set of elements is fixed for the entire life of an array object.
+We don't want the implicit use of Unchecked_Deallocation inside of the
+containers to leak out and cause new erroneous cases.
+
+Even when the parameters in question have mode "in", a version of the problem
+still exists, since no modification of the container is necessary to cause
+problems. While reading non-existent memory is less dangerous than writing it
+(as it can't corrupt the program directly), it still can cause the program to
+fault (for instance, if something in it used to modify memory elsewhere, or even
+directly if the memory was returned to the target OS). So the read at [2] has a
+risk of causing a program fault and thus would still be a problem if the
+tampering check did not exist.
+
+"Tampering with elements" also catches some other errors here as a side-effect.
+In particular, in implementation that "slide" vector elements when one is
+inserted or deleted, the object passed as a parameter may no longer have the
+data of the original element. That could cause various problems, especially if
+the "new" element has different discriminants than the original one.
+
+---
+
+It appears that the performance problems cited by the questioner primarily are
+related to "tampering with elements", and specifically with the overhead of
+Reference and Constant_Reference, which use an implicit controlled object (at
+least in an all-Ada implementation) to manage the tampering state of the
+container.
+
+The performance of the actual tampering checks is not the problem, as those are
+simple integer compares; much smaller than the actual cost of the operation in
+most cases. It would be nice to be able to remove the overhead of those checks,
+but that would not make much difference.
+
+An Ada compiler could make the cost of Reference/Constant_Reference cheaper in a
+number of ways, but they all require cooperation from the front end.
+
+One possibility is for the compiler to replace the controlled object with an
+explicit modification of the container (essentially in-lining Finalize for the
+object). That would probably require a special mode for compiling the function,
+so it doesn't actually return an expensive controlled object.
+
+Perhaps a better solution is to use a simple tree transformation when the
+compiler can tell that there is no call (thus no possible tampering failure)
+before the finalization of the object that would be returned from Reference or
+Constant_Reference. If that's true, the call could be replaced by a call to a
+hidden, unsafe routine that simply returns a raw pointer (and which probably
+could be in-lined). All of the finalization overhead would disappear with the
+returned object. It's estimated that 90% of the calls to Reference could be
+transformed this way.
+
+Either of these would greatly reduce the overhead at the cost of some work.
+
+---
+
+We used the same rules for all forms of containers. That was done mainly to make
+it easier to switch between kinds of containers. It also makes the language
+definition easier.
+
+However, the importance of "tampering with elements" varies based on the kind of
+container. Indefinite containers need the check the most, as almost any
+replacement of an element will free and allocate new memory. Unbounded
+containers need the check mostly for reallocation cases (as in the expansion of
+a vector), and when a node is "freed" (as when a map item is deleted).
+
+Bounded containers need the check least of all. If they are implemented as
+expected (with a fixed array backing them), then the actual element memory
+cannot disappear at all. An operation might move elements around, but the memory
+is not going anywhere. In that case, "tampering with elements" really can only
+detect whether the element accessed through the reference or parameter
+potentially has changed.
+
+Indeed, for a bounded container (only), dereferencing the result of Reference
+cannot cause erroneous execution unless the container is itself deallocated.
+Otherwise, it will always continue to point to the memory of an element (it just
+might not be the right element). Moreover, for containers other than vectors,
+implementations can further reduce trouble by waiting to reallocate elements as
+long as possible. That is, when inserting new elements, a previously used
+element should be used only if no other elements are available, and then the
+least recently used element should be reused. That makes it much more likely
+that any dangling references point at deleted elements (to which modifications
+are not going to cause any problems by themselves) as opposed to pointing at
+some other in-use element (to which modifications are likely to cause problems).
+
+Note that one can get erroneous execution in such cases by changing
+discriminants of known-to-be-constrained objects (such as formal parameters).
+But this is possible without involving any containers -- there is nothing new
+with this.
+
+As such, the "tamper with elements" check on Reference and especially
+Constant_Reference for bounded containers is not doing a lot of good. For
+containers with individual nodes (all but vectors), we can give implementation
+advice to use least-recently used allocation of nodes. For an implementation
+that follows such advice, the reuse of nodes while a reference exists is
+unlikely (it can happen of course if the container is near capacity), so the
+danger of modifying the wrong element is minimal. The danger mainly comes from
+data loss, where code continues to update an element that has been deleted. It's
+probably not worth the overhead for such cases. That's especially true for
+Constant_Reference (where no updating is allowed anyway).
+
+The case with the bounded vector is not as clear-cut. Deleting or inserting an
+element usually causes the others to "slide" over, invalidating all cursors and
+references. These now all point at the wrong element. Thus, while a reference
+will still access data, it will always be the wrong data. There is an argument
+that this is not significant, as the same thing can happen with a fixed array.
+That argument however seems to mainly be that fixed arrays are buggy, so bounded
+vectors should also be buggy. :-)
+
+As such, it is reasonable to eliminate the tampering check for Reference and
+Constant_Reference for bounded containers (other than the vector). That would
+make bounded containers slightly less safe than the unbounded form, but they
+also would be considerably faster.
+
+We could also eliminate the "tamper with elements" check from Query_Element for
+the bounded forms (which cannot modify its parameter, so it's essentially the
+same as Constant_Reference). It's not as clear as to whether eliminating it from
+Update_Element is worthwhile. The overhead of the check is much less than for
+Reference (as no controlled element is involved), but there is the possibility
+of the Process routine overwriting the wrong element if the parameter was passed
+by copy, even if the element wasn't touched after the tampering call. That's
+enough more dangerous (and Update_Element is used little enough) that it might
+make sense to retain the check for it.
+
+If we were to make some or all of the bounded containers different by
+eliminating their tampering check for Reference/Constant_Reference, there would
+clearly be an interoperability concern. Moving from a working bounded container
+to an unbounded one could cause some failures from tampering. (Going in the
+other direction would not cause any problems, of course.) It's hard to say how
+significant this is; most Reference/Constant_Reference calls are very-shortlived
+and couldn't tamper in any way. But there probably would be some longer-lived
+ones (via renaming or parameter passing) that could cause issues.
+
+To summarize, the primary reason for the "tamper with elements" check for
+Reference and Constant_Reference cannot happen for bounded forms. Thus, we can
+drop that check from Reference, Constant_Reference, and Query_Element for
+bounded containers other than vectors with little loss of safety, at least when
+combined with advice to allocate nodes in a LRU fashion.
+
+We could also drop the checks from bounded vectors, but the loss of safety would
+be considerably more.
+
+It's unclear if this is a good idea, or whether techniques to reduce the cost of
+the tampering check and (more importantly) the tampering state setup for all
+containers are a better place to spend effort.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+[This thread diverged from the one in AI12-0110-1; there was some
+cross-pollination.]
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  7:23 AM
+
+BTW, while on the subject of tampering checks, we are becoming more worried that
+the design of the containers in Ada is fundamentally flawed. It is a serious
+embarrassment, one noted by several of our customers, that the performance of
+the Ada containers is way less efficient than the C++ containers, and we fear
+that a lot of this inefficiency is mandated by the Ada design.
+
+In the case of bounded containers, we have a set of "formal" containers that are
+much simpler and much more efficient. I don't know if in practice we will end up
+replacing the official containers entirely, perhaps so.
+
+***************************************************************
+
+From: Brad Moore
+Sent: Monday, February 10, 2014  9:45 AM
+
+It strikes me that Tampering should be a check that can be suppressed with
+pragma Suppress. Maybe it was an oversight that it isnt already a suppressable
+check?
+
+Once programmers are satisfied that their code does not tamper with the
+containers, they might want to choose to suppress the tampering checks, to
+obtain better performance.
+
+I'd much rather see that than "replace the official containers entirely".
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  9:51 AM
+
+> It strikes me that Tampering should be a check that can be suppressed
+> with pragma Suppress.
+> Maybe it was an oversight that it isnt already a suppressable check?
+
+Well the notion of suppressible checks, which can be turned on and off at will,
+does not work well with run-time units where the checks are deeply embedded into
+the run-time code and its design.
+
+> Once programmers are satisfied that their code does not tamper with
+> the containers, they might want to choose to suppress the tampering
+> checks, to obtain better performance.
+>
+> I'd much rather see that than "replace the official containers
+> entirely".
+
+Well yes, but it won't help at all I am afraid.
+
+***************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, February 10, 2014  10:21 AM
+
+> It strikes me that Tampering should be a check that can be suppressed
+> with pragma Suppress.
+> Maybe it was an oversight that it isnt already a suppressable check?
+>
+> Once programmers are satisfied that their code does not tamper with
+> the containers, they might want to choose to suppress the tampering
+> checks, to obtain better performance.
+>
+> I'd much rather see that than "replace the official containers
+> entirely".
+
+I agree with you, but how could you do that if the containers are written in
+Ada, like regular packages? Suppress can remove only compiler generated checks.
+
+Tampering checks could be suppressed only if fully implemented as pre/post
+conditions, but I doubt this is doable (disclaimer: I never actually looked into
+the implementation of containers, please correct me if I'm wrong)
+
+***************************************************************
+
+From: Brad Moore
+Sent: Monday, February 10, 2014  10:20 AM
+
+> Well the notion of suppressible checks, which can be turned on and off
+> at will, does not work well with run-time units where the checks are
+> deeply embedded into the run-time code and its design.
+
+I see, but I would have thought that something could be done however.
+Maybe if the suppression is globally specified as a configuration pragma, the
+tampering could be removed by the compiler as dead code, similar to when a
+constant boolean expression is encountered in GNAT?
+
+i.e. Do_Tampering_Checks : constant Boolean := False;
+
+if Do_Tampering_Checks then
+    ... -- Tampering check code
+end if;
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  10:33 AM
+
+> I see, but I would have thought that something could be done however.
+> Maybe if the suppression is globally specified as a configuration
+> pragma, the tampering could be removed by the compiler as dead code,
+> similar to when a constant boolean expression is encountered in GNAT?
+
+How can that help, the run-time does not get recompiled in response to setting a
+configuration pragma!
+
+***************************************************************
+
+From: Brad Moore
+Sent: Monday, February 10, 2014  10:59 AM
+
+Could it be used as a switch to select a different container library to link
+with, then?
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  11:01 AM
+
+> Could it be used as a switch to select a different container library to link
+> with, then?
+
+Conceivably a configuration pragma could be used in this way, but it is more
+attractive to just fix the existing containers IMO. This is damaging the
+language, and what I would be inclined to do is to make a new set of efficient
+containers, and retain the old ones just to pass ACATS tests but not expect many
+other people to use them. I don't see why we should have a default that is
+unusable.
+
+***************************************************************
+
+From: Brad Moore
+Sent: Monday, February 10, 2014  11:14 AM
+
+I would say that not everyone cares about performance, when using containers.
+Having safety as the default seems like the right choice to me for Ada.
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  11:20 AM
+
+> I would say that not everyone cares about performance, when using
+> containers. Having safety as the default seems like the right choice to
+> me for Ada.
+
+Ada is supposed to be about getting safety WITHOUT paying a huge performance
+hit. We are finding a lot of users who are very disappointed to find out that
+the containers are
+
+a) SO much worse than C++
+
+b) as a consequence pretty much useless
+
+We found that ourselves internally, so some of our attempts to use the standard
+containers have just been abandoned in favor of spinning our own, and that is
+what will happen with customers.
+
+Believe me "we know that the containers in Ada are five times slower than those
+in C++, but they are so much safer" won't fly. Besides we have no real basis for
+saying that they are safer, we don't know in practice that all this checking
+will actually be helpful, we are just guessing that this is the case without
+real data.
+
+We don't expect critical applications to use the containers at all. Far too much
+difficult stuff. Instead they will typically use our formal bounded containers
+which are very usable, but much simplified AND much safer, because they are much
+more friendly to certification and formal proof.
+
+One thing that would have helped is to design all the safety stuff so that it
+was in the form of preconditions and postconditions, which could be easily
+suppressed.
+
+***************************************************************
+
+From: Brad Moore
+Sent: Monday, February 10, 2014  11:38 AM
+
+>> I would say that not everyone cares about performance, when using
+>> containers.Having safety as the default seems like the right choice
+>> to me for Ada.
+>
+>Ada is supposed to be about getting safety WITHOUT paying a huge
+>performance hit. We are finding a lot of users who are very
+>disappointed to find out that the containers are
+>
+>a) SO much worse than C++
+
+I could see performance as being the default, but I can also imagine that there
+are projects that would want to have a way to turn on the extra checking, when
+performance is not an issue, and the possibility of tampering hasn't been
+completely ruled out.
+
+***************************************************************
+
+From: Gary Dismukes
+Sent: Monday, February 10, 2014  1:18 PM
+
+> > I see, but I would have thought that something could be done however.
+> > Maybe if the suppression is globally specified as a configuration
+> > pragma, the tampering could be removed by the compiler as dead code,
+> > similar to when a constant boolean expression is encountered in GNAT?
+>
+> How can that help, the run-time does not get recompiled in response to
+> setting a configuration pragma!
+
+In fact it does effectively get recompiled, since these are generics getting
+expanded in the user's code.  So in principle a configuration pragma could be
+used to control this, though would still be a little tricky to control tampering
+checks this way.
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  1:26 PM
+
+Surely we don't make a copy of the ENTIRE body of the generic, sounds horrible
+not to be sharing code as much as possible, certainly the interface does not
+demand such behavior.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 10, 2014  2:10 PM
+
+> BTW, while on the subject of tampering checks, we are becoming more
+> worried that the design of the containers in Ada is fundamentally
+> flawed. It is a serious embarrassment, one noted by several of our
+> customers, that the performance of the Ada containers is way less
+> efficient than the C++ containers, and we fear that a lot of this
+> inefficiency is mandated by the Ada design.
+
+I can believe this, but I find it hard to believe that tampering (alone) is the
+cause of this inefficiency. The tampering *check* should be a simple comparison
+against an integer value, which shouldn't add significant overhead compared to
+the "real" operation in most cases.
+
+I'd expect dangling cursor checks (if you make them) to be much more expensive
+(and a drag on performance). But those are optional.
+
+It would be nice if someone could quantify the difference between the Ada and
+C++ libraries and pinpoint the exact issues. My guess is that you'd still see
+similar problems even with the tampering check eliminated. (I'd do this myself,
+but I don't know C++ well enough to make an accurate comparison.)
+
+> One thing that would have helped is to design all the safety stuff so
+> that it was in the form of preconditions and postconditions, which
+> could be easily suppressed.
+
+I've suggested that before (including on Friday). It's still possible, of
+course, it would be compatible to do so (we couldn't use predicates, but
+preconditions would work). (But it would be a lot of work for the Standard, and
+some for implementers.) Of course, we couldn't have done this for Ada 2005, as
+we didn't have preconditions then.
+
+In particular, if we added the routine Is_Tampering_with_Cursors (Container
+: in Vector) return Boolean, then the bounded vector Insert could be:
+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Extended_Index;
+                  New_Item  : in     Vector)
+    with Pre => (if Container.Is_Tampering_with_Cursors then raise Program_Error with "Tampering check") and then
+                (if Before not in Container.First_Index ..
+                    Container.Last_Index + 1 then raise Constraint_Error) and then
+                (if Container.Length = Container.Capacity then raise Capacity_Error),
+         Post => (Container.Is_Tampering_with_Cursors'Old =
+                  Container.Is_Tampering_with_Cursors) and
+                  Container.Length'Old + 1 = Container.Length);
+
+The postcondition is intended to show provers that a call of Insert doesn't
+change the tampering state.
+
+Having these as preconditions and postconditions would allow easy suppression of
+the checks (and also would allow the compiler to combine and/or eliminate them,
+so it wouldn't be as necessary to suppress them).
+
+This seems to me to be the best way to fix the performance problem caused by the
+checking. But that presumes that we're sure that the performance problem is
+caused solely by the checking.
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  2:15 PM
+
+> This seems to me to be the best way to fix the performance problem
+> caused by the checking. But that presumes that we're sure that the
+> performance problem is caused solely by the checking.
+
+The main issue for performance is in loops, and I believe Ed has some insight
+into the issues there, Ed?
+
+***************************************************************
+
+From: Ed Schonberg
+Sent: Monday, February 10, 2014  2:58 PM
+
+>> BTW, while on the subject of tampering checks, we are becoming more
+>> worried that the design of the containers in Ada is fundamentally
+>> flawed. It is a serious embarrassment, one noted by several of our
+>> customers, that the performance of the Ada containers is way less
+>> efficient than the C++ containers, and we fear that a lot of this
+>> inefficiency is mandated by the Ada design.
+>
+> I can believe this, but I find it hard to believe that tampering
+> (alone) is the cause of this inefficiency. The tampering *check*
+> should be a simple comparison against an integer value, which
+> shouldn't add significant overhead compared to the "real" operation in most
+> cases.
+
+the cost is not the comparison, but the setting and reseting of the tampering
+counter. Its management requires that references be somehow controlled, so in an
+loop you are forced to create. initialize, and finalize an object with a
+controlled component. This makes simple loops (add the elements of a vector,
+say)  more than an order of magnitude slower that the naive array code.  The
+finalization machinery cannot be inlined, so there is no hope for the code
+generator to optimize any of it.  There are possible front-end optimizations for
+some simple loops, and we will experiment with them in coming weeks, but in
+general the controlled overhead is the killer.  If there are better suggestions
+on how to manage tampering bits in the presence of arbitrary references that may
+be floating around, I’d be delighted to hear it.
+
+***************************************************************
+
+From: Ed Schonberg
+Sent: Monday, February 10, 2014  3:00 PM
+
+> Surely we don't make a copy of the ENTIRE body of the generic, sounds
+> horrible not to be sharing code as much as possible, certainly the
+> interface does not demand such behavior.
+
+Surely you jest. There is very little that can be shared between different kinds
+of containers.
+
+***************************************************************
+
+From: Gary Dismukes
+Sent: Monday, February 10, 2014  3:09 PM
+
+And what is shared is either unrelated to tampering checks or is itself generic.
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  3:06 PM
+
+Perhaps the idea of a completely separate set of containers, which completely
+remove the tampering checks, and a configuration pragma saying whether tampering
+checks are required to choose which set of containers are needed.
+
+Then probably for GNAT, we would default to the efficient set, and have a
+compiler switch for strictly conforming behavior.
+
+The configuration pragma could be
+
+   pragma Container_Tampering_Checks (On | Off);
+
+with a requirement that this be set consistently for all units withing
+containers.
+
+Or perhaps, since these are all generic, it would work to instantiate two
+separate versions depending on the setting of Tampering_Check???
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, February 10, 2014  3:09 PM
+
+>> Surely we don't make a copy of the ENTIRE body of the generic, sounds
+>> horrible not to be sharing code as much as possible, certainly the
+>> interface does not demand such behavior.
+>
+> Surely you jest. There is very little that can be shared between different
+> kinds of containers.
+
+I think Robert meant that you might be able to share code between different
+instantiations of the same generic, by carving out some of the code into a
+non-generic package.  I think we already do that for the unbounded containers.
+It might be harder to do that with the bounded containers.
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  3:11 PM
+
+> Surely you jest. There is very little that can be shared between different
+> kinds of containers.
+
+I do not jest, I am talking about sharing code between multiple instantiations
+of the same container, as we do for Text_IO or Bounded_String. We minimize the
+amount of generic code in such packages, so that e.g. multiple instantiations of
+Bounded_Strings for different lengths share 95% of the code between them (they
+are actually uses of a Superbounded package that keeps the max length around).
+Similarly, 95% of the work of the generic subpackages in Text_IO is done by
+non-generic helper routines.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 10, 2014  3:22 PM
+
+> the cost is not the comparison, but the setting and reseting of the
+> tampering counter. Its management requires that references be somehow
+> controlled, so in an loop you are forced to create. initialize, and
+> finalize an object with a controlled component. This makes simple
+> loops (add the elements of a vector, say)  more than an order of
+> magnitude slower that the naive array code.  The finalization
+> machinery cannot be inlined, so there is no hope for the code
+> generator to optimize any of it.  There are possible front-end
+> optimizations for some simple loops, and we will experiment with them
+> in coming weeks, but in general the controlled overhead is the killer.
+> If there are better suggestions on how to manage tampering bits in the
+> presence of arbitrary references that may be floating around, I'd be
+> delighted to hear it.
+
+Thanks, I was starting to think about that since Robert's message pointed me the
+right way. It's especially annoying because there isn't any sensible way to
+suppress such overhead (it's not with the check per-se).
+
+I would have expected worse problems with Reference/Constant_Reference, but
+perhaps they're not used as much in critical situations.
+
+Anyway, I think it is possible to optimize the overhead away in simple cases. I
+know I hoped that the containers would get used enough to make such
+optimizations worthwhile. But I don't see a general way to do that (it would be
+specific to the containers), and I admit I'm not sure the substantial efforts
+required would help enough.
+
+Specifically, if the compiler "knows" that it is dealing with a controlled
+object used solely for a tampering check, then it can determine if there are any
+possible occurrences of a tampering check within the scope of that object. (That
+necessarily would have to be pretty conservative, probably would assume that any
+call to a non-container routine contains tampering.) If there are no tampering
+checks in that scope, then the controlled object itself (setup and removal) can
+be completely removed from the program, which of course would completely
+eliminate the overhead. (This probably would require in-lining of the setup and
+finalization of the object.)
+
+I would expect that the majority of Reference/Constant_Reference calls would
+meet these requirements and could have the overhead removed. It would be rarer
+for loops, but then again loops that have lots of contained calls will be less
+sensitive to the loop overhead (it would be a much smaller part of the whole).
+
+This isn't ideal because it requires knowledge about the containers themselves.
+Perhaps if the tampering check was a precondition, it would require a bit less
+magic, but you'd also want to know about routines that could not possibly have a
+tampering check (other container routines that are pure reads, in particular).
+[Because blocking the optimization by *any* call would leave few loops that
+could be optimized.] I can imagine defining a set of [implementation-defined]
+aspects for the purpose, but of course that increases the work needed.
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  3:28 PM
+
+> Specifically, if the compiler "knows" that it is dealing with a
+> controlled object used solely for a tampering check, then it can
+> determine if there are any possible occurrences of a tampering check
+> within the scope of that object. (That necessarily would have to be
+> pretty conservative, probably would assume that any call to a
+> non-container routine contains tampering.) If there are no tampering
+> checks in that scope, then the controlled object itself (setup and
+> removal) can be completely removed from the program, which of course
+> would completely eliminate the overhead. (This probably would require
+> in-lining of the setup and finalization of the object.)
+
+I don't see this kind of highly specialized flow analysis as being even vaguely
+practical, at least in our environment. It would require a complete extra
+complicated pass in the compiler, and I can't see that happening.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 10, 2014  3:36 PM
+
+...
+> Specifically, if the compiler "knows" that it is dealing with a
+> controlled object used solely for a tampering check, then it can
+> determine if there are any possible occurrences of a tampering check
+> within the scope of that object. (That necessarily would have to be
+> pretty conservative, probably would assume that any call to a
+> non-container routine contains tampering.) If there are no tampering
+> checks in that scope, then the controlled object itself (setup and
+> removal) can be completely removed from the program, which of course
+> would completely eliminate the overhead. (This probably would require
+> in-lining of the setup and finalization of the object.)
+
+Another way to do this would be to have unsafe versions of the routines
+somewhere (which don't create the controlled object) and switch to them anytime
+that the scope of the object doesn't contain any possible tampering operations.
+
+More generally, since the controlled object exists solely for the tampering
+check, it isn't needed at all if it is known that there isn't any possible
+tampering in the actual loop body (or scope of Reference/Constant_Reference).
+For simple cases, this is determinable by the compiler, and then some method has
+to be used to ensure that no useless controlled object is created and managed.
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  3:45 PM
+
+> More generally, since the controlled object exists solely for the
+> tampering check, it isn't needed at all if it is known that there
+> isn't any possible tampering in the actual loop body (or scope of
+> Reference/Constant_Reference). For simple cases, this is determinable
+> by the compiler, and then some method has to be used to ensure that no
+> useless controlled object is created and managed.
+
+It's really uncomfortable to have the front end of the compiler have to know
+this much about containers. I think I prefer the approach where you just
+indicate at instantiation time whether or not you want tampering checks.
+
+Note that another advantage of having the tampering checks be stated as
+preconditions and the status stated as pre/post conditions is that you have a
+chance of verifying formally  that no tampering is possible.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 10, 2014  3:55 PM
+
+> I don't see this kind of highly specialized flow analysis as being
+> even vaguely practical, at least in our environment. It would require
+> a complete extra complicated pass in the compiler, and I can't see
+> that happening.
+
+Yeah, it's probably too hard to do for loops. I have to wonder, though, if
+something like it would be worth it for Reference/Constant_Reference, which
+probably are a lot of the overhead in many cases. Most of the time, their
+lifetime is very short (within a single expression), and there probably is an
+expression pass that such an optimization could be added to.
+
+For instance, in
+   Sum := 0;
+   for C in Container.Iterator loop -- (1)
+      Sum := Sum + Container(C).Component; -- (2)
+   end loop;
+
+Let's assume that there are 100 elements in Container. In that case, the
+tampering loop setup at (1) is executed once; the tampering setup for
+Constant_Reference (implicit in 2) happens 100 times. Moreover, that second,
+very local object gets finalized as soon as the assignment statement is
+completed (it might even be sooner than that). So that is very localized, it's
+clear that there is no tampering check (because there is no call of any kind) in
+the scope of that tampering check.
+
+And it's clear that removing (2) would save 100 times the overhead that removing
+(1) would.
+
+Of course, I haven't tried this in practice, so I don't know how hard it would
+really be.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 10, 2014  4:00 PM
+
+...
+> Note that another advantage of having the tampering checks be stated
+> as preconditions and the status stated as pre/post conditions is that
+> you have a chance of verifying formally that no tampering is possible.
+
+I agree with this in any case, that's one reason I've been interested in doing
+this for quite a while.
+
+But I don't think it would help much for the purpose of eliminating the setup
+cost (other than a SPARK-like environment), because real code has just too many
+external subprogram calls to be able to tell. Instrumenting them all with no
+tampering pre/postconditions is likely to be prohibitive.
+
+***************************************************************
+
+From: Ed Schonberg
+Sent: Monday, February 10, 2014  4:08 PM
+
+> And it's clear that removing (2) would save 100 times the overhead
+> that removing (1) would.
+>
+> Of course, I haven't tried this in practice, so I don't know how hard
+> it would really be.
+
+this is the kind of transformation i have been experimenting with. There are
+cases where the expansion of the generalized indexing following by an explicit
+dereference could be replaced with a call to Element directly, which does not
+involve the creation of a reference, and therefore generates no controlled
+calls.  The question is to determine precisely when the body of the loop makes
+this transformation safe.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 10, 2014  4:24 PM
+
+Ah, great minds think alike! :-)
+
+Unless the generalized indexing is used in a renames or as an actual parameter,
+I would expect that the determination whether tampering could occur would be
+purely local to the subexpression in question. So that seems practical.
+
+I probably would look into the idea of having a "unsafe"
+Reference/Constant_Reference routine somehow hidden in the container, to use in
+place of the standard call. The problem with Element is that it logically copies
+the element, while Reference/Constant_Reference is a pointer to it. So there are
+other considerations with replacing with Element that don't come up if an unsafe
+version (without the controlled object) of Reference/Constant_Reference is
+available. (It's also possible that copying a large element is more expensive
+than the tampering setup. That can't happen for a no-tampering
+Reference/Constant_Reference.)
+
+I suppose it makes sense to use an Element replacement as a proof-of-concept, as
+no funny business in the containers is needed. If it looks promising, then try a
+container modification to go further.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 14, 2014  12:55 PM
+
+At the risk of restarting a thread which has died down, I have some additional
+thoughts on this issue today. I was thinking a bit about this while getting
+ready for work, and I was wondering if the bounded containers are actually
+different than the other containers in terms of needing some tampering checks.
+This thought inspired me to go back and look at the original problems that
+inspired the checks. This note (essentially an LSN) explains what I found out.
+
+----
+
+Executive summary:
+
+The tampering with elements checks associated with Reference/Constant_Reference
+for bounded containers are probably not worth their overhead, as most of the
+problems that they're intended to prevent aren't possible if the implementation
+advice is followed. The checks do prevent some problems, however.
+
+The tampering with elements checks associated with Reference/Constant_Reference
+could be eliminated with little loss of safety if some additional constraints
+are placed on the implementation of the containers. For a bounded container,
+these constraints are already part of the implementation advice, so the effect
+would be minimal (additional advice would reduce risk even further). For an
+unbounded container, these constraints could be lived with, but would make some
+likely implementation approaches impossible, especially for vectors. For
+indefinite containers, the constraints would be impossible.
+
+The tampering with elements checks associated with the
+Query_Element/Update_Element callbacks could be eliminated with the same
+constraints as mentioned above. There would be a small additional loss of safety
+for Update_Element, mainly for elements that could be passed by-copy.
+
+The tampering with cursors checks associated with iterators (both the callback
+form and the for loop form) can't be eliminated without a significant loss of
+safety.
+
+Eliminating tampering checks from some kinds of containers and some operations
+(but not other containers and operations) would reduce consistency between the
+containers, but that could only be a problem when moving from a container
+without such checks to one that has them, and even then a problem seems
+unlikely.
+
+----
+
+Let's start with some background.
+
+The tampering checks were originated to ensure that call-back iterators (and now
+for loops) did not have to be constructed defensively. Specifically, inserting
+or deleting an element near the current one in an iterator can cause trouble, as
+the iterator may have already saved a cursor (pointer) to the "next" value. If
+that next value was to change by some operation, the iterator could malfunction
+(possibly missing an element, or visiting an element twice, or worst of all,
+visiting some memory that *used* to be an element but has since been returned to
+the system).
+
+The cost of these check was thought to be acceptable, because the setup only
+happens once per loop, and the checks are cheap (an integer compare, typically).
+Moreover, the setup is cheap for the call-back iterators, as the body of the
+iterator can clear the tampering flag when it completes its actions.
+
+Later, we ran into some similar issues with Query_Element/Update_Element, and we
+decided to use the already defined tampering mechanism to handle them.
+Specifically, if the element that Query_Element/Update_Element is currently
+working on is deleted or replaced, then if the parameter was passed by
+reference, it may no longer reference allocated memory (for container
+implementations that allocate elements individually, especially likely for the
+indefinite containers). For Update_Element, there is also the potential for data
+loss -- if the element is passed by copy, any modifications made to it via
+operations calls from Update_Element (rather than to the parameter) will be lost
+when Update_Element returns and copies back the parameter to the element.
+
+The tampering checks for elements weren't restricted to the element being
+operated on specifically, for two reasons. First, tracking the element in
+question would make the checks significantly more expensive, especially as
+several nested operations could be used to operate on a number of elements at
+once. Secondly, some reference container designs (especially for vectors) move
+elements around when new ones are inserted or deleted. That means that element
+might change if something is inserted in front of it, with all of the same
+issues happening. In order to give implementers maximum flexibility for
+implementations, we simply banned any insertions or deletions, which also has
+the effect of making the check relatively simple.
+
+For Ada 2012, we have new operations that also use these checks. The iterators
+and the associated for loop syntax has exactly the same need for tampering
+checks as the Ada 2005 call-back iterators. The only difference is that clearing
+the tampering state is harder as there is no easy place to put that code. The
+usual solution is to use a controlled object, but of course that increases the
+overhead of the setup and removal of the tampering state. Again, this isn't too
+significant in most uses, as it occurs only once per loop, and the other
+overhead of setting up iteration can also be fairly significant.
+
+Ada 2012 also adds Reference/Constant_Reference. The design of these functions
+uses accessibility checks on the container (via it being an explicitly aliased
+parameter) and on the result to ensure that the returned access value cannot
+outlive the container. This eliminates the majority of dangling pointer issues.
+However, we still have the same problem as with Query_Element/Update_Element, in
+that a replacement or deletion of the element could leave the pointer accessing
+nothing. That might appear to be hard to do (given the generally short life of
+the result), but parameter passing and renames both can extend that lifetime
+arbitrarily. There is an example of this causing erroneous execution in
+AI05-0212-1. Thus, we determined that a tampering check is needed here, too.
+It's implementable using a controlled object that is finalized at the end of the
+lifetime of the access value. When the object is finalized, the tampering state
+is cleared.
+
+The problem, of course, is that this setup and tear-down of the tampering state
+is rather expensive, as it involves creating and destroying a controlled object.
+In addition, this is likely to be very frequent in Ada code, especially that
+using the new indexing syntax. Finally, a lot of these cases cannot have any
+tampering operations occur during their very short lifetime, so the check is
+just arbitrary overhead.
+
+In a typical loop, there will be one or more indexed accesses per iteration. So
+while the for loop will have one tampering setup/teardown per execution of the
+entire loop statement, similar overhead will be incurred per iteration by
+Reference/Constant_Reference. Thus the Reference/Constant_Reference overhead is
+likely to be several orders of magnitude more important than the loop overhead.
+If we change anything, this is the most important thing to change.
+
+---
+
+We wanted the containers to be as similar as possible. Thus, we used the same
+tampering checks on all of the containers. However, the *need* for the tampering
+checks is not the same for each kind of container. In particular, the indefinite
+containers have to, by definition, allocate each element separately (as the size
+and shape of the element is not known until it is inserted). These containers
+also will have to delete and then reinsert an element that is replaced (at least
+in general), as again the size and shape could change. In these cases, the
+element memory will most likely be returned to the storage pool (often the
+standard storage pool) and reused (maybe by something completely unrelated).
+Later references to that memory will cause havoc.
+
+OTOH, the bounded containers will never return memory to a storage pool; the
+maximum size is fixed throughout the life of the container. Thus an element will
+continue to exist during the entire life of the container, and a reference to it
+will continue to point somewhere so long as the container itself hasn't been
+destroyed.
+
+As you might guess, the situation with the unbounded containers is somewhere in
+between. Some containers implementations might move an element when a container
+is expanded to allow more elements. For instance, the typical vector
+implementation expands its capacity by allocating a new, larger data area,
+copying all of the existing elements to the new data area, and then freeing the
+old data area. (Vectors don't have to work this way, a point we'll come back to
+later.) In such an implementation, an element insertion has a non-zero risk of
+making any existing references dangling. (This is an important reason for the
+tampering check covering any insertions or deletions, not just of the element
+itself.)
+
+Another interesting difference is between Update_Element and Reference. The data
+loss situation that can occur for elements passed by copy in Update_Element
+can't occur for Reference, because all access to the element is via the
+reference -- essentially by-reference. This means that for Reference and
+Constant_Reference, the only concern is about elements being
+inserted/deleted/replaced.
+
+---
+
+There are two levels of the concern about elements being
+inserted/deleted/replaced for functions Reference and Constant_Reference. The
+primary concern is any case where the memory of the element could be deallocated
+and potentially reused, not just for another element of the same type, but
+possibly in some unrelated data structure. This is the classic erroneous
+execution problem, and it is well-known to be a major cause of security bugs and
+other pestilence. Solutions that eliminate these problems are highly desired,
+and we're certainly willing to pay some overhead to eliminate this.
+
+The secondary concern are cases where the element is deleted and the memory is
+reused for another element. (A closely related concern, which only happens for
+vectors, is cases where the insertion or deletion of an element causes the
+referenced element to move such that the reference no longer points at the same
+element.) In these cases, the reference still points at a valid element, but
+it's the *wrong* element. Such cases certainly can cause problems (say by
+writing components of the wrong element), but they can't cause erroneous
+execution by themselves. Moreover, these cases are essentially the same as
+mistakes that can happen with a fixed array of elements. If there is a way to
+cause erroneous execution from such a case, it's also possible to create the
+same erroneous execution from similar misuse of array elements (such examples
+usually involve renaming or parameter passing, both of which can be done with
+array elements just like container elements). As such, we don't want to have any
+extra cost in trapping these errors, but if we can detect them for free, that
+would be good.
+
+---
+
+If you've still awake at this point, you're probably wondering where I'm going
+with all this. The key here is that bounded containers are not supposed to
+allocate or deallocate elements on the fly. They're supposed to be all allocated
+when the container is created. (There is implementation advice to this effect
+for each bounded container.) Thus the primary concern about functions Reference
+and Constant_Reference is impossible for a bounded container: the returned
+reference can only become dangling if the entire container is destroyed while
+the reference exists. (This can only happen if the container is explicitly
+deallocated with Unchecked_Deallocation or the similar subpool facilities while
+the reference exists. Tampering checks do not provide any help for this extreme
+circumstance.)
+
+To reiterate, for a bounded container (only), dereferencing the result of
+Reference cannot cause erroneous execution unless the container is itself
+deallocated. Otherwise, it will always continue to point to the memory of an
+element (it just might not be the right element). Moreover, for containers other
+than vectors, implementations can further reduce trouble this by waiting to
+reallocate elements as long as possible. That is, when inserting new elements, a
+previously used element should be used only if no other elements are available,
+and then the least recently used element should be reused. That makes it much
+more likely that any dangling references point at deleted elements (to which
+modifications are not going to cause any problems by themselves) as opposed to
+pointing at some other in-use element (to which modifications are likely to
+cause problems).
+
+Note that one can get erroneous execution in such cases by changing
+discriminants of known-to-be-constrained objects (such as formal parameters).
+But this is possible without involving any containers -- there is nothing new
+with this.
+
+---
+
+As such, the tampering check on Reference and especially Constant_Reference for
+bounded containers is not doing a lot of good. For containers with individual
+nodes (all but vectors), we can give implementation advice to use least-recently
+used allocation of nodes. For an implementation that follows such advice, the
+reuse of nodes while a reference exists is unlikely (it can happen of course if
+the container is near capacity), so the danger of modifying the wrong element is
+minimal. The danger mainly comes from data loss, where code continues to update
+an element that has been deleted. It's probably not worth the overhead for such
+cases. That's especially true for Constant_Reference (where no updating is
+allowed anyway).
+
+The case with the bounded vector is not as clear-cut. Deleting or inserting an
+element usually causes the others to "slide" over, invalidating all cursors and
+references. These now all point at the wrong element. Thus, while a reference
+will still access data, it will always be the wrong data. There is an argument
+that this is not significant, as the same thing can happen with a fixed array.
+That argument however seems to mainly be that fixed arrays are buggy, so bounded
+vectors should also be buggy. :-)
+
+As such, it is not only reasonable to suppress the tampering check for Reference
+and Constant_Reference for bounded containers, but for most containers, it may
+be sensible to eliminate it altogether. That would make bounded containers
+slightly less safe than the unbounded form, but they also would be considerably
+faster.
+
+---
+
+If we were to make some or all of the bounded containers different by
+eliminating their tampering check for Reference/Constant_Reference, there would
+clearly be an interoperability concern. Moving from a working bounded container
+to an unbounded one could cause some failures from tampering. (Going in the
+other direction would not cause any problems, of course.) It's hard to say how
+significant this is; most Reference/Constant_Reference calls are very-shortlived
+and couldn't tamper in any way. But there probably would be some longer-lived
+ones (via renaming or parameter passing) that could cause issues.
+
+---
+
+Could we go further? Yes, but there are downsides. First, consider
+Update_Element. It has the additional data loss issue of by-copy elements.
+Moreover, it's tampering state setup is cheaper than Reference as no controlled
+object is needed. So a bit less safety in exchange for much less overhead gain
+(and in a lesser-used routine) is probably not worth a change. Query_Element is
+essentially the same as Constant_Reference, so it could be eliminated, but again
+there this isn't used much and the overhead is much less than
+Constant_Reference.
+
+We also could remove the tampering checks in the same way for the Unbounded
+forms if we were willing to require that implementations refrain from
+deallocating (as opposed to saving and reusing) elements when they are
+deleted/inserted/replaced. The problem with this is that it would prevent the
+contiguous implementation of vectors; an implementation would have to be chunked
+so that a capacity expansion did not move any existing elements to new memory.
+That's probably a too much of an imposition.
+
+---
+
+On the other side of the tampering check, we could make the tampering checks
+(along with some of the other checks for containers) an explicit precondition on
+the containers routines. This is compatible as renaming/'Access does not require
+matching preconditions. This would allow dropping some of the English text in
+the RM, as a pleasant side-effect. (A lot of that text is really messy as it is
+trying to write something better described in pseudo-code in English.) That
+might not help the performance problem too much, at least not directly, but it
+would allow a compiler to remove redundant tampering checks (once a routine has
+made the check, it doesn't need to be repeated on future calls unless something
+that might change the tampering state intervenes), and it also would allow a
+compiler to know when no tampering failure is possible (which could be used to
+eliminate tampering overhead, particularly for Reference and
+Constant_Reference).
+
+---
+
+Concluding. When I started writing this, I was pretty sure that the tampering
+check on Reference/Constant_Reference for bounded containers had no purpose at
+all. I now realize that I was wrong about that, as it does prevent reading or
+modifying the wrong element after a tampering operation. However, it is unlikely
+that such reading or modifying would cause erroneous execution (more
+specifically, the reading or writing of memory that does not currently belong to
+the container); it could only do so for discriminated records that already have
+such problems in many other non-container cases. Moreover, with care, most
+containers could ensure that such reading or modifying is only of an unused
+element, which is even less likely to cause problems. (Not for the bounded
+vector, unfortunately.)
+
+The main negative here is making the bounded containers more different (and
+somewhat less safe) than the other kinds of containers. I'm not sure how
+important we think having all of the containers be as similar as possible is.
+
+I do think we need to talk about this in a meeting setting, and perhaps I need
+to write up some examples of the cases that would slip through without a
+tampering check for bounded containers. So we probably need to make an AI for
+further consideration.
+
+***************************************************************
+
+From: Geert Bosch
+Sent: Friday, February 14, 2014  1:22 PM
+
+(Let me preface this with noting that I read Randy's excellent write up from
+this morning, but this is not a direct reply.)
+
+> the cost is not the comparison, but the setting and reseting of the
+> tampering counter. Its management requires that references be somehow
+> controlled, so in an loop you are forced to create. initialize, and finalize an object with a controlled component. This makes simple loops (add the elements of a vector, say)  more than an order of magnitude slower that the naive array code.
+
+It seems clear to me that anything involving controlled types for the cursor is
+going to be unusable. In particular, it is a really bad idea to require that
+creating a reference to a container must modify that container.
+
+
+Argument 1: Multiple tasks must be able to concurrently read the same thing
+===========================================================================
+I shouldn't have to know whether some type is implemented with a container or
+otherwise to be able to concurrently read objects of that type from multiple
+tasks. As it is currently in GNAT, referencing a container requires updating a
+reference count in the container and the update is not protected and will cause
+erroneous execution if done concurrently from multiple tasks.
+
+Argument 2: References are fleeting, but have an unclear life time
+==================================================================
+As references often are very local and live only for a single use (as in
+indexing), they should not require updating the container, which typically is a
+far more global data structure. Writing global data does not only require more
+care (see above, consider locking), especially on multiprocessors writing to
+non-local memory can be far slower.
+
+
+Along the jest of Randy's mail, we don't really need tampering checks all that
+much. What do we care about? What are our requirements? I see one big one.
+
+Requirement: Avoid erroneous execution
+======================================
+We don't want a program that attempts to update a container while holding
+references to it cause erroneous execution when using the reference after the
+update.
+
+Current situation for GNAT
+==========================
+As shown above, today tampering checks not only slow things down, they CAUSE
+erroneous execution in multitasking programs concurrently reading a container,
+as concurrent references cause concurrent writes.
+
+Cause of the problem
+====================
+The problem is that we require the tampering checks on the operations modifying
+the container. This in turn requires updates to *know* about references,
+resulting in all issues above.
+
+Proposed solution
+=================
+Instead of requiring the update to fail the tampering check, allow subsequent
+use of the now-stale references to fail the tampering check. A conceptual
+implementation would be as follows:
+
+  - any operations that would currently require a tampering check will instead
+    increase the version number (modification counter) of the container
+
+  - any reference (such as a cursor) contains the version number of the
+    container at the time the reference was created
+
+  - any dereference checks the container for its version number, and raises
+    Program_Error if it detects tampering
+
+Benefits
+========
+1. References only need to read the container, so are fast.
+2. Concurrent reads of containers are safe, even when iterating
+3. It is OK to hold a reference and then perform an update while still
+   holding the reference, as long as the reference is not used subsequently.
+4. This approach could be easily extended to allow efficient concurrent updates,
+   or detect concurrent usage, with only locking overhead for writes.
+
+My hope is that we can slightly rework the concept of tampering checks, so that
+we can get containers to be efficient.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 14, 2014  2:43 PM
+
+...
+> It seems clear to me that anything involving controlled types for the
+> cursor is going to be unusable. In particular, it is a really bad idea
+> to require that creating a reference to a container must modify that
+> container.
+
+You're confusing cursors and references here. There are no (mandated) tampering
+checks for cursors.
+
+Your counter solution for cursors is a good one for detecting cursor problems.
+My container implementations uses a similar solution for that, although mine
+uses per-element rather than per-container ids. (That solution was designed in
+2006 or 2007; this is not a new idea.)
+
+A reference, however, is an access discriminant. It's lifetime is strictly known
+to be that of the enclosing object, and the (usually static) accessibility
+checks required ensure that it cannot be used after that lifetime without heroic
+efforts. We also (usually statically) ensure that the container lives as long as
+the reference.
+
+The tampering check is used to ensure that the *element* lives as long as the
+reference. [Note that tampering is only in effect during the (usually short)
+lifetime of the reference; it's not related in any way to the cursor.] Without
+that, you can get erroneous execution from a dangling pointer -- and that's one
+of the worst kinds of erroneousness as it means potentially writing someone
+else's memory. It's not worthwhile to detect that after the fact, because once
+some other data structure is corrupt, it will stay that way. It's too late to
+recover.
+
+Your proposal:
+>  - any dereference checks the container for its version number, and raises
+>    Program_Error if it detects tampering
+
+makes no sense for references, because they are just a normal access-to-object
+dereference. Thus the element modification takes place through a raw pointer.
+There is no opportunity to communicate that modification back to the container.
+I suppose that one could *assume-the-worst* that all references are
+modifications, but that does not help because you find out too late: once you've
+overwritten random memory, the program is unrecoverable. You'd usually know that
+the program is corrupt (unless of course the corruption was such that it made
+the counters look OK), but all you can do then is terminate the program. One
+would not want to use such a container in a rocket controller!
+
+> As shown above, today tampering checks not only slow things down, they CAUSE erroneous execution
+> in multitasking programs concurrently reading a container, as concurrent references cause
+> concurrent writes.
+
+Right, but no one is required to use a reference to read an element. Calling
+function Element involves no tampering check, the "problem" is that it requires
+a copy of the element. Ergo, if you want concurrent reads, just use Element
+rather than Constant_Reference.
+
+Of course, Ada does not guarantee concurrent reads in any case in the standard
+library. Of course, we could add such a guarantee (presumably for a very limited
+set of container operations). I suspect that it wouldn't be too hard to make a
+read guarantee work for the bounded containers, but for the much more general
+indefinite containers (the big advance, IMHO), I suspect that it would be
+problematical. One reason being that we have to have tampering checks to prevent
+erroneous execution of references there (as any replacement of an element causes
+reallocation), whereas their value for bounded containers is much more doubtful.
+(As described in detail in my previous message.)
+
+I'm somewhat dubious of the value of supporting concurrent reads (only), you're
+always going to need some sort of locking to handle the modifications, and it
+isn't going to add any additional overhead to use that for reads as well. (My
+spam filter has this problem, blacklists and whitelists and other data are
+rarely modified compared to the runtime of the filter, but one still has to get
+a lock before reading from them in order to ensure that the data isn't in the
+process of being updated.) What is the use case that you are considering??
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Friday, February 14, 2014  3:37 PM
+
+I have had trouble following all of the ins and outs of this thread.  But I
+definitely agree with this idea, though Randy implies it may be solving a
+different problem.  The container library Bob implemented many years ago for our
+static analysis tool (CodePeer) uses a very similar approach, where you have a
+"modification count" or equivalent, and checks are performed that this
+modification count doesn't change, to detect the equivalent of tampering.
+
+I also wonder whether references might be short-lived enough that we could do
+something at compile-time to improve performance.  In partial answer to
+something Randy mentioned, I think it would be reasonable to bump a
+"modification count" whenever you return a reference that supports update, even
+before any actual modification takes place.  We use that approach for a software
+virtual-memory mechanism, also in our static analysis tool.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Friday, February 14, 2014  4:21 PM
+
+> I have had trouble following all of the ins and outs of this thread.
+
+I have not read all of it.
+
+I think the way to make containers fast is for someone (AdaCore?) to hack on
+them, and do measurements and profiling.  Perhaps then language change
+suggestions might be in order.
+
+> But I definitely agree with this idea, though Randy implies it may be
+> solving a different problem.  The container library Bob implemented
+> many years ago for our static analysis tool (CodePeer) uses a very
+> similar approach, where you have a "modification count" or equivalent,
+> and checks are performed that this modification count doesn't change,
+> to detect the equivalent of tampering.
+
+That's not how I remember it.  As I recall, for something like Vectors, there
+were two types, one growable (call it G), and one fixed length (call it F).  You
+create a G object, and append things onto it. You then call Freeze, which takes
+a G, and returns an F containing the same sequence of items.  You now process
+the F. Freeze is implemented so it didn't have to copy the data.
+
+Once you call Freeze, the G object is destroyed, and any attempt to touch it
+raises an exception.  It is often used like this:
+
+    function Build_F_Obj(...) return F is
+        G_Obj: G; -- [*]
+    begin
+        ...build G_Obj...
+        return Freeze (G_Obj);
+    end Build_F_Obj;
+
+so there's little opportunity for tripping over that exception, because G_Obj
+vanishes right after the Freeze.
+
+And once you call Freeze, you've got an F, whose length cannot change.  So
+there's no need for tampering checks on F.
+
+This supports programs where the first phase builds up the data structure, and
+then the second phase processes it without modifying it (or, at least, without
+changing its size/shape).  Pretty common.
+
+[*] As I recall, G is limited, and F is nonlimited.  So at [*], we default init
+to empty.  Today, I would use a build-in-place function Empty, and avoid use of
+defaults.
+
+That was many years ago, so I might be misremembering, and someone might have
+changed it in the meantime.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 14, 2014  4:28 PM
+
+> I have had trouble following all of the ins and outs of this thread.
+
+That doesn't surprise me, there's a lot of misinformation out there. And I'm not
+good at explaining things concisely -- I hope that you manage to do that. :-)
+
+> But I definitely agree with this idea, though Randy implies it may be
+> solving a different problem.
+
+Yes, it's solving a different problem. Read the "problem" part of my message for
+an explanation of the problems that tampering is intended to solve. Geert's
+solution is really about detecting "invalid" cursors, which the containers have
+never required. We didn't require that because solutions like Geert's don't
+provide 100% detection, which is necessary in order to meet a requirement, or
+they have a lot of false positives. The hope was that implementations would
+implement a cheaper 95% solution, but one also has to be careful not to
+introduce too many false positives.
+
+Tampering of elements is mainly about preventing erroneous execution by reading
+or writing a no longer existing element -- either one that was passed as a
+parameter to the call-back of Query_Element or Update_Element, or one that we
+have a reference to from Reference/Constant_Reference. I've always considered
+these more dangerous than the cursor cases, because a container implementation
+can decide just how much erroneousness from invalid cursors it was willing to
+tolerate (which is of course a trade-off with performance). There is no
+possibility of detecting such problems in the reference or call-back cases, at
+least without a large amount of complication (because no false positives would
+be tolerated, just as false positives are not tolerated in the detection of ).
+The tampering check gives us well-defined bounds on what false positives are
+tolerated.
+
+It does make sense to allow an implementation to "suppress" the tampering check
+somehow, if it in fact would prefer maximum performance, erroneousness be
+damned. That would be consistent with the handling of the cursor cases, where an
+implementation can allow erroneousness for maximum performance if desired. (My
+understanding is that there is a debug implementation of the containers for GNAT
+that detects invalid cursors and a performance implementation that does not. It
+makes sense to treat tampering with elements the same way, because the problem
+is fairly similar.)
+
+***************************************************************
+
+From: Geert Bosch
+Sent: Friday, February 14, 2014  11:56 PM
+
+> ...
+>> It seems clear to me that anything involving controlled types for the
+>> cursor is going to be unusable. In particular, it is a really bad
+>> idea to require that creating a reference to a container must modify
+>> that container.
+>
+> You're confusing cursors and references here. There are no (mandated)
+> tampering checks for cursors.
+
+I'm referring to this (A.18.2(97.1/3)):
+> When tampering with cursors is prohibited for a particular vector
+> object V, Program_Error is propagated by a call of any
+> language-defined subprogram that is defined to tamper with the cursors
+> of V, leaving V unmodified.
+Isn't this a mandated tampering check for cursors?
+
+> Your counter solution for cursors is a good one for detecting cursor
+> problems. My container implementations uses a similar solution for
+> that, although mine uses per-element rather than per-container ids.
+> (That solution was designed in 2006 or 2007; this is not a new idea.)
+
+The purpose is not to invent new ideas, but to fix the horrible inefficiencies
+(and lack of safety) that we have today. Today, a cursor has to be controlled as
+the container has to know about it in order to raise exceptions on operations
+that are defined to tamper with cursors. Containers having to know about
+references to them, whether cursors or otherwise, is the root of all evil.
+
+> A reference, however, is an access discriminant. It's lifetime is
+> strictly known to be that of the enclosing object, and the (usually
+> static) accessibility checks required ensure that it cannot be used
+> after that lifetime without heroic efforts. We also (usually
+> statically) ensure that the container lives as long as the reference.
+
+Right, that is helpful. Unfortunately cursors don't have that property, but
+there are ways to solve that with an extra level of indirection.
+
+> The tampering check is used to ensure that the *element* lives as long
+> as the reference. [Note that tampering is only in effect during the
+> (usually
+> short) lifetime of the reference; it's not related in any way to the
+> cursor.] Without that, you can get erroneous execution from a dangling
+> pointer -- and that's one of the worst kinds of erroneousness as it
+> means potentially writing someone else's memory. It's not worthwhile
+> to detect that after the fact, because once some other data structure
+> is corrupt, it will stay that way. It's too late to recover.
+
+For simplicity, I only recognize a single kind of erroneousness, and it always
+is the worst kind, and it always is too late to recover.
+
+Fortunately, access types are abstract in Ada. We can invent whatever
+implementation we want for them, including ones that look like:
+
+   type Version_Number_Access is access Version_Number;
+   type Element_Access is record
+      Address           : System.Address;
+      Reference_Version : Version_Number;
+      Current_Version   : Version_Number_Access;
+   end record;
+
+The compiler can implement the dereference of this fat pointer as:
+
+  function Dereference (Ptr : Element_Access) return Element is
+  begin
+      if Ptr.Current_Version.all /= Ptr.Reference_Version then
+          raise Program_Error with "failed tampering check";
+      end if;
+
+      declare
+         Item : Element;
+         for Item'Address use Ptr.Address;
+      begin
+         return Element; --  return-by-reference
+      end;
+   end Dereference;
+
+> Your proposal:
+>> - any dereference checks the container for its version number, and
+>> raises Program_Error
+>>   if it detects tampering
+>
+> makes no sense for references, because they are just a normal
+> access-to-object dereference. Thus the element modification takes
+> place through a raw pointer. There is no opportunity to communicate
+> that modification back to the container.
+
+AFAIK, we don't have to. Tampering with elements means replacing elements, not
+modifying them.
+
+> I suppose that one could
+> *assume-the-worst* that all references are modifications, but that
+> does not help because you find out too late: once you've overwritten
+> random memory, the program is unrecoverable. You'd usually know that
+> the program is corrupt (unless of course the corruption was such that
+> it made the counters look OK), but all you can do then is terminate
+> the program. One would not want to use such a container in a rocket controller!
+
+No, the point is that containers just manage elements. So containers care about
+tampering with cursors (adding/removing elements) or tampering with elements
+(replacing elements with different elements), not so much with modifying the
+elements managed by the container.
+
+The Cursor, Constant_Reference_Type and Reference_Type types in the end are all
+just references. Informally, cursors can become invalid because adding/removing
+elements might involve reorganization or reallocation of the datastructure
+causing any pointers to elements to become invalid. References can become
+invalid because the referenced element is no longer in the container and could
+be freed.
+
+>> As shown above, today tampering checks not only slow things down, they
+>> CAUSE erroneous execution
+>> in multitasking programs concurrently reading a container, as
+>> concurrent references cause concurrent writes.
+>
+> Right, but no one is required to use a reference to read an element.
+> Calling function Element involves no tampering check, the "problem" is
+> that it requires a copy of the element. Ergo, if you want concurrent
+> reads, just use Element rather than Constant_Reference.
+
+I don't see how this should make a difference. As long as we're only reading it
+shouldn't matter what kind of references or indexing we use. Remember, vectors
+should be able to be substitutes for arrays. We can concurrently read from
+multiple references to the same array element. The same should be true for
+vectors.
+
+> Of course, Ada does not guarantee concurrent reads in any case in the
+> standard library. Of course, we could add such a guarantee (presumably
+> for a very limited set of container operations).
+
+Repeating the "of course" twice doesn't really make it a stronger argument. If
+we'd violate the principle that concurrent reads are OK, that makes containers
+not a viable substitute for arrays. Vectors should have the same semantics as
+arrays.
+
+> I suspect that it wouldn't be too
+> hard to make a read guarantee work for the bounded containers, but for
+> the much more general indefinite containers (the big advance, IMHO), I
+> suspect that it would be problematical.
+
+It shouldn't be, or the implementation is flawed. In essence, if reading from a
+data-structure involves writing that data-structure, we're lost.
+
+> One reason being that we have to have
+> tampering checks to prevent erroneous execution of references there
+> (as any replacement of an element causes reallocation), whereas their
+> value for bounded containers is much more doubtful. (As described in
+> detail in my previous message.)
+
+Again, access types are not just memory addresses. We could implement access
+types as pairs of (integer index, version number), where the index points into
+an array of pointers and version numbers. That way we could detect dereferencing
+of access types whose target has disappeared or changed.
+
+> I'm somewhat dubious of the value of supporting concurrent reads
+> (only), you're always going to need some sort of locking to handle the
+> modifications, and it isn't going to add any additional overhead to
+> use that for reads as well.
+
+This is completely wrong. If we're not protecting against concurrent access, as
+is the case of regular data types such as arrays, no locking is needed for
+concurrent reads. They just work. A program wishing to update a container needs
+to ensure there are no concurrent readers, just as for any other variable.
+
+Updating the container concurrently with reading it is erroneous, just as for
+any other variable. With the version numbering scheme, it is easy to detect
+this. Reading never needs locking.
+
+> (My spam filter has this problem, blacklists and whitelists and other
+> data are rarely modified compared to the runtime of the filter, but
+> one still has to get a lock before reading from them in order to
+> ensure that the data isn't in the process of being updated.) What is
+> the use case that you are considering??
+
+The general method is: read the version number, copy the data, read the version
+number again. If the number didn't change the data is good. Otherwise, repeat.
+This scheme ensures consistent data, as well as lock-free behavior: the system
+will always make progress, even though an individual task might starve.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, February 15, 2014  12:57 AM
+
+> > ...
+> >> It seems clear to me that anything involving controlled types for
+> >> the cursor is going to be unusable. In particular, it is a really
+> >> bad idea to require that creating a reference to a container must
+> >> modify that container.
+> >
+> > You're confusing cursors and references here. There are no
+> > (mandated) tampering checks for cursors.
+>
+> I'm referring to this (A.18.2(97.1/3)):
+> > When tampering with cursors is prohibited for a particular vector
+> > object V, Program_Error is propagated by a call of any
+> > language-defined subprogram that is defined to tamper with the
+> > cursors of V, leaving V unmodified.
+> Isn't this a mandated tampering check for cursors?
+
+No. This is a mandated tampering check (used in for loops and iterators) that no
+operations occur on the containers that would damage cursors. There is no
+mandated check on cursors themselves, and it's certainly not required that they
+are controlled. (They could be if the implementation wants that.)
+
+> > Your counter solution for cursors is a good one for detecting cursor
+> > problems. My container implementations uses a similar solution for
+> > that, although mine uses per-element rather than per-container ids.
+> > (That solution was designed in 2006 or 2007; this is not a
+> new idea.)
+> The purpose is not to invent new ideas, but to fix the horrible
+> inefficiencies (and lack of safety) that we have today. Today, a
+> cursor has to be controlled as the container has to know about it in
+> order to raise exceptions on operations that are defined to tamper
+> with cursors.
+
+This is definitely not true. There is little relationship between a cursor and a
+reference: a *reference* has to be controlled, a cursor does not. I think you
+need to read the container model much more closely before discussing it, because
+you have so much confused it takes an amazing amount of time to refute it.
+
+> Containers having to know about references to them, whether cursors or
+> otherwise, is the root of all evil.
+
+Then we have nothing that we could ever agree on vis-a-vis safety of containers.
+
+> > A reference, however, is an access discriminant. It's lifetime is
+> > strictly known to be that of the enclosing object, and the (usually
+> > static) accessibility checks required ensure that it cannot be used
+> > after that lifetime without heroic efforts. We also (usually
+> > statically) ensure that the container lives as long as the
+> > reference.
+>
+> Right, that is helpful. Unfortunately cursors don't have that
+> property, but there are ways to solve that with an extra level of
+> indirection.
+
+Cursors have nothing (directly) to do with tampering. "Tampering with cursors"
+is just a name.
+
+...
+> Fortunately, access types are abstract in Ada. We can invent whatever
+> implementation we want for them, including ones that look like:
+>
+>    type Version_Number_Access is access Version_Number;
+>    type Element_Access is record
+>       Address           : System.Address;
+>       Reference_Version : Version_Number;
+>       Current_Version   : Version_Number_Access;
+>    end record;
+>
+> The compiler can implement the dereference of this fat pointer as:
+>
+>   function Dereference (Ptr : Element_Access) return Element is
+>   begin
+>       if Ptr.Current_Version.all /= Ptr.Reference_Version then
+>           raise Program_Error with "failed tampering check";
+>       end if;
+>
+>       declare
+>          Item : Element;
+>          for Item'Address use Ptr.Address;
+>       begin
+>          return Element; --  return-by-reference
+>       end;
+>    end Dereference;
+
+Since Ada allows anonymous access types to be converted to other access types,
+you are saying that you want *all* general access types in Ada to have this
+representation. The odds of that happening are nil (it wouldn't be compatible
+with C, it would have huge overhead for people that never use the cursors,
+etc.). Besides, you're directly trying the same false starts we had when we
+tried to solve the user-defined dereference problem. We ended up with the access
+discriminant solution because it had the best overall properties. I doubt much
+has changed about that.
+
+Besides, this doesn't actually work. If the pointer is dereferenced and then
+passed as a reference parameter, and then tampering happens within the called
+subprogram, your check would pass, but use of the reference parameter is still
+erroneous. The existing tampering check catches that case (indeed, that case is
+the primary reason for this specific tampering check).
+
+> > Your proposal:
+> >> - any dereference checks the container for its version number, and
+> >> raises Program_Error
+> >>   if it detects tampering
+> >
+> > makes no sense for references, because they are just a normal
+> > access-to-object dereference. Thus the element modification takes
+> > place through a raw pointer. There is no opportunity to communicate
+> > that modification back to the container.
+>
+> AFAIK, we don't have to. Tampering with elements means replacing
+> elements, not modifying them.
+
+Correct. In which case I have no idea what your proposal is intended to detect,
+because it won't detect any tampering at all.
+
+> The Cursor, Constant_Reference_Type and Reference_Type types in the
+> end are all just references. Informally, cursors can become invalid
+> because adding/removing elements might involve reorganization or
+> reallocation of the datastructure causing any pointers to elements to
+> become invalid.
+> References can become invalid because the referenced element is no
+> longer in the container and could be freed.
+
+Right. But these are handled very differently, because the consequences are very
+different. With a cursor, you always have to use some other operation for it to
+have any effect. That other operation can make any checks needed. With a
+reference, since you have a bare pointer, we can't make the checks that way, and
+we have to have tampering.
+
+> >> As shown above, today tampering checks not only slow things down,
+> >> they CAUSE erroneous execution in multitasking programs
+> >> concurrently reading a container, as concurrent references cause
+> >> concurrent writes.
+> >
+> > Right, but no one is required to use a reference to read an element.
+> > Calling function Element involves no tampering check, the "problem"
+> > is that it requires a copy of the element. Ergo, if you want
+> > concurrent reads, just use Element rather than Constant_Reference.
+>
+> I don't see how this should make a difference.
+
+It makes a difference because when an element is copied, it no longer matters
+what happens to the original element afterwards. It's the same reason that one
+uses temporaries rather than calculating values in place.
+
+> As long as
+> we're only reading it shouldn't matter what kind of references or
+> indexing we use. Remember, vectors should be able to be substitutes
+> for arrays. We can concurrently read from multiple references to the
+> same array element. The same should be true for vectors.
+
+If we had ragged arrays (like the indefinite containers), you'd have all of the
+same problems. Only a bounded container is anything like an array, and I could
+see making an exception for those.
+
+But really, you are asking for more than Ada guarantees about anything.
+Unless you have atomic or protected objects, having multiple tasks access (or
+call!) anything is always risky. That's a flaw in Ada, but it is pervasive. One
+hopes that the parallel subgroup will come up with some proposals that will help
+that.
+
+You can get away with multiple access to an array so long as the components are
+disjoint. But that works simply because there is no control structure associated
+with it; if there is, as in the case of the containers, access becomes much more
+problematical.
+
+> > Of course, Ada does not guarantee concurrent reads in any case in
+> > the standard library. Of course, we could add such a guarantee
+> > (presumably for a very limited set of container operations).
+> Repeating the "of course" twice doesn't really make it a stronger
+> argument.
+> If we'd violate the principle that concurrent reads are OK, that makes
+> containers not a viable substitute for arrays.
+> Vectors should have the same semantics as arrays.
+
+Only protected (and atomic) objects are truly safe when used from tasks. So in
+this way, they *are* the same as arrays. :-)
+
+More seriously, if you're willing to restrict your view to what can be
+accomplished with arrays (as in the bounded vectors), then I can see your point.
+But a vector (in general) has many capabilities that an array does not,
+especially in allowing elements of different sizes and shapes. And those
+compatibilities require complex implementations that would be hard to make task
+safe AND memory safe.
+
+> > I suspect that it wouldn't be too
+> > hard to make a read guarantee work for the bounded containers, but
+> > for the much more general indefinite containers (the big advance,
+> > IMHO), I suspect that it would be problematical.
+>
+> It shouldn't be, or the implementation is flawed. In essence, if
+> reading from a data-structure involves writing that data-structure,
+> we're lost.
+
+No, you're lost. The whole advantage of the containers to me is that they manage
+memory and eliminate almost all erroneous execution from dangling pointers.
+(Iterators also have a termination guarantee.) To eliminate those guarantees in
+order to have a dubious read-only tasking guarantee is going in the wrong
+direction.
+
+There would be value to a fully task-safe container implementation, but it would
+necessarily be quite expensive.
+
+> > One reason being that we have to have tampering checks to prevent
+> > erroneous execution of references there (as any replacement of an
+> > element causes reallocation), whereas their value for bounded
+> > containers is much more doubtful. (As described in detail in my
+> > previous message.)
+> Again, access types are not just memory addresses. We could implement
+> access types as pairs of (integer index, version number), where the
+> index points into an array of pointers and version numbers. That way
+> we could detect dereferencing of access types whose target has
+> disappeared or changed.
+
+That's never going to happen. It's been proposed before but the overhead would
+be crippling.
+
+Indeed, one of the main reasons cursors are private types is so that they can
+have an implementation like the one you're talking about. But it doesn't work
+for references (both because the check is too soon, and because you can't change
+the representation of an Ada general access type, since they're all
+interconvertable modulo accessibility checks).
+
+> > I'm somewhat dubious of the value of supporting concurrent reads
+> > (only), you're always going to need some sort of locking to handle
+> > the modifications, and it isn't going to add any additional overhead
+> > to use that for reads as well.
+> This is completely wrong. If we're not protecting against concurrent
+> access, as is the case of regular data types such as arrays, no
+> locking is needed for concurrent reads. They just work. A program
+> wishing to update a container needs to ensure there are no concurrent
+> readers, just as for any other variable.
+
+Exactly. And the only way I know (that doesn't pervert the program structure) to
+prevent concurrent readers is to have them test an "updating" lock before they
+do any reading, and free it afterwards. You could have the updater call an entry
+in the readers to tell them to pause, but that really puts irrelevant stuff into
+the readers (and has at least has as much overhead as a lock).
+
+It makes much more sense to have the entire data structure protected by an
+appropriate locking system.
+
+The only time your suggestion would make sense is in the case of a data
+structure that is *never* modified after initialization. But those structures
+are much rarer in practice than initially seems to be the case. (Almost every
+structure that I've ever designed that way had to be changed at some future
+point to allow modifications.)
+
+> Updating the container concurrently with reading it is erroneous, just
+> as for any other variable. With the version numbering scheme, it is
+> easy to detect this. Reading never needs locking.
+>
+>
+> > (My spam filter has this problem, blacklists and whitelists and other
+> > data are rarely modified compared to the runtime of the filter, but
+> > one still has to get a lock before reading from them in order to
+> > ensure that the data isn't in the process of being
+> > updated.) What is the use case that you are considering??
+
+> The general method is: read the version number, copy the
+> data, read the version number again. If the number didn't
+> change the data is good. Otherwise, repeat.
+> This scheme ensures consistent data, as well as lock-free
+> behavior: the system will always make progress, even though
+> an individual task might starve.
+
+Such a system is likely to miss deadlines. Hard to say if that is acceptable
+or not. For my spam filter, that would require a version number on every
+individual item (since reads have a very small granularity), or copying all
+of the data. Neither seems like a good option.
+
+Remember that the containers, like an array, are designed to allow using of
+elements in place. You *never* have to copy an element. I don't see how this
+scheme would work when updating parts of elements in place (which is the
+normal case).
+
+Anyway, please explain a scheme that actually detects the bugs that
+tampering prevents, and then it will make much more sense to talk about
+this. It's frustrating when someone is solving different problems than the
+ones the checks actually prevent.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, February 15, 2014  8:19 PM
+
+The problem with quickly answering messages on the way out of the office is that
+you don't organize your thoughts very well. Thus I want to clarify a point
+that's somewhat off-topic here, hopefully so we don't discuss it more (certainly
+not in this thread).
+
+I said:
+
+> Unless you have atomic or protected objects, having multiple tasks
+> access (or call!) anything is always risky. That's a flaw in Ada, but
+> it is pervasive.
+
+By this, I mean that multiple task access to raw Ada data structures like an
+array is risky. It's risky because safe access always requires some sort of
+protocol, be it "no access after initialization", or "check version number and
+retry if changed", or "lock before use", or whatever. Just accessing an array
+from multiple tasks without any sort of protocol is likely going to cause a
+latent bug of some sort. And that is a very hard bug to find, as it is likely to
+occur rarely, and also it is an error of omission (which are usually the hardest
+ones to find).
+
+The Ada language provides very little help for this, in that it doesn't have
+many ways to prevent access that avoids the protocol. The best thing one can do
+is to completely encapsulate the data structure (array in this example) in a
+package, but once that's done, the "arrayness" has disappeared -- we just have
+another ADT, essentially another container.
+
+Essentially, if you want a multi-tasking guarantee in Ada, you need to write a
+package that provides it. The standard containers are no different in this
+regard.
+
+Whether Ada should have some purpose-built multi-tasking safe containers is
+another question, but they clearly would need a different design (or
+abandonment of safety).
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, February 15, 2014  9:06 PM
+
+...
+> Besides, this doesn't actually work. If the pointer is dereferenced
+> and then passed as a reference parameter, and then tampering happens
+> within the called subprogram, your check would pass, but use of the
+> reference parameter is still erroneous. The existing tampering check
+> catches that case (indeed, that case is the primary reason for this
+> specific tampering check).
+
+In case someone actually wants to see some of the examples that the reference
+tampering check is intended to prevent, and to have them ready for the eventual
+AI, I've created some examples:
+
+  package Pkg is
+     type Item is record
+         C : Character := 'R';
+         ...
+     end record;
+     package Item_Vector is new Ada.Containers.Vectors (Element_Type => Item,
+             Index_Type => Positive);
+
+     Item_List : Item_Vector.Vector;
+
+     procedure Process_Item (Obj : in out Item);
+  end Pkg;
+
+  package body Pkg is
+     procedure Process_Item (Obj : in out Item) is
+     begin
+        ...
+        -- Split Item:
+        Item_List.Append (Item'(C => Character'Pred(Obj.C), ...)); -- [1]
+        Obj.C := Character'Succ(Obj.C); -- [2]
+        ...
+     end Process_Item;
+  end Pkg;
+
+  with Pkg;
+  procedure Main is
+  begin
+      Pkg.Item_List.Append (Item'(C => 'M', ...));
+      Pkg.Item_List.Append (Item'(C => 'T', ...));
+      Pkg.Process_Item (Pkg.Item_List(2).all); -- [3]
+  end Main;
+
+The call at [3] uses the Variable_Indexing aspect and expands into
+
+      Pkg.Process_Item (Pkg.Item_List.Reference(2).Element.all);
+
+In this case, tampering with elements is prohibited until the call Process_Item
+returns. This means that the call at [1] fails a tampering check.
+
+This is important; if the Append call required an expansion of the vector, and
+the vectors' implementation uses a reallocation strategy (this was Matt's
+original reference implementation of unbounded vectors), then the element
+Item_List(2) will be copied to the new (larger) vector data area, and the
+original one will be freed.
+
+If the parameter Obj is passed by reference (as it must be if Item is a
+by-reference type, for example if it is tagged), then the parameter object no
+longer exists at the location referenced by the parameter, and the modification
+at [2] will occur into memory no longer owned by the container. This is classic
+use of a dangling pointer.
+
+The parameter Obj being passed by copy does not help. In that case, the
+modification at [2] will be OK, but the copy-back after the call will be to
+non-existent memory. Moreover, the problem occurs in the by-copy case even if
+the object is never touched after the tampering call.
+
+Note that at the point of the dereference, there is no problem. The problem
+happens later, AFTER the dereference, but while the reference object exists.
+
+Also note that this is a new problem to the containers; it does not happen with
+arrays. That's because arrays have no way to create or delete or replace
+elements. The set of elements is fixed for the entire life of an array object.
+We don't want the implicit use of Unchecked_Deallocation inside of the
+containers to leak out and cause new erroneous cases.
+
+Even when the parameters in question have mode "in", a version of the problem
+still exists, since no modification of the container is necessary to cause
+problems. While reading non-existent memory is less dangerous than writing it
+(as it can't corrupt the program directly), it still can cause the program to
+fault (for instance, if the deallocated memory was returned to the target
+OS/kernel and it was unmapped from the process's address space). So the read at
+[2] has a risk of causing a program fault and thus it has to be formally
+erroneous in this case.
+
+A similar problem can happen if the reference is passed as an access
+parameter:
+
+  package Pkg2 is
+     type Item is record
+         C : Character := 'R';
+         ...
+     end record;
+     package Item_Vector is new Ada.Containers.Vectors (Element_Type => Item,
+             Index_Type => Positive);
+
+     Item_List : Item_Vector.Vector;
+
+     procedure Process_Item (Obj : access Item);
+  end Pkg2;
+
+  package body Pkg is
+     procedure Process_Item (Obj : access Item) is
+     begin
+        ...
+        -- Split Item:
+        Item_List.Append (Item'(C => Character'Pred(Obj.all.C), ...)); -- [4]
+        Obj.all.C := Character'Succ(Obj.all.C); -- [5]
+        ...
+     end Process_Item;
+  end Pkg;
+
+  with Pkg;
+  procedure Main is
+  begin
+      Pkg.Item_List.Append (Item'(C => 'M', ...));
+      Pkg.Item_List.Append (Item'(C => 'T', ...));
+      Pkg.Process_Item (Pkg.Item_List(2)); -- [6]
+  end Main;
+
+In this case, the parameter acts as if it is passed by-reference, so the by-copy
+issues can't happen, but the remaining issues still are possible. Note that the
+reference (an anonymous access discriminant) is implicitly converted to the
+anonymous access parameter. The accessibility rules are still in place; an
+attempt to assign the access parameter to a long-lived access type should raise
+Program_Error. In this example, the dereference occurs after the tampering, but
+it's possible to use a renaming to move that before the tampering:
+
+    My_Obj : Item renames Obj.all;
+
+In any case, passing objects as parameters is fundamental to Ada; having them be
+unsafe is not acceptable.
+
+As I've previously noted, these particular examples can't cause erroneous
+execution this way for the bounded containers (as the underlying memory is never
+allocated or freed on the fly, only when the container is created or destroyed),
+so it might make sense to eliminate the tampering check there. But there is
+another way for tampering with a container to cause erroneous execution.
+
+Specifically, AI05-0212-1 gives an example of how vector sliding can cause
+erroneous execution for a reference. (It's rather long so I won't repeat it
+here.) In this case, the erroneous execution is caused by changing the
+discriminants of a constrained object. Argubly, we could tolerate this
+erroneousness, since we do so for other kinds of calls (see 3.7.2(4)). We never
+decided if that was OK as we prevented it with no extra cost with the same check
+that prevents the first problem.
+
+Hope this sheds some light on the purpose of the tampering checks for
+Reference/Constant_Reference.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Sunday, February 16, 2014  8:35 AM
+
+> Even when the parameters in question have mode "in", a version of the
+> problem still exists, since no modification of the container is
+> necessary to cause problems. While reading non-existent memory is less
+> dangerous than writing it (as it can't corrupt the program directly),
+> it still can cause the program to fault (for instance, if the
+> deallocated memory was returned to the target OS/kernel and it was
+> unmapped from the process's address space). So the read at [2] has a
+> risk of causing a program fault and thus it has to be formally erroneous in
+> this case.
+
+Well, you don't need unlikely events like "unmapped from address space"
+to see bad behavior.  If X is a dangling pointer, then:
+
+    Y := X.all.Next;
+    Y.all := ...;
+
+will overwrite arbitrary memory locations.  So yes, the fact that X is an
+in-mode parameter doesn't help.
+
+> Hope this sheds some light on the purpose of the tampering checks for
+> Reference/Constant_Reference.
+
+Yes, thank you.  I think I sort-of knew all that, but it was helpful to have it
+clearly laid out.
+
+***************************************************************
