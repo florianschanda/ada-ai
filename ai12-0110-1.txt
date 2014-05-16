@@ -1,0 +1,383 @@
+!standard A.18.2(97.1/3)                               14-05-15  AI05-0110-1/01
+!standard A.18.3(69.1/3)
+!standard A.18.4(15.1/3)
+!standard A.18.7(14.1/3)
+!standard A.18.10(90/3)
+!standard A.18.18(35/3)
+!class binding interpretation 14-05-15
+!status work item 14-05-15
+!status received 14-02-07
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Tampering checks are performed first
+
+!summary
+
+Any needed tampering checks are performed before any other language-defined
+checks.
+
+!question
+
+What should happen when inserting into a full bounded container when tampering
+is prohibited? Should it cause Capacity_Error because the container is full,
+or Program_Error because it's tampering when tampering is prohibited? Or is
+this unspecified? (Program_Error.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify A.18.2(97.1/3):
+
+When tampering with cursors is prohibited for a particular vector object V,
+Program_Error is propagated by a call of any language-defined subprogram that
+is defined to tamper with the cursors of V, leaving V unmodified. Similarly,
+when tampering with elements is prohibited for a particular vector object V,
+Program_Error is propagated by a call of any language-defined subprogram that
+is defined to tamper with the elements of V Redundant[(or tamper with the
+cursors of V)], leaving V unmodified. {These checks are made before any other
+defined behavior of the language-defined subprogram.}
+
+AARM Ramification: The tampering check should be made before any other checks
+or operations defined by the container operation.
+
+Modify A.18.3(69.1/3), A.18.4(15.1/3), A.18.7(14.1/3), A.18.10(90/3), and
+A.18.18(35/3) similarly.
+
+!discussion
+
+Generally, we have been careful to define the order of the checks for the
+containers. In this case, there is no rule given.
+
+Tampering occurs when one calls a subprogram that they're not allowed to
+call in the current context. As such this check should be early in the
+call, before more specific things happen.
+
+For instance, consider inserting into a full bounded container when
+tampering with cursors is prohibited. In this case, the insertion is
+prohibited; the fact that the container is full is secondary. If the programmer
+increased the size of the container to get rid of the Capacity_Error, they
+shouldn't be greeted with a Program_Error from calling Insert in the wrong
+place.
+
+An alternative to this wording would be to adopt the Pre- and
+Post-conditions proposed in AI12-0112-1. That seems like too much change for
+a corrigendum, but could be the long-term solution to this issue.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+Several ACATS tests for containers have uninitentionally tested this
+issue.
+
+!appendix
+
+From: Jeff Cousins
+Sent: Friday, February  7, 2014  11:21 AM
+
+Hi.  Has anyone any thoughts on what should happen when inserting into a
+full bounded container when tampering is prohibited?  Should it cause
+Capacity_Error because the container is full, or Program_Error because
+it's tampering when tampering is prohibited?  Is there any precedent for
+which exception has priority, or is it left as implementation dependent?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February  7, 2014  7:00 PM
+
+A few thoughts.
+
+A) This is an issue any time a routine is defined to raise an exception *and*
+   could possibly be tampering. For instance, a call of Replace_Element for a
+   vector could raise Constraint_Error (if Position = No_Element) or
+   Program_Error (if Position isn't in Container) or Program_Error (if the call
+   was when Container was in a tampering context). The first two cases have a
+   defined order, the later does not. You could have a similar question whether
+   this call raises Constraint_Error or Program_Error if Position = No_Element
+   in a tampering context.
+
+B) I think we tried to get an intended order of checking when the routines were
+   defined. But we didn't include any of the "blanket rule" exceptions
+   (tampering, capacity).
+
+C) I'm not sure that it's clear whether the Constraint_Error and Program_Error
+   cases defined for individual routines come before or after the capacity
+   checks. If we decide to define this carefully, we need to be careful about
+   that.
+
+D) The question has an angels-on-the-head-of-a-pin feeling. Does anyone really
+   care what happens when a call is bad for *two* different reasons, so long as
+   at least one exception is raised? So I'm a bit dubious about spending effort
+   on defining this.
+
+E) I would hope that for Ada 2020 we'd define at least some of these checks in
+   terms of Preconditions. That would automatically give an order to the checks.
+   (We'd need a few additional queries like In_Tampering_Region and
+   Does_Cursor_Belong_to_Container to do that.) I wouldn't want to define the
+   order of exceptions such that we can't do that (which could happen if
+   exceptions that don't make sense as preconditions end up getting checked
+   before ones that do).
+
+Probably we ought to discuss this, but maybe the conclusion will be to do
+nothing.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, February  7, 2014 11:54 PM
+
+> A) This is an issue any time a routine is defined to raise an
+> exception
+> *and* could possibly be tampering.
+
+I understand that there are cases where several exceptions may be raised, and
+that in general it doesn't matter which one is actually raised.
+
+But in the case of tampering, I think it's different. There are circumstances
+where you are not allowed to call certain subprograms: if you do, you get
+Program_Error. You don't even enter the subprogram to check anything else.
+
+In particular, if you increase the capacity of a container, you would expect the
+capacity_error to disappear, not to be changed to Program_Error!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Saturday, February  8, 2014 12:46 AM
+
+> Probably we ought to discuss this, but maybe the conclusion will be to
+> do nothing.
+
+I am in favor of doing nothing. The scenario where
+
+a) we spend time discussing it
+
+b) we spend time carefully defining which exception you get
+
+c) we spend time generating wording for the RM
+
+d) we spend time writing silly ACATS tests that make sure implementations give
+   the "right" exception.
+
+e) implementors spend time adjusting their implementations to do the required
+   thing, quite likely introducing extra overhead for the normal case.
+
+Is unattractive, given that the benefit to users is absolutely zero, or perhaps
+given the caution in e) negative.
+
+I thought we had got past worrying too much and ACATS testing marginal cases :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Saturday, February  8, 2014 12:50 PM
+
+> In particular, if you increase the capacity of a container, you would
+> expect the capacity_error to disappear, not to be changed to Program_Error!
+
+Amazing, JPR came up with an actual use argument :-)
+
+Still, unconvincing, I bet this scenario never happens except in the ACATS tests
+for the lifetime of the products.
+
+BTW, we are seeing users quite unhappy with the tampering check overhead, and we
+expect that many/most of our users will ignore the standard containers and use
+our set of simplified "formal" containers, which were aimed at facilitating
+proof, but are quite generally usable as light weight much more efficiency
+routines.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Saturday, February  8, 2014  1:17 AM
+
+> I am in favor of doing nothing. The scenario where ...
+
+Except if we simply endorse what the only current implementation is doing. I
+would be very surprised if the first thing in the subprograms was not the
+tampering check.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Saturday, February  8, 2014  1:28 AM
+
+>> I am in favor of doing nothing. The scenario where ...
+> Except if we simply endorse what the only current implementation is
+> doing. I would be very surprised if the first thing in the subprograms
+> was not the tampering check.
+
+Why make life more difficult for other implementations unnecessarily!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, February  8, 2014  2:19 PM
+
+> Hi.  Has anyone any thoughts on what should happen when inserting into
+> a full bounded container when tampering is prohibited?  Should it
+> cause Capacity_Error because the container is full, or Program_Error
+> because it's tampering when tampering is prohibited?  Is there any
+> precedent for which exception has priority, or is it left as
+> implementation dependent?
+
+My initial reaction was that the tampering check should come first.
+
+Me second reaction was, I don't really care enough about this to discuss, change
+the RM, etc.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Monday, February 10, 2014  3:49 AM
+
+> I am in favor of doing nothing. The scenario where
+
+I can live with the precedence of exceptions being undefined, I just need to
+know that the ACATS tests can't assume that there is a precedence.
+
+> Except if we simply endorse what the only current implementation is doing. I
+> would be very surprised if the first thing in the subprograms was not the
+> tampering check.
+
+A problem with this is that the behaviour of the only current implementation
+varies between containers.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, February 10, 2014  4:22 AM
+
+>> Except if we simply endorse what the only current implementation is
+>> doing. I would be very surprised if the first thing in the
+>> subprograms was not the tampering check.
+> A problem with this is that the behaviour of the only current
+> implementation varies between containers.
+
+THAT is highly undesirable, and I would argue it is a reason for requiring
+something. Consistency between containers has always been a goal.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  7:03 AM
+
+> THAT is highly undesirable, and I would argue it is a reason for
+> requiring something. Consistency between containers has always been a goal.
+
+But what of what possible value is this consistency. After all it would be
+patently absurd to say "it doesn't matter which exception you raise, but you
+must raise the same one in every case". I must say I can't see spending one
+minute of time working on this issue, no matter what the ARG says, we have so
+many more pressing things to work on.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  7:10 AM
+
+> THAT is highly undesirable, and I would argue it is a reason for
+> requiring something. Consistency between containers has always been a goal.
+
+By the way, an ACATS test worrying about which exception is raised here is for
+me a perfect example of returning to days when ACATS tests wasted far too much
+time worrying about marginal cases of no possible interest to users.
+
+At AdaCore, we may or may not bother to move forward our ACATS testing to the
+new version of the ACATS tests. We have not made a decision on this, but for
+sure we are less likely to bother making this step if the suite concentrates on
+marginal issues such as this. Of course that does not mean we will ignore other
+tests, we are always free to pick up whatever tests we find useful :-)
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Monday, February 10, 2014  7:11 AM
+
+> But what of what possible value is this consistency. After all it
+> would be patently absurd to say "it doesn't matter which exception you
+> raise, but you must raise the same one in every case". I must say I
+> can't see spending one minute of time working on this issue, no matter
+> what the ARG says, we have so many more pressing things to work on.
+
+Actually I have spent more time by now reading this thread than adding a few
+lines of code to some of the containers, so I’ll do that in the hope that the
+ARG will focus on more pressing issues.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, February 10, 2014  7:17 AM
+
+>> THAT is highly undesirable, and I would argue it is a reason for
+>> requiring something. Consistency between containers has always been a
+>> goal.
+>
+> But what of what possible value is this consistency. After all it
+> would be patently absurd to say "it doesn't matter which exception you
+> raise, but you must raise the same one in every case". I must say I
+> can't see spending one minute of time working on this issue, no matter
+> what the ARG says, we have so many more pressing things to work on.
+
+What I meant is that, as a user, if I write some code using one kind of
+container, and then decide to switch to another but compatible container, I
+would find it unfriendly if I have to change my code because the exception
+raised in some circumstances is not consistent.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  7:34 AM
+
+> Actually I have spent more time by now reading this thread than adding
+> a few lines of code to some of the containers, so I’ll do that in the hope
+> that the ARG will focus on more pressing issues.
+
+So which exception are you choosing?
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  7:35 AM
+
+> What I meant is that, as a user, if I write some code using one kind
+> of container, and then decide to switch to another but compatible
+> container, I would find it unfriendly if I have to change my code
+> because the exception raised in some circumstances is not consistent.
+
+I don't see that as realistic, your code would have to be prepared to handle
+both eventualities anyway.
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Monday, February 10, 2014  7:40 AM
+
+>> Actually I have spent more time by now reading this thread than
+>> adding a few lines of code to some of the containers, so I’ll do that in
+>> the hope that the ARG will focus on more pressing issues.
+>
+> So which exception are you choosing?
+
+Tampering, which is the one chosen in a majority of the containers already.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 10, 2014  7:56 AM
+
+> Tampering, which is the one chosen in a majority of the containers already.
+
+seems reasonable, most likely means that most programs would treat the situation
+as fatal and not try to recover, which as JPR noted, leads to slightly nicer
+behavior when the container is full (you don't get a bogus capacity error
+masking the real error in your program).
+
+****************************************************************
