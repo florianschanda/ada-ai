@@ -1,0 +1,1077 @@
+!standard A.18.2(99/3)                                14-05-15    AI12-0112-1/01
+!class Amendment 14-05-15
+!status work item 14-05-15
+!status received 15-02-11
+!priority Medium
+!difficulty Hard
+!subject Preconditions for container operations
+!summary
+
+Most container checks are described with preconditions rather than
+English, so that the definitions are more formal (and can be processed
+by tools) and that the text is simpler.
+
+!problem
+
+Many of the subprograms defined by the containers start with a series of
+checks described in English. These would be better written as preconditions,
+which would make them available to compilers for optimization and to proof
+tools, as well as being less ambiguous for human readers.
+
+!proposal
+
+(See summary.)
+
+!wording
+
+[See the !discussion for general notes before reading this.]
+
+Prototype of revised package Ada.Containers.Vectors, paragraphs A.18.2(97.2/3)
+through A.18.2(237).
+
+97.2/3
+function Has_Element (Position : Cursor) return Boolean;
+97.3/3
+Returns True if Position designates an element, and returns False otherwise.
+
+98/2
+function "=" (Left, Right : Vector) return Boolean;
+99/3
+If Left and Right denote the same vector object, then the function returns True.
+If Left and Right have different lengths, then the function returns False.
+Otherwise, it compares each element in Left to the corresponding element in
+Right using the generic formal equality operator. If any such comparison returns
+False, the function returns False; otherwise, it returns True. Any exception
+raised during evaluation of element equality is propagated.
+
+New
+function Cursor_Belongs_To_Container (Container : Vector; Position : Cursor)
+   return Boolean;
+New
+Returns True if Position designates an element in Container, and returns False
+otherwise.
+
+New AARM Ramification:
+If Position is No_Element, Cursor_Belongs_To_Container returns False.
+
+New
+function Tampering_With_Cursors_Prohibited (Container : Vector) return Boolean;
+New
+Returns True if tampering with cursors or tampering with elements is currently
+prohibited for Container, and returns False otherwise.
+New AARM Note: Prohibiting tampering with elements also prohibits tampering with
+cursors, so we have this function reflect that.
+
+New
+function Tampering_With_Elements_Prohibited (Container : Vector) return Boolean;
+New
+Returns True if tampering with elements is currently prohibited for Container,
+and returns False otherwise.
+
+100/2+
+function To_Vector (Length : Count_Type) return Vector
+   with Post'Class => Length (To_Vector'Result) = Length;
+101/2
+Returns a vector with a length of Length, filled with empty elements.
+
+102/2+
+function To_Vector
+  (New_Item : Element_Type;
+   Length   : Count_Type) return Vector
+   with Post'Class => Length (To_Vector'Result) = Length;
+103/2
+Returns a vector with a length of Length, filled with elements initialized to
+the value New_Item.
+
+104/2+
+function "&" (Left, Right : Vector) return Vector
+   with Post'Class => Length ("&"'Result) = Length (Left) + Length (Right);
+105/2
+Returns a vector comprising the elements of Left followed by the elements of
+Right.
+
+106/2+
+function "&" (Left  : Vector;
+              Right : Element_Type) return Vector
+   with Post'Class => Length ("&"'Result) = Length (Left) + 1;
+107/2
+Returns a vector comprising the elements of Left followed by the element Right.
+
+108/2+
+function "&" (Left  : Element_Type;
+              Right : Vector) return Vector
+   with Post'Class => Length ("&"'Result) = Length (Right) + 1;
+109/2
+Returns a vector comprising the element Left followed by the elements of Right.
+
+110/2+
+function "&" (Left, Right  : Element_Type) return Vector
+   with Post'Class => Length ("&"'Result) = 2;
+111/2
+Returns a vector comprising the element Left followed by the element Right.
+
+112/2
+function Capacity (Container : Vector) return Count_Type;
+113/2
+Returns the capacity of Container.
+
+114/2
+procedure Reserve_Capacity (Container : in out Vector;
+                            Capacity  : in     Count_Type);
+115/3
+If the capacity of Container is already greater than or equal to Capacity, then
+Reserve_Capacity has no effect. Otherwise, Reserve_Capacity allocates additional
+storage as necessary to ensure that the length of the resulting vector can
+become at least the value Capacity without requiring an additional call to
+Reserve_Capacity, and is large enough to hold the current length of Container.
+Reserve_Capacity then, as necessary, moves elements into the new storage and
+deallocates any storage no longer needed. Any exception raised during allocation
+is propagated and Container is not modified.
+
+116/2
+function Length (Container : Vector) return Count_Type;
+117/2
+Returns the number of elements in Container.
+
+118/2+
+procedure Set_Length (Container : in out Vector;
+                      Length    : in     Count_Type)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (To_Vector'Result) = Length;
+119/3
+If Length is larger than the capacity of Container, Set_Length calls
+Reserve_Capacity (Container, Length), then sets the length of the Container to
+Length. If Length is greater than the original length of Container, empty
+elements are added to Container; otherwise, elements are removed from Container.
+
+120/2
+function Is_Empty (Container : Vector) return Boolean;
+121/2
+Equivalent to Length (Container) = 0.
+
+122/2+
+procedure Clear (Container : in out Vector)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container) = 0;
+123/2
+Removes all the elements from Container. The capacity of Container does not
+change.
+
+124/2+
+function To_Cursor (Container : Vector;
+                    Index     : Extended_Index) return Cursor
+    with Post'Class => (if Index in First_Index (Container) .. Last_Index (Container)
+                        then Cursor_Belongs_To_Container (Container, To_Cursor'Result)
+                        else To_Cursor'Result = No_Element);
+125/2
+If Index is not in the range First_Index (Container) .. Last_Index (Container),
+then No_Element is returned. Otherwise, a cursor designating the element at
+position Index in Container is returned.
+
+126/2
+function To_Index (Position  : Cursor) return Extended_Index;
+127/2
+If Position is No_Element, No_Index is returned. Otherwise, the index (within
+its containing vector) of the element designated by Position is returned.
+
+128/2+
+function Element (Container : Vector;
+                  Index     : Index_Type)
+   return Element_Type
+   with Pre'Class  => (if Index not in First_Index (Container) .. Last_Index (Container)
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+129/2+
+Element returns the element at position Index.
+
+130/2+
+function Element (Position  : Cursor) return Element_Type
+   with Pre'Class  => (if Position = No_Element then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+131/2+
+Element returns the element designated by Position.
+
+132/2+
+procedure Replace_Element (Container : in out Vector;
+                           Index     : in     Index_Type;
+                           New_Item  : in     Element_Type)
+   with Pre'Class  => (if Tampering_With_Elements_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Index not in First_Index (Container) .. Last_Index (Container)
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+133/3+
+Replace_Element assigns the value New_Item to the element at position Index.
+Any exception raised during the assignment is propagated. The element at
+position Index is not an empty element after successful call to
+Replace_Element.
+
+134/2+
+procedure Replace_Element (Container : in out Vector;
+                           Position  : in     Cursor;
+                           New_Item  : in     Element_Type);
+   with Pre'Class  => (if Tampering_With_Elements_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Position = No_Element then raise Constraint_Error) and then
+                      (if not Cursor_Belongs_To_Container (Container, Position)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+135/3+
+Replace_Element assigns New_Item to the element designated by Position. Any
+exception raised during the assignment is propagated. The element at Position is
+not an empty element after successful call to Replace_Element.
+
+136/2+
+procedure Query_Element
+  (Container : in Vector;
+   Index     : in Index_Type;
+   Process   : not null access procedure (Element : in Element_Type))
+   with Pre'Class  => (if Index not in First_Index (Container) .. Last_Index (Container)
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+137/3+
+Query_Element calls Process.all with the element at position Index as the
+argument. Tampering with the elements of Container is prohibited during the
+execution of the call on Process.all. Any exception raised by Process.all is
+propagated.
+
+138/2+
+procedure Query_Element
+  (Position : in Cursor;
+   Process  : not null access procedure (Element : in Element_Type))
+   with Pre'Class  => (if Position = No_Element then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+139/3+
+Query_Element calls Process.all with the element designated by Position as the
+argument. Tampering with the elements of the vector that contains the element
+designated by Position is prohibited during the execution of the call on
+Process.all. Any exception raised by Process.all is propagated.
+
+140/2+
+procedure Update_Element
+  (Container : in out Vector;
+   Index     : in     Index_Type;
+   Process   : not null access procedure (Element : in out Element_Type))
+   with Pre'Class  => (if Index not in First_Index (Container) .. Last_Index (Container)
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+[Editor's note: Yes, Update_Element does not tamper with elements, because it
+cannot replace the memory of the element. There is AARM note: A.18.2(97.a/2).
+When Process is called, it prohibits tampering with elements; I don't know
+of any way with the current aspects to show that.]
+141/3+
+Update_Element calls Process.all with the element at position Index as the
+argument. Tampering with the elements of Container is prohibited during the
+execution of the call on Process.all. Any exception raised by Process.all is
+propagated.
+142/2
+If Element_Type is unconstrained and definite, then the actual Element parameter
+of Process.all shall be unconstrained.
+143/2
+The element at position Index is not an empty element after successful
+completion of this operation.
+
+144/2+
+procedure Update_Element
+  (Container : in out Vector;
+   Position  : in     Cursor;
+   Process   : not null access procedure (Element : in out Element_Type))
+   with Pre'Class  => (if Position = No_Element then raise Constraint_Error) and then
+                      (if not Cursor_Belongs_To_Container (Container, Position)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+145/3
+Update_Element calls Process.all with the element designated by
+Position as the argument. Tampering with the elements of Container is prohibited
+during the execution of the call on Process.all. Any exception raised by
+Process.all is propagated.
+146/2
+If Element_Type is unconstrained and definite, then the actual Element parameter
+of Process.all shall be unconstrained.
+147/2
+The element designated by Position is not an empty element after successful
+completion of this operation.
+
+147.1/3
+type Constant_Reference_Type
+      (Element : not null access constant Element_Type) is private
+   with Implicit_Dereference => Element;
+147.2/3
+type Reference_Type (Element : not null access Element_Type) is private
+   with Implicit_Dereference => Element;
+147.3/3
+The types Constant_Reference_Type and Reference_Type need finalization.
+147.4/3
+The default initialization of an object of type Constant_Reference_Type or
+Reference_Type propagates Program_Error.
+
+147.5/3+
+function Constant_Reference (Container : aliased in Vector;
+                             Index     : in Index_Type)
+   return Constant_Reference_Type
+   with Pre'Class  => (if Index not in First_Index (Container) .. Last_Index (Container)
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+147.6/3
+This function (combined with the Constant_Indexing and Implicit_Dereference
+aspects) provides a convenient way to gain read access to an individual element
+of a vector given an index value.
+147.7/3+
+Constant_Reference returns an object whose discriminant is an access value that
+designates the element at position Index. Tampering with the elements of Container
+is prohibited while the object returned by Constant_Reference exists and has not
+been finalized.
+
+147.8/3+
+function Reference (Container : aliased in out Vector;
+                    Index     : in Index_Type)
+   return Reference_Type
+   with Pre'Class  => (if Index not in First_Index (Container) .. Last_Index (Container)
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+147.9/3
+This function (combined with the Variable_Indexing and Implicit_Dereference
+aspects) provides a convenient way to gain read and write access to an
+individual element of a vector given an index value.
+147.10/3+
+Reference returns an object whose discriminant is an access value that
+designates the element at position Index. Tampering with the elements of
+Container is prohibited while the object returned by Reference exists and
+has not been finalized.
+147.11/3
+The element at position Index is not an empty element after successful
+completion of this operation.
+
+147.12/3+
+function Constant_Reference (Container : aliased in Vector;
+                             Position  : in Cursor)
+   return Constant_Reference_Type
+   with Pre'Class  => (if Position = No_Element then raise Constraint_Error) and then
+                      (if not Cursor_Belongs_To_Container (Container, Position)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+147.13/3
+This function (combined with the Constant_Indexing and Implicit_Dereference
+aspects) provides a convenient way to gain read access to an individual element
+of a vector given a cursor.
+147.14/3+
+Constant_Reference returns an object whose discriminant is an access
+value that designates the element designated by Position. Tampering with the
+elements of Container is prohibited while the object returned by
+Constant_Reference exists and has not been finalized.
+
+147.15/3+
+function Reference (Container : aliased in out Vector;
+                    Position  : in Cursor)
+   return Reference_Type is
+   with Pre'Class  => (if Position = No_Element then raise Constraint_Error) and then
+                      (if not Cursor_Belongs_To_Container (Container, Position)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+147.16/3
+This function (combined with the Variable_Indexing and Implicit_Dereference
+aspects) provides a convenient way to gain read and write access to an
+individual element of a vector given a cursor.
+147.17/3+
+Reference returns an object whose discriminant is an access value
+that designates the element designated by Position. Tampering with the elements
+of Container is prohibited while the object returned by Reference exists and has
+not been finalized.
+147.18/3
+The element designated by Position is not an empty element after successful
+completion of this operation.
+
+147.19/3+
+procedure Assign (Target : in out Vector; Source : in Vector)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Target)
+                       then raise Program_Error),
+        Post'Class => Length (Source) = Length (Target);
+147.20/3
+If Target denotes the same object as Source, the operation has no effect. If the
+length of Source is greater than the capacity of Target, Reserve_Capacity
+(Target, Length (Source)) is called. The elements of Source are then copied to
+Target as for an assignment_statement assigning Source to Target (this includes
+setting the length of Target to be that of Source).
+
+147.21/3+
+function Copy (Source : Vector; Capacity : Count_Type := 0)
+   return Vector
+   with Pre'Class => (if Capacity /= 0 and then Capacity < Length (Source)
+                      then raise Capacity_Error),
+        Post'Class => Length (Copy'Result) = Length (Source);
+147.22/3+
+Returns a vector whose elements are initialized from the corresponding elements
+of Source. If Capacity is 0, then the vector capacity is the length of Source;
+if Capacity is equal to or greater than the length of Source, the vector
+capacity is at least the specified value.
+
+148/2+
+procedure Move (Target : in out Vector;
+                Source : in out Vector)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Target)
+                       then raise Program_Error) and then
+                      (if Tampering_With_Cursors_Prohibited (Source)
+                       then raise Program_Error),
+        Post'Class => (if Target = Source then True
+                       else
+                         Length (Target) = Length (Source'Old) and then
+                         Length (Source) = 0);
+149/3
+If Target denotes the same object as Source, then the operation has no effect.
+Otherwise, Move first calls Reserve_Capacity (Target, Length (Source)) and then
+Clear (Target); then, each element from Source is removed from Source and
+inserted into Target in the original order. The length of Source is 0 after a
+successful call to Move.
+
+150/2+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Extended_Index;
+                  New_Item  : in     Vector)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Before not in First_Index (Container) .. Last_Index (Container) + 1
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old + Length (New_Item) = Length (Container);
+151/3+
+If Length (New_Item) is 0, then Insert does nothing. Otherwise, it computes the
+new length NL as the sum of the current length and Length (New_Item); if the
+value of Last appropriate for length NL would be greater than Index_Type'Last,
+then Constraint_Error is propagated.
+[Editor's note: This last check might overflow if written as a Precondition;
+I didn't try.]
+152/2
+If the current vector capacity is less than NL, Reserve_Capacity (Container, NL)
+is called to increase the vector capacity. Then Insert slides the elements in
+the range Before .. Last_Index (Container) up by Length (New_Item) positions, and
+then copies the elements of New_Item to the positions starting at Before. Any
+exception raised during the copying is propagated.
+
+153/2+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Cursor;
+                  New_Item  : in     Vector);
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Length (New_Item) /= 0 and then
+                          Before /= No_Element and then 
+                         (not Cursor_Belongs_To_Container (Container, Before))
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Length (New_Item) = Length (Container);
+154/3+
+If Length (New_Item) is 0, then Insert does nothing. If Before is No_Element,
+then the call is equivalent to Insert (Container, Last_Index (Container) + 1,
+New_Item); otherwise, the call is equivalent to Insert (Container,
+To_Index (Before), New_Item);
+
+155/2+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Cursor;
+                  New_Item  : in     Vector;
+                  Position  :    out Cursor);
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Before /= No_Element and then 
+                         (not Cursor_Belongs_To_Container (Container, Before))
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Length (New_Item) = Length (Container) and then
+                      Cursor_Belongs_To_Container (Container, Position);
+156/2+
+If Before equals No_Element, then let T be Last_Index (Container) + 1;
+otherwise, let T be To_Index (Before). Insert (Container, T, New_Item) is
+called, and then Position is set to To_Cursor (Container, T).
+
+157/2+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Extended_Index;
+                  New_Item  : in     Element_Type;
+                  Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Before not in First_Index (Container) .. Last_Index (Container) + 1
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container);
+158/2
+Equivalent to Insert (Container, Before, To_Vector (New_Item, Count));
+
+159/2+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Cursor;
+                  New_Item  : in     Element_Type;
+                  Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Count /= 0 and then
+                          Before /= No_Element and then 
+                         (not Cursor_Belongs_To_Container (Container, Before))
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container);
+160/2
+Equivalent to Insert (Container, Before, To_Vector (New_Item, Count));
+
+161/2+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Cursor;
+                  New_Item  : in     Element_Type;
+                  Position  :    out Cursor;
+                  Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Before /= No_Element and then 
+                         (not Cursor_Belongs_To_Container (Container, Before))
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container) and then
+                      Cursor_Belongs_To_Container (Container, Position);
+162/2
+Equivalent to Insert (Container, Before, To_Vector (New_Item, Count), Position);
+
+163/2+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Extended_Index;
+                  Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Before not in First_Index (Container) .. Last_Index (Container) + 1
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container);
+164/3+
+If Count is 0, then Insert does nothing. Otherwise, it computes the new length
+NL as the sum of the current length and Count; if the value of Last appropriate
+for length NL would be greater than Index_Type'Last, then Constraint_Error is
+propagated.
+165/2
+If the current vector capacity is less than NL, Reserve_Capacity (Container, NL)
+is called to increase the vector capacity. Then Insert slides the elements in
+the range Before .. Last_Index (Container) up by Count positions, and then
+inserts elements that are initialized by default (see 3.3.1) in the positions
+starting at Before.
+
+166/2+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Cursor;
+                  Position  :    out Cursor;
+                  Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Before /= No_Element and then 
+                         (not Cursor_Belongs_To_Container (Container, Before))
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container) and then
+                      Cursor_Belongs_To_Container (Container, Position);
+167/2
+If Before equals No_Element, then let T be Last_Index (Container) + 1;
+otherwise, let T be To_Index (Before). Insert (Container, T, Count) is called,
+and then Position is set to To_Cursor (Container, T).
+
+168/2+
+procedure Prepend (Container : in out Vector;
+                   New_Item  : in     Vector)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Length (New_Item) = Length (Container);
+169/2
+Equivalent to Insert (Container, First_Index (Container), New_Item).
+
+170/2+
+procedure Prepend (Container : in out Vector;
+                   New_Item  : in     Element_Type;
+                   Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container);
+171/2
+Equivalent to Insert (Container, First_Index (Container), New_Item, Count).
+
+172/2+
+procedure Append (Container : in out Vector;
+                  New_Item  : in     Vector)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Length (New_Item) = Length (Container);
+173/2
+Equivalent to Insert (Container, Last_Index (Container) + 1, New_Item).
+
+174/2+
+procedure Append (Container : in out Vector;
+                  New_Item  : in     Element_Type;
+                  Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container);
+175/2
+Equivalent to Insert (Container, Last_Index (Container) + 1, New_Item, Count).
+
+176/2+
+procedure Insert_Space (Container : in out Vector;
+                        Before    : in     Extended_Index;
+                        Count     : in     Count_Type := 1);
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Before not in First_Index (Container) .. Last_Index (Container) + 1
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container);
+177/3
+If Count is 0, then Insert_Space does nothing. Otherwise, it computes the new
+length NL as the sum of the current length and Count; if the value of Last
+appropriate for length NL would be greater than Index_Type'Last, then
+Constraint_Error is propagated.
+178/2
+If the current vector capacity is less than NL, Reserve_Capacity (Container, NL)
+is called to increase the vector capacity. Then Insert_Space slides the elements
+in the range Before .. Last_Index (Container) up by Count positions, and then
+inserts empty elements in the positions starting at Before.
+
+179/2+
+procedure Insert_Space (Container : in out Vector;
+                        Before    : in     Cursor;
+                        Position  :    out Cursor;
+                        Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Before /= No_Element and then 
+                         (not Cursor_Belongs_To_Container (Container, Before))
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old + Count = Length (Container) and then
+                      Cursor_Belongs_To_Container (Container, Position);
+180/2
+If Before equals No_Element, then let T be Last_Index (Container) + 1;
+otherwise, let T be To_Index (Before). Insert_Space (Container, T, Count) is
+called, and then Position is set to To_Cursor (Container, T).
+
+181/2+
+procedure Delete (Container : in out Vector;
+                  Index     : in     Extended_Index;
+                  Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Index not in First_Index (Container) .. Last_Index (Container) + 1
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old - Count <= Length (Container);
+182/3+
+If Count is 0, Delete has no effect. Otherwise, Delete slides the elements
+(if any) starting at position Index + Count down to Index. Any exception
+raised during element assignment is propagated.
+
+183/2+
+procedure Delete (Container : in out Vector;
+                  Position  : in out Cursor;
+                  Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if Position = No_Element then raise Constraint_Error) and then
+                      (if not Cursor_Belongs_To_Container (Container, Position)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old - Count <= Length (Container);
+184/2
+Delete (Container, To_Index (Position), Count) is called, and then
+Position is set to No_Element.
+
+185/2+
+procedure Delete_First (Container : in out Vector;
+                        Count     : in     Count_Type := 1)
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old - Count <= Length (Container);
+186/2
+Equivalent to Delete (Container, First_Index (Container), Count).
+
+187/2+
+procedure Delete_Last (Container : in out Vector;
+                       Count     : in     Count_Type := 1);
+   with Pre'Class  => (if Tampering_With_Cursors_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old - Count <= Length (Container);
+188/3
+If Length (Container) <= Count, then Delete_Last is equivalent to Clear
+(Container). Otherwise, it is equivalent to Delete (Container,
+Index_Type'Val(Index_Type'Pos(Last_Index (Container)) – Count + 1), Count).
+
+189/2+
+procedure Reverse_Elements (Container : in out Vector)
+   with Pre'Class  => (if Tampering_With_Elements_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+190/2
+Reorders the elements of Container in reverse order.
+
+191/2+
+procedure Swap (Container : in out Vector;
+                I, J      : in     Index_Type)
+   with Pre'Class  => (if Tampering_With_Elements_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if I not in First_Index (Container) .. Last_Index (Container)
+                       then raise Constraint_Error) and then
+                      (if J not in First_Index (Container) .. Last_Index (Container)
+                       then raise Constraint_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+192/2+
+Swap exchanges the values of the elements at positions I and J.
+
+193/2+
+procedure Swap (Container : in out Vector;
+                I, J      : in     Cursor);
+   with Pre'Class  => (if Tampering_With_Elements_Prohibited (Container)
+                       then raise Program_Error) and then
+                      (if I = No_Element or else J = No_Element
+                       then raise Constraint_Error) and then
+                      (if not Cursor_Belongs_To_Container (Container, I)
+                       then raise Program_Error) and then
+                      (if not Cursor_Belongs_To_Container (Container, J)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old - Count <= Length (Container);
+194/2+
+Swap exchanges the values of the elements designated by I and J.
+
+195/2
+function First_Index (Container : Vector) return Index_Type;
+196/2
+Returns the value Index_Type'First.
+
+197/2+
+function First (Container : Vector) return Cursor
+    with Post'Class => (if not Is_Empty (Container)
+                        then Cursor_Belongs_To_Container (Container, First'Result)
+                        else First'Result = No_Element);
+198/2
+If Container is empty, First returns No_Element. Otherwise, it returns a cursor
+that designates the first element in Container.
+
+199/2
+function First_Element (Container : Vector) return Element_Type;
+200/2
+Equivalent to Element (Container, First_Index (Container)).
+
+201/2
+function Last_Index (Container : Vector) return Extended_Index;
+202/2
+If Container is empty, Last_Index returns No_Index. Otherwise, it returns the
+position of the last element in Container.
+
+203/2+
+function Last (Container : Vector) return Cursor;
+    with Post'Class => (if not Is_Empty (Container)
+                        then Cursor_Belongs_To_Container (Container, Last'Result)
+                        else Last'Result = No_Element);
+204/2
+If Container is empty, Last returns No_Element. Otherwise, it returns a cursor
+that designates the last element in Container.
+
+205/2
+function Last_Element (Container : Vector) return Element_Type;
+206/2
+Equivalent to Element (Container, Last_Index (Container)).
+
+207/2
+function Next (Position : Cursor) return Cursor;
+208/2
+If Position equals No_Element or designates the last element of the container,
+then Next returns the value No_Element. Otherwise, it returns a cursor that
+designates the element with index To_Index (Position) + 1 in the same vector as
+Position.
+
+209/2
+procedure Next (Position : in out Cursor);
+210/2
+Equivalent to Position := Next (Position).
+
+211/2
+function Previous (Position : Cursor) return Cursor;
+212/2
+If Position equals No_Element or designates the first element of the container,
+then Previous returns the value No_Element. Otherwise, it returns a cursor that
+designates the element with index To_Index (Position) – 1 in the same vector as
+Position.
+
+213/2
+procedure Previous (Position : in out Cursor);
+214/2
+Equivalent to Position := Previous (Position).
+
+215/2
+function Find_Index (Container : Vector;
+                     Item      : Element_Type;
+                     Index     : Index_Type := Index_Type'First)
+   return Extended_Index;
+216/2
+Searches the elements of Container for an element equal to Item (using the
+generic formal equality operator). The search starts at position Index and
+proceeds towards Last_Index (Container). If no equal element is found, then
+Find_Index returns No_Index. Otherwise, it returns the index of the first equal
+element encountered.
+
+217/2+
+function Find (Container : Vector;
+               Item      : Element_Type;
+               Position  : Cursor := No_Element)
+   return Cursor
+    with Pre'Class  => (if Position /= No_Element and then 
+                         (not Cursor_Belongs_To_Container (Container, Position))
+                        then raise Program_Error),
+    with Post'Class => (if Find'Result then True
+                        else Cursor_Belongs_To_Container (Container, Find'Result));
+218/3+
+Find searches the elements of
+Container for an element equal to Item (using the generic formal equality
+operator). The search starts at the first element if Position equals No_Element,
+and at the element designated by Position otherwise. It proceeds towards the
+last element of Container. If no equal element is found, then Find returns
+No_Element. Otherwise, it returns a cursor designating the first equal element
+encountered.
+
+219/2
+function Reverse_Find_Index (Container : Vector;
+                             Item      : Element_Type;
+                             Index     : Index_Type := Index_Type'Last)
+   return Extended_Index;
+220/2
+Searches the elements of Container for an element equal to Item (using the
+generic formal equality operator). The search starts at position Index or, if
+Index is greater than Last_Index (Container), at position Last_Index
+(Container). It proceeds towards First_Index (Container). If no equal element is
+found, then Reverse_Find_Index returns No_Index. Otherwise, it returns the index
+of the first equal element encountered.
+
+221/2+
+function Reverse_Find (Container : Vector;
+                       Item      : Element_Type;
+                       Position  : Cursor := No_Element)
+   return Cursor
+    with Pre'Class  => (if Position /= No_Element and then 
+                         (not Cursor_Belongs_To_Container (Container, Position))
+                        then raise Program_Error),
+    with Post'Class => (if Reverse_Find'Result then True
+                        else Cursor_Belongs_To_Container (Container, Reverse_Find'Result));
+222/3+
+Reverse_Find searches the elements
+of Container for an element equal to Item (using the generic formal equality
+operator). The search starts at the last element if Position equals No_Element,
+and at the element designated by Position otherwise. It proceeds towards the
+first element of Container. If no equal element is found, then Reverse_Find
+returns No_Element. Otherwise, it returns a cursor designating the first equal
+element encountered.
+
+223/2
+function Contains (Container : Vector;
+                   Item      : Element_Type) return Boolean;
+224/2
+Equivalent to Has_Element (Find (Container, Item)).
+
+227/2+
+procedure Iterate
+  (Container : in Vector;
+   Process   : not null access procedure (Position : in Cursor))
+   with Post'Class => Length (Container)'Old = Length (Container);
+228/3
+Invokes Process.all with a cursor that designates each element in Container, in
+index order. Tampering with the cursors of Container is prohibited during the
+execution of a call on Process.all. Any exception raised by Process.all is
+propagated.
+
+229/2
+procedure Reverse_Iterate
+  (Container : in Vector;
+   Process   : not null access procedure (Position : in Cursor))
+   with Post'Class => Length (Container)'Old = Length (Container);
+230/3
+Iterates over the elements in Container as per procedure Iterate, except that
+elements are traversed in reverse index order.
+
+230.1/3
+function Iterate (Container : in Vector)
+   return Vector_Iterator_Interfaces.Reversible_Iterator'Class;
+230.2/3
+Iterate returns a reversible iterator object (see 5.5.1) that will generate a
+value for a loop parameter (see 5.5.2) designating each node in Container,
+starting with the first node and moving the cursor as per the Next function when
+used as a forward iterator, and starting with the last node and moving the
+cursor as per the Previous function when used as a reverse iterator. Tampering
+with the cursors of Container is prohibited while the iterator object exists (in
+particular, in the sequence_of_statements of the loop_statement whose
+iterator_specification denotes this object). The iterator object needs
+finalization.
+
+230.3/3
+function Iterate (Container : in Vector; Start : in Cursor)
+   return Vector_Iterator_Interfaces.Reversible_Iterator'Class;
+230.4/3
+If Start is not No_Element and does not designate an item in Container, then
+Program_Error is propagated. If Start is No_Element, then Constraint_Error is
+propagated. Otherwise, Iterate returns a reversible iterator object (see 5.5.1)
+that will generate a value for a loop parameter (see 5.5.2) designating each
+node in Container, starting with the node designated by Start and moving the
+cursor as per the Next function when used as a forward iterator, or moving the
+cursor as per the Previous function when used as a reverse iterator. Tampering
+with the cursors of Container is prohibited while the iterator object exists (in
+particular, in the sequence_of_statements of the loop_statement whose
+iterator_specification denotes this object). The iterator object needs
+finalization.
+231/3
+The actual function for the generic formal function "<" of Generic_Sorting is
+expected to return the same value each time it is called with a particular pair
+of element values. It should define a strict weak ordering relationship (see
+A.18); it should not modify Container. If the actual for "<" behaves in some
+other manner, the behavior of the subprograms of Generic_Sorting are
+unspecified. The number of times the subprograms of Generic_Sorting call "<" is
+unspecified.
+
+232/2
+function Is_Sorted (Container : Vector) return Boolean;
+233/2
+Returns True if the elements are sorted smallest first as determined by the
+generic formal "<" operator; otherwise, Is_Sorted returns False. Any exception
+raised during evaluation of "<" is propagated.
+
+234/2+
+procedure Sort (Container : in out Vector)
+   with Pre'Class  => (if Tampering_With_Elements_Prohibited (Container)
+                       then raise Program_Error),
+        Post'Class => Length (Container)'Old = Length (Container);
+[We could check in the postcondition that these are sorted, but that's rather
+expensive, and these assertions won't usually be ignored.]
+235/2
+Reorders the elements of Container such that the elements are sorted smallest
+first as determined by the generic formal "<" operator provided. Any exception
+raised during evaluation of "<" is propagated.
+
+236/2+
+procedure Merge (Target  : in out Vector;
+                 Source  : in out Vector)
+   with Pre'Class  => (if Tampering_With_Elements_Prohibited (Target)
+                       then raise Program_Error) and then
+                      (if Tampering_With_Elements_Prohibited (Source)
+                       then raise Program_Error),
+        Post'Class => Length (Source) = 0 and then
+                      Length (Target) = Length (Source)'Old + Length (Target)'Old;
+[Checking whether these are sorted is too expensive, so we won't try;
+especially as wee don't specify what happens if they're not.
+We don't have a foolproof way to check if these are the same object,
+so we don't try that, either.]
+237/3
+If Source is empty, then Merge does nothing. If Source and Target are the same
+nonempty container object, then Program_Error is propagated. Otherwise, Merge
+removes elements from Source and inserts them into Target; afterwards, Target
+contains the union of the elements that were initially in Source and Target;
+Source is left empty. If Target and Source are initially sorted smallest first,
+then Target is ordered smallest first as determined by the generic formal "<"
+operator; otherwise, the order of elements in Target is unspecified. Any
+exception raised during evaluation of "<" is propagated.
+
+
+!discussion
+
+For this initial version, we've prototyped the changes needed for a single
+package (Ada.Containers.Vectors). The other 6 basic containers would need
+similar wording changes. We also might want some additional preconditions
+related to capacity for the bounded versions (although that would be
+painful to do, as the bounded versions are described by difference).
+
+Since the other containers would be very similar, we did just this
+one container in order to determine whether it is worth following through with
+the effort to do the remainder of the containers.
+
+The prototype only shows the wording for the main body of the definition
+of Ada.Containers.Vectors. The package specification would also have to
+be modified, and there might be some wording simplifications possible
+in the other sections. These were not looked at for this prototype.
+
+A handful of new predicate functions are needed for these preconditions. These
+are clearly marked as new. All other operations are pre-existing; the
+contracts are new and some of the English text has been simplified but no
+change in semantics is intended. The paragraph numbers of modified paragraphs
+are marked with a "+". The edits to text (including deletions) is not shown in
+order to illustrate the improvement (or lack thereof) in readability after
+converting English checks to Ada expressions. (A lot of connector words
+were dropped, especially "otherwise", which should improve readability.)
+
+The prototype includes very simple postconditions on the operations. These
+are by no means complete; for instance, we could easily have postconditions
+on the capacity of the container. The question of how far we ought to go with
+postconditions is one that will need to be discussed.
+
+One postcondition not included that should be is
+    Tampering_With_Cursors_Prohibited (Container)'Old = Tampering_With_Cursors_Prohibited (Container) and
+    Tampering_With_Elements_Prohibited (Container)'Old = Tampering_With_Elements_Prohibited (Container)
+
+This says that the tampering state is not changed by the subprogram. Knowing
+that will allow compilers to eliminate extra tampering checks - often multiple
+modifications will be grouped together such that only a single check is needed.
+
+This should be included on every subprogram that has a Container parameter other
+that Reference and Constant_Reference. (Note that the routines with callbacks,
+like Iterate and Query_Element, change the tampering state internally, but the
+state is unchanged when they complete.) I would suggest doing that with a
+blanket rule rather than cluttering the definitions with these two extra lines.
+
+There are two additional issues with this addition. First, most of the reading
+routines do not have a Container parameter. We would need a global out
+annotation (Global out => null) on most of those routines to state that the
+container tampering state (as well as any other global state) is unchanged.
+If we had such an annotation, we would probably want to specify it with a
+blanket rule as well. (But we could also forget the blanket rules and simply
+repeat these on every routine, after all, that's what an implementation would
+do. Or alternatively, write everything out in the package specification and
+use a simplified version in the body of the clause.)
+
+Second, I don't see any way to show where the tampering is prohibited. That
+occurs in callbacks (Query_Element, Update_Element, Iterate, Reverse_Iterate),
+when an iterator object returned by Iterate is used, and during the lifetime
+of the object returned by Reference and Constant_Reference. Unfortunately,
+none of these places can be described by the constract aspects currently
+available with Ada. One could imagine having appropriate preconditions on
+the callback access values such that we could describe it there, but I don't
+have any idea of a way to describe its association with use of the objects.
+
+!ASIS
+
+No ASIS impact.
+
+!ACATS test
+
+These changes are not intended to change any of the semantics of the
+containers, so no new ACATS tests are needed. To the extent that the ACATS
+doesn't test the error cases, C-Tests are needed to do that (but those are
+needed whether or not this AI is approved).
+
+!appendix
+
+From: Randy Brukardt
+Sent: Tuesday, February 11, 2014  12:18 PM
+
+[A partial message in response to messages in the thread filed in AI12-0111-1.]
+
+> One thing that would have helped is to design all the safety stuff so
+> that it was in the form of preconditions and postconditions, which
+> could be easily suppressed.
+
+I've suggested that before (including on Friday). It's still possible, of
+course, it would be compatible to do so (we couldn't use predicates, but
+preconditions would work). (But it would be a lot of work for the Standard, and
+some for implementers.) Of course, we couldn't have done this for Ada 2005, as
+we  didn't have preconditions then.
+
+In particular, if we added the routine Is_Tampering_with_Cursors (Container
+: in Vector) return Boolean, then the bounded vector Insert could be:
+
+procedure Insert (Container : in out Vector;
+                  Before    : in     Extended_Index;
+                  New_Item  : in     Vector)
+    with Pre => (if Container.Is_Tampering_with_Cursors then raise Program_Error with "Tampering check") and then
+                (if Before not in Container.First_Index .. Container.Last_Index + 1 then raise Constraint_Error) and then
+                (if Container.Length = Container.Capacity then raise Capacity_Error),
+         Post => (Container.Is_Tampering_with_Cursors'Old = Container.Is_Tampering_with_Cursors) and
+                  Container.Length'Old + 1 = Container.Length);
+
+The postcondition is intended to show provers that a call of Insert doesn't
+change the tampering state.
+
+Having these as preconditions and postconditions would allow easy suppression
+of the checks (and also would allow the compiler to combine and/or eliminate
+them, so it wouldn't be as necessary to suppress them).
+
+This seems to me to be the best way to fix the performance problem caused by
+the checking. But that presumes that we're sure that the performance problem
+is caused solely by the checking.
+
+****************************************************************
+
