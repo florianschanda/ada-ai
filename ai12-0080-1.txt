@@ -1,5 +1,7 @@
-!standard 3.9.3(6/2)                                      14-05-09  AI05-0080-1/05
+!standard 3.9.3(6/2)                                   14-05-16  AI05-0080-1/06
 !standard 7.3.2(21/3)
+!standard 13.11.6(28/3)
+!standard A.18.2(168/2)
 !standard A.18.26(29/3)
 !standard A.18.26(31/3)
 !standard B.1(50)
@@ -32,6 +34,10 @@ This AI corrects minor errors in the Standard.
 5) "Invariant" should be "Type_Invariant" in 7.3.2 as there is no such thing as
 an "Invariant policy".
 
+6) Drop the Count parameter from Prepend in A.18.2(168/2).
+
+7) Add a check for the maximum supported alignment in 13.11.6(28/3).
+
 !question
 
 1) The following appears to be legal:
@@ -63,6 +69,16 @@ dereferenced. Should the ".all" be deleted? (Yes.)
 
 5) 7.3.2(21/3) talks about the "Invariant or Invariant'Class policy". But of
 course the policy is for Type_Invariant. Should this say "Type_Invariant"? (Yes.)
+
+6) A.18.2(168/2) describes a Prepend with 3 parameters, including Count.
+But the equivalence in A.18.2(169/2) does not reference Count, and the
+package specification at A.18.2(44/2) does not have a Count parameter. Is this
+parameter a mistake? (Yes.)
+
+7) The alignment code in 13.11.6(28/3) assumes that Pool.Storage is properly
+aligned at the maximum alignment. Moreover, it does not check for nonsense
+alignments. Should there be some indication that this code isn't realistic?
+(Yes.)
 
 !recommendation
 
@@ -108,6 +124,20 @@ If performing checks is required by the [Invariant]{Type_Invariant} or
  the point of corresponding aspect specification applicable to a given type,
 then the respective invariant expression is considered enabled.
 
+6) Modify A.18.2(168/2):
+
+procedure Prepend (Container : in out Vector;
+                   New_Item  : in     Vector[;
+                   Count     : in     Count_Type := 1]);
+
+7) Add at the front of 13.11.6(28/3):
+
+      -- Check for the maximum supported alignment, which is the alignment
+      -- of the storage area:
+      if Alignment > Pool.Storage'Alignment then
+         raise Program_Error;
+      end if;
+
 !discussion
 
 1) This problem was noted in the e-mail appendix to AI95-00391-1 (which
@@ -126,6 +156,22 @@ be dereferenced. So ".all" doesn't make sense in this example.
 5) Since there is no such thing as an "Invariant" policy, this is a no-brainer
 correction.
 
+6) The similar Append does not have a Count parameter in any of its
+declarations. It seems pretty clear that this is a cut-and-paste error.
+
+7) Unfortunately, Ada doesn't provide a mechanism to ensure that a component
+like Storage is aligned properly. (We don't care *where* it's stored, only
+that it is aligned to the maximum supported.) Thus we can't actually fix
+this code as it stands.
+
+The author of the question suggested a complex rewrite using Integer_Address,
+but that assumed that Integer_Address was a modular type, which is not
+required by the Ada Standard. That just swaps one problem for another (somewhat
+less likely) problem. Thus, we adopt a more minimal fix.
+
+Aside: We really ought to look into some solution for the component alignment
+problem, as it makes it hard to write portable storage pools.
+
 !corrigendum 3.9.3(6/2)
 
 @drepl
@@ -133,7 +179,7 @@ correction.
 subprogram or, in the case of a private extension inheriting a function with
 a controlling result, have a full type that is a null extension; for a type
 declared in the visible part of a package, the overriding may be either in
-the visible or the private part. Such a subprogram is said to @i<require 
+the visible or the private part. Such a subprogram is said to @i<require
 overriding>. However, if the type is a generic formal type, the subprogram
 need not be overridden for the formal type itself; a nonabstract version
 will necessarily be provided by the actual type.>
@@ -159,6 +205,48 @@ If performing checks is required by the Type_Invariant or Type_Invariant'Class
  assertion policies (see 11.4.2) in effect at the point of corresponding aspect
 specification applicable to a given type, then the respective invariant
 expression is considered @i<enabled>.
+
+!corrigendum 13.11.6(28/3)
+
+@drepl
+@xcode<      -- @ft<@i<Correct the alignment if necessary:>>
+      Pool.Next_Allocation := Pool.Next_Allocation +
+         ((-Pool.Next_Allocation) @b<mod> Alignment);
+      @b<if> Pool.Next_Allocation + Size_In_Storage_Elements @>
+         Pool.Pool_Size @b<then>
+         @b<raise> Storage_Error; -- @ft<@i<Out of space.>>
+      @b<end if>;
+      Storage_Address := Pool.Storage (Pool.Next_Allocation)'Address;
+      Pool.Next_Allocation :=
+         Pool.Next_Allocation + Size_In_Storage_Elements;
+   @b<end> Allocate_From_Subpool;>
+@dby
+@xcode<      -- @ft<@i<Check for the maximum supported alignment, which is the alignment>>
+      -- @ft<@i<of the storage area:>>
+      @b<if> Alignment > Pool.Storage'Alignment @b<then>
+         @b<raise> Program_Error;
+      @b<end if>;
+      -- @ft<@i<Correct the alignment if necessary:>>
+      Pool.Next_Allocation := Pool.Next_Allocation +
+         ((-Pool.Next_Allocation) @b<mod> Alignment);
+      @b<if> Pool.Next_Allocation + Size_In_Storage_Elements @>
+         Pool.Pool_Size @b<then>
+         @b<raise> Storage_Error; -- @ft<@i<Out of space.>>
+      @b<end if>;
+      Storage_Address := Pool.Storage (Pool.Next_Allocation)'Address;
+      Pool.Next_Allocation :=
+         Pool.Next_Allocation + Size_In_Storage_Elements;
+   @b<end> Allocate_From_Subpool;>
+
+!corrigendum A.18.2(168/2)
+
+@drepl
+@xcode<@b<procedure> Prepend (Container : @b<in out> Vector;
+                   New_Item  : @b<in>     Vector;
+                   Count     : @b<in>     Count_Type := 1);
+@dby
+@xcode<@b<procedure> Prepend (Container : @b<in out> Vector;
+                   New_Item  : @b<in>     Vector);
 
 !corrigendum A.18.32(29/3)
 
@@ -255,7 +343,7 @@ No test needed.
     subprogram or, in the case of a private extension inheriting a
                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     function with a controlling result, have a full type that is a
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^        
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     null extension; for a type declared in the visible part of a
     package, the overriding may be either in the visible or the
     private part. Such a subprogram is said to require
@@ -363,5 +451,368 @@ document out ASAP with various last-minute issues getting wrapped up.
 
 Anyway, thanks for pointing this out. It'll get fixed (it's seemingly the only
 paragraph of 7.3.2 that previously didn't have an error).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, March  1, 2014  8:13 AM
+
+I was recently assigned to implement AI05-0298-1 in GNAT.  The title is
+"Last-minute presentation issues in the Standard", so we apparently assumed
+there was nothing to do (until recently).  There is one substantive change
+lurking in there, which is to change an 'in' parameter to 'in out'.
+
+I used a modified version of the Mister_Pools example of RM-13.11.6 as my
+regression test.
+
+Changes to Mr_Pools:
+
+The index constraint (0 .. Pool_Size-1) is illegal because Pool_Size is a
+discriminant. I changed it to (1 .. Pool_Size).
+
+You can't Release the initial pool. So change it from a renaming of
+Unchecked_Deallocate_Subpool to a procedure with a body that asserts
+Pool.Current_Pool > 1. This assertion cannot go in Deallocate_Subpool, because
+Deallocate_Subpool will be called from finalization of the
+Mark_Release_Pool_Type object.
+
+There is no guarantee that the Storage component of Mark_Release_Pool_Type will
+be aligned on any particular boundary. Therefore, the existing alignment
+adjustment is wrong. I fixed it by doing all the address arithmetic in
+Integer_Address rather than Storage_Count; that is, it is working with addresses
+rather than array indices. Integer_Address is used instead of Address, because
+Address doesn't have the operators used in the alignment adjustment (e.g. unary
+minus with modular semantics). Note that this depends on Integer_Address being a
+modular type, which the RM does not require.
+
+I added a postcondition to ensure correct alignment:
+
+    Post => Storage_Address mod Alignment = 0
+
+The code in Deallocate_Subpool:
+
+      else -- Reinitialize the default subpool:
+         Pool.Next_Allocation := 1;
+         Subpools.Set_Pool_Of_Subpool
+           (Pool.Markers (1)'Unchecked_Access,
+            Pool);
+
+doesn't make any sense, because when the "else" part is entered, we are
+deallocating the initial subpool (Pool.Current_Pool = 1), which can only happen
+during finalization of the Mark_Release_Pool_Type object. So I removed it.
+
+Here are the diffs:
+
+% diff -u orig/mr_pool.ads mr_pool.ads
+--- orig/mr_pool.ads	2014-02-27 17:07:38.000000000 -0500
++++ mr_pool.ads	2014-02-28 11:05:27.000000000 -0500
+@@ -1,6 +1,5 @@
+ with System.Storage_Pools.Subpools;
+ with System.Storage_Elements;
+-with Ada.Unchecked_Deallocate_Subpool;
+ package MR_Pool is
+
+    use System.Storage_Pools;
+@@ -20,14 +19,12 @@
+    function Mark
+      (Pool : in out Mark_Release_Pool_Type) return not null Subpool_Handle;
+
+-   procedure Release
+-     (Subpool : in out Subpool_Handle) renames
+-     Ada.Unchecked_Deallocate_Subpool;
++   procedure Release (Subpool : in out Subpool_Handle);
+
+ private
+
+    type MR_Subpool is new Subpools.Root_Subpool with record
+-      Start : Storage_Count;
++      Start : Integer_Address;
+    end record;
+    subtype Subpool_Indexes is Positive range 1 .. 10;
+    type Subpool_Array is array (Subpool_Indexes) of aliased MR_Subpool;
+@@ -36,8 +33,8 @@
+      (Pool_Size : Storage_Count) is new Subpools
+      .Root_Storage_Pool_With_Subpools with
+    record
+-      Storage         : Storage_Array (0 .. Pool_Size-1);
+-      Next_Allocation : Storage_Count   := 0;
++      Storage         : Storage_Array (1 .. Pool_Size);
++      Next_Allocation : Integer_Address;
+       Markers         : Subpool_Array;
+       Current_Pool    : Subpool_Indexes := 1;
+    end record;
+@@ -55,7 +52,8 @@
+       Storage_Address          :    out System.Address;
+       Size_In_Storage_Elements : in     Storage_Count;
+       Alignment                : in     Storage_Count;
+-      Subpool                  :        not null Subpool_Handle);
++      Subpool                  :        not null Subpool_Handle) with
++     Post => Storage_Address mod Alignment = 0;
+
+    overriding procedure Deallocate_Subpool
+      (Pool    : in out Mark_Release_Pool_Type;
+% diff -u orig/mr_pool.adb mr_pool.adb
+--- orig/mr_pool.adb	2014-02-27 17:07:38.000000000 -0500
++++ mr_pool.adb	2014-02-28 11:03:35.000000000 -0500
+@@ -1,3 +1,4 @@
++with Ada.Unchecked_Deallocate_Subpool;
+ package body MR_Pool is
+
+    use type Subpool_Handle;
+@@ -5,7 +6,8 @@
+    procedure Initialize (Pool : in out Mark_Release_Pool_Type) is
+    -- Initialize the first default subpool.
+    begin
+-      Pool.Markers (1).Start := 1;
++      Pool.Next_Allocation := To_Integer (Pool.Storage (1)'Address);
++      Pool.Markers (1).Start := Pool.Next_Allocation;
+       Subpools.Set_Pool_Of_Subpool (Pool.Markers (1)'Unchecked_Access, Pool);
+    end Initialize;
+
+@@ -36,18 +38,23 @@
+       if Subpool /= Pool.Markers (Pool.Current_Pool)'Unchecked_Access then
+          raise Program_Error; -- Only the last marked subpool can be released.
+       end if;
++      -- If Pool.Current_Pool = 1, we are being called from finalization of the
++      -- Mark_Release_Pool_Type object, so we do nothing.
+       if Pool.Current_Pool /= 1 then
+          Pool.Next_Allocation := Pool.Markers (Pool.Current_Pool).Start;
+          Pool.Current_Pool    :=
+            Pool.Current_Pool - 1; -- Move to the previous subpool
+-      else -- Reinitialize the default subpool:
+-         Pool.Next_Allocation := 1;
+-         Subpools.Set_Pool_Of_Subpool
+-           (Pool.Markers (1)'Unchecked_Access,
+-            Pool);
+       end if;
+    end Deallocate_Subpool;
+
++   procedure Release (Subpool : in out Subpool_Handle) is
++      Pool : Mark_Release_Pool_Type renames
++        Mark_Release_Pool_Type (Subpools.Pool_Of_Subpool (Subpool).all);
++   begin
++      pragma Assert (Pool.Current_Pool > 1);
++      Ada.Unchecked_Deallocate_Subpool (Subpool);
++   end Release;
++
+    function Default_Subpool_for_Pool
+      (Pool : in out Mark_Release_Pool_Type) return not null Subpool_Handle
+    is
+@@ -68,14 +75,20 @@
+          -- Only the last marked subpool can be used for allocations.
+       end if;
+
+-      -- Correct the alignment if necessary:
++      -- Correct the alignment if necessary.  Note that this depends on
++      -- Integer_Address being a modular, not signed, integer.
+       Pool.Next_Allocation :=
+-        Pool.Next_Allocation + ((-Pool.Next_Allocation) mod Alignment);
+-      if Pool.Next_Allocation + Size_In_Storage_Elements > Pool.Pool_Size then
++        Pool.Next_Allocation +
++        ((- Pool.Next_Allocation) mod Integer_Address (Alignment));
++      Storage_Address := To_Address (Pool.Next_Allocation);
++      Pool.Next_Allocation :=
++        Pool.Next_Allocation + Integer_Address
++ (Size_In_Storage_Elements);
++
++      if Pool.Next_Allocation >
++        To_Integer (Pool.Storage (Pool.Pool_Size)'Address)
++      then
+          raise Storage_Error; -- Out of space.
+       end if;
+-      Storage_Address      := Pool.Storage (Pool.Next_Allocation)'Address;
+-      Pool.Next_Allocation := Pool.Next_Allocation + Size_In_Storage_Elements;
+    end Allocate_From_Subpool;
+
+ end MR_Pool;
+%
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, March  1, 2014  5:59 PM
+
+Thanks for the updates.
+
+> I used a modified version of the Mister_Pools example of
+> RM-13.11.6 as my regression test.
+
+Steve Baird wrote a potential ACATS test for storage pools; it can be found in
+the submitted tests as CDB40SB.A. Find it from
+http://www.ada-auth.org/submit.html. It's highly likely that this test will be
+in ACATS 4.0. You could have saved some time by using that (but then of course
+we wouldn't have your detailed comments on the example).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, May 14, 2014  8:14 PM
+
+> I was recently assigned to implement AI05-0298-1 in GNAT.
+> The title is "Last-minute presentation issues in the Standard", so we
+> apparently assumed there was nothing to do (until recently).  There is
+> one substantive change lurking in there, which is to change an 'in'
+> parameter to 'in out'.
+>
+> I used a modified version of the Mister_Pools example of
+> RM-13.11.6 as my regression test.
+
+I'm writing the AI from these changes, and I have some questions.
+
+> You can't Release the initial pool.
+
+Where do you get that from? I can't find any such rule, and I'm pretty sure
+there is no such rule. Certainly "Release" is allowed, since that's a MR_Pool
+invention. And Unchecked_Deallocate_Subpool is allowed on any subpool, including
+the initial pool.
+
+I have the code simply reset the initial pool if it is deallocated (it can't
+disappear completely, but it certainly can be emptied). I'm not sure why you
+think that's impossible -- I'd say that it is required behavior. (Surely you
+can't mean that you can never dump the items in the initial subpool without
+destroying the entire pool -- that makes no sense.)
+
+> So change it from a renaming of Unchecked_Deallocate_Subpool to a procedure
+> with a body that asserts Pool.Current_Pool > 1. This assertion cannot go in
+> Deallocate_Subpool, because Deallocate_Subpool will be called from
+> finalization of the Mark_Release_Pool_Type object.
+
+No need for all of this complication, as your premise is wrong. And the else
+branch in Deallocate_Subpool is needed for reinitialization when/if the initial
+subpool is deallocated.
+
+> There is no guarantee that the Storage component of
+> Mark_Release_Pool_Type will be
+> aligned on any particular boundary.
+
+This is obnoxious and seems to be a bug in Ada. It should be possible to
+guarentee the alignment of this (and any!) component. But it's not possible to
+give any sort of alignment requirement for a discriminant-dependent component,
+even assuming the Recommended Level of Support. This is especially annoying
+because real compilers certainly align the objects properly and it should be
+possible to ensure that the component is aligned properly relative to the
+object.
+
+The problem is really that we have no way to set alignment of record components;
+we can only position them completely, which is obviously impossible for
+something with an unknown size. I wonder if that ought to be changed.
+
+> Therefore, the existing alignment adjustment is wrong. I fixed it by
+> doing all the address arithmetic in Integer_Address rather than
+> Storage_Count; that is, it is working with addresses rather than array
+> indices. Integer_Address is used instead of Address, because Address doesn't
+> have the operators
+> used in the alignment adjustment (e.g. unary minus with modular semantics).
+> Note that this depends on Integer_Address being a modular type, which
+> the RM does not require.
+
+I don't think this is really any better, because it is still depending on
+assumptions that aren't necessarily true. I don't care that much about
+protecting against overflow (this is not a real-world example for obvious
+reasons), so I can't tell if that is your concern here or whether there some
+place where your code really depends on modular semantics. My guess is, however,
+that you can't use unary minus in here on Integer_Address (while Storage_Count,
+which is a modular type, that is OK).
+
+My personal opinion is that the use of Address (in any form) is to be avoided in
+new code. I don't like examples using address math. I'd much rather properly set
+the alignment of the component and use the previous code than to drag address
+calculations into this (they're always wrong). I realize that completely
+avoiding Address in a storage pool is impossible, but I'd rather minimize it.
+
+I can't figure out how this code is supposed to work (for modular math or any
+other). So I can't fix it. And since I've never, ever written correct alignment
+code (someone on the ARG claimed that my original version was messed up, so it
+was replaced by this version that I don't understand; and the Janus/Ada code had
+an off-by-one error for more than a year before someone noticed - I still don't
+know if its right, it just doesn't have the off-by-one error anymore. :-), I'm
+not the person to figure out the correct code.
+
+...
+> @@ -55,7 +52,8 @@
+>        Storage_Address          :    out System.Address;
+>        Size_In_Storage_Elements : in     Storage_Count;
+>        Alignment                : in     Storage_Count;
+> -      Subpool                  :        not null Subpool_Handle);
+> +      Subpool                  :        not null Subpool_Handle) with
+> +     Post => Storage_Address mod Alignment = 0;
+
+This Post doesn't make any sense as written. Storage_Address is a
+System.Address, and that doesn't have a "mod" operator. I presume you really
+wanted this to be:
+
+> +     Post => To_Integer(Storage_Address) mod Alignment = 0;
+
+so the type would then be an Integer_Address for which there is a "mod"
+operator.
+
+I had thought that there also were visibility issues, but there is a use clause
+for System.Storage_Elements so you're OK there.
+
+--------------
+
+So, for a scorecard:
+
+Changes involving Release aren't necessary (the premise behind the changes is
+wrong, so far as I can tell).
+
+Changes involving alignments don't fix anything -- they simply trade one dubious
+assumption for another. Maybe that's fixable, but I'm not going to try (I'll
+envitably make it worse). Maybe we ought to add a weasel-word sentence about
+alignments rather than redoing 40% of the code to make it bullet-proof -- or
+better still fix the underlying problem so that the original code would work.
+
+The added postcondition is wrong (but fixable) and is weird in that it really
+ought to be a Post'Class on the initial package (it applies to all redefinitions
+of Allocate and Allocate_From_Subpool). We have Pre'Class on the 13.11.4
+package, so a Post'Class would make some sense. I don't see much point in just
+adding a Post in this example anyway.
+
+So tell me again what is wrong with this example? As it stands, I can save
+myself some time and write up exactly zero changes that you recommended. If we
+can make the 100% portable without any non-RM assumptions, I'm all for it. But
+in the absence of that, I'd just as soon leave the example alone. And I'm
+certainly not the person to make a suggestion for portable code. The only thing
+that I would do now is document the assumption about the alignment of Storage
+(which I won't do right now in order to allow some time for feedback).
+
+After all, in a real subpool, Storage would almost certainly be allocated from
+some other storage pool, and the alignment of that allocation could be
+controlled. In that case, this code is correct, and redoing it just makes it
+more complicated with no benefit. Similarly, at least some compilers would
+allocate such a component so that it is aligned reasonably, so again the
+existing code would work (but not portably). A comment would at least tell
+someone not to use it without rechecking if the assumptions hold, and would
+leave the example alone otherwise.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May 16, 2014  7:04 PM
+
+I'm working on a prototype of preconditions for the vector containers (to be
+discussed if we want to change the entire set of containers - a concrete
+proposal would help deciding that).
+
+I happened to notice the following routine (A.18.2(168/2) & A.18.2(169/2)):
+
+procedure Prepend (Container : in out Vector;
+                   New_Item  : in     Vector;
+                   Count     : in     Count_Type := 1);
+
+Equivalent to Insert (Container, First_Index (Container), New_Item).
+
+The Count parameter is never used here! The "equivalent" routine does not have
+a Count parameter, nor do any of the other routines that take a vector
+(including the close relative Append).
+
+Also note that the Prepend in the full package specification (A.18.2(44/2))
+does not have this parameter.
+
+I believe that all evidence is that the specification is right, and I should
+correct this as a "presentation" error.
+
+Any objections??
+
 
 ****************************************************************
