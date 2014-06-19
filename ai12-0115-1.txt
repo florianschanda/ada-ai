@@ -1,0 +1,188 @@
+!standard A.5.1 (5)                                  14-06-19    AI12-0115-1/01
+!class Amendment 14-06-19
+!status work item 14-06-19
+!status received 14-05-15
+!priority Low
+!difficulty Easy
+!subject Add Size_Is_Multiple_Of aspect
+
+!summary
+
+Add Size_Is_Multiple_Of aspect.
+
+!problem
+
+It's not possible to portable specify that the size of a subtype is a multiple
+of some size. This was needed for reasons that I don't want to detail.
+
+!proposal
+
+(See Summary.)
+
+!wording
+
+For any record first subtype R, the following aspect can be specified:
+Size_Is_Multiple_Of
+    R'Size shall be a multiple of Size_Is_Multiple_Of[Redundant: the compiler
+    should add padding bits as necessary].
+
+!discussion
+
+This seems like a very specialized need, which the proposer did not explain
+in detail.
+
+[Editor's note: This AI was created as we are not currently killing sensible
+ideas. However, I recommend that we put this idea on Hold without further work,
+for the reasons mentioned above.]
+
+!ASIS
+
+No ASIS impact.
+
+!ACATS test
+
+An ACATS C-Test is needed to verify that the aspect is implemented as specified.
+
+!appendix
+
+!topic Add Size_Is_Multiple_Of aspect
+!reference 13.3
+!from Adam Beneschan 14-05-15
+!discussion
+
+This is based on an issue I recently had.  (I know that modifying the language
+just because somebody has a problem once isn't always the right thing to do,
+but I thought I'd put it out there anyway in case it might be useful to others,
+since it seems like a simple enough feature.)
+
+I needed an aspect like
+
+    with Size_Is_Multiple_Of => 64;
+
+on a record subtype R, to indicate that R'Size must be a multiple of
+64 and the compiler should add padding bits if necessary to make it so.  (I
+don't think it makes sense for other kinds of types besides records.) 
+
+The problem is that it's difficult to use the Size aspect to achieve this.  If
+I knew that the total size of the components was S, I could say
+
+    with Size => (S + 63) / 64;
+
+However, I don't see a good way to compute S.  Adding the 'Size attributes of
+all the component subtypes won't always work, since it may not give the right
+result if some components have alignment requirements, and it's too easy to get
+wrong if components are later added to the record.  Another possible solution is
+a nested record type:
+
+    type R2 is record
+       ...
+    end record;
+    type R is record
+       Data : R2;
+    end record
+    with size => (R2'Size + 63) / 64;
+
+But that means an extra "Data." has to be added to refer to any record
+component, which is obnoxious.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May 15, 2014  3:56 PM
+
+> The problem is that it's difficult to use the Size aspect to achieve 
+> this.  If I knew that the total size of the components was S, I could 
+> say
+> 
+>     with Size => (S + 63) / 64;
+> 
+> However, I don't see a good way to compute S.  Adding the 'Size 
+> attributes of all the component subtypes won't always work, since it 
+> may not give the right result if some components have alignment 
+> requirements, and it's too easy to get wrong if components are later 
+> added to the record.
+
+Well, it seems to me that a better solution would be to have the compiler give
+you S. That is, have an attribute that told you the minimum size as calculated
+by the compiler, so that you can then round it up or whatever.
+
+     with Size => (R'Minimum_Size + 63) / 64;
+
+The problem with this is that R'Minimum_Size is unlikely to be static. We could
+try to define it to be static in certain cases (as we discussed previously),
+but it's not clear that would be enough. (Discriminant-dependent components
+would cause trouble, for instance, although they are probably aren't involved
+in such a case.) At least private types would be a non-problem here (as you'd
+be doing this on the full type).
+
+> Another possible solution is a nested record
+> type:
+> 
+>     type R2 is record
+>        ...
+>     end record;
+>     type R is record
+>        Data : R2;
+>     end record
+>     with size => (R2'Size + 63) / 64;
+> 
+> But that means an extra "Data." has to be added to refer to any record 
+> component, which is obnoxious.
+
+Besides, R2'Size isn't static, so this is illegal. (Again, see previous
+discussion about that.)
+
+So maybe your idea is best. But it still seems like a very specialized need (I
+don't recall ever having this particular issue come up for me), so I have to
+wonder the wisdom of putting it into the language. I'd rather there be a more
+general solution (like 'Minimum_Size) but that too seems like a specialized
+need.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, May 15, 2014  9:56 PM
+
+> I needed an aspect like
+>
+>      with Size_Is_Multiple_Of => 64;
+
+Why wouldn't it be adequate to specify an alignment of 64?
+
+Why do you care if the size is a multiple of 64, so long as it is properly
+aligned?
+
+****************************************************************
+
+From: Adam Beneschan
+Sent: Friday, May 16, 2014  12:40 PM
+
+I don't want to go into details, but I assure you that in this case it
+mattered.  It wasn't exactly "normal" programming, though; it was system
+programming that involved unchecked conversions and some other tricky stuff.
+That's why I'm aware that perhaps this need isn't general enough to be worth a
+language change.  But I thought I'd mention it in case there were others who
+may have been in a similar situation.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, May 16, 2014  1:15 PM
+
+>...  That's why I'm aware that perhaps this need isn't  general enough 
+>to be worth a language change.
+
+Yes, IMHO this is way too specialized to add to the language.
+
+If I were doing this, I'd probably create the record, write some code to print
+out the size, and then write "with Size => ..." where ... is the Size rounded
+up.  And:
+
+    pragma Assert (T'Size mod 64 = 0);
+    --  because ...
+
+If you add record components, you have to change the Size clause.
+No big deal -- it's not particularly error prone.
+
+****************************************************************
+
