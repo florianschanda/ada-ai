@@ -1,0 +1,185 @@
+!standard 6.3.1(10.1/2)                                14-06-20  AI05-0120-1/01
+!class binding interpretation 14-06-20
+!status work item 14-06-20
+!status received 14-06-04
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject "in out" parameters on a default iterator function
+
+!summary
+
+If the call to the default iterator function would be illegal, a container
+element iterator is illegal. If any of the calls to functions in a container
+element iterator propagates an exception, the container element iterator
+propagates the exception.
+
+!question
+
+The original version of a proposed ACATS test used a default iterator
+function with the specification:
+
+   function Iterate
+     (Container : aliased in out Sparse_Array)
+      return Sparse_Array_Iterator_Interfaces.Reversible_Iterator'Class;
+
+This caused an internal error in a compiler when the test tried iterating
+on a function call (that is, a constant):
+
+    for Item of Get_Constant_Sparse_Data loop
+
+We eventually realized that this expands to
+
+    for Cur in Get_Constant_Sparse_Data.Iterate loop
+
+which is of course illegal (as we're passing a function call to an in out
+parameter).
+
+There is no rule which allows this, but clearly we don't want to allow making
+calls that would otherwise be illegal. Do we need a new rule? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add after 5.5.2(6.1/4): [A legality rule added by AI12-0047-1]
+
+For a container element iterator, if the call of the default iterator
+function that creates the loop iterator (see below) would be illegal, then
+the container element iterator is illegal.
+
+AARM Ramification: This can happen if the parameter to the default iterator
+  function is *in out* and the iterable_name is a constant. We wrote the
+  wording to apply to any reason that the call would be illegal, as it's
+  possible that one of the default parameters would be illegal, or that
+  some accessibility check would fail. (We can't come up with an example
+  of an accessibility check failure, but that area is so complex that it's
+  easy to believe that there is a way for it to fail.)
+
+A generalized iterator is illegal if the iteration cursor subtype of the
+iterable_name is a limited type at the point of the generalized iterator.
+A container element iterator is illegal if the default cursor subtype 
+of the type of the iterable_name is a limited type at the point of the
+container element iterator.
+
+AARM Reason: If the cursor type is limited, the assignment to the
+  loop parameter for a generalized iterator would be illegal. The same
+  is true for a container element iterator. We have to say "at the point
+  of the iterator" as the limitedness of a type can change due to
+  visibility.
+
+[Editor's Note: We can't use "inherently limited" here as we usually
+do in legality rules as the assignment rule applies to all limited
+types, including those that become nonlimited at some point in their
+scope. Yes, the assignment rule is just "the target shall be
+a nonlimited variable". Here I think we need more clarification; in
+particular this does not depend on the limitedness of the cursor
+at the point of the instantiation of iterator interfaces; if the
+cursor later becomes nonlimited, iterators are then legal.]
+
+Delete AARM 5.5.2(10.b/4) (it's covered by the above).
+
+Add after 5.5.2(10/3):
+
+Any exception raised during the execution of a generalized iterator as
+described above is propagated by the generalized iterator.
+
+AARM To Be Honest: We're not talking about exceptions raised and then
+  handled within the sequence_of_statements; this text is mainly concerned
+  about exceptions raised by the implementation of the generalized iterator.
+
+AARM Ramification: Note that this text covers exceptions raised by called
+  functions, as well as exceptions raised by the assignment to the loop
+  parameter.
+
+Add after 5.5.2(13/3):
+
+Any exception raised during the execution of a container element iterator as
+described above is propagated by the container element iterator.
+
+AARM To Be Honest: We're not talking about exceptions raised and then
+  handled within the sequence_of_statements; this text is mainly concerned
+  about exceptions raised by the implementation of the ontainer element iterator.
+
+AARM Ramification: Note that this text covers exceptions raised by called
+  functions, as well as exceptions raised by the assignment to the loop
+  cursor.
+
+!discussion
+
+We want this to work just like a macro-expansion into the appropriate code,
+so we define that it works that way.
+
+The rules for the interfaces defined in Iterator_Interfaces prevents any
+of the calls to those functions from being illegal, so we don't need any
+rules for them.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, June  4, 2014  1:44 PM
+
+Brad wrote an ACATS foundation to test default container iterators by copying
+some of the interesting parts of the design of the Ada containers.
+
+In particular, he put an access to the container into the cursor.
+
+In order to do that, he had to make the Iterate function have the
+specification:
+
+   function Iterate
+     (Container : aliased in out Sparse_Array)
+      return Sparse_Array_Iterator_Interfaces.Reversible_Iterator'Class;
+
+so that Container'Unchecked_Access would work.
+
+GNAT threw up on the part of the test that tried iterating on constants:
+
+    for Item of Get_Constant_Sparse_Data loop
+                |
+         >>> actual for "Container" must be a variable
+
+This message didn't make much sense, so I reported it as a bug in GNAT. But it
+actually does make sense if you expand the loop into the equivalent generalized
+iterator form:
+
+    for Cur in Get_Constant_Sparse_Data.Iterate loop
+
+Here we're passing a function result (constant) to an aliased in out parameter
+(requires variable), which is clearly wrong.
+
+5.5.1(8/3) requires various things of the default iterator function. I have to
+wonder if one of them ought to be that it doesn't require a variable (is not "in
+out" or access-to-variable). Alternatively, 5.5.2 needs a rule to require the
+object for a container element iterator is a variable if the T parameter to the
+default iterator function is "in out" or "access-to-variable". This certainly
+should not be left to a compiler internal error!
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, June  4, 2014  2:19 PM
+
+I agree this is a language bug (though if you read it just right the right rule
+is implied ;-).  These new features are supposed to be "syntactic sugar" and the
+same legality rules should apply (and so should the same dynamic semantics).  In
+particular, in 5.5.2(12) it specifies:
+
+   "The default iterator function for the type of the iterable container object
+    for the loop is called on the iterable container object ..."
+
+Somewhere in 5.5.2 we should require that it be legal to make such a function
+call, as far as parameter modes, accessibility, or whatever.  Furthermore, if
+this function propagates an exception, then presumably the loop statement
+propagates an exception.
+
+****************************************************************
