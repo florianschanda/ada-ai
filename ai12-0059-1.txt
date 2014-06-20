@@ -1,4 +1,4 @@
-!standard 13.03 (58)                              13-01-30    AI12-0059-1/01
+!standard 13.03 (58)                              14-06-19    AI12-0059-1/02
 !class Amendment 13-01-30
 !status work item 13-01-30
 !status received 12-09-21
@@ -6,10 +6,6 @@
 !difficulty Medium
 !subject Object_Size attribute
 !summary
-
-[Editor's note: The bulk of this AI is made up of the final version of AI05-00319-1,
-which eventually was voted No Action. There is some additional discussion at the end,
-based on the recent e-mail on this topic.]
 
 The new attribute S'Object_Size denotes the size of most objects of subtype S.
 
@@ -41,15 +37,22 @@ in general is *not* the size of an object of the type. Thus, specifying the
 size of a (sub)type causes a number of unusual effects (such as the size
 being forgotten for some derviations).
 
-What is needed is a way to specify the default size of an object of a type,
-such as the facility provided in GNAT.
+The rules for (Sub)type'Size mean that it specifies the minimum size of a
+packed component. That's a pretty useless thing to specify (why would you want
+to specify that a subtype *cannot* be packed?)
 
-[Editor's note: This presentation of the problem is not the best. The
-root of the problem is that Subtype'Size specifies the minimum size that
-a component can be packed to; that's a pretty useless thing to specify.
-What you usually want to specify is the *default* size of an object or
-component (especially component). I'll rewrite this if there is some
-agreement on the problem beyond the e-mail discussion.]
+Moreover, that specification does not apply to other representation clauses.
+Specifically, there is no rule that makes it illegal to pack or give a
+component_clause that is smaller than a specified Size; only 13.1(12/3) applies,
+and it just requires that all values can be stored. So a compiler can completely
+ignore Size when a representation aspect other than Pack applies to a component;
+and since the 'Size is rarely defined to be a whole number of storage elements,
+it is essentially ignored for components that don't have a representation item.)
+
+What we really want to specify is the size of a component or stand-alone object
+when there is no representation clauses given for the object: meaning no Pack,
+no Component_Size, and no record representation clause. GNAT has such a facility
+called Object_Size.
 
 !proposal
 
@@ -58,7 +61,8 @@ agreement on the problem beyond the e-mail discussion.]
 !wording
 
 [Editor's note: The below wording needs updating for aspect clauses and the
-notion of "confirming" representation clauses.]
+notion of "confirming" representation clauses. The latter is a serious problem
+here that needs discussion - it wasn't discussed in Pittsburgh.]
 
 Add Object_Size to 13.3(9/1):
 The following representation attributes are defined, Address, Alignment,
@@ -68,15 +72,37 @@ Insert the following after 13.3(58):
 
 For every subtype S:
 
-S'Object_Size	If S is definite, denotes the size (in bits) that the
-implementation would choose for a stand-alone aliased object of subtype S.
-If S is indefinite, the meaning is implementation-defined. The value of this
-attribute is of the type universal_integer. The Object_Size of a subtype is at
+S'Object_Size	If S is definite and not inherently limited, denotes the
+size (in bits) that the implementation would choose for a stand-alone
+aliased object of subtype S. If S is inherently limited or indefinite, the
+meaning is implementation-defined. The value of this attribute is of the
+type universal_integer. The Object_Size of a subtype is at
 least as large as the Size of the subtype. Object_Size may be specified via
 an attribute_definition_clause; the expression of such a clause shall be static
 and its value nonnegative. If Object_Size is specified, all aliased objects
-of the subtype shall have the specified Size.
+with nominal subtype S shall have the specified Size.
 
+[Editor's note: The Pittsburg meeting asked that this be changed to "aliased
+variable", because "one can imagine constants taking advantage of discriminants
+not changing." That's true for nonaliased constants, but an aliased
+constant can be used as a target of an access-to-constant, as can an
+access-to-variable. If the representations differ, there would be no way to
+determine what to do when reading the object, especially when copying the
+entire object. (Reading bits not part of the object is not acceptable.)
+All aliased objects have to have the same representation, period.]
+
+[Another Editor's note: This wording is incompatible with the notion of
+a "confirming" representation clause. In general, Object_Size should have
+no effect if it isn't specified; implementations should be allowed to
+use any size they want for components in the absence of such specification.
+(In particular, they shouldn't have to be the same.) OTOH, if this aspect
+is specified, then all components ought to have this size in the absence
+of some other overriding representation item. There is much more on this
+topic at the end of the discussion.
+
+One way to fix this would be to delete the last sentence above and simply
+depend on the Implementation Advice, which applies to all objects anyway,
+and which can be ignored by an implementation if that makes sense.]
 
 Implementation Advice
 
@@ -108,13 +134,16 @@ equal S'Object_Size, unless:
     The size of X is determined by a component_clause or Component_Size clause; or
     Pragma Pack applies to the type containing component X.
 
+[Editor's note: It would be best if the above only applied when Object_Size is
+specified (so that different sizes can be used for different components if that
+makes sense), but that's incompatible with the "confirming" aspect idea. Dunno
+if there is any fix. At least this is IA which can be ignored if it is too much
+of a problem.]
+
 An Object_Size clause on a composite type should not affect the internal
 layout of components.
 
 The recommended level of support for the Object_Size attribute of subtypes is:
-
-    The implementation should allow S'Object_Size to be specified if S
-    is a first subtype.
 
     If S is a static signed integer subtype, the implementation should support
     specifying S'Object_Size to be the size of any signed integer
@@ -140,13 +169,6 @@ The recommended level of support for the Object_Size attribute of subtypes is:
     need allow only the specification of S'Object_Size to be the same as what
     the implementation would choose by default.
 
-AARM Note
-    Ramification: An implementation need not support Object_Size on non-first
-    subtypes. We allow this freedom, as Rational^H^H^H^H^H^H^H^H some
-    implementations may have trouble with static matching if the Object_Sizes
-    of subtypes can be different (see 4.9.1). We will let the market decide
-    whether subtype specification of Object_Size is necessary.
-
 Change 13.3(50) to:
 
 If the Object_Size of a subtype is not specified, the Size of the subtype is
@@ -164,22 +186,32 @@ AARM Note:
     Reason: We need to specify what happens if both Object_Size and Size are
     specified incompatibly.
 
-Change the first sentence of 4.9.1(2) to:
+Modify the first sentence of 4.9.1(2/3) to:
 
 A subtype statically matches another subtype of the same type if they have
-statically matching constraints and their Object_Sizes (see 13.3) are the
-same.
+statically matching constraints, all predicate specifications that apply to
+them come from the same declarations, {their Object_Sizes (see 13.3) are the
+same,} and, for access subtypes, either both or neither exclude null. 
 
 AARM note:
 
     Ramification: If one of the subtypes is not yet frozen, an implementation
     may have to repeat the check when the subtypes are both frozen. This
     can only make to previously statically matching subtype fail to match;
-    it cannot make a match legal. This deferred check is only necessary if
-    the implementation chooses to allow subtypes to have different Object_Size
-    values. (This is not required, but will be possible if the implementation
-    allows specification of Object_Size for non-first subtypes.)
+    it cannot make a match legal.
 
+Add Object_Size to 13.1(23):
+
+An implementation need not support a specification for the Size {or
+Object_Size} for a given composite subtype, nor the size or storage place for
+an object (including a component) of a given composite subtype, unless the
+constraints on the subtype and its composite subcomponents (if any) are all
+static constraints.
+
+[This is necessary so that we aren't requiring Object_Size to be supported
+on types that might have a representation not completely specified at
+compile-time, or are represented discontiguously, or are represented
+differently for different constraints.]
 
 !discussion
 
@@ -226,22 +258,9 @@ as it cannot statically match the base type.
 
 2013 discussion:
 
-The root of the problem with (Sub)type'Size is that it was intended to
-specify the minimum size of a packed component. That's a pretty useless thing
-to specify (why would you want to specify that a subtype CANNOT be packed?)
-
-Moreover, that does not apply to other representation clauses.
-Specifically, there is no rule that makes it illegal to pack or give a
-component_clause that is smaller than a specified Size; only 13.1(12/3) applies,
-and it just requires that all values can be stored. So a compiler can completely
-ignore Size when a representation aspect other than Pack applies to a component;
-and since the 'Size is rarely defined to be a whole number of storage elements,
-it is essentially ignored for components that don't of a representation item.)
-
-What we really want to specify is the size of a component or stand-alone object
-when there is no representation clauses given for the object: meaning no Pack,
-no Component_Size, and no record representation clause.
-
+As noted in the !problem, we really want to specify the size of a component or
+stand-alone object when there is no representation clauses given for the object:
+meaning no Pack, no Component_Size, and no record representation clause.
 That is the primary purpose of 'Object_Size.
 
 Note that (Sub)type'Size is not a significant problem for composite types; the
@@ -252,7 +271,7 @@ An alternative (if 'Object_Size would become incompatible with the existing
 implementation) would be to extend 'Component_Size to scalar types, with
 the meaning that is specifies the size to be used for components in the
 absence of representation clauses. Note that the size of stand-alone objects
-is rarely relevant; the size of a subtype is sually an issue to when
+is rarely relevant; the size of a subtype is usually an issue to when
 it is used in components in a number of composite types (and giving
 representation clauses on all of them is painful). Doing so would eliminate
 the need to provide subtype specifiability for the aspect, and would ensure
