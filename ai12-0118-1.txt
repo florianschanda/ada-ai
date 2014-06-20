@@ -1,0 +1,882 @@
+!standard 4.9(38/2)                                  14-06-20    AI12-0118-1/00
+!class Amendment 14-06-20
+!status work item 14-06-20
+!status received 14-05-30
+!priority Low
+!difficulty Medium
+!subject
+
+!summary
+
+** TBD.
+
+!problem
+
+!proposal
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+As Tucker has said in the past, this is a case where we can move the bump under
+the rug to various places, but we can't remove it. It could never be the case
+that constant evaluation and runtime evaluation always give precisely the same
+results, because the rules for real expression evaluation allow any result in
+the correct model interval. In order to ensure that these always have the same
+value, one would have to eliminate permissions to use extra precision within
+runtime expressions (which would be very expensive on some hardware), and even
+then the choice of results would not necessarily be the same in rounding
+circumstances.
+
+The suggested fix of requiring typed static expressions to not use extra precision
+moves the "bump" to the boundary between typed and untyped expressions. Adding
+or removing a type (something that is quite common in the author's experience)
+would change the results of an expression.
+
+It's also important to note that effectively requiring 'Machine after every
+operation is incompatible, in that any static expression that cannot be
+represented by the result of 'Machine would be statically illegal. This wouldn't
+be as much of a problem as a similar rule for integers (as it would mainly effect
+very large values) but it would be very hard to work around without leaving the
+typed domain (and thus reintroducing the problem).
+
+[Someone in favor of this change may want to add some words in favor of it.
+I certainly can't - I find virtually all uses of "=" for floating point to be
+wrong -- that was the first thing I was taught in a programming class and
+nothing significant has changed about floating point in the intervening 30
+years. It might be OK in casual use, but causal use should not care about the
+details of the results -- use it isn't casual.]
+
+!ASIS
+
+No ASIS impact.
+
+!ACATS test
+
+An ACATS C-Test is needed.
+
+!appendix
+
+From: Robert Dewar
+Sent: Friday, May 30, 2014  2:41 PM
+
+here is a note I just sent to someone
+raising a question as to why they were
+getting different results from constants and variables.
+
+I think this is worth addressing
+
+> Well this turned out to be an instructive example.
+> There is no bug, but the behavior is definitely a bit surprising. So
+> here is a complete explanation.
+> Let's look at the simplified test program:
+>
+>>      1. procedure M is
+>>      2.    var_int1 : Integer;
+>>      3.    var_int3 : Integer;
+>>      4.    var_float1 : constant float := 0.9;
+>>      5.    var_float2 : constant float := 0.2;
+>>      6.    var_float4 : float := 0.9;
+>>      7.    var_float5 : float := 0.2;
+>>      8. begin
+>>      9.    -- 0.9/0.2 = 4.5 => Rounded to 4
+>>     10.    var_int1 := integer(var_float1/var_float2);
+>>     11.    pragma Assert (var_int1 = 4);
+>>     12.
+>>     13.    -- 0.9/0.2 = 4.5 => Rounded to 5
+>>     14.    var_int3 := integer(var_float4/var_float5);
+>>     15.    pragma Assert (var_int3 = 5);
+>>     16. end M;
+>
+> This program compiles and executes quietly with or without -msse2.
+> What is going on? Well the expanded code is (with -gnatp since the
+> checks are just a distraction).
+>
+>> procedure m is
+>>    var_int1 : integer;
+>>    var_int3 : integer;
+>>    var_float1 : constant float := [15099494.0*2**(-24)];
+>>    var_float2 : constant float := [13421773.0*2**(-26)];
+>>    var_float4 : float := [15099494.0*2**(-24)];
+>>    var_float5 : float := [13421773.0*2**(-26)]; begin
+>>    var_int1 := 4;
+>>    var_int3 := integer(var_float4 / var_float5);
+>>    return;
+>> end m;
+>
+> As we can see the constant and variable values are initialized to the
+> same value, which is the nearest machine number to the given constants
+> 0.9 and 0.2.
+> Neither of these numbers can be represented exactly, so what we have
+> is "near-to-0.9" and "near-to-0.2".
+>
+> In the case of the first division, this is a static expression which
+> means the divide is done exactly.
+> Trusty google calculator shows this result as 4.49999981374. The
+> important point is that it is less than 4.5, so it correctly truncates
+> to 4 (the conversion is still being done exactly, since this
+> conversion is also static).
+>
+> Now for the second division, the division is done at run-time (the
+> compiler does not attempt to fold such divisions, it could in this
+> case, but if it did, it would have to get the same result as is
+> obtained at run-time anyway). Now this division is NOT exact, it is a
+> floating-point division which happens to give the result of 4.5.
+>
+> Interestingly this is the true mathematical result, even though the
+> operands are "wrong". Floating-point arithmetic is like that, in this
+> case the errors cancel one another.
+>
+> Now we convert (again at run-time) the exact 4.5 and as required it
+> rounds up to 5.
+>
+> Basically the issue is that extended precision can always cause
+> surprises. Compiling with -msse2 eliminates the excess precision at
+> run-time, but Ada semantics (perhaps unwisely) requires extended
+> precision for intermediate results when computing static expressions
+> involving typed static constants.
+>
+> So the bottom line is that the behavior you are seeing is "expected"
+> and in fact mandated by the standard. Expected is in quotes here,
+> because although the RM may expect it, it sure is a bit surprising!
+>
+> Programmer advice to avoid this is to avoid static expressions with
+> floating-point that do more than a single operation.
+>
+> Consider the following modified test:
+>
+>>      1. procedure M1 is
+>>      2.    var_int1 : Integer;
+>>      3.    var_int3 : Integer;
+>>      4.    var_float1 : constant float := 0.9;
+>>      5.    var_float2 : constant float := 0.2;
+>>      6.    var_float4 : float := 0.9;
+>>      7.    var_float5 : float := 0.2;
+>>      8.    var_float6 : float;
+>>      9. begin
+>>     10.    -- 0.9/0.2 = 4.5 => Rounded to 5)
+>>     11.    var_float6 := var_float1/var_float2;
+>>     12.    var_int1 := integer (var_float6);
+>>     13.    pragma Assert (var_int1 = 5);
+>>     14.
+>>     15.    -- 0.9/0.2 = 4.5 => Rounded to 5
+>>     16.    var_int3 := integer(var_float4/var_float5);
+>>     17.    pragma Assert (var_int3 = 5);
+>>     18. end M1;
+>
+> Now this gives 5 in the first division, because we force the result to
+> be converted to a machine number (and as we know from the run-time
+> behavior, that machine number is exactly 4.5).
+>
+> Historical note, in versions of Ada before 2005, compilers were
+> allowed to keep extra precision for static constants. So at least one
+> Ada 95 compiler gives a result of 5 for the first division since it
+> keeps the 0.9 and 0.2 values exactly and gets exactly 4.5 on the
+> static division.
+>
+> An AI for Ada 2005 eliminated this extra precision, requiring typed
+> constants to be truncated to machine numbers, in an effort to improve
+> portability by eliminating extra precision. And that's what we see at
+> work here.
+>
+> But that AI probably didn't go far enough, it perhaps should have
+> eliminated all cases of keeping extra precision, by requiring a
+> 'Machine operation after any static operation on typed floating-point
+> values.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, June 4, 2014  8:19 AM
+
+
+type Feet_Type is new Integer;
+
+type Metres_Type is new Long_Float;
+
+Max_TA_Con : constant Metres_Type := (12345.0 * Feet_To_Metres_Con); -- X
+
+subtype TA_Type is  Metres_Type range 0.0 .. Max_TA_Con;
+
+TA : Feet_Type;
+
+TA_Temp : Metres_Type;
+
+New_Value : TA_Type;
+
+-- TA set to 12345.
+
+TA_Temp := Metres_Type (TA) * Metres_Type (Feet_To_Metres_Con); --Y New_Value := TA_Type (TA_Temp); --Z
+
+
+This gave a Constraint_Error at Z, but only if optimisation was used.  I think
+the conversion at X is done at a different precision to that at Y, and the value
+produced at Y is a smidgin above that produced at X.  With optimisation, Z uses
+the value still in an 80-bit floating point register from Y, thus keeping
+precision; without optimisation, Y stores the result in a 64-bit value memory
+location then Z re-loads it, thus losing precision.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, June 4, 2014  8:31 AM
+
+> This gave a Constraint_Error at Z, but only if optimisation was used.
+> I think the conversion at X is done at a different precision to that
+> at Y, and the value produced at Y is a smidgin above that produced at
+> X.  With optimisation, Z uses the value still in an 80-bit floating
+> point register from Y, thus keeping precision; without optimisation, Y
+> stores the result in a 64-bit value memory location then Z re-loads
+> it, thus losing precision.
+
+Yes. but that's extra precision at run-time, a well known problem on the x86,
+which can be fixed by using SSE2 arithmetic.
+
+It has nothing to do with this issue, which is about extra precision in the
+compile-time evaluation of static expressions.
+
+***************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, June 4, 2014  8:58 AM
+
+Ok, I wasn't sure which was the cause of the problem.
+
+So at Z, when checking against the upper bound of TA_Type, what precision is
+used?
+
+> Yes. but that's extra precision at run-time, a well known problem on the x86, which can be fixed by using SSE2 arithmetic.
+
+But we use SSE2.  Maybe a separate Support Call is needed.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, June 4, 2014  9:09 AM
+
+>> Yes. but that's extra precision at run-time, a well known problem on the
+>> x86, which can be fixed by using SSE2 arithmetic.
+>
+> But we use SSE2.  Maybe a separate Support Call is needed.
+
+Hard to say, but definitely not relevant for this ARG discussion.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, June 4, 2014  2:18 PM
+
+...
+> Hard to say, but definitely not relevant for this ARG discussion.
+
+Of which there has been none to date. :-)
+
+Perhaps that's because some of us don't understand what you are proposing.
+It sounds like you want to abandon exact evaluation of static expressions (a
+hallmark of Ada since the beginning) in all cases except the rather rare one of
+a universal numeric expression. (Since there is a preference to non-universal
+types, any expression with a single typed element is all typed.)
+
+That seems like a pain to implement. I know that our compiler uses exact math
+for all compile-time expressions, target conversions only occur in the back-end
+(which of course has the most knowledge of the target). But the back-end doesn't
+ever see any parts of static expressions, they've been folded down to a single
+value before it seems them.
+
+It certainly would be possible to get more target information into the front end
+(everything is possible after all), and I don't know what other compilers do, so
+I don't think implementation costs kills the idea but it certainly appears to
+make it less appealing. (Assuming I understand what you're proposing correctly.)
+
+P.S. You said:
+
+> An AI for Ada 2005 eliminated this extra precision, requiring typed
+> constants to be truncated to machine numbers, in an effort to improve
+> portability by eliminating extra precision. And that's what we see at
+> work here.
+
+This is wrong; the "machine number" rule exists in Ada 95. The AI (AI95-0268-1)
+simply fixed the required rounding to match that of the target hardware (it
+previously was required to be away from zero, so a static expression and the
+equivalent runtime expression could get different answers even if all of the
+values were machine numbers of the target - truly nonsense).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, June 4, 2014  2:51 PM
+
+> ...
+>> Hard to say, but definitely not relevant for this ARG discussion.
+>
+> Of which there has been none to date. :-)
+>
+> Perhaps that's because some of us don't understand what you are proposing.
+> It sounds like you want to abandon exact evaluation of static
+> expressions (a hallmark of Ada since the beginning) in all cases
+> except the rather rare one of a universal numeric expression. (Since
+> there is a preference to non-universal types, any expression with a
+> single typed element is all
+> typed.)
+
+No, ONLY for floating-point, no one is suggesting anything for the discrete
+case.
+
+Look at the example again, it is all about fpt precision.
+
+> That seems like a pain to implement. I know that our compiler uses
+> exact math for all compile-time expressions, target conversions only
+> occur in the back-end (which of course has the most knowledge of the
+> target). But the back-end doesn't ever see any parts of static
+> expressions, they've been folded down to a single value before it seems them.
+
+Well in Ada 2005 and later, you are required to be able to implement X'Machine
+in the front end, that's what that AI is about.
+
+Look at this simple example:
+
+> with Text_IO; use Text_IO;
+> procedure k is
+>    X : constant Float := 1.0 / 10.0;
+>    Y : constant Boolean := (X = 1.0 / 10.0); begin
+>    Put_Line (Boolean'Image (Y));
+> end;
+
+Do you expect True here? Well that would have been right in Ada 93 but by Ada
+2012 (actually by 2005 for sure, and maybe 95), the result is False. If that
+surprises you, it just means you didn't follow this little change carefully. If
+your compiler prints True, it is now wrong! Why, because there is an implicit
+'Machine in the declaration of X, i.e. it means
+
+    X : constant Float := Float'Machine (1.0 / 10.0);
+
+But there is no corresponding implicit Float'Machine for the same expression in
+the declaration of Y.
+
+What I am saying is that there should be, and the above should print True.
+
+In general expressions should give the same result at compile time as at
+run-time. This is true for Integer barring raising an exception, but it is
+nowhere near true for floating-point.
+
+> It certainly would be possible to get more target information into the
+> front end (everything is possible after all), and I don't know what
+> other compilers do, so I don't think implementation costs kills the
+> idea but it certainly appears to make it less appealing. (Assuming I
+> understand what you're proposing correctly.)
+
+The implementation cost is minimal, you have to have the capability anyway, it
+is just a matter of using it within static expressions.
+
+Extra implicit precision is always evil when it comes to floating-point!
+
+> This is wrong; the "machine number" rule exists in Ada 95. The AI
+> (AI95-0268-1) simply fixed the required rounding to match that of the
+> target hardware (it previously was required to be away from zero, so a
+> static expression and the equivalent runtime expression could get
+> different answers even if all of the values were machine numbers of
+> the target - truly nonsense).
+
+OK, so there you are ... the above program prints False in Ada 95 as well as a
+result of this AI.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, June 4, 2014  7:24 PM
+
+...
+> No, ONLY for floating-point, no one is suggesting anything for the
+> discrete case.
+
+All integer evaluation is exact (runtime or compile-time), so integer evaluation
+is irrelevant to such a discussion. The only effect of "exact evaluation" for
+integers is to ensure that literals larger than Max_Int can be written. That's
+hardly relevant here (unless you're proposing to make overflow of real numbers
+illegal).
+
+> Look at the example again, it is all about fpt precision.
+
+I would hope that you would have similar rules for fixed point as well as
+floating point; it's nasty to have them work differently. (If the gotchas are
+bad enough for floating point to throw away 30+ years of history, it makes no
+sense to leave them in fixed point.)
+
+> > That seems like a pain to implement. I know that our compiler uses
+> > exact math for all compile-time expressions, target conversions only
+> > occur in the back-end (which of course has the most knowledge of the
+> > target). But the back-end doesn't ever see any parts of static
+> > expressions, they've been folded down to a single value before it
+> > seems them.
+>
+> Well in Ada 2005 and later, you are required to be able to implement
+> X'Machine in the front end, that's what that AI is about.
+
+That's what the *current* rule is about, and that's OK because excess range is a
+problem for stand-alone objects. But discarding excess range would be a pretty
+serious incompatibility if you're going to do it after every operation.
+
+> Look at this simple example:
+>
+> > with Text_IO; use Text_IO;
+> > procedure k is
+> >    X : constant Float := 1.0 / 10.0;
+> >    Y : constant Boolean := (X = 1.0 / 10.0); begin
+> >    Put_Line (Boolean'Image (Y));
+> > end;
+>
+> Do you expect True here? Well that would have been right in Ada 93 but
+> by Ada 2012 (actually by 2005 for sure, and maybe 95), the result is
+> False. If that surprises you, it just means you didn't follow this
+> little change carefully. If your compiler prints True, it is now
+> wrong! Why, because there is an implicit 'Machine in the declaration
+> of X, i.e. it means
+>
+>     X : constant Float := Float'Machine (1.0 / 10.0);
+>
+> But there is no corresponding implicit Float'Machine for the same
+> expression in the declaration of Y.
+
+Actually, I didn't interpret 4.9(38) that way. I interpreted it to mean that one
+cannot have excess precision at runtime for X. In particular, our Ada 83
+compiler generated the maximum precision value for all constants (usually a
+64-bit value), even if the type is smaller. 4.9(38) says you can't do that.
+
+But I didn't see it as having any effect on the exact static value of X. When X
+is used in the expression for Y, it's part of a larger static expression, so
+4.9(38) doesn't apply. That eliminates the anomoly that you show here (although
+I suspect this is a case of Tucker's bump under the rug, and I'm sure it moves
+somewhere else).
+
+> What I am saying is that there should be, and the above should print
+> True.
+
+The $64000 question here is *where* are you putting that extra 'Machine. If
+you're putting it after every real static operation, then effectively you've
+gotten rid of exact evaluation (it would almost never happen). And you'd be
+introducing an incompatibility, as large literals would become illegal, even if
+the ultimate expression is legal.
+
+For integer, the reason for exact evaluation is so that 2**32-1 always legal,
+even if 2**32 is larger than MaxInt.
+
+There certainly are similar cases for float. An expression like:
+    G : Float := (2.0e40-1.0) * Float'Epsilon; would be illegal if you
+are inserting 'Machine at every step (2.0e40 cannot be represented in type
+Float).
+
+These probably aren't quite as likely as for the integer case, but I'd be pretty
+surprised if they don't exist (outside of the ACATS tests - I know they exist in
+the ACATS tests, but those Ada83-era tests aren't very realistic).
+
+...
+> The implementation cost is minimal, you have to have the capability
+> anyway, it is just a matter of using it within static expressions.
+
+I think we mainly have it at runtime. But my main point is that using it at
+every turn in static expressions means that "exact evaluation" is out the window
+(as that is only meaningful for real numbers, integers always being exact
+anyway).
+
+> Extra implicit precision is always evil when it comes to
+> floating-point!
+
+Could be; I tend to believe the opposite, but I'm not numerical analysist.
+"=" on floating point is always suspicious without extensive error analysis
+(which hardly anyone ever does; and certainly wasn't done in your example). Any
+problems with static expressions are pretty much in the noise, at least for
+day-to-day common usage.
+
+> > This is wrong; the "machine number" rule exists in Ada 95. The AI
+> > (AI95-0268-1) simply fixed the required rounding to match that of
+> > the target hardware (it previously was required to be away from
+> > zero, so a static expression and the equivalent runtime expression
+> > could get different answers even if all of the values were machine
+> > numbers of the target - truly nonsense).
+>
+> OK, so there you are ... the above program prints False in Ada 95 as
+> well as a result of this AI.
+
+Well, it prints True in our Ada 95 compiler. There is no ACATS test that expects
+it to print False, and it makes no sense for it to print False (a nonsense
+result that clearly violates the Dewar rule - well, at least my interpretation
+of the Dewar rule ;-), so I don't see any reason to expect that to be the case
+-- even if it is literally true.
+
+And there's no ACATS test because this example is clearly pathological (at least
+as written). To make it not pathological, one would have to take into account an
+error analysis for each operation involved, (not to mention a more realistic
+usage of numbers) and once that's done, there's no longer going to be any
+surprise. (Of course, there's no surprise in our compiler anyway.)
+
+As I noted, the effect of 4.9(38) in our compiler is to discard excess precision
+when the value of X is used at runtime. And that's it. That's what I understood
+the purpose of 4.9(38) to be. It certainly has no effect on intermediate results
+of any kind in static expressions.
+
+To the extent that it appears that an example like yours is truncating, the rule
+is worded wrong (IMHO) and that should be cleared up. After all, AARM 4.9(1.e)
+says "The rules for evaluating static expressions are designed to maximize
+portability of static calculations." Sticking 'Machine in all over the place
+minimizes such portability across targets of static real expressions.
+
+I've spent enough time on this one, so I don't plan to comment further.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, June 4, 2014  7:58 PM
+
+Minor correction:
+
+...
+> > OK, so there you are ... the above program prints False in Ada 95 as
+> > well as a result of this AI.
+>
+> Well, it prints True in our Ada 95 compiler. There is no ACATS test
+> that expects it to print False,
+
+Actually, there are two such tests (one for float and one for fixed). I looked
+in the wrong file for them - sorry. I have a comment in our work list for these
+tests -- "rounding of real static expressions - I know this isn't done".
+Apparently, I've now forgotten that it was even required. :-)
+
+Anyway, I find that the anomalies that come from effectively inserting 'Machine
+are worse than those that come from exact evaluation. I'd be more in favor of
+partially repealing 4.9(38) than completely abandoning exact evaluation and
+portability. Especially as it was a lot of work to implement exact evaluation,
+and it will be a lot more work to get rid of it 99% of the time.
+
+It's not a big deal either way, though, as I've been happily ignoring static
+effects of 4.9(38) and I'll be quite happy to continue doing that. :-) [at least
+until a customer complains.]
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, June 4, 2014  8:36 PM
+
+> I would hope that you would have similar rules for fixed point as well
+> as floating point; it's nasty to have them work differently. (If the
+> gotchas are bad enough for floating point to throw away 30+ years of
+> history, it makes no sense to leave them in fixed point.)
+
+Well the rule about taking 'Machine has been around for a long time. The fact
+that your compiler gets it wrong does not establish this wrong intepretation as
+long-term history!
+
+As for fixed-point, very probably so, para 38 after all applies to fixed-point
+as well. I don't know if GNAT gets that right or not (we have so few people
+using fixed-point other than Duration).
+
+>> Extra implicit precision is always evil when it comes to
+>> floating-point!
+
+> Could be; I tend to believe the opposite, but I'm not numerical analysist.
+
+That's the trouble, people who don't know fpt think that extra precision is
+always good, when really it is a menace. Thank goodness for SSE2
+
+> "=" on floating point is always suspicious without extensive error
+> analysis (which hardly anyone ever does; and certainly wasn't done in your
+> example).
+
+Nonsense, that's another bit of wrong-thinking, there are plenty of algorithms
+where equality is perfectly reasonable for floating-point. But many people who
+don't know FPT hold to this myth.
+
+> Any problems with static expressions are pretty much in the noise, at
+> least for day-to-day common usage.
+
+VERY wrong. This discussion arose because of major concerns from an important
+user on finding out that adding constant to fpt declarations changed the
+behavior.
+
+> Well, it prints True in our Ada 95 compiler. There is no ACATS test
+> that expects it to print False, and it makes no sense for it to print
+> False (a nonsense result that clearly violates the Dewar rule - well,
+> at least my interpretation of the Dewar rule ;-), so I don't see any
+> reason to expect that to be the case -- even if it is literally true.
+
+No, I think False is expected and
+
+> And there's no ACATS test because this example is clearly pathological
+> (at least as written). To make it not pathological, one would have to
+> take into account an error analysis for each operation involved, (not
+> to mention a more realistic usage of numbers) and once that's done,
+> there's no longer going to be any surprise. (Of course, there's no
+> surprise in our compiler
+> anyway.)
+
+It's actually a test program submitted as a boiled down example from real
+customer code, and the customer is quite unhappy to find out that Ada behaves
+this way.
+
+> As I noted, the effect of 4.9(38) in our compiler is to discard excess
+> precision when the value of X is used at runtime. And that's it.
+> That's what I understood the purpose of 4.9(38) to be. It certainly
+> has no effect on intermediate results of any kind in static expressions.
+
+I think your compiler is seriously wrong, and that you have missed the point of
+4.9(38) which says NOTHING about runtime. BTW, Tucker agrees with the GNAT
+interpretation, as we discussed in a long phone call.
+
+> To the extent that it appears that an example like yours is
+> truncating, the rule is worded wrong (IMHO) and that should be cleared
+> up. After all, AARM
+> 4.9(1.e) says "The rules for evaluating static expressions are
+> designed to maximize portability of static calculations." Sticking
+> 'Machine in all over the place minimizes such portability across
+> targets of static real expressions.
+
+Actually, this is nothing to do with truncation, GNAT, as required by 4.9 does
+unbiased rounding to the nearest machine number.
+
+Regarding large literals, that's a point, but my view was that you would stick
+'Machine in after every exact operation. So the particular example you give (big
+number * epsilon) would still work.
+
+To me this is the most important issue that has come before the ARG for a while,
+it is one of the only issues that comes from a major concern by an actual Ada
+user.
+
+I really think that the fact that my little test program prints False is
+worrisome!
+
+It is possible that this is not the intention of the 4.9 para, but it is what it
+says, and what GNAT has done for a long time.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, June 4, 2014  8:38 PM
+
+> It's not a big deal either way, though, as I've been happily ignoring
+> static effects of 4.9(38) and I'll be quite happy to continue doing
+> that. :-) [at least until a customer complains.]
+
+Well it's a big deal for our customer, who was very surprised to find that the
+same expression gives different results depending on whether one of the
+constituents is declared with or without a CONSTANT keyword.
+
+He wants to know what style rules he must adopt to avoid his programmers
+stumbling on what he feels is a serious problem with the language.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, June 6, 2014  10:55 AM
+
+One clarification, for Randy especially, that I think is helpful is that the
+proposal to strip extended precision in static expressions everywhere, and not
+just on the declaration of typed constants is that this ONLY applies to typed
+static expressions. If you say:
+
+    X : constant := ....
+
+then the .... is computed exactly using infinite precision.
+This is true now, and no one is proposing changing that.
+Furthermore, there is no constraint on the value of X, and as long as you stay
+in the untyped realm, you can build on this result still in the infinite
+precision domain, as in
+
+    Y : constant := X + ...
+
+Only when you reenter the typed domain:
+
+    Z : constant Float := X;
+
+Do you get back into the realm of range limited machine numbers. Let's make that
+clearer with a specific example.
+
+>      1. package Giant is
+>      2.    X : constant := 10.0**50_000;
+>      3.    Y : constant := X + X;
+>      4.    Z : constant Float := Y;
+>                                  |
+>         >>> value not in range of type "Standard.Float"
+>         >>> static expression fails Constraint_Check
+>
+>      5. end;
+
+All compilers, under the current rules, should process the above example as
+shown, and this would still be allowed under the proposal to eliminate extra
+precision in typed static real situations.
+
+So we are not at all proposing to eliminate the valuable feature of being able
+to do infinite precision non-range checked calculations in the real number
+domain at compile time.
+
+The proposal is strictly limited to cases where we are doing calculations in the
+typed domain.
+
+The basic idea is that if you have
+
+   A : Float := expression
+
+then if you note that A is not modified you might be tempted to write
+
+   A : constant Float := (same expression)
+
+and it is a surprise if adding that constant keyword causes your program to
+behave differently.
+
+The proposal is to eliminate this surprise, by ensuring that typed expressions
+have the same results at compile time as they do at run-time.
+
+Once upon a time, that would have seemed to big a burden to place on an
+implementation, and actually if we made the requirement be stated that way (all
+expressions must have identical values at compile time and run time), that would
+be too heavy a burden. There are of course architectures, like the old Cray,
+where no one knows what the floating-point unit does, and it is not documented
+(e.g. 81.0/3.0 does not give exactly 27.0). And even in todays IEEE realm, there
+are pathological cases where some implementation defined behavior is allowed.
+
+So we would state the requirement simply as saying that every operand must be
+converted to a machine number (if necessary), and that the result of every
+operation must be converted to a machine number (with run-time compatible
+rounding in both cases).
+
+We know that is not hard to do, since the compiler is required to do this for
+static constants anyway (yes, I know that Randy's compiler gets this wrong, but
+I am quite convinced that is just a bug!) And for sure, GNAT has done that right
+for ever (*).
+
+And this simpler rule will elimianate the suprises on IEEE machines in
+99.99999999% of the cases, with only very strange pathological exceptions.
+
+(*) I say that now, but the fact of the matter is that this behavior was a
+surprise to me, and at first I felt sure that the behavior the customer saw was
+a bug, but then Tuck pointed out the AI and the corresponding rule in 4.9, which
+indeed GNAT implements as given in the RM, and so then I could see that of
+course the behavior of GNAT was as expected. I wrote a fairly lengthy reply to
+the customer, explaining everything. Probably the easiest thing for him to do is
+to ban the use of the keyword CONSTANT on typed floating-point operations, and
+avoid writing any typed static expressions that have more than one operation (or
+add explicit 'Machine calls at each stage).
+
+I am thinking of implementing a configuration pragma, perhaps
+
+    No_Static_Extended_Precision
+
+or some such to get the new less surprising rules, but I really think it should
+be the default (I might even consider making it a compiler option where the
+default is do-it-right, then we can add the appropriate switch for the ACATS
+tests, just as we add -gnatE to get the broken dynamic elaboration model
+required by the RM).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June 20, 2014  6:39 PM
+
+I've been trying to not throw more fuel on the fire here, but since I can't seem
+to move on without a reply, here it is... - RLB
+
+Robert Dewar wrote:
+
+...
+> >> Extra implicit precision is always evil when it comes to
+> >> floating-point!
+>
+> > Could be; I tend to believe the opposite, but I'm not numerical analysist.
+>
+> That's the trouble, people who don't know fpt think that extra
+> precision is always good, when really it is a menace.
+> Thank goodness for SSE2
+>
+> > "=" on floating point is always suspicious without extensive error
+> > analysis (which hardly anyone ever does; and certainly wasn't done in your example).
+>
+> Nonsense, that's another bit of wrong-thinking, there are plenty of
+> algorithms where equality is perfectly reasonable for floating-point.
+> But many people who don't know FPT hold to this myth.
+
+I don't find this a myth. But it's pretty clear that's because we're talking
+about different things. When I'm talking about floating point, I'm talking about
+the definition in the Ada Standard, and particularly the definition on Annex G
+"strict mode". It appears from the above that you're talking about the behavior
+of floating point hardware, which is a different kettle of fish.
+
+I personally am primarily interested in "portable Ada code", partly because with
+the tiny market share of Janus/Ada, it's the only thing that's useful to me and
+my customers. And partly because it's what's defined by the Ada standard, which
+is what we're discussing here.
+
+Now, the Annex G model only requires that the result of an operation is in the
+appropriate model interval. It certainly does not require the same result in
+that interval for each operation. Indeed, given:
+   C := A * B;
+   D := A * B;
+there is no requirement that C = D unless A and B are model numbers. I'm acutely
+aware of this when working on ACATS tests (and similar tests in RRS's
+repository); usually we try to have all operands and results be model numbers to
+avoid ambiguity in the results. I've definitely seen cases (on multiple
+compilers) where C /= D in practice; back when I first took over the ACATS
+maintenance, I had to fix a number of tests to remove such assumptions based
+on complaints by other implementers.
+
+As such, the static case is only a small part of the whole. And as such, the use
+of floating point "=" is always suspicious in portable Ada code.
+
+When you say that "there are plenty of algorithms where equality is perfectly
+reasonable for floating-point", you *have* to be going beyond anything in the
+Ada Standard. Because by the Standard, "=" only makes sense on model numbers,
+and that almost never happens in practice (so many commonly used constants like
+PI are never model numbers).
+
+Now, I'm well aware that implementers will sometimes have to go beyond the
+standard in order to meet their customers needs. Not all customers are going to
+write portable Ada code. Your -sse2 switch is a clear example of going beyond
+the standard (it surely isn't necessary to meet the Annex G requirements). It
+makes perfect sense to me to have a similar switch for the static case if that
+avoids problems with your customers. No one thinks that the Ada Standard is the
+last word in everything.
+
+It also might make sense to explore whether the Ada standard should provide more
+guarantees in terms of floating-point arithmetic. But it seems to me that there
+isn't a lot of value to changing the static case if the dynamic case is not
+guaranteed as well. Indeed, it would seem to encourage depending on things that
+mentioned in the Ada standard.
+
+----------
+
+From a later message:
+
+> If you say:
+>    X : constant := ....
+>
+>then the .... is computed exactly using infinite precision.
+>This is true now, and no one is proposing changing that.
+>Furthermore, there is no constraint on the value of X, and as long as
+>you stay in the untyped realm, you can build on this result still in
+>the infinite precision domain, as in
+>    Y : constant := X + ...
+>
+>Only when you reenter the typed domain:
+>    Z : constant Float := X;
+>Do you get back into the realm of range limited machine numbers.
+
+I agree that this is probably the best way to deal with your proposal.
+
+The [minor] problem I have with it is that virtually nothing in an Ada program
+should be untyped. There are a few constants like PI that are naturally untyped,
+but the vast majority of constants belong to a single type.
+
+In my programs, at least, most of the untyped constants occur because I wanted
+to put the constants first, before the type declarations. It's not at all
+unusual for me to move one of them in order to make it typed after the fact.
+That would bring up the same sort of problem (change of value) that you note
+currently happens with constants vs. variables.
+
+It might be slightly less surprising to have it associated with the type rather
+than with "constant", but we're not eliminating this problem, just moving the
+bump. And in practice, virtually nothing in well-written programs will be using
+infinite precision, because almost everything should have a type.
+
+****************************************************************
+
