@@ -1,7 +1,9 @@
-!standard 4.6(56)                                   14-05-28    AI12-0074-1/04
-!standard 6.4.1(12)
+!standard 4.6(56)                                   14-07-23    AI12-0074-1/05
+!standard 6.4.1(6.25/3)
 !standard 6.4.1(13.1/3)
 !class binding interpretation 13-06-09
+!status Corrigendum 2015 14-07-23
+!status ARG Approved 4-0-3  14-06-28
 !status work item 13-07-08
 !status ARG Approved 9-0-0  13-06-15
 !status work item 13-06-09
@@ -92,22 +94,18 @@ initialized reasonably.
 
 Append to end of 6.4.1 Legality Rules section:
 
-   If the mode is *out*, the actual parameter is a view conversion,
-   and the type of the formal parameter is a
-   a scalar type that has the Default_Value aspect specified, then
-     -  the type of the operand of the conversion shall have the
-        Default_Value aspect specified; and
+   If the mode is *out*, the actual parameter is a view conversion, and the
+   type of the formal parameter is an access type or a scalar type that has
+   the Default_Value aspect specified, then
      -  there shall exist a type (other than a root numeric type) that is
-        an ancestor of both the target type and the operand type.
-   Similarly, if the mode is *out*, the actual parameter is a view
-   conversion, and the type of the formal parameter is a
-   an access type, then there shall exist a type that is an ancestor of
-   both the target type and the operand type.
+        an ancestor of both the target type and the operand type; and
+     -  in the case of a scalar type, the type of the operand of the
+        conversion shall have the Default_Value aspect specified. 
    In addition to the places where Legality Rules normally apply
    (see 12.3), these rules also apply in the private part of an
    instance of a generic unit.
 
-   AARM note: These rules is needed in order to ensure that a well-defined
+   AARM note: These rules are needed in order to ensure that a well-defined
    parameter value is passed.
 
 Replace 6.4.1(13.1/3)
@@ -153,14 +151,14 @@ does not fit in the representation of the target type (as in the example in the
 question).
 
 Note that the "does not fit" case already exists in Ada, all the way back to Ada
-83. Specifically, if an implementation has multiple representations for access
+95. Specifically, if an implementation has multiple representations for access
 types, and the view conversion is going from the larger representation to the
 smaller one, then the problem could occur. [This happened historically; the
 segmented architecture of the 16-bit 8086 led to compilers supporting both long
 (with segments) and short (without segments) pointers. Similarly, the Unisys
 U2200 compiler that the author worked on supported Ada pointers (machine
-addresses) and C pointers (byte addresses, a pair of a machine address and a
-byte offset).]
+addresses [which accessed words]) and C pointers (byte addresses, a pair of a
+machine address and a byte offset).]
 
 Clearly, the "does not fit" problem was unusual for access types, so it's not
 surprising that it was never solved. However, it becomes much more important
@@ -219,13 +217,15 @@ as 13.1(10) ensures that the Default_Value aspect is the same for the derived ty
 and the parent type, and of course the types are related in this case. That means
 that all affected view conversions will be explicit in the program.
 
-We use a similar Legality Rule to handle the more minor issue with access types.
+We use the same Legality Rule to handle the more minor issue with access types.
 Note that this will be incompatible in rare cases (access type view conversions
 are rare in existing code, and ones that would trigger the rule should be much
-rarer). Also note that unlike scalar types, it is not that uncommon to read
-an "out" access parameter, in order to check bounds or discriminants of the
-designated object. This means that the problematic case is more likely to
-occur in practice.
+rarer). Such code was not possible in Ada 83 (unrelated access type conversions
+didn't exist); Ada 95 general access conversions are required to trigger the
+problem. Also note that unlike scalar types, it is not that uncommon to read an
+"out" access parameter, in order to check bounds or discriminants of the
+designated object. This means that the problematic case is more likely to occur
+in practice.
 
 ---
 
@@ -264,10 +264,65 @@ A possibility to minimize both the incompatibility and the possibility of
 erroneousness is to use a suppressible error here (presuming that we define
 those, see AI12-0092-1). In that case, the programmer would have to take
 explicit action (suppress the error) to cause the possibility of erroneous
-execution. That might be the best solution for this case (because the
+execution. That might be a better solution for this case (because the
 incompatibility can be easily avoided by suppressing the error as well as
 by introducing a temporary), but it depends on us having decided to
-define suppressible errors.
+define suppressible errors. We ultimately determined that this case is
+rather unlikely to occur, so that it doesn't provide a reason to define
+suppressible errors.
+
+!corrigendum 4.6(56)
+
+@drepl
+@xbullet<Reading the value of the view yields the result of converting the
+value of the operand object to the target subtype (which might raise
+Constraint_Error), except if the object is of an access type and the view
+conversion is passed as an out parameter; in this latter case, the value of
+the operand object is used to initialize the formal parameter without checking
+against any constraint of the target subtype (see 6.4.1).>
+@dby
+@xbullet<Reading the value of the view yields the result of converting the value of the
+operand object to the target subtype (which might raise Constraint_Error), except
+if the object is of an elementary type and the view conversion is passed
+as an out parameter; in this latter case, the value of the operand object may be
+used to initialize the formal parameter without checking against any constraint of the
+target subtype (as described more precisely in 6.4.1).>
+
+!corrigendum 6.4.1(6.25/3)
+
+@dinsa
+@xbullet<For a call, any @fa<default_expression> evaluated as part of the call is
+considered part of the call.>
+@dinst
+If the mode is @b<out>, the actual parameter is a view conversion, and the
+type of the formal parameter is an access type or a scalar type that has
+the Default_Value aspect specified, then
+@xbullet<there shall exist a type (other than a root numeric type) that is
+an ancestor of both the target type and the operand type; and>
+@xbullet<in the case of a scalar type, the type of the operand of the
+conversion shall have the Default_Value aspect specified.>
+In addition to the places where Legality Rules normally apply
+(see 12.3), these rules also apply in the private part of an
+instance of a generic unit.
+
+!corrigendum 6.4.1(13.1/3)
+
+@drepl
+@xinbull<For a scalar type that has the Default_Value aspect specified, the
+formal parameter is initialized from the value of the actual, without checking
+that the value satisfies any constraint or any predicate;>
+@dby
+@xinbull<For a scalar type that has the Default_Value aspect specified,
+the formal parameter is initialized from the value of the actual,
+without checking that the value satisfies any constraint or any
+predicate, except in the following case: if the actual parameter
+is a view conversion and either>
+@xi2bull<there exists no type (other than a root numeric type) that
+is an ancestor of both the target type and the type of the
+operand of the conversion; or>
+@xi2bull<the Default_Value aspect is unspecified for the type of the
+operand of the conversion>
+@xindent<then Program_Error is raised;>
 
 
 !ACATS Test
