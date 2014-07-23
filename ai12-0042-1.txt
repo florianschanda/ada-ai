@@ -1,9 +1,11 @@
-!standard 7.3.2(6/3)                                 14-06-23    AI12-0042-1/09
+!standard 7.3.2(6/3)                                 14-07-22    AI12-0042-1/10
 !standard 7.3.2(17/3)
 !standard 7.3.2(18/3)
 !standard 7.3.2(19/3)
+!standard 7.3.2(20/3)
 !class binding interpretation 12-11-29
 !status Corrigendum 2015 13-12-11
+!status ARG Approved 4-0-5  14-06-28
 !status work item 12-12-17
 !status ARG Approved 6-0-2  13-11-17
 !status work item 12-11-29
@@ -32,23 +34,15 @@ is not a private type or private extension?
 
 !wording
 
-Add before 7.3.2(6/3):
-
-  [AARM: Language Design Principle -- we require overriding (or
-   abstractness) in the case of inherited subprograms that have different
-   contracts (this includes pre/post-conditions as well as type_invariants)
-   than the "original" ancestor subprogram. We don't want an
-   implicitly-declared inherited subprogram that performs checks that were
-   not performed by the original subprogram.]
-
 Add after 7.3.2(6/3):
 
-  If a private extension occurs at a point where a private operation of
+  If a type extension occurs at a point where a private operation of
   some ancestor is visible and inherited, and a Type_Invariant'Class expression
   applies to that ancestor, then the inherited operation shall be
   abstract or shall be overridden.
 
-Modify 7.3.2(16/3-19/3) as follows:
+Modify 7.3.2(16/3-19/3) as follows: (Note: This includes the changes of
+AI12-0044-1 as well as this AI)
 
    * An invariant is checked upon successful return from a call on any
      subprogram or entry that:
@@ -89,32 +83,33 @@ Add after 7.2.3 (20/3)
     on the part of the object that is of type T.
 
     [AARM Reason: Class-wide objects are treated as though they exist outside
-     the scope of every type, and may be passed across package "borders" freely
-     without further invariant checks.]
+     the scope of every type, and may be passed across package "boundaries"
+     freely without further invariant checks.]
 
 !discussion
 
 This AI addresses three issues:
 
-    1) If a private extension inherits from some ancestor both a
+    1) If a type extension inherits from some ancestor both a
        Type_Invariant'Class and a private operation, then we've
        added a rule that the operation must be either overridden or
        abstract. The point is that the class-wide Type_Invariant of
        the ancestor didn't apply to the original operation (because
        it was a private operation) but it applies to the inherited
-       operation.
+       operation. (An example of such a case is given below.)
 
-       As a general rule, we require overriding (or abstractness)
-       in the case of inherited subprograms that have different
-       contracts (this includes pre/post-conditions as well as
-       type_invariants) than the "original" ancestor subprogram.
-       We don't want an implicitly-declared inherited subprogram
-       that performs checks that were not performed by the original
-       subprogram.
+       In such a case, the private operation would not be expected to
+       to maintain the invariant (as it is inside the checking boundary).
+       However, the inherited routine would be required to maintain the
+       invariant (as it is now on the checking boundary). We require
+       overriding (or abstractness) in the case of inherited subprograms that
+       have different contracts than the "original" ancestor subprogram when
+       that significantly changes the meaning of the routine (this includes
+       preconditions as well as type invariants).
 
        This is just to avoid surprising behavior, not because of any
        real definitional problem. It also spares implementations from
-       having to generate wrapper routines.
+       having to generate wrapper routines in this case.
 
    2)  In 7.3.2(18/3), the existing wording:
 
@@ -148,21 +143,54 @@ Both cases could be prevented with Legality Rules (as we do not allow
 class-wide invariants to be hidden). We decided its not worth preventing such
 things, even with the possibility of misuse.
 
+Similarly, there are other holes in the checking represented by type
+invariants (some of these are explained in AARM 7.3.2(20.a/3)). We do not
+believe the effort to plug all possible holes is practical. As such, we only
+plug holes that are likely to occur in practice (like the use of class-wide objects).
+
+!example
+
+An example of item (1) from the discussion:
+
+   package Type_Invariant_Pkg is
+      type T1 is tagged private with Type_Invariant'Class => Is_Ok (T1);
+      function Is_Ok (X1 : T1) return Boolean;
+      procedure Op (X : in out T1); -- [1]
+   private
+      type T1 is tagged record F1, F2 : Natural := 0; end record;
+      function Is_Ok (X1 : T1) return Boolean is (X1.F1 <= X1.F2);
+      procedure Priv_Op (X : in out T1); -- [2]
+   end Type_Invariant_Pkg;
+
+   private package Type_Invariant_Pkg.Child is
+      type T2 is new T1 with null record; -- Illegal by this AI.
+      -- Inherits procedure Op (X : in out T2); -- [3]
+      -- Inherits procedure Priv_Op (X : in out T2); -- [4]
+   end;
+
+Note that a call on Op [1] will cause the invariant to be checked on return,
+while a call on Priv_Op [2] would not make such an invariant check.
+
+However, a call on either Op [3] or Priv_Op [4] will cause the invariant to
+be checked on return. It's this change of the check that applies to Priv_Op
+that makes this illegal.
+
+Note that this case is rather unlikely. If the keyword private is erased from
+Type_Invariant_Pkg.Child, then the error goes away (as Priv_Op [4] would be
+declared in the private part of Type_Invariant_Pkg.Child and no invariant
+check would be required).
+
 !corrigendum 7.3.2(6/3)
 
 @dinsa
 The Type_Invariant'Class aspect shall not be specified for an untagged type.
 The Type_Invariant aspect shall not be specified for an abstract type.
 @dinst
-If a private extension occurs at a point where a private operation of
+If a type extension occurs at a point where a private operation of
 some ancestor is visible and inherited, and a Type_Invariant'Class expression
 applies to that ancestor, then the inherited operation shall be
 abstract or shall be overridden.
 
-!comment We neeed to delete the extra "and" for the merged version of AI12-0042-1
-!comment and AI12-0044-1. We'll do that here for good measure. (Perhaps this
-!comment should do the merge in the AI directly.) See the merge file for
-!comment the bulk of the change.
 !corrigendum 7.3.2(17/3)
 
 @drepl
@@ -198,10 +226,20 @@ or entry is visible outside the immediate scope of type @i<T> or
 overrides an inherited operation that is visible outside the
 immediate scope of @i<T>, or>
 
-@xi2bull<@i<T> is a record extension and the subprogram or entry is a
-primitive operation that corresponds to a visible operation of a private
-or private extension ancestor to which the same (class-wide)
-invariant applies.>
+@xi2bull<@i<T> is a record extension, and the subprogram or entry is a
+primitive operation visible outside the immediate scope of type @i<T> or
+overrides an inherited operation that is visible outside the immediate
+scope of @i<T>.>
+
+!corrigendum 7.3.2(20/3)
+
+@dinsa
+@xindent<The check is performed on each such part of type @i<T>.>
+@dinst
+@xbullet<For a view conversion to a class-wide type occurring
+within the immediate scope of @i<T>, from a specific type that is
+a descendant of @i<T> (including @i<T> itself), a check is performed
+on the part of the object that is of type @i<T>.>
 
 !ACATS test
 
@@ -305,7 +343,8 @@ Sent: Friday, August  3, 2012  12:28 PM
 > 7.3.2(16-19) should be applied, even if the type is *not* a private
 > type/extension.  It would be illegal to define a new
 > Type_Invariant'Class aspect on such a type, but if it inherits a
-> Type_Invariant'Class, we need to define which operations of the type will perform the invariant check.
+> Type_Invariant'Class, we need to define which operations of the type will
+> perform the invariant check.
 
 I agree.
 
