@@ -405,3 +405,1109 @@ I'm sure we can figure this out in Paris over a glass (tumbler??) of Beaujolias.
 
 ***************************************************************
 
+From: Steve Baird
+Sent: Monday, July 21, 2014  6:37 PM
+
+This is a summary of some internal AdaCore discussions (mostly between Tuck and
+me) about a possible approach to the problem that Randy identified in AI12-0113
+(Class-wide preconditions and statically bound calls).
+
+The dynamic semantics of Pre'Class/Post'Class evaluation for a primitive
+operation of a tagged type T in the case of a non-dispatching (i.e., statically
+bound) call to Foo could be changed as follows:
+
+   If a controlling formal parameter of Foo is used as a
+   controlling operand of a call within the Pre'Class expression
+   or the Post'Class expression, then for purposes of determining
+   the controlling tag of that call the (dynamic) tag of the
+   parameter is considered to be T'Tag.
+
+Note that the name resolution rules of 6.1.1 are unaffected by this change.
+At least as stated above, this is purely a dynamic semantics change (but see
+below). This is, in some sense, the worst kind of incompatible change (i.e., a
+dynamic semantics change where neither the old nor the new behavior necessarily
+raises an exception), but there seems to be agreement that the language is
+broken here and a fix is needed.
+
+A couple of corner-case issues have been identified.
+
+1) We don't want a rule like "the controlling tag of the call is
+    T'Tag" because we don't want to bypass the tag equality
+    check in the case where there are multiple controlling operands.
+    Details available upon request.
+
+2) Oddness is possible if the tagged type T in question is abstract.
+
+    Consider a statically bound call to the following procedure:
+
+      package Pkg is
+        type T is abstract tagged null record;
+        function Is_Ok (X : T) return Boolean is abstract;
+        procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+      end Pkg;
+
+    The point is that Proc is not abstract but Is_Ok is.
+
+    If we are not careful, we end up trying to execute the "body"
+    of an abstract function.
+
+    One approach to this problem is to view it as an unimportant
+    corner case so that behavior in this situation only needs to be
+    well-defined (as opposed to being useful).
+
+    Taking this approach, we can just state that the proposed
+    dynamic semantics change doesn't apply if the tagged type T
+    in question is abstract; program behavior in this case is
+    then unaffected by the changes of this AI.
+
+    A cleaner (but messier at the level of RM wording) approach would be
+    to make such a statically bound call illegal. With the proposed new
+    dynamic semantics, such a call would be equivalent to an illegal
+    construct (i.e., to a non-dispatching call to an abstract
+    subprogram), so by this reasoning it should be illegal.
+    Unfortunately, it would be possible to construct violations
+    of this rule which occur in expanded instance bodies (which are
+    not subject to legality checking) so we would also need a
+    special dynamic semantics rule (presumably Program_Error would
+    be raised) to handle this corner case of a corner case.
+    This comes down to a question of whether capturing this approach
+    in the RM is worth all the verbiage that would be required.
+
+Opinions?
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, July 21, 2014  6:49 PM
+
+>... 2) Oddness is possible if the tagged type T in question is abstract.
+>
+>     Consider a statically bound call to the following procedure:
+>
+>       package Pkg is
+>         type T is abstract tagged null record;
+>         function Is_Ok (X : T) return Boolean is abstract;
+>         procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+>       end Pkg;
+>
+>     The point is that Proc is not abstract but Is_Ok is.
+> ...
+> Opinions?
+
+As Steve knows, my opinion is that it is very important that the tag used for
+calling the subprogram matches the tag used for evaluating the class-wide
+precondition.  Hence, if Pre'Class involves a call on an abstract subprogram,
+Program_Error is raised.
+
+An alternative would be to require that the Pre'Class aspect not include a call
+on an abstract function if the associated subprogram is non-abstract.
+Presumably a similar rule could apply to Post'Class.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Tuesday, July 22, 2014  11:15 AM
+
+> As Steve knows, my opinion is that it is very important that the tag
+> used for calling the subprogram matches the tag used for evaluating
+> the class-wide precondition.  Hence, if Pre'Class involves a call on an abstract subprogram, Program_Error is raised.
+>
+> An alternative would be to require that the Pre'Class aspect not
+> include a call on an abstract function if the associated subprogram is
+> non-abstract.  Presumably a similar rule could apply to Post'Class.
+
+Well, we normally try to prevent calls to abstract subprograms via compile-time
+rules.  If you want a run-time check, you declare a concrete subprogram, and
+write a body that says "raise P_E;", and hopefully override that body whereever
+appropriate.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 22, 2014  8:08 PM
+
+> This is a summary of some internal AdaCore discussions (mostly between
+> Tuck and me) about a possible approach to the problem that Randy
+> identified in AI12-0113 (Class-wide preconditions and statically bound
+> calls).
+>
+> The dynamic semantics of Pre'Class/Post'Class evaluation for a
+> primitive operation of a tagged type T in the case of a
+> non-dispatching (i.e., statically bound) call to Foo could be changed
+> as follows:
+>
+>    If a controlling formal parameter of Foo is used as a
+>    controlling operand of a call within the Pre'Class expression
+>    or the Post'Class expression, then for purposes of determining
+>    the controlling tag of that call the (dynamic) tag of the
+>    parameter is considered to be T'Tag.
+>
+> Note that the name resolution rules of 6.1.1 are unaffected by this
+> change.
+
+I think this was one of the ideas I had as a possible solution. It seemed clunky
+at the time, but it definitely has the right semantics. Tucker seemed to think
+there was a more elegant way of describing this, but I guess he no longer thinks
+that?
+
+(BTW, this AI is assigned to Tucker and I, so I have an interest in figuring out
+what a rewrite ought to look like.)
+
+> At least as stated above, this is purely a dynamic semantics change
+> (but see below). This is, in some sense, the worst kind of
+> incompatible change (i.e., a dynamic semantics change where neither
+> the old nor the new behavior necessarily raises an exception), but
+> there seems to be agreement that the language is broken here and a fix
+> is needed.
+
+Right. It's insane that a body can make essentially no assumptions about a
+Pre'Class precondition, and in particular, the Pre'Class that it knows about may
+not even be true. Similarly, a body might be subject to Post'Class
+postconditions that it doesn't know about, causing them to fail. These seemed
+like an especial problem when they occurred for a call to a parent operation in
+the implementation of a child operation. The whole point of the child operation
+would be to ensure those Post'Class conditions; it makes perfect sense that they
+wouldn't be met at the point of the parent call.
+
+An interesting question is whether Type_Invariant'Class has a similar problem. I
+didn't try to work that out, but it seemed like it might (given the
+correspondence between postconditions and type invariants).
+
+> A couple of corner-case issues have been identified.
+>
+> 1) We don't want a rule like "the controlling tag of the call is
+>     T'Tag" because we don't want to bypass the tag equality
+>     check in the case where there are multiple controlling operands.
+>     Details available upon request.
+
+That's the other example from the meeting, right? If one of the other parameters
+is controlling but does not get its tag from the parameters of the call that
+defines the precondition/postcondition, then it's likely that the tag check will
+fail. (This is a dumb thing to do in Pre'Class or Post'Class; the other choice
+would be to statically ban such a call -- since we're only talking about the
+top-level of calls anyway. But it's not clear that would simplify the wording
+enough to justify the extra compile-time check.)
+
+> 2) Oddness is possible if the tagged type T in question is abstract.
+>
+>     Consider a statically bound call to the following procedure:
+>
+>       package Pkg is
+>         type T is abstract tagged null record;
+>         function Is_Ok (X : T) return Boolean is abstract;
+>         procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+>       end Pkg;
+>
+>     The point is that Proc is not abstract but Is_Ok is.
+>
+>     If we are not careful, we end up trying to execute the "body"
+>     of an abstract function.
+>
+>     One approach to this problem is to view it as an unimportant
+>     corner case so that behavior in this situation only needs to be
+>     well-defined (as opposed to being useful).
+
+What other approach would there be? A direct call to Is_OK in the body of Proc
+would be illegal:
+    procedure Proc (X : T) is
+    begin
+       if Is_OK(T) then -- Illegal!
+
+Since a precondition is just making these preamble checks visible, such a
+precondition makes no sense from the get-go.
+
+>     Taking this approach, we can just state that the proposed
+>     dynamic semantics change doesn't apply if the tagged type T
+>     in question is abstract; program behavior in this case is
+>     then unaffected by the changes of this AI.
+
+"Just"? That seems like a massive pain in the neck to implement (having two
+different sets of code generation depending on whether the original type is
+abstract). It doesn't seem to work, either:
+
+      package Pkg2 is
+         type T is tagged null record;
+         function Is_Ok (X : T) return Boolean;
+         procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+      end Pkg2;
+
+      with Pkg2;
+      package Child2 is
+         type NT is abstract new Pkg2.T with null record;
+         function Is_Ok (X : NT) return Boolean is abstract;
+      end Child2;
+
+It would be OK to make a statically bound call to Proc for type NT, but we still
+would be calling an abstract subprogram.
+
+>     A cleaner (but messier at the level of RM wording) approach would be
+>     to make such a statically bound call illegal. With the proposed new
+>     dynamic semantics, such a call would be equivalent to an illegal
+>     construct (i.e., to a non-dispatching call to an abstract
+>     subprogram), so by this reasoning it should be illegal.
+>
+>     Unfortunately, it would be possible to construct violations
+>     of this rule which occur in expanded instance bodies (which are
+>     not subject to legality checking) so we would also need a
+>     special dynamic semantics rule (presumably Program_Error would
+>     be raised) to handle this corner case of a corner case.
+>     This comes down to a question of whether capturing this approach
+>     in the RM is worth all the verbiage that would be required.
+
+My initial thought is that the precondition itself should be illegal, because a
+pure-within-the-body evaluation approach would call an abstract routine with a
+statically bound call -- which is always illegal. Specifically, a call to an
+abstract subprogram should not be allowed in Pre'Class or Post'Class IF the
+contract is on a nonabstract routine. (Unfortunately, "concrete" is not a
+technical term.)
+
+We don't need to look through calls for such a check, because the special tag
+rules only apply to the top-level of calls (the direct calls mentioned in the
+precondition/postcondition), so the only problems could be there. (Other places
+are already handled by the existing Ada rules.)
+
+I don't think that this could be a problem within a generic, as everything that
+can be abstract has to be declared as such in a generic, and then we have
+assume-the-worst in the body (the actual might not be abstract, but so what).
+[Besides, tagged extensions are illegal in a body anyway, so the problem could
+only happen in a specification, and we recheck there.]
+
+That's complicated by my Pkg2 example above; we could say that this check is
+repeated each time a subprogram is declared or inherited (and
+Pre'Class/Post'Class is involved). That would make the inherited Proc illegal.
+Not the most fun, but better than a dynamic rule for such a silly case.
+
+> Opinions?
+
+See above. Note that my suggestion for a legality rule is in-line with Bob's
+opinion that such things should be prevented at compile-time. If that doesn't
+fly, then I lean toward Tucker's "always raise Program_Error if one calls an
+abstract body" -- that's what we did for equality after all. A mixed version is
+just more work for something that only should happen in the warped mind of Steve
+Baird :-) [or by accident, of course].
+
+Now it's your turn -- what's wrong with my suggested legality check this??
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, July 23, 2014  1:16 PM
+
+> Specifically, a call to an abstract subprogram should not be allowed
+> in Pre'Class or Post'Class IF the contract is on a nonabstract routine.
+> (Unfortunately, "concrete" is not a technical term.)
+
+The objection I see to this approach is that it can impact a user who has no
+problematic statically bound calls. Language changes (either legality rules or
+dynamic semantics changes) which pertain only to such statically bound calls
+have no effect on such a user.
+
+This might be viewed as a problem even if we were defining the language from
+scratch, and it is certainly is a larger incompatibility than the
+statically-bound-call-based approaches.
+
+How much weight should be given to this objection?
+
+If the answer to this question is "not much", then I agree that the general
+approach of trying to deal with this issue via legality rules enforced at the
+point of the declaration of the Pre/Post'Class-bearing subprogram (perhaps
+including, as you point out, inherited subprograms) seems worth considering,
+
+>>     Taking this approach, we can just state that the proposed
+>>     dynamic semantics change doesn't apply if the tagged type T
+>>     in question is abstract; program behavior in this case is
+>>     then unaffected by the changes of this AI.
+>
+> It doesn't seem to work, either:
+>
+>       package Pkg2 is
+>          type T is tagged null record;
+>          function Is_Ok (X : T) return Boolean;
+>          procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+>       end Pkg2;
+>
+>       with Pkg2;
+>       package Child2 is
+>          type NT is abstract new Pkg2.T with null record;
+>          function Is_Ok (X : NT) return Boolean is abstract;
+>       end Child2;
+>
+> It would be OK to make a statically bound call to Proc for type NT,
+> but we still would be calling an abstract subprogram.
+
+A minor detail, but I disagree. I think the approach I outlined handles (in the
+sense that behavior is well-defined, although not necessarily useful) this case
+just fine. If we are making a statically bound call to Proc for type NT, then we
+would be making a statically bound call to a primitive of an abstract type and
+therefore we would revert to existing RM-defined behavior (which is
+well-defined, although perhaps not useful).
+
+Going off on a little bit of a tangent here, consider the case where we modify
+Child2 in the above example by making NT and Is_OK both non-abstract. Just to
+keep things simple, let's assume that nobody extends NT (so that any object
+whose nominal type is NT has a matching underlying tag). Now any call
+(statically or dynamically bound) to Child2.Proc will execute Pkg2's Proc but
+Child2's Is_Ok. This is true for the current RM wording and for any of the
+proposals we have been considering. Do we care about this mismatch?
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 23, 2014  2:05 PM
+
+> > Specifically, a call to an abstract subprogram should not be allowed
+> > in Pre'Class or Post'Class IF the contract is on a nonabstract routine.
+> > (Unfortunately, "concrete" is not a technical term.)
+>
+> The objection I see to this approach is that it can impact a user who
+> has no problematic statically bound calls. Language changes (either
+> legality rules or dynamic semantics changes) which pertain only to
+> such statically bound calls have no effect on such a user.
+
+A user without statically bound calls is highly unusual.
+
+Moreover, it's bizarre to write a precondition that can't be evaluated for some
+of the subprograms to which it applies. That seems like a bug to me, not a
+feature. And of course, the user can always make the call into an explicitly
+dispatching one, in which case the error goes away.
+
+> This might be viewed as a problem even if we were defining the
+> language from scratch, and it is certainly is a larger incompatibility
+> than the statically-bound-call-based approaches.
+>
+> How much weight should be given to this objection?
+
+Roughly that of a feather of a hummingbird. :-)
+
+> If the answer to this question is "not much", then I agree that the
+> general approach of trying to deal with this issue via legality rules
+> enforced at the point of the declaration of the Pre/Post'Class-bearing
+> subprogram (perhaps including, as you point out, inherited
+> subprograms) seems worth considering,
+
+OK.
+
+> >>     Taking this approach, we can just state that the proposed
+> >>     dynamic semantics change doesn't apply if the tagged type T
+> >>     in question is abstract; program behavior in this case is
+> >>     then unaffected by the changes of this AI.
+> >
+> > It doesn't seem to work, either:
+> >
+> >       package Pkg2 is
+> >          type T is tagged null record;
+> >          function Is_Ok (X : T) return Boolean;
+> >          procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+> >       end Pkg2;
+> >
+> >       with Pkg2;
+> >       package Child2 is
+> >          type NT is abstract new Pkg2.T with null record;
+> >          function Is_Ok (X : NT) return Boolean is abstract;
+> >       end Child2;
+> >
+> > It would be OK to make a statically bound call to Proc for type NT,
+> > but we still would be calling an abstract subprogram.
+>
+> A minor detail, but I disagree. I think the approach I outlined
+> handles (in the sense that behavior is well-defined, although not
+> necessarily useful) this case just fine.
+> If we are making a statically bound call to Proc for type NT, then we
+> would be making a statically bound call to a primitive of an abstract
+> type and therefore we would revert to existing RM-defined behavior
+> (which is well-defined, although perhaps not useful).
+
+The basic approach you are advocating is that the dynamic semantics are
+completely different if somehow an abstract subprogram gets involved. While this
+"works" in the sense that the behavior is defined in all cases, it's completely
+insane. For one thing, it makes a maintenance hazard (if someone adds "abstract"
+in the wrong place, the results silently change, not even an exception is
+raised). Second, it adds distributed overhead to all class-wide preconditions if
+they are evaluated out-of-line (in a thunk or within the subprogram - a
+reasonable implementation, IMHO). In such a case, one would pass the appropriate
+tag and dispatch appropriately (either the statically determined tag or the
+dynamically determined one, depending on which is right). Reverting to
+redispatching would require some additional mechanism associated with every tag
+lookup to deal with the abstract case. This would be a distributed overhead.
+
+Note that Janus/Ada does this for all calls to subprograms of formal types in a
+generic unit (it's how generic code sharing works for tagged types).
+
+Also note that anyone can write the behavior you are asking for explicitly, by
+type converting to a class-wide type (making the call explicitly dispatching). I
+think it is better to have it explicitly in the code rather than implicit in
+some way.
+
+> Going off on a little bit of a tangent here, consider the case where
+> we modify Child2 in the above example by making NT and Is_OK both
+> non-abstract. Just to keep things simple, let's assume that nobody
+> extends NT (so that any object whose nominal type is NT has a matching
+> underlying tag).
+> Now any call (statically or dynamically bound) to Child2.Proc will
+> execute Pkg2's Proc but Child2's Is_Ok.
+> This is true for the current RM wording and for any of the proposals
+> we have been considering.
+> Do we care about this mismatch?
+
+Interesting. One could argue that we do, as it violates what I consider the
+overriding principle here: that Pre'Class is behaves the same as the same
+expression written as Pre on each subprogram, with some additional guarantees.
+That argues that all subprograms with Pre'Class should require overriding.
+(Moreover, similar cases of "counterfeiting" of Pre'Class by interfaces require
+overriding). (We could try to formally define what cases cause problems, but it
+seems like a slippery slope to me, plus a wording nightmare because the obvious
+description isn't one allowed by the actual language wording.) The issue being
+that we don't want to allow any case where a body could be successfully called
+when precondition checking is on yet the precondition that the body knows about
+is False.
+
+OTOH, we've pretty much decided to allow various "mistakes" caused by
+inheritance. That would be OK for postconditions, but not so much for
+preconditions. (At least if we are following the current thinking.)
+
+Somehow, I get the feeling that you don't want to fix these, just leaving them
+completely useless for their intended purpose (allowing analysis, including
+static analysis, of all calls to primitive operations of tagged types, no matter
+what kind of call it turns out to be, and of course on both sides of the call).
+Do we just forget that they ever existed? Or do we just admit that we didn't
+understand these well enough initially and they need correction? (That's been
+true of almost every kind of contract, we've changed predicates and invariants
+incompatibly, why is this case different?)
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, July 23, 2014  2:31 PM
+
+>> Specifically, a call to an abstract subprogram should not be allowed
+>> in Pre'Class or Post'Class IF the contract is on a nonabstract routine.
+>> (Unfortunately, "concrete" is not a technical term.)
+>
+> The objection I see to this approach is that it can impact a user who
+> has no problematic statically bound calls. Language changes (either
+> legality rules or dynamic semantics changes) which pertain only to
+> such statically bound calls have no effect on such a user.
+
+It seems weird to write a "default" implementation for a subprogram, but no
+default for its precondition.  I don't see this as having "no effect" on code
+with only dynamically-bound calls, because if you decide to inherit this
+subprogram and don't particularly want to figure out the details of its
+implementation, but just want to reuse it because it basically does the right
+thing, why do you have to puzzle out what precondition to apply to it?
+
+I remain firmly in the camp of requiring a match of tags used for body and
+precondition, and catching this at compile time (by disallowing an abstract
+precondition on a non-abstract subprogram) seems to be the better solution.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, July 23, 2014  5:22 PM
+
+>> ...   package Pkg2 is
+>>          type T is tagged null record;
+>>          function Is_Ok (X : T) return Boolean;
+>>          procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+>>       end Pkg2;
+>>
+>>       with Pkg2;
+>>       package Child2 is
+>>          type NT is abstract new Pkg2.T with null record;
+>>          function Is_Ok (X : NT) return Boolean is abstract;
+>>       end Child2;
+>>
+>> It would be OK to make a statically bound call to Proc for type NT,
+>> but we still would be calling an abstract subprogram.
+>
+> ...
+> Going off on a little bit of a tangent here, consider the case where
+> we modify Child2 in the above example by making NT and Is_OK both
+> non-abstract. Just to keep things simple, let's assume that nobody
+> extends NT (so that any object whose nominal type is NT has a matching
+> underlying tag).
+> Now any call (statically or dynamically bound) to Child2.Proc will
+> execute Pkg2's Proc but Child2's Is_Ok.
+> This is true for the current RM wording and for any of the proposals
+> we have been considering.
+> Do we care about this mismatch?
+
+No, because the user is explicitly choosing to reuse the code for Proc with a
+(necessarily weaker) precondition.  They must know something about the inner
+details of Proc such that they believe it can work even with this weaker
+precondition, and they presumably need this weaker precondition to make Proc
+useful for their purposes.  So this really isn't a mismatch, it is an
+intentional choice by the definer of NT based presumably on detailed knowledge
+of T's implementation of Proc.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, July 23, 2014  5:37 PM
+
+Randy Brukardt wrote:
+>A user without statically bound calls is highly unusual.
+
+In the case of an abstract type which happens to provide a non-abstract
+"default" implementation for some operation, I'd certainly claim that it isn't a
+weird corner case.
+
+Calls to a primitive operation of an abstract type will often be dispatching
+calls, even if the callee statically named in the call happens to be a
+non-abstract subprogram.
+
+You're right that an overriding operation often makes a statically bound call to
+the parent's operation, but the case where this isn't done is hardly a
+pathology.
+
+Tucker Taft wrote:
+> It seems weird to write a "default" implementation for a subprogram,
+> but no default for its precondition.
+
+Suppose you have
+
+   package Pkg is
+     type T is abstract tagged record ... end record;
+     function Is_Ok_For_Op1 (X : T) return Boolean is abstract;
+     procedure Op1 (X : T) is abstract with
+       Pre'Class => Is_Ok_For_Op1 (X);
+     procedure Op2 (Xx, Yy: T) with Pre'Class =>
+       Is_Ok_For_Op1 (Xx) and Is_Ok_For_Op1 (Yy);
+     -- Op2 is not abstract; a "default" implementation is provided
+   end;
+
+because the implementation of Op2 involves (dispatching) calls to Op1.
+
+This seems like a reasonable scenario to me (including the use of Pre'Class
+instead of Pre). My impression is that both Tuck and Randy would prefer to
+reject this example; please correct me if I am mistaken about either of your
+positions.
+
+I think the author of code like the above example might be surprised to learn
+that their code is no longer legal because the language has been "improved".
+
+Note that the "stick with the existing dynamic semantics in the case of a
+problematic statically-bound call" rule also works well with this example if
+somebody does make a statically bound call to Op2.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, July 23, 2014  6:21 PM
+
+> > It seems weird to write a "default" implementation for a subprogram,
+> > but no default for its precondition.
+>
+> Suppose you have
+>
+>    package Pkg is
+>      type T is abstract tagged record ... end record;
+>      function Is_Ok_For_Op1 (X : T) return Boolean is abstract;
+>      procedure Op1 (X : T) is abstract with
+>        Pre'Class => Is_Ok_For_Op1 (X);
+>      procedure Op2 (Xx, Yy: T) with Pre'Class =>
+>        Is_Ok_For_Op1 (Xx) and Is_Ok_For_Op1 (Yy);
+>      -- Op2 is not abstract; a "default" implementation is provided
+>    end;
+>
+> because the implementation of Op2 involves (dispatching) calls to Op1.
+>
+> This seems like a reasonable scenario to me (including the use of
+> Pre'Class instead of Pre).
+> My impression is that both Tuck and Randy would prefer to reject this
+> example; please correct me if I am mistaken about either of your
+> positions.
+
+No, you've convinced me with this example that we can't have a Legality Rule.
+(This example looks suspiciously like the root types of Claw, and I certainly
+would like the option of having Pre'Class.)
+
+> I think the author of code like the above example might be surprised
+> to learn that their code is no longer legal because the language has
+> been "improved".
+>
+> Note that the "stick with the existing dynamic semantics in the case
+> of a problematic statically-bound call" rule also works well with this
+> example if somebody does make a statically bound call to Op2.
+
+Please forget this and think of something that is actually both implementable
+and sensible to users. This is neither. I'm not going to waste more time on this
+if you don't become reasonable.
+
+One last data point: We want the same rule to apply to both Pre'Class and
+Post'Class (and probably Type_Invariant'Class as well). But the latter two are
+going to be implemented as part of the body of the subprogram (that's where they
+can be optimized away, not at the call site). Consider a modification of your
+example above:
+
+   package Pkg2 is
+      type T is abstract tagged record ... end record;
+      function Is_Mumble (X : T) return Boolean is abstract;
+      procedure OpM (Xx : in out T) with Post'Class =>
+        Is_Mumble (Xx);
+      -- OpM is not abstract; a "default" implementation is provided.
+   end;
+
+   package Pkg2.Child is
+      type NT is new T with null record;
+      function Is_Mumble (X : NT) return Boolean;
+      -- Inherits the default OpM.
+   end Pkg2.Child;
+
+You are requiring that Post'Class does different things in the bodies for
+OpM(T) and OpM(NT). That's going to be pretty hard to implement considering that
+they're the *same* body. You'd have to use a wrapper for every version of OpM,
+because you couldn't tell if there ever was going to be an extension with a
+different rule than the one you generated initially. That would be a form of
+distributed overhead because it would occur on every subprogram that has
+Post'Class.
+
+----
+
+The only reasonable solution I see at the moment is to raise Program_Error in
+the unlikely event that an abstract routine is called by Pre'Class or
+Post'Class. This isn't as ideal as a Legality Rule, but it's consistent with
+what we did for abstract untagged equality (4.5.2(24.1/3)) so it's not like it
+hasn't occurred before. (And this case seems similar to that in some ways.)
+
+A statically bound call to OpM(T) or Op2(T) in the examples above seems pretty
+weird since T is an abstract type -- in most cases, you can't even get an object
+of type T.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, July 23, 2014  9:44 PM
+
+> No, you've convinced me with this example that we can't have a
+> Legality Rule. ...
+
+I am not convinced.  In a case like this which involves re-dispatching, what you
+really should write is:
+
+    with Pre'Class => Is_Ok_For_Op1(T'Class(Xx)) and Is_Ok_For_Op1(T'Class(Yy))
+
+because internally you are converting Xx and Yy to the class-wide type before
+invoking Op1.  That should be revealed in the precondition.  If you are
+expecting anything more about Xx or Yy before converting them to the class-wide
+type then that might require additional clauses in the Pre'Class without such a
+conversion.  But for re-dispatching uses of Xx and Yy, the redispatching should
+be apparent in the Pre'Class as well.
+
+The legality rule we have suggested would be just what we want to inform the
+user that what they wrote in the Pre'Class didn't make sense, and didn't
+properly account for the semantics of re-dispatching.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, July 23, 2014  10:25 PM
+
+> The legality rule we have suggested would be just what we want to
+> inform the user that what they wrote in the Pre'Class didn't make
+> sense, and didn't properly account for the semantics of
+> re-dispatching.
+
+You've kinda reconvinced me.
+
+Another factor that's reconvinced me is that you never, ever want (implicit)
+dispatching in a precondition or postcondition. We want to be able to implement
+these (especially postconditions) inside the body of the subprogram. For that to
+work sensibly, there shouldn't be any implicit dispatching. Even in the case of
+a dispatching call, one can think of what's going on as the tag being determined
+at the call site, and then dispatching to an appropriate (statically bound)
+precondition before dispatching to the actual body.
+
+After all, that's exactly what happens for Pre, and we want Pre'Class to operate
+as similarly as possible.
+
+But if an abstract routine is involved in a contract, it can only be legal if
+dispatching is involved. Everywhere else in Ada, we require users to make the
+dispatching explicit somehow -- that should be true in a contract as well. If it
+is true, then there is no reason to allow a call on an abstract routine in a
+Pre'Class (we certainly would not allow such a call in a Pre).
+
+A third factor that I've thought of since is that while Claw has a structure
+somewhat like Steve's example, one important difference exists. And that is the
+most of the routines with default implementations are query functions like
+Is_Valid (the validity flag being in the default portion of the record) -- it's
+the implementations of the operations that are abstract.
+
+Steve's example *could* happen, but it's not what occurs in my experience.
+(Especially as Op2 would normally be a class-wide routine in Claw; a routine
+that depends on other implementations generally does not allow overriding --
+something we did to keep the size of the interface [the primitive routines and
+their containing package] managable. But a class-wide routine has to use Pre,
+not Pre'Class.)
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, July 23, 2014  11:39 PM
+
+> I am not convinced.  In a case like this which involves
+> re-dispatching, what you really should write is:
+>
+>     with Pre'Class => Is_Ok_For_Op1(T'Class(Xx)) and
+> Is_Ok_For_Op1(T'Class(Yy))
+
+This brings up a topic which crossed my mind last night.
+The rule we have been considering (and we don't have real wording for this yet)
+says
+
+   If a controlling formal parameter of Foo is used as a
+   controlling operand of a call within the Pre'Class expression
+   or the Post'Class expression, ...
+
+What does this mean if the controlling operand in question is something like a
+parenthesized expression or a type conversion which has the same associated
+object as a controlling formal parameter of Foo? Presumably we don't want
+slapping a pair of parens around a parameter to change the controlling tag of
+some call. What about a conditional expression where one of the dependent
+expressions has the same associated object? More relevant to today's question,
+what about a qualified expression?
+
+If we do make this change, I think it is important that we provide some way for
+users to get back to the old behavior in the (presumably less common) case where
+that's what is wanted. This could be accomplished by saying that the new dynamic
+semantics rule does not apply at least in the case of a redundant qualified
+expression (i.e., one where the type of the expression is the same class-wide
+type as that of the operand). We might need to do something similar with type
+conversions in order to handle cases where a variable view is needed.
+
+If we have something along these lines to provide a workaround when
+previously-legal code becomes illegal, then I think that would resolve my
+objections to the new legality rule we have been discussing.
+
+On the other hand, giving significant dynamic semantics to what would normally
+be a redundant qualified expression or type conversion (e.g., the qualified
+expressions in your example above) detracts from readability (and is simply
+ugly). We may want to just hold our noses and accept this because we don't have
+a better alternative.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 24, 2014  1:08 PM
+
+>> I am not convinced.  In a case like this which involves
+>> re-dispatching, what you really should write is:
+>>
+>>     with Pre'Class => Is_Ok_For_Op1(T'Class(Xx)) and
+>> Is_Ok_For_Op1(T'Class(Yy))
+> ...
+> If we do make this change, I think it is important that we provide
+> some way for users to get back to the old behavior in the (presumably
+> less common) case where that's what is wanted....
+
+I believe that is exactly what is done above, namely, forcing the calls on
+Is_Ok_For_Op1 to do a dispatching call even when the caller of the associated
+subprogram is using static binding.  (Or am I missing an subtle difference?)  As
+I mentioned, this only does dispatching for the particular calls on
+Is_Ok_For_Op1.  If there were other clauses in the precondition that used Xx or
+Yy without such a conversion-to-classwide, they would use static binding if
+static binding was used in the call on the associated subprogram.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Thursday, July 24, 2014  1:32 PM
+
+> (Or am I missing an subtle difference?)
+
+As I suggested in my previous message, what is missing are the precise rules for
+when the proposed "use the statically bound tag instead of the underlying
+dynamic tag" change kicks in.
+
+You seem to be assuming that the change applies in the case of
+   X
+but not in the case of
+   T'Class'(X)
+.
+
+That sounds like a good start to me. I think we are on track towards something
+we can agree on.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 24, 2014  2:05 PM
+
+> You seem to be assuming that the change applies in the case of
+>    X
+> but not in the case of
+>    T'Class'(X)
+
+I wrote "T'Class(X)" -- i.e. a conversion, not a qualified_expression.
+
+> That sounds like a good start to me. I think we are on track towards
+> something we can agree on.
+
+No, I was presuming it applied to a *conversion*, not a qualified expression.
+A qualified expression shouldn't change the dynamic semantics, other than
+perhaps to insert a check.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Thursday, July 24, 2014  2:33 PM
+
+> I wrote "T'Class(X)" -- i.e. a conversion, not a qualified_expression.
+
+So what's a few pixels among friends? Ok, good point.
+
+Anyhow, my two main points remain:
+   1) I think we are on the right track here.
+   2) For each of the various cases where an actual parameter expression
+      can have the same associated object as X (listed in
+      6.2(10/3)), we need to decide whether the new
+      "use the statically bound tag" dynamic semantics rule
+      applies.
+
+> A qualified expression shouldn't change the dynamic semantics, other
+> than perhaps to insert a check.
+
+That sounds good to me. Similarly, adding parens shouldn't change anything in
+this area.
+
+So does the change never apply in the case of any type conversion?
+That's a nice simple rule. The decision could depend on some properties of the
+target type of the conversion (e.g., class-wide vs. specific,
+ancestor/descendant/both/neither, abstract/concrete(, but I don't see any
+obvious reason to do anything like that.
+
+That leaves conditional expressions, something like
+
+    with Pre'Class => Is_Ok ((if Blah then X else Something_Else));
+
+I'd say keep things simple and say the new rule does not apply in this case.
+This breaks the dynamic equivalence between
+   (X)
+and
+   (if True then X else Something_Else)
+but I could live with that.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 24, 2014  4:13 PM
+
+> That leaves conditional expressions, something like
+>
+>     with Pre'Class => Is_Ok ((if Blah then X else Something_Else));
+>
+> I'd say keep things simple and say the new rule does not apply in this
+> case. This breaks the dynamic equivalence between
+>    (X)
+> and
+>    (if True then X else Something_Else) but I could live with that.
+
+This seems bizarre to me.  I would rather not talk about two different sets of
+rules. There should only be one rule, I would hope.  The rule currently in the
+RM is broken, and we should come up with a new rule.  The new rule should ensure
+that when inside the body of an operation that is *not* inherited and has a
+Pre'Class aspect, we know which precondition expressions were conceptually
+"or"ed together to make up the effective precondition, and we know which
+Post'Class expressions are going to be "anded" when we are done.
+
+If a body is inherited, while something used in the Pre'Class or Post'Class is
+overridden, we may need to recompile/reanalyze the body if any assumptions were
+made when compiling/analyzing it about what Pre'Class applied, and what
+Post'Class expressions needed to be proved.
+
+Let's assume we treat a non-inherited Pre'Class as roughly equivalent to a Pre
+when making a statically bound call, i.e. nothing special happens in terms of
+dispatching, etc.  The next question is what happens to a Pre'Class when it is
+inherited?  My initial cut would be to systematically replace each use of a
+formal parameter with the corresponding formal parameter of the subprogram in
+the descendant type, and similarly replace each statically-bound call on a
+primitive operation with a statically-bound call on the corresponding primitive
+in the descendant type.  It is not clear that this would be easy to define
+formally, but I think this represents the "goal" semantics from my perspective.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Friday, July 25, 2014  2:41 PM
+
+Steve Baird wrote:
+>    2) For each of the various cases where an actual parameter expression
+>       can have the same associated object as X (listed in
+>       6.2(10/3)), we need to decide whether the new
+>       "use the statically bound tag" dynamic semantics rule
+>       applies.
+
+Tucker Taft wrote:
+> This seems bizarre to me.  I would rather not talk about two different
+> sets of rules. There should only be one rule, I would hope.
+
+I'm confused, I thought you were advocating treating
+    with Pre'Class => Is_Ok (X)
+differently than
+    with Pre'Class => Is_Ok (T'Class (X)) with respect to the "use the tag of
+                                               the statically bound call"
+dynamic semantics rule. Is that what you mean by "two different sets of rules".
+If so, then I thought you were in favor of this. If not, then please elaborate.
+
+If we do introduce that distinction then we also have to decide which way to
+treat things like qualified expressions, parenthesized expressions, and
+conditional expressions. I don't anticipate that any of these would be
+controversial based on the discussion so far (in particular, I don't have strong
+feelings one way or the other about conditional expressions).
+
+The proposal I thought we were close to converging on is
+
+    1) The dynamic semantics change.
+    2) A legality check that change #1 does not cause us,
+       in effect, to invoke the body of an abstract subprogram.
+    3) P_E is raised somewhere if #2 is violated in an expanded instance.
+
+You raise the question of statically bound calls to inherited subprograms. Could
+this be addressed by changing the originally proposed dynamic semantics change
+
+> The dynamic semantics of Pre'Class/Post'Class evaluation for a
+> primitive operation of a tagged type T in the case of a
+> non-dispatching (i.e., statically bound) call to Foo could be changed as
+> follows:
+>
+>   If a controlling formal parameter of Foo is used as a
+>   controlling operand of a call within the Pre'Class expression
+>   or the Post'Class expression, then for purposes of determining
+>   the controlling tag of that call the (dynamic) tag of the
+>   parameter is considered to be T'Tag.
+
+so that instead using T'Tag we use the Tag of the ancestor of T for which the
+corresponding non-inherited subprogram is a primitive subprogram? [There might
+be some ugly corner cases involving interface types and null procedures].
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 25, 2014  5:38 PM
+
+> Steve Baird wrote:
+> >    2) For each of the various cases where an actual parameter expression
+> >       can have the same associated object as X (listed in
+> >       6.2(10/3)), we need to decide whether the new
+> >       "use the statically bound tag" dynamic semantics rule
+> >       applies.
+>
+> Tucker Taft wrote:
+> > This seems bizarre to me.  I would rather not talk about two
+> > different sets of rules. There should only be one rule, I would hope.
+>
+> I'm confused,
+
+Yes, clearly. :-)
+
+> I thought you were advocating treating
+>     with Pre'Class => Is_Ok (X)
+> differently than
+>     with Pre'Class => Is_Ok (T'Class (X)) with respect to the "use the
+> tag of the statically bound call"
+> dynamic semantics rule. Is that what you mean by "two different sets
+> of rules". If so, then I thought you were in favor of this. If not,
+> then please elaborate.
+
+You're looking at this in completely the wrong way. If Pre'Class is given on a
+primitive of tagged type T:
+
+(1) For the purposes of resolution ONLY, X in the above is treated as a
+class-wide type (T'Class). This is done ONLY so that inherited Pre'Class
+expressions work (we don't want calls that would be illegal for some descendant
+of T, and we want dispatching to work.). [I'm not 100% certain that this step is
+even needed.]
+
+(2) For a call, Pre'Class is to be evaluated at the call site, based on the
+declaration that the call is resolved to. In this case, the type X is treated to
+be whatever type the dispatching type is resolved to be. That means Pre'Class
+might be evaluated using dispatching (for a dispatching call) or statically
+bound.
+
+(3) For all other purposes (these mainly are Post'Class and probably
+Type_Invariant'Class), X is treated to be of the specific type associated with
+the subprogram for whose declaration the Pre'Class is associated. That's some
+descendant of T (or T itself). This means any associated calls are always
+statically bound. (This is exactly how it would work if one used Post rather
+than Post'Class, manually adding a new Post for each overridden subprogram.)
+
+Note that for (2) and (3), it is only the type of X that changes. If you wrap X
+in a type conversion, then that type becomes irrelavant, just as it would if you
+wrote
+   if Is_OK (T'Class (X)) then
+
+(2) and (3) have to be different because the way Pre'Class works is different
+than Post'Class. In particular, a call only evaluateds the Pre'Class it knows
+about -- this allows the precondition of a dispatching call to be known at the
+call-site. But to evaluate that at the call-site means it must be dispatching.
+
+Note that such a dispatching call is always equivalent to a statically bound
+call in the absence of an inherited body. For an inherited body, different
+versions of the functions that make up Pre'Class might be called [if they
+themselves are overridden] than those that would have been evaluated by the
+body.
+
+That would allow counterfeiting for an inherited body. Arguably, no inheritance
+should be allowed for subprograms with Pre'Class unless the functions that make
+up Pre'Class are themselves all inherited. But that's too strong (and
+complicated) of a restriction; counterfeiting can only happen when some routine
+that makes up the class-wide precondition is weakened. While that fits with LSP,
+useful weakening is rather rare. So I think that particular problem can be left
+behind.
+
+If any of the expressions evaluated by (2) or (3) are statically bound to an
+abstract subprogram, then of course the expression is illegal. We probably do
+need a rule to say this. If there is any case where that could occur in a
+generic body and the abstractness is, then we would need a Program_Error rule.
+
+However, I got the feeling Tucker wanted to stick with the rule I proposed
+earlier, which is that Pre'Class/Post'Class is illegal if it is used on a
+concrete routine such that any of the constituents is abstract. That never
+causes a generic problem (extensions are not allowed in bodies), and it only
+would provide a false positive for a Pre'Class for which every call in existence
+is dispatching. (It would NEVER be a false positive for Post'Class, since those
+are always statically bound, unless of course the body in question is never
+called anywhere [even after being inherited].)
+
+> If we do introduce that distinction then we also have to decide which
+> way to treat things like qualified expressions, parenthesized
+> expressions, and conditional expressions. I don't anticipate that any
+> of these would be controversial based on the discussion so far (in
+> particular, I don't have strong feelings one way or the other about
+> conditional expressions).
+
+There's no "distinction" here. This is just a normal expression with objects of
+a statically known tagged type.
+
+I realize this is somewhat of a different way to look at this than you were
+doing. But what you were doing was clearly leading nowhere (worring about the
+semantics of a parenthesized expression is my idea of "nowhere"!)
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Friday, July 25, 2014  7:05 PM
+
+> I'm confused, I thought you were advocating treating
+>   with Pre'Class => Is_Ok (X)
+> differently than
+>   with Pre'Class => Is_Ok (T'Class (X)) with respect to the "use the
+> tag of the statically bound call"
+> dynamic semantics rule. Is that what you mean by "two different sets
+> of rules". If so, then I thought you were in favor of this. If not,
+> then please elaborate.
+
+I don't see these as different rules, merely different consequences of a single
+rule, which is largely based on a static binding view unless the pre'class
+explicitly includes a conversion to class wide. In that case, the normal
+consequences arise and dispatching always occurs.
+
+I'll try to propose some wording at some point real soon now...
+
+***************************************************************
+
+From: Steve Baird
+Sent: Friday, July 25, 2014  7:13 PM
+
+Sounds good. I think we are close.
+
+***************************************************************
