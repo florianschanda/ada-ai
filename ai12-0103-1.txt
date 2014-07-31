@@ -1,5 +1,5 @@
-!standard 13.14(3/3)                                14-05-12    AI12-0103-1/01
-!class ramification 14-05-12
+!standard 13.14(3/3)                                14-07-30    AI12-0103-1/02
+!class binding interpretation 14-05-12
 !status work item 14-05-12
 !status received 14-04-10
 !priority Low
@@ -7,8 +7,11 @@
 !subject Expression functions that are completions in package specifications
 !summary
 
-Expression functions and null procedures never cause freezing in a package
-specification, even if they are completions.
+Expression functions that are a completion freeze their expression but do
+not freeze anything else (unlike regular bodies). Other expression functions
+don't freeze anything at all.
+
+Similarly, null procedures never cause freezing, even if they are completions.
 
 !question
 
@@ -51,84 +54,143 @@ specifications, then the completion (2) would be illegal (as it is using an
 incomplete deferred constant), but it could be made legal by erasing the
 declaration at (1).
 
-Is this correct? (Yes.)
+Is this correct? (Not quite.)
 
-!response
+!recommendation
 
-13.14(3/3) does not apply to package specifications. The reason for the rule, as
-explained by the following AARM notes, is that we want interchangability of
-bodies (of all kinds) with body stubs (which have to be freezing, because we
-can't know their contents).
-
-However, body stubs are not allowed in package specifications. So there is no
-need to have rules that emulate having those. Moreover, moving expression
-functions between specifications and bodies is made easier if the freezing rule
-doesn't apply in the specification.
-
-Therefore, we confirm that the wording in the standard is correct.
+(See summary.)
 
 !wording
 
-Modify AARM 13.14(3.f/3):
+Modify AARM 13.14(3/3):
 
-Note that "body" includes null_procedure_declarations and
-expression_function_declarations when those are used as completions, as well as
-entry_bodys (see 3.11.1). These all cause freezing, along with proper_bodys and
-body_stubs{, but only in declarative_parts}.
+The end of a declarative_part, protected_body, or a declaration of a library
+package or generic library package, causes freezing of each entity and profile
+declared within it, except for incomplete types. A {body or
+entry_body}[noninstance body other than a renames-as-body] causes freezing of
+each entity and profile declared before it within the same declarative_part
+that is not an incomplete type; it only causes freezing of an incomplete type
+if the body is within the immediate scope of the incomplete type. 
+
+[Editor's note: In the new text, "body" and "entry_body" are in the syntax
+font. These do not include instances or renames, so we no longer need the
+exceptions in the old text.]
+
+Replace AARM 13.14(3.f/3) with:
+
+Note that "body" includes "proper_body"s and "body_stub"s; these, along with
+"entry_body"s cause freezing. However, "null_procedure_declaration"s and
+"expression_function_declaration"s (even when those are used as completions),
+as well as "generic_instantiation"s and renames-as-bodies do not necessarily
+cause freezing; each has their own specific rules.
+
+[All of the quoted things are in the syntax font, without quotes, in the actual
+note.]
 
 Add an AARM Ramification after 13.14(3.g/3):
 
 Note that the rule about bodies being freezing only applies in
-declarative_parts. Package specifications do not allow a body_stub (or a
-proper_body), and thus the reason for bodies being freezing is not possible.
-Freezing is annoying to users, so we want as little of it as makes semantic
-sense -- and we already have enough rules so that expression functions that
-are not completions do not cause problems. As such, we don't need to make
-expression functions and null procedures in a package specification
-freezing, even when they are completions.
+declarative_parts. All of the kinds of bodies (see 3.11.1 - keep in mind the
+difference from "body"s) that are allowed in a package specification have
+their own freezing rules. Freezing is annoying to users, so we want as little
+of it as makes semantic sense. 
+
+Add after 13.14(5/3):
+
+* The occurrence of a expression_function_declaration that is a completion
+  causes freezing of the expression of the expression_function_declaration.
+
+AARM Reason: This rule prevents calls through access values to an expression
+that might have unfrozen parts. Typically, elaboration checks and other
+freezing rules prevent this, but in this case the completion is elaborated
+but since this is not a "body" [syntax font] it does not by itself freeze
+anything that precedes it.
+
+Modify AARM 13.14(10.g/3) so that "body" is in the syntax font (two places).
 
 !discussion
 
-Freezing is something that should be minimized, as it is mysterious to users. In
-particular, we should not be invoking freezing when we don't have to.
+The general principle is that things that might occur in a package specification
+freeze as little as is required to prevent semantic problems. In particular,
+renames-as-bodies are excluded from the "freeze everything" rules (despite
+acting as a body).
 
-In the specific case of expression functions, we already have all of the
-freezing rules we need upon their uses. (Those are necessary to handle
-expression functions that are not completions.) As such, there is no semantic
-need for an expression function that acts as a body to be freezing.
+This is necessary so that the occurrence of one of these implicit bodies don't
+freeze unrelated entities from outer scopes.
+
+Moreover, it's clear that 13.14(3/3) does not apply to package specifications.
+The reason for the rule, as explained by the following AARM notes, is that we
+want interchangability of bodies (of all kinds) with body stubs (which have
+to be freezing, because we can't know their contents). However, body stubs are
+not allowed in package specifications. So there is no need to have rules that
+emulate having those.
+
+Additionally, there is a usability issue. Freezing is mysterious to users (one
+user said they believed that it was invented to cover up compiler bugs!) As
+such, we should require as little freezing as possible to avoid semantic
+problems.
 
 The primary argument for expression functions as completions freezing is for
 consistency with other bodies. But that is misleading, as renames-as-bodies are
 not freezing. So changing from a renames-as-body to an expression function to an
-regular body has to change freezing somewhere. Specifically:
+regular body has to change freezing somewhere. Specifically, all of the following
+have essentially the same effect (assume Bar is a function, and these Foos are
+all completions):
 
     function Foo return Integer renames Bar; -- Never freezing
 
-    function Foo return Integer is (Bar); -- Freezes sometimes
-               -- (currently only if a completion in declarative_part).
+    function Foo return Integer is (Bar); -- Freezes only Bar (see below)
 
     function Foo return Integer is        -- Always freezes
     begin
         return Bar;
     end Foo;
 
-Before Ada 2012, no subprogram declaration that could appear in a package
-specification was freezing. The various sorts of bodies could not appear in a
-package specification.
+Clearly, there is going to be a wart of sorts in any case. Looking at all kinds of
+bodies (semantic font), we have a continuum of kinds of bodies:
+   null procedures as completions;
+   renames-as-body;
+   expression functions as completions;
+   generic instantiations;
+   normal bodies ("proper_body" and "entry_body");
+   body stubs.
 
-Thus it makes sense that a completion that is an expression function or null
-procedure is never freezing (by iteself) when it appears in a package
-specification. The consistency problem only arises when the expression function
-completion occurs in a body of some sort, where it could easily be converted to
-one of the other forms that is explicitly freezing. (If someone was to move an
-expression function from a package body to the package specification, the change
-in freezing would be more flexible, so that is not a problem. If someone was to
-move the expression function from a package specification to a package body, the
-freezing would be stronger, but since everything in the package specification
-already was frozen at the end of the specification, there would be no effect.
+It's clearly never going to be the case that all of these have the same
+freezing rules. Thus we simply have the existing rule (13.14(3/3) only apply
+to the last two, and change the AARM notes accordingly.
 
-Therefore, we adjust the language AARM notes (to make it clear that the wording
-of 13.14(3/3) is intended, but make no changes to the normative wording.
+Unfortunately, this is not quite the end of the story. Steve Baird pointed
+out that a modified version of the example in AARM 13.14(10.i-q/3) causes
+trouble:
+
+   package Pack is
+      type Flub is range 0 .. 100;
+      function Foo (A : in Natural) return Natural;
+      type Bar is access function Foo (A : in Natural) return Natural;
+      P : Bar := Foo'Access; -- (A)
+      function Foo (A : in Natural) return Natural is
+         (A + Flub'Size); -- (B)
+      Val : Natural := P.all(5); -- (C)
+   end Pack;
+
+13.14(10.3/3) does not apply to (A) (since the declaration of Foo is not
+an expression function). There is no rule (intentionally) to freeze the
+expressions of an expression function, so (B) does not freeze anything.
+However, then, the call at (C) is using a property of an unfrozen type.
+
+Moreover, note that the call is after the body of Foo, so it passes
+elaboration checks.
+
+We briefly considered changing elaboration checks to prevent this
+problem, but it would change something simple (elaboration checks) to fix
+something that is already complex (freezing).
+
+Thus, we have adopted a rule that an expression function as completion
+freezes its expression (so it can be immediately called, as it is elaborated).
+
+We could have complicated the rule so that it only applies when 'Access
+is taken of the subprogram within the immediate scope, but that would be
+an unusual context dependency for a freezing rule.
 
 !ASIS
 
