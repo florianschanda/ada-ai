@@ -1,0 +1,206 @@
+!standard 3.2.2(12)                                     14-08-11    AI12-0123-1/01
+!class Amendment 14-08-11
+!status work item 14-08-11
+!status received 14-07-08
+!priority Low
+!difficulty Easy
+!subject Add 'Subtype attribute
+
+!summary
+
+Add a new attribute, Subtype.
+
+!problem
+
+When experimenting or testing, rapid changes can occur in a program. These changes
+can have a ripple effect in the code. One way to minimize this effect is to avoid
+using subtype names in the code. After all, the compiler knows the subtype of
+every object, and in many cases, the reader doesn't care. Moreover, not all
+subtypes have names.
+
+For instance:
+
+   declare
+    K : Integer;
+   begin
+    Ada.Text_IO.Put_Line( "Value:" & K'Subtype'Image(K) );
+   end;
+
+would require less change than:
+
+   declare
+    K : Integer;
+   begin
+    Ada.Text_IO.Put_Line( "Value:" & Integer'Image(K) );
+   end;
+
+if the subtype of K is changed.
+
+!proposal
+
+Add a new attribute, Subtype, which takes an object as its prefix and provides
+the nominal subtype of the object.
+
+!wording
+
+** TBD. This attribute would go toward the end of 3.2.2, to be consistent
+with other widely-used attributes.
+
+!discussion
+
+The attribute ought to reflect the nominal subtype, so that a "clone" object
+can be defined with it:
+
+    I : Natural range 0 .. 20;
+    J : I'Subtype;
+
+Issues:
+(1) The prefix of the attribute would have to be evaluated (although implementations
+could often use an 11.6 permission to eliminate the evaluation). For instance, if
+F is a function, then
+    V(F)'Subtype
+needs to call F (in the canonical semantics).
+(2) Subprogram profiles are designed to avoid any evaluation/elaboration in the
+subtypes (only subtype_marks and null exclusions are allowed). Some rule would be
+needed to prevent this attribute from causing problems in profiles (the easiest
+one is to simply not allow it there, but that's annoying).
+(3) The nominal subtype isn't useful for some entities (especially for formal
+in out objects and renames of objects). It's not clear what the attribute would
+mean in such a case.
+
+Alternatively, one could imagine this being O'Type, with the result being the
+italized T of legend (and AARM 4.5.1(2.b-i/2)). That would fix problem (3), but
+the first two issues would remain, and it could be used in object declarations
+less often (because it would often be indefinite). Also, since the details of
+italized T seems to depend on visibility for private types, the same would be
+true here.
+
+!ASIS
+
+No ASIS impact.
+
+!ACATS test
+
+An ACATS C-Test is needed to verify that the attribute is implemented as specified.
+
+!appendix
+
+!topic Predefined Attributes
+!reference None
+!from Author E.Fish 14-07-08
+!keywords keywords Attribute
+!discussion
+
+Given variable V, the compiler already knows the type, therefore it should be
+trivial to implement. However, one pitfall is the case of altering the
+variable's declaration to cause something legal to become illegal; example:
+
+   declare
+    K : Integer;
+   begin
+    Ada.Text_IO.Put_Line( "Value:" & K'Type'Image(K) );
+   end;
+
+-- changed to
+   declare
+    Type J is null record;
+    K : J;
+   begin
+    -- Invalid attribute "Image" is not applicable to records.
+    Ada.Text_IO.Put_Line( "Value:" & K'Type'Image(K) );
+   end;
+
+The 'Type attribute could be useful in reducing the number of alterations
+needed when experimenting or testing, as shown above. Granted, that these
+are trivial examples and easily worked around.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 8, 2014  2:56 PM
+
+I don't see any problem description here, just a solution looking for a
+problem. The ARG needs a description of whatever it is that is hard or
+impossible to do in current Ada. A proposed solution is fine but not required.
+
+We need a problem statement so that we can judge whether a proposed new feature
+is worth the implementation effort and additional complexity in the Standard.
+The stronger the problem, the more effort and complexity that we would allow.
+
+> Given variable V, the compiler already knows the type, therefore it 
+> should be trivial to implement.
+
+Depends on your definition of "trivial". I don't think it would be hard,
+but:
+(1) "Type" is a reserved word, so syntax grammar changes would be required.
+(2) Pedantic: Ada doesn't allow naming of types, only of subtypes. Moreover, a
+subtype is necessary to declare an object or the like. So this should really be
+O'Subtype, which would have the added advantage of carrying the constraint (if
+any) along. Thus:
+
+    V : Integer range 1 .. 10;
+    W : V'Subtype;
+
+(3) The prefix of this attribute would require evaluation. For instance, if you had:
+
+    function F return Natural;
+    type A is array (Natural range <>) of Integer;
+    V : A(1..10);
+    W : V(F)'Subtype;
+
+The function F would have to be called when the prefix of 'Subtype. (It's true
+that the compiler could use 11.6 to eliminate this evaluation, since the result
+would have no bearing on the effect of the program, but that's not the canonical
+semantics but an optimization.) We would definitely want this to work similarly
+to O'Size, where the prefix is definitely evaluated (whether or not it has any
+effect on the result).
+
+This would mean that evaluations would occur in places where they previously
+were not allowed. For instance, Ada's rules prevent writing anything that needs
+to be evaluated in a subprogram profile:
+
+    procedure P (A : V(F)'Subtype);
+
+We'd need to do something special in order the support this: (A) Allow it,
+meaning a substantial implementation cost, along with requiring new rules for
+conformance; (B) Make it illegal to use some or all 'Subtype attributes in
+profiles and similar places [which would be an odd restriction]; (C) Make it
+illegal to write any prefix to 'Subtype that would require evaluation [ditto];
+(D) Define that the prefix of 'Subtype is not evaluated [which would be
+different than most (all?) other attributes].
+
+(4) I didn't even try to think of what this would mean in a generic body.
+Especially for formal in out objects (where the subtype is not known in the
+body).
+
+> However, one
+> pitfall is the case of altering the variable's declaration to cause 
+> something legal to become illegal; example:
+> 
+>    declare
+>     K : Integer;
+>    begin
+>     Ada.Text_IO.Put_Line( "Value:" & K'Type'Image(K) );
+>    end;
+> 
+> -- changed to
+>    declare
+>     Type J is null record;
+>     K : J;
+>    begin
+>     -- Invalid attribute "Image" is not applicable to records.
+>     Ada.Text_IO.Put_Line( "Value:" & K'Type'Image(K) );
+>    end;
+
+That seems like the least of the problems.
+ 
+> The 'Type attribute could be useful in reducing the number of 
+> alterations needed when experimenting or testing, as shown above.
+> Granted, that these are trivial examples and easily worked around.
+
+This seems like a solution in search of a problem, to me. "could be useful"
+is not a problem statement! We're not looking for cool ideas to add to Ada
+-- everyone has plenty of those, but Ada is large enough without them. We're
+looking for areas where Ada needs improvement.
+
+****************************************************************
