@@ -1,0 +1,416 @@
+!standard A.3.4                                     14-08-21    AI12-0127-1/01
+!class Amendment 14-08-21
+!status work item 14-08-21
+!status received 14-07-14
+!priority Medium
+!difficulty Easy
+!subject Partial aggregate notation
+
+!summary
+
+A notation for updating part of a record type is defined (where the remainder of
+the type is unchanged).
+
+!problem
+
+It is common to need to use an object of a composite type with just a small
+modification (often of a single component). This can be awkward to express
+in Ada.
+
+For instance, consider a record type Rec with many components, one of which
+is Colour, a variable R of type Rec, and the need to call procedure Foo with R
+but using the Black colour.
+
+There are two ways to do this in current Ada, but both are ugly. The first uses
+a temporary variable, a copy, and an assignment to the component:
+
+   declare
+      T : Rec := R;
+   begin
+      T.Colour := Black;
+      Foo (T);
+   end;
+
+The other way uses an aggregate listing all components of Rec, which is very
+cumbersome and a burden for maintenance:
+
+   Foo ((X => R.X, Y => R.Y, ...., Colour => Black));
+
+This construct is especially common in postconditions. It's common for a
+subprogram only to change a small part of a large composite type.
+
+   procedure Foo (Fighters : in out Rec)
+      with Post => (Fighters.Colour = Black and
+                    Fighters = (X => Fighters'Old.X, Y => Fighters'Old.Y, ...
+                       Shape => Trapazoid));
+
+This is cumbersome enough that the Postcondition author might check the changed
+component and not even mention that the other components are unchanged.
+
+Some better way to write these should be provided.
+
+[Editor's note: Sorry, these identifiers reminded me of the title of one of my
+favorite albums of all time. It should be pretty obvious (at least after a
+visit to Wikipedia); I would have liked to work in the two "the"s but that
+was over the top.]
+
+!proposal
+
+A partial aggregate has the syntax:
+
+    (expression with delta record_component_association_list);
+
+The expected type for the expression is the type of the aggregate.
+
+No components are required for a partial aggregate, but any components that are
+part of the record type can be given. [This will require redoing the definition
+of "needed" in 4.3.1(9), but I think the rest of the rules work without change.]
+We need some rule to deal with the case where one or more discriminants are
+given in the association list; in such a case, components dependent on that
+discriminant would have to be "needed". (An alternative would be to disallow
+changing discriminants at all in a partial aggregate, but that sounds like it
+would be limiting.
+
+The dynamic semantics is that the given components are evaluated as usual, and
+any components not given come from the object denoted by the expression.
+
+
+[Note: I've made no attempt to define these for array types. That would be
+natural, but it would be harder to reuse the existing wording for array
+components, especially as positional components don't even have association
+syntax. There's no close analog in the language today as there is for records.
+Probably much of 4.3.3 would have to be rewritten to support using these in
+partial aggregates.]
+
+!wording
+
+** TBD: this would be a new aggregate subclause (A.3.4).
+
+!discussion
+
+SPARK 2014 defines an attribute Update for this purpose. Using this
+attribute, the call in the question can be expressed as:
+   Foo (R'Update(Color => Black));
+
+We believe it is better to use aggregate syntax for this, as we certainly want
+aggregate semantics relative to temporaries, build-in-place, limited types,
+resolution, and the like to apply. Additionally, by using aggregate notation,
+we can reuse some of the existing definitions for aggregate elements.
+
+!examples
+
+Using this facility, the initial example in the !problem can be written:
+
+   Foo ((R with delta Colour => Black));
+
+The postcondition example can be written as:
+
+   procedure Foo (Fighters : in out Rec)
+      with Post => (Fighters.Colour = Black and
+                    Fighters = (Fighters'Old with delta Shape => Trapazoid));
+
+!ASIS
+
+No ASIS impact.
+
+!ACATS test
+
+ACATS B-Tests and C-Tests are needed to test the implementation of this feature.
+
+!appendix
+
+topic        Adding partial aggregate functionality to Ada
+!reference    Ada 2012 RM{clause unsure}
+!from        Simon Clubley 2014-07-13
+!keywords    partial aggregate device register bitfields atomic updating
+
+[The original motivation for this proposal was the simultaneous updating of
+multiple bitfields in a device register. However, discussions in comp.lang.ada
+have revealed a wide range of potential uses for this notation which would allow
+these other existing uses to be expressed more cleanly. The examples
+demonstrating the wider potential of this proposal were provided by Niklas
+Holsti.]
+
+Background
+----------
+Ada can model the bitfields in a device register as a record type containing
+those bitfields and can map an instance of that record type to the address of
+that device register.
+
+However, sometimes there is a requirement to be able to update a subset of those
+bitfields as an atomic operation while preserving the contents of the other
+bitfields in the record.
+
+In Ada, the only way to do this (apart from C style bitmasks on an integer
+variable) is to read the device register into a temporary instance of the record
+type, modify the temporary variable and write the temporary variable back to the
+device register.
+
+This, to put it mildly, is ugly.
+
+Normal (non-atomic) records also have similar issues.
+
+For normal records, consider a record type Rec with many components, one of
+which is Colour, a variable R of type Rec, and the need to call procedure Foo
+twice, once using R with its own Colour, and once with R but using the Black
+colour.
+
+There are two ways to do this in current Ada, but both are ugly. The first uses
+a temporary variable, a copy, and an assignment to the component:
+
+   declare
+      T : Rec := R;
+   begin
+      Foo (R);
+      T.Colour := Black;
+      Foo (T);
+   end;
+
+The other way uses an aggregate listing all components of Rec, which is very
+cumbersome and a burden for maintenance:
+
+   Foo (R);
+   Foo ((X => R.X, Y => R.Y, ...., Colour => Black));
+
+Proposal
+--------
+An elegant solution for these problems would be a new partial aggregate syntax
+in which the list of record components to be modified would be listed along with
+their new values.
+
+One suggested syntax would be:
+
+    A := (A changing C => D, E => F);
+
+or
+
+    A := (A updating C => D, E => F);
+
+where A is a record and C and E are record components.
+
+[When this syntax discussion took place in comp.lang.ada, one suggestion for the
+keyword was "overriding" but I didn't like that because that keyword made it
+seem as if A was the one doing the overriding, not the later C and E
+references.]
+
+For an Atomic record, the compiler would generate a sequence which performs an
+atomic read of the whole record into a compiler generated temporary, modifies
+this temporary with the new component values, then performs an atomic write of
+this temporary back to the whole record.
+
+As the sequence would be performed on the record as a whole, C.6(15) would be
+guaranteed to apply. This means there would be a single read of the device
+register and a single write to the device register.
+
+For the normal record example above, one could simply write instead
+
+   Foo (R);
+   Foo ((R changing Colour => Black));
+
+which is much more elegant than the above methods currently provided by Ada.
+
+In addition, Niklas also provided the following array aggregate example:
+
+   type Month_Days is array (Month) of Positive;
+
+   Normal_Year_Days : constant Month_Days :=
+      (Jan => 31, Feb => 28, Mar => 31, ..., Dec => 31);
+
+   Leap_Year_Days : constant Month_Days :=
+      (Normal_Year_Days changing Feb => 29);
+
+It was also suggested partial aggregates could be of use in contracts within Ada
+2012 and also had some uses within SPARK. However, this is one area I currently
+have no experience with, so I reproduce the following example as-is:
+
+|I have not yet used Ada 2012 contracts in my programming, but I believe
+|that partial aggregates would be quite useful in post-conditions, to
+|express that some "out" value is the same as some "in" value except for
+|changes to certain components:
+|
+|   with Post => X = (X'old changing Colour => Black)
+
+Regarding the use of a new keyword, I do think we need a new keyword because we
+are talking about adding a subset update capability to Ada and that new usage
+should stand out in any code.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, July 15, 2014  11:49 AM
+
+Interestingly, SPARK 2014 has a capability almost exactly matching this, using
+an attribute "'Update"; for example:
+
+    T : Rec := R'Update (Colour => Black);
+
+or
+
+    Foo (R'Update (Colour => Black));
+
+I believe this attribute is also available in recent releases of GNAT, though
+clearly at this stage it is non portable.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, July 15, 2014   5:46 PM
+
+Steve Baird had told me about this attribute in Paris. One thing almost everyone
+I've talked to about it agrees is that this is a hack as an attribute -- this is
+a kind of aggregate and ought to look like it.
+
+Attributes are supposed to be kinds of function calls, but it's not possible to
+write this Update attribute as a function call. Moreover, we would want all of
+the aggregate rules to apply to the contents, and there aren't function calls
+like:
+    R'Update (Primary_Color => True); -- Primary_Color is a subtype with a static predicate or
+    R'Update (1..5 => True);
+
+Most likely, we'd want the aggregate rules to apply to the result, as well
+(build-in-place, etc. -- but here at least a function call is consistent with
+aggregates).
+
+SPARK had to make this an attribute because they couldn't add new syntax.
+That's no reason for Ada itself to limit itself in such a way. (As one Tucker
+Taft has said in the past, new features shouldn't look "bolted-on", and I can't
+imagine a worse "bolt-on" than using an attribute with aggregate semantics
+instead of a proper aggregate.)
+
+Ergo, this phony attribute should stay a SPARK-only thing; Ada needs a proper
+aggregate syntax for this.
+
+****************************************************************
+
+From: Simon Clubley
+Sent: Wednesday, July 16, 2014  4:25 PM
+
+> Interestingly, SPARK 2014 has a capability almost exactly matching
+> this, using an attribute "'Update"; for example:
+>
+>     T : Rec := R'Update (Colour => Black);
+>
+> or
+>
+>     Foo (R'Update (Colour => Black));
+>
+> I believe this attribute is also available in recent releases of
+> GNAT, though clearly at this stage it is non portable.
+
+Thanks. Yes, it is in GNAT. I did notice
+
+   http://gcc.gnu.org/onlinedocs/gnat_rm/Attribute-Update.html
+
+is silent about if C.6(15) is guaranteed to apply when R (in your
+example) is Atomic.
+
+> Steve Baird had told me about this attribute in Paris. One thing
+> almost everyone I've talked to about it agrees is that this is a hack
+> as an attribute -- this is a kind of aggregate and ought to look like it.
+
+I agree with this; I think a "real" partial aggregate syntax is required.
+
+Are there any thoughts on how the proposed syntax could be improved ?
+
+> Ergo, this phony attribute should stay a SPARK-only thing; Ada needs a
+> proper aggregate syntax for this.
+
+Is there support here for adding partial aggregates to the next version of Ada?
+
+When combined with an Atomic record, such syntax would allow the simultaneous
+updating of multiple bitfields within a record mapped to a device register. It
+would also be useful in a more general way as shown by the examples provided in
+comp.lang.ada and reproduced in my submission.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, July 22, 2014  12:41 PM
+
+> I think a "real" partial aggregate syntax is required.
+> Are there any thoughts on how the proposed syntax could be improved ?
+
+Randy and I have discussed the possibility of using extension aggregate syntax
+except using "with delta" in place of "with".
+
+Given
+    type T is record F1, F2, F3, F4 : Integer; end record;
+    X : T;
+and then taking this approach
+    X'Update (F3 => 123, F4 => 456);
+could be expressed as
+    (X with delta F3 => 123, F4 => 456);
+
+At this point this is nothing more than an idea that came up in conversation.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 22, 2014  1:08 PM
+
+But of course one that will be included in the AI associated with this thread.
+So the idea will at least be on the radar.
+
+****************************************************************
+
+From: Mark Lorenzen
+Sent: Wednesday, July 23, 2014  4:12 AM
+
+> I agree with this; I think a "real" partial aggregate syntax is
+> required.
+>
+> Are there any thoughts on how the proposed syntax could be improved ?
+
+It could maybe be done as for an extension aggregate, unless that would confuse
+users:
+
+Foo (R with Colour => Black);
+
+or
+
+S := (R with Colour => Black);
+
+****************************************************************
+
+From: Simon Clubley
+Sent: Wednesday, July 23, 2014  3:05 PM
+
+> Randy and I have discussed the possibility of using extension
+> aggregate syntax except using "with delta" in place of "with".
+>
+> Given
+>     type T is record F1, F2, F3, F4 : Integer; end record;
+>     X : T;
+> and then taking this approach
+>     X'Update (F3 => 123, F4 => 456);
+> could be expressed as
+>     (X with delta F3 => 123, F4 => 456);
+
+I don't like the idea of seeing just the exact same "with" extension aggregate
+notation re-used for partial aggregates as I think that would be too confusing.
+
+However, while I think new syntax such as "changing" would be best, if the
+desire is to re-use existing keywords, then I think your "with delta" suggestion
+is by far the best of the suggestions I have seen so far and would not be
+confused with an extension aggregate.
+
+****************************************************************
+
+From: Christoph Grein
+Sent: Thursday, July 24, 2014  5:13 AM
+
+The problem with these two reserved words
+    F (X with delta F3 => 123, F4 => 456);
+is that one might easily forget the delta and, with some overloading of F, might
+arrive at a different legal interpretation.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, July 27, 2014  3:23 PM
+
+Somewhat unlikely because Ada requires that there be a unique interpretation
+provided by context before looking inside an aggregate.
+
+****************************************************************
+
