@@ -1,0 +1,258 @@
+!standard B.2(9)                                        14-08-21    AI12-0126-1/01
+!class Amendment 14-08-21
+!status work item 14-08-21
+!status received 14-07-10
+!priority Low
+!difficulty Easy
+!subject Add Interfaces.Shifting
+
+!summary
+
+Allow the prefix of the Image attribute to be an object.
+
+!problem
+
+Shoft and rotate operations are not available for most modular types. If the
+modulus of a type is parameterized, one usually has to forego the use of the
+shoft and rotate operations, or convert the type into some type defined in
+package Interfaces. Since the types in Interfaces are target-dependent, such
+code is not 100% portable. (The vast majority of targets will have types
+Interfaces.Unsigned_8 and Interfaces.Unsigned_16, so this portability problem
+is not too severe, but it adds to the urgency of some fix.)
+
+!proposal
+
+(See Wording.)
+
+!wording
+
+generic
+    type Modular is mod <>;
+package Interfaces.Shifting is
+    type Shiftable is new Modular;
+    procedure Rotate_Right (Value : Shiftable; Amount : Natural) return Shiftable
+      with Convention => Intrinsic;
+    procedure Rotate_Left (Value : Shiftable; Amount : Natural) return Shiftable
+      with Convention => Intrinsic;
+    procedure Shift_Left (Value : Shiftable; Amount : Natural) return Shiftable
+      with Convention => Intrinsic;
+    procedure Shift_Right (Value : Shiftable; Amount : Natural) return Shiftable
+      with Convention => Intrinsic;
+    procedure Shift_Right_Arithmetic (Value : Shiftable; Amount : Natural)
+      return Shiftable
+      with Convention => Intrinsic;
+end Interfaces.Shifting;
+
+!discussion
+
+It not at all clear what these operations do for types for which the Mod is not
+a power of 2. If we have
+   type Seven is mod 7;
+what is the result of Rotate_Right(1)? The existing operations are defined in
+terms of the bit representation, but they don't specify how many bits participate.
+Nor do they define what happens if the result isn't a value of the type. (Is
+it moded by the modulus? Is an exception raised?)
+
+This is even an issue for moduluses that are unusual powers of 2. If we have
+   type Cool is mod 2**5;
+we'll get different answers if we only use 5 bits in the operation versus the
+more natural 8 bits.
+
+The original intent of these routines was to provide access to the underlying
+hardware operations, but I doubt that many machines have 5 bit rotate
+operations.
+
+Tightning up the wording of B.2(9) is a must if this package is implemented.
+
+!ASIS
+
+No ASIS impact.
+
+!ACATS test
+
+An ACATS C-Test is needed to verify that the package is implemented as
+specified.
+
+!appendix
+
+!topic Interfaces: type Unsigned_Word
+!reference 3.5.4, B.2
+!from Gautier de Montmollin 10-07-14
+!keywords modular shift
+!discussion
+
+The issue is simple: if you want the following type:
+
+  type Unsigned_Word is mod 2 ** System.Word_Size;
+
+a custom definition will provide bit-wise logical operators (and, or, xor, and
+not) just as 3.5.4 (31) specifies, but not the shift and rotate operations.
+That's a handicap if you want to shift or rotate on a "native unsigned" in
+code that should compile for and run on various architectures (e.g on both
+Intel 32 bit and Intel 64 bit). The solution is to have it in Interfaces and
+define the intrinsic Shift_Left etc. procedures.
+
+Interfaces.Unsigned_Word will be is the pendant to the "native signed"
+with Integer.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, July 10, 2014  12:54 PM
+
+Rather than trying to standardize more types in Interfaces, it might be more
+appropriate to standardize a generic which adds these operators to a type
+derived from a formal modular type.  E.g.:
+
+generic
+    type Modular is mod <>;
+package Interfaces.Shifting is
+    type Shiftable is new Modular;
+    procedure Rotate_Right (Value : Shiftable; Amount : Natural) return Shiftable
+      with Convention => Intrinsic;
+    procedure Rotate_Left (Value : Shiftable; Amount : Natural) return Shiftable
+      with Convention => Intrinsic;
+    procedure Shift_Left (Value : Shiftable; Amount : Natural) return Shiftable
+      with Convention => Intrinsic;
+    procedure Shift_Right (Value : Shiftable; Amount : Natural) return Shiftable
+      with Convention => Intrinsic;
+    procedure Shift_Right_Arithmetic (Value : Shiftable; Amount : Natural)
+      return Shiftable
+      with Convention => Intrinsic;
+end Interfaces.Shifting;
+
+Most vendors already provide a capability roughly equivalent to this.
+
+Note also that if you are only interested in Shift_Left and Shift_Right,
+multiplying and dividing by "2 ** Amount" should have the same effect in many
+optimizing compilers.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 10, 2014  11:37 PM
+
+...
+> Interfaces.Unsigned_Word will be is the pendant to the "native signed"
+> with Integer.
+
+Two problems with that:
+(1) Integer isn't necessarily related to the "best" type on some target.
+    Janus/Ada always makes it 16-bits, for instance, so that programs would be
+    able to write binary-compatible files using Sequential_IO and Direct_IO
+    between our 16-bit and 32-bit MS-DOS implementations, and we left it that
+    way for Windows for similar reasons.
+(2) Most style guides suggest minimizing the use of Integer; rather a type
+    with the required range should be used. The required range depends on the
+    problem, not the target. Thus "Unsigned_Word" should be used very rarely,
+    making it hard to justify.
+
+Bob would note (as he did for a similar size problem) that there is a
+relatively easy way to accomplish what you want:
+
+    with Interfaces;
+    package Native is
+        subtype Unsigned_Word is Interfaces.Unsigned_32; -- Change for 64-bit targets.
+        function Shift_Left (Value : Unsigned_Word; Amount : Natural)
+           return Unsigned_Word renames Interfaces.Shift_Left;
+        -- And so on for the others.
+
+        pragma Assert (Unsigned_Word'Size = System.Word_Size);
+    end Native;
+
+The assert ensures that you actually make the change to the definition of
+Unsigned_Word. It's not perfect, but it's pretty simple and relatively
+foolproof.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, July 10, 2014  11:46 PM
+
+> Most vendors already provide a capability roughly equivalent to this.
+
+Fascinating. This is the first I've heard of this. Especially as I don't
+understand what this ought to do for a type like:
+
+    type Unsigned_Short is mod 2**4;
+
+If it uses some round-up to the nearest byte, you could easily get values out
+of range. If you say that it does a 4-bit shift or rotate, I don't know of any
+sane way to implement the rotates. (Only a bit test/shift/add sequence comes
+to mind, and that's pretty expensive on a machine without a native bit-test
+instruction.)
+
+The existing operations are intended to be directly mapped to the underlying
+hardware operations (all single instructions on most targets); that wouldn't
+be possible with such a generic.
+
+> Note also that if you are only interested in Shift_Left and 
+> Shift_Right, multiplying and dividing by "2 ** Amount" should have the 
+> same effect in many optimizing compilers.
+
+Absolutely. I'd be surprised if any didn't do that (Janus/Ada certainly does).
+But note that it might actually be smaller to use an addressing mode on the
+Intel processors to do a multiply, so that might happen instead.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, July 12, 2014  10:15 AM
+
+> Fascinating. This is the first I've heard of this. Especially as I 
+> don't understand what this ought to do for a type like:
+>
+>      type Unsigned_Short is mod 2**4;
+>
+> If it uses some round-up to the nearest byte, you could easily get 
+> values out of range. If you say that it does a 4-bit shift or rotate, 
+> I don't know of any sane way to implement the rotates. (Only a bit 
+> test/shift/add sequence comes to mind, and that's pretty expensive on 
+> a machine without a native bit-test instruction.)
+>
+> The existing operations are intended to be directly mapped to the 
+> underlying hardware operations (all single instructions on most 
+> targets); that wouldn't be possible with such a generic.
+
+Perhaps we could add an assertion to the generic spec to require that the
+Modulus be a power of 2, with the exponent being a power-of 2 times
+System.Storage_Unit.  This assertion might need to use a "(for some ...)"
+which would be cool, e.g.:
+
+   pragma Assert ((for some X in 0 .. 5 =>
+            Modular'Modulus = 2**(2**X * System.Storage_Unit)));
+
+****************************************************************
+
+From: Gautier de Montmollin
+Sent: Thursday, July 17, 2014  9:53 AM
+
+The generic sub/child package Interfaces.Shifting (with rules as discussed
+later) seems a very good solution (if not the best...).
+
+> Note also that if you are only interested in Shift_Left and 
+> Shift_Right, multiplying and dividing by "2 ** Amount" should have the 
+> same effect in many optimizing compilers.
+
+Sure - the snag is that you are never 100% sure it really happens.
+It did with GNAT since I've begun to look at these things (and Ada as
+well) around 1998.
+Much later, in 2009 (so with GNAT GPL 2009), when profiling a decompression
+code I had a shock:
+2**n (as an Unsigned_32 expression) was expanded as:
+    interfaces__unsigned_32($system__exp_uns__exp_unsigned(2, n) and 16#FFFF_FFFF#)
+So, with a call to the function System.Exp_Uns.Exp_Unsigned ...
+Now (GNAT GPL 2014) everything seems well again.
+
+****************************************************************
+
+From: Gautier de Montmollin
+Sent: Thursday, July 17, 2014  10:09 AM
+
+> Sure - the snag is that you are never 100% sure it really happens.
+
+True.  It's the job of language designers to make sure optimizations are
+feasible, but not to make sure they actually happen.
+
+****************************************************************
+
