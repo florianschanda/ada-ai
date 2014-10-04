@@ -1,0 +1,963 @@
+!standard C.6(15)                                   14-10-03    AI12-0128-1/01
+!standard C.6(20)
+!standard C.6(22/2)
+!class Amendment 14-10-03
+!status work item 14-10-03
+!status received 14-07-14
+!priority Medium
+!difficulty Easy
+!subject Exact size access to parts of composite atomic objects
+
+!summary
+
+
+!problem
+
+It is not unusual for hardware to require access in a particular size. Indeed,
+Ada has C.6(22/2) to make it possible for users of Atomic and Volatile objects
+to be able to match such hardware requirements.
+
+Ada also has record representation clauses to make it possible to represent
+bit fields in terms of a record rather than having to use obscure masking
+operations.
+
+Unfortunately, when these two capabilities are put together, problems occur.
+In particular, access to components of a composite atomic object might
+have the wrong size. C.6(15) only applies to the object as a whole, so
+compilers are free to use the wrong size to access the components.
+
+The language should be defined so this doesn't happen.
+
+!proposal
+
+(See Wording.)
+
+!wording
+
+Add after C.6(8.1/4): [Static Semantics]
+
+For a volatile object, the following representation aspect can be specified:
+
+Exact_Size_Only
+   The type of aspect Exact_Size_Only is Boolean. An object with aspect
+   Exact_Size_Only having the value True is called an *exact size object*.
+   For an exact size object, all loads and stores of the object shall be
+   implemented by accessing exactly the bits of the object and no others.
+
+   When this aspect is directly
+   specified, the aspect_definition shall be a static expression. If not
+   specified, this aspect is False.
+
+AARM Ramification: This aspect makes the Implementation Advice a requirement
+on the specified object (which will have no effect on most implementations,
+which are following the advice anyway). Note that this wording does NOT say
+"as a whole"; this rule applies to ALL accesses of the object and accesses
+which may require some other implementation are illegal (see below).
+
+Add after C.6(13.2/3): [Legality Rules]
+
+It is illegal to specify aspect Exact_Size_Only to have the value True for
+an object if the implementation cannot support the exact access required
+by the aspect.
+
+AARM Discussion: On most implementations, this will mean that the size of
+the object will have to be a multiple of the storage unit size.
+
+The name of an exact size object shall not be used as the prefix of a slice,
+indexed_component, or selected_component.
+
+AARM Reason: Such a component access will necessarily be volatile, and
+almost always would require access in a different (smaller) size than
+the object as a whole. To make the implementation easier, we disallow
+all component access to such objects.
+
+An exact size object shall not have a part which is a discriminated record.
+
+AARM Reason: A discriminant check would be an implicit component access
+just like the ones banned by the previous rule.
+
+An exact size object shall not be the actual to a generic *in out* parameter.
+An exact size object shall not be the prefix for the Access
+or Unchecked_Access attribute.
+
+AARM Reason: Inside the generic, the restrictions on access would not be known
+and thus enforced. If passed as an actual to a generic *in* parameter, a copy
+would be made. Similarly, the designated type for an access type would not
+enforce the restrictions on access to an exact size object.
+
+!discussion
+
+The problem isn't really C.6(15). C.6(8/3) says that the subcomponents of
+a volatile object are also volatile. (Recall that atomic objects are also
+volatile.) The same rule that is supposed to help us then causes problems,
+as C.6(22/2) says that volatile objects should be accessed exactly
+if possible. That applies to the components as much as the object as a whole,
+so the language *expects* that the components will be accessed in a smaller
+size. (C.6(22/2) is "only" Implementation Advice, so a compiler could ignore
+it, but that is not the intent of the language.)
+
+The usual recommendation is that temporaries should be used to access the
+object as a whole, and then the reading/writing of the individual components
+be done on the temporary.
+
+This follows from the most important rule of volatile objects, the requirement
+that reads and writes be "what you see is what you get". An Ada compiler is not
+allowed to generate a read for an assignment into a volatile object.
+
+The problem with this recommendation is that forgetting to do it (which is
+very natural to an Ada programmer) will cause a very hard to find bug in the
+program. In such cases, the hardware typically does not respond to the
+incorrect sized read or write, which will cause an error of omission in the
+program -- the hardest kind of bug to find, made worse because the source
+code will appear correct.
+
+The only sensible way for a project to avoid the problem is to not allow
+composite atomic objects (a restriction that can easily be checked with
+a style checker). But this means that bit fields have to be handled with
+masks or the like, which are much more likely to contain errors. This is
+a negative incentive that we need to avoid.
+
+As such, we propose an aspect to declare that a volatile object is to be
+read or written in the exact size of the object, and the aspect should be
+rejected if that cannot be done. In addition, direct access to any
+subcomponents of the object are banned.
+
+The aspect should be a relatively cheap solution for Ada implementations (only
+a few new legality checks are needed), and it ensures that programmers use
+temporaries as needed (mistakes are illegal).
+
+---
+
+A friendlier solution would be to somehow define that all accesses to such
+atomic objects as a whole are read/written as a whole. This would require
+some sort of read/write cycle for components. While this sound appealing,
+it has a number of fatal flaws:
+
+(1) Some devices can only be written. A read/write cycle on such a device
+would read nonsense (or unrelated data) -- such devices can only be
+written as a whole; writing a single component isn't possible. An automatic
+solution fixes nothing for these sorts of devices.
+
+(2) Such a read/write cycle would require a hole be made in C.6(20);
+we'd have a situation where the generated code involves a read not included
+in the source. But C.6(20) is the rule that makes it possible to program
+unusual hardware reliably. Weakening it is unlikely to help in general,
+and doing so would be incompatible (most volatile objects aren't memory-mapped
+device registers with unusual hardware restrictions).
+
+(3) We could try repealing C.6(8/3) so that the components aren't
+volatile. That would prevent C.6(22/2) from applying to the components,
+and could fix the problem for reads. But for writes, we're still need a
+pre-read which would still violate C.6(20). In addition, the compatiblity
+problems would be worse (existing code could very easily depend on the
+components being volatile).
+
+(4) Since composite volatile objects are not uncommon, and the vast majority
+are in normal memory (not associated with memory-mapped hardware), the
+reduced performance could be a problem. It's much better for the unusual
+case to be declared rather than a penalize all users for the possible
+existence of that case.
+
+---
+
+Notes on the solution:
+
+(1) C.6(19) prevents problems with parameter passing; passing by copy
+essentially means that a temporary is made implicitly by the compiler.
+
+(2) The original problem was with atomic objects, but there seems to be no
+reason for it not to apply to volatile objects as well. It's really an
+extension of C.6(22/2), which applies to volatile objects.
+
+(3) Aggregates are legal for the object even when the aspect is specified; an
+aggregate is formally defined as a temporary object, so an assignment of it
+is an assignment of the object as a whole.
+
+(4) We do say that build-in-place is not allowed for a type with the new
+aspect; we do not want compilers doing component-at-a-time assignments.
+
+(5) The new aspect applies to objects of all types, but it has no visible
+effects on objects of elementary types other than to check that the size of
+the object can be written exactly.
+
+(6) I can't think of any effects caused by generic units other than the
+"in out" one that aren't already covered by existing rules. But I expect
+Steve will find one. ;-)
+
+(7) An alternative name for the aspect was No_Partial_Access. That name
+emphasizes the language problem rather than the intended use, so I
+changed to Exact_Size_Only, which echoes the wording of C.6(22/2) and
+is a positive statement. The effect is the same with either name.
+
+(8) I defined the term "exact size object" because I was quickly tired
+of trying to fit "object with the aspect Exact_Size_Only having the value
+True" into wording and have it remain readable. Especially as I found that
+I had a few more rules than I originally expected. But we don't strictly
+need it.
+
+
+!example
+
+    type Status is
+       Ready : Boolean;
+       Length : Integer range 0 .. 15;
+    end record;
+    for Status use record
+       Ready 0 range 0 .. 0;
+       Length 0 range 1 .. 5;
+    end record;
+
+    Status_Register : Status
+       with Address => ...,
+            Size => 32,
+            Atomic => True,
+            Exact_Size_Only;
+    Temporary : Status;
+
+    Status_Register := (Ready => True, Length => 0); -- OK.
+    Temporary := Status_Register; -- OK.
+    if Temporary.Ready then -- OK.
+       null;
+    end if;
+    if Status_Register.Read then -- Illegal.
+       null;
+    end if;
+    Status_Register.Length := 10; -- Illegal.
+
+!ASIS
+
+The new aspect would need to be added to the appropriate ASIS enumeration type.
+
+
+!ACATS test
+
+An ACATS B-Test should be created to check the Legality Rules for the new
+aspect. The actual read/write size cannot be tested by the ACATS,
+unfortunately, so we don't need or want a C-Test.
+
+!appendix
+
+!topic        Does Atomic on a record apply to it's components ?
+!reference    Ada 2012 RMC.6(15)
+!from        Simon Clubley 2014-07-13
+!keywords    Atomic update record components
+
+This submission was prompted by an issue identified recently in comp.lang.ada.
+On an ARM target, a 32-bit record, with multiple bitfields, was defined as
+Atomic. However, the generated code showed that when a bitfield, instead of
+the record as a whole, was referenced, GNAT sometimes used ldrb/strb (byte
+level access instructions) instead of ldr/str (32 bit access instructions).
+
+This broke the hardware requirement that the register this record was been
+used to access must be accessed in units of 32 bits.
+
+Scenario:
+
+Consider a 32 bit record marked as Atomic. This record consists of multiple
+bitfields and is used to model the bitfields in a 32 bit memory mapped device
+register. The hardware requires the device register to be read from and written
+to in units of 32 bits.
+
+Now consider the following statement:
+
+    Device_Register.bitfield := 1;
+
+When this specific bitfield in the record, say 4 bits wide, is written to, does
+the Atomic attribute on the record require the record to be accessed in units of
+32 bits or is the compiler permitted to generate code to access, say, 8 bits of
+the record only ?
+
+C.6(15) states:
+
+    For an atomic object (including an atomic component) all reads and
+    updates of the object as a whole are indivisible.
+
+There are conflicting opinions about the above rule in comp.lang.ada.
+The words "as a whole" in C.6(15) were used to justify the position that access
+to this single bitfield is not required to be in units of the record size which
+on the surface seemed reasonable.
+
+However, other opinions are that C.6(15) does apply when accessing this single
+bitfield.
+
+Which opinion is correct ?
+
+I would like C.6(15) to apply, but I am more interested in obtaining a firm
+decision so other options can be considered if it doesn't.
+
+As a related question, when C.6(15) does apply, does it also apply to all the
+bits included by 'Size when 'Size has been used to increase the size of the
+atomic object (say from 5 bits to 32 bits) ?
+
+Possible solutions:
+
+If C.6(15) applies when accessing a single bitfield in an Atomic record, then
+this is clearly a GNAT bug and needs handling as such.
+
+If C.6(15) is deemed not to apply to a single bitfield, then we need a mechanism
+to indicate, in the program source code, that the compiler is not allowed to
+reference a bitfield in an Atomic record by just accessing one segment of that
+record's memory.
+
+If the partial aggregate proposal is approved, then this could be the mechanism.
+If it is not approved, then a pragma/aspect along the lines of
+"No_Segmented_Access" could be the mechanism to enforce this.
+
+I do believe a mechanism is required in Ada itself however. The special
+requirements of the register should be declared in the source code, for the
+compiler (and maintainers) to see, so that it can be guaranteed to be honoured
+when the code is compiled.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, July 15, 2014  4:15 AM
+
+C.6 8/3's "Finally, if an object is volatile, then so are all of its
+subcomponents [(the same does not apply to atomic)]." seems to support the view
+that the words "as a whole" in C.6(15) win.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, July 15, 2014  12:01 PM
+
+> ... C.6(15) states:
+>
+>      For an atomic object (including an atomic component) all reads and
+>      updates of the object as a whole are indivisible.
+>
+> There are conflicting opinions about the above rule in comp.lang.ada.
+> The words "as a whole" in C.6(15) were used to justify the position
+> that access to this single bitfield is not required to be in units of
+> the record size which on the surface seemed reasonable.
+>
+> However, other opinions are that C.6(15) does apply when accessing
+> this single bitfield.
+>
+> Which opinion is correct ?
+
+C.6(15) is only referring to reads and updates of the object as a whole.  There
+are no special "atomicness" rules when referring to individual components,
+though all such components are considered volatile.
+
+> I would like C.6(15) to apply, but I am more interested in obtaining a
+> firm decision so other options can be considered if it doesn't.
+>
+> As a related question, when C.6(15) does apply, does it also apply to
+> all the bits included by 'Size when 'Size has been used to increase
+> the size of the atomic object (say from 5 bits to 32 bits) ?
+
+The definition of 'Size on an elementary object is that it refers to the number
+of bits normally read/written, as specified in 13.1(7/2):
+
+   "The representation of an object consists of a certain number of bits (the
+   size of the object). For an object of an elementary type, these are the bits
+   that are normally read or updated by the machine code when loading, storing,
+   or operating-on the value of the object...."
+
+For a non-atomic composite object, extra bits might not be loaded/stored, again
+quoting from that same paragraph:
+
+   "... For a composite object, padding bits might not be read or updated in any
+   given composite operation, depending on the implementation."
+
+For an atomic composite object, although it is not stated explicitly, the
+implication is that the 'Size of an atomic object determines the number of bits
+read/written indivisibly (e.g. see C.6(11/4)).
+
+> Possible solutions:
+>
+> If C.6(15) applies when accessing a single bitfield in an Atomic
+> record, then this is clearly a GNAT bug and needs handling as such.
+>
+> If C.6(15) is deemed not to apply to a single bitfield, then we need a
+> mechanism to indicate, in the program source code, that the compiler
+> is not allowed to reference a bitfield in an Atomic record by just
+> accessing one segment of that record's memory.
+>
+> If the partial aggregate proposal is approved, then this could be the
+> mechanism. If it is not approved, then a pragma/aspect along the lines
+> of "No_Segmented_Access" could be the mechanism to enforce this.
+>
+> I do believe a mechanism is required in Ada itself however. The
+> special requirements of the register should be declared in the source
+> code, for the compiler (and maintainers) to see, so that it can be
+> guaranteed to be honoured when the code is compiled.
+
+For special-purpose hardware requirements such as this, it seems better to fetch
+the word as a whole into a temp, set the bit of interest, and then store the
+word back as a whole. Expecting the compiler to give you this level of control
+is probably overkill. Do you have examples of other languages that promise this
+level of control?  If so, how is it specified?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 15, 2014  5:36 PM
+
+> > However, other opinions are that C.6(15) does apply when accessing
+> > this single bitfield.
+> >
+> > Which opinion is correct ?
+>
+> C.6(15) is only referring to reads and updates of the object as a
+> whole.  There are no special "atomicness" rules when referring to
+> individual components, though all such components are considered
+> volatile.
+
+This seems to defeat the purpose of C.6(15), which was specifically to support
+the sort of hardware register access noted by the questioner. OTOH, there's
+plenty of evidence that this (misguided) interpretation was intended (which I
+missed during the initial comp.lang.ada discussion, so I put fuel on this fire
+mistakenly). That means that fixing it would be incompatible, and that's not
+likely to fly.
+
+...
+> > I do believe a mechanism is required in Ada itself however. The
+> > special requirements of the register should be declared in the
+> > source code, for the compiler (and maintainers) to see, so that it
+> > can be guaranteed to be honoured when the code is compiled.
+>
+> For special-purpose hardware requirements such as this, it seems
+> better to fetch the word as a whole into a temp, set the bit of
+> interest, and then store the word back as a whole.
+
+Sure, this makes sense. But if someone mistakenly does the wrong thing, the
+compiler just generates the wrong code without any complaint. That's not the Ada
+way (I hope).
+
+>   Expecting the compiler to give you this level of control is probably
+> overkill.  Do you have examples of other languages that promise this
+> level of control?  If so, how is it specified?
+
+So far as I can tell, other languages don't *need* this sort of control, because
+a hardware register would never be modeled as a composite type. In C, for
+instance, one would generally use bit-masking operations to get at the parts of
+the register, so it would only be read as a whole.
+
+This problem happens because us Ada people say "hey, we have a better way to
+handle bit fields! Just declare an appropriate record and record representation
+clause and let the compiler handle all of the mess!". But if someone does that
+on an atomic hardware register, and writes natural access code, the wrong code
+is generated.
+
+The reason that we added Implementation Advice C.6(22/2) and C.6(23/2) was
+specifically to support the case of accessing hardware registers. It seems
+obnoxous that we say, "and, oh by the way, a record type will work here, but
+don't use it like one or we'll generate the wrong code.". There ought to be a
+way for the compiler to tell the user that the wrong code will be generated.
+
+I agree with you that an explicit temporary is needed. We don't want to get into
+implicit volatile operations (everything must appear in the source). But that
+means that any individual component access to a hardware register is a mistake.
+
+This, I think that an aspect is needed here that causes the compiler to reject
+any case where anything other than the exact bits of the entire atomic object
+would be accessed. That can't be the default for compatibility reasons, but it
+certainly should be possible. (I can't quite imagine any case where accessing
+part of an atomic object ever makes sense, for any expected use of atomic, but
+someone almost certainly has code that expects that to work.)
+
+I would suggest an aspect No_Partial_Access, which could only be given on atomic
+objects. That would have no effect if the atomic object's type was elementary,
+but for a composite object, it would prevent any direct access to components of
+the object. That would require that a temporary be used to read or update just
+part of the object (as it should -- it's important that what happens to the
+other bits be specified in such a case).
+
+Access to memory-mapped hardware has always been considered important in Ada,
+and using bit-mapped records rather than bit masks has always been considered an
+Ada advantage -- and it's silly that they don't work well together. At the
+least, we should provide a means so that bad uses are detected, not just
+silently executed (incorrectly because of the hardware limitations).
+
+****************************************************************
+
+From: Simon Clubley
+Sent: Wednesday, July 15, 2014  3:55 PM
+
+>> > Which opinion is correct ?
+>>
+>> C.6(15) is only referring to reads and updates of the object as a
+>> whole.  There are no special "atomicness" rules when referring to
+>> individual components, though all such components are considered
+>> volatile.
+>
+> This seems to defeat the purpose of C.6(15), which was specifically to
+> support the sort of hardware register access noted by the questioner.
+> OTOH, there's plenty of evidence that this (misguided) interpretation
+> was intended (which I missed during the initial comp.lang.ada
+> discussion, so I put fuel on this fire mistakenly). That means that
+> fixing it would be incompatible, and that's not likely to fly.
+>
+
+[First, my apologies for any delayed responses. The way Ada-Comment is described
+in the LRM makes it sound like a dropbox for public comments which are then
+discussed internally. I didn't realise two way communication was possible for
+the submitter after something was submitted.]
+
+Thanks, Randy. So at least we now know GNAT is behaving in a way compatible with
+how C.6(15) was intended to be interpreted when it was written.
+
+> ...
+>> > I do believe a mechanism is required in Ada itself however. The
+>> > special requirements of the register should be declared in the
+>> > source code, for the compiler (and maintainers) to see, so that it
+>> > can be guaranteed to be honoured when the code is compiled.
+>>
+>> For special-purpose hardware requirements such as this, it seems
+>> better to fetch the word as a whole into a temp, set the bit of
+>> interest, and then store the word back as a whole.
+
+One issue is that while excessive terseness is bad (C and friends), excessive
+verbosity can also hinder readability especially when it's boilerplate type code
+such as the above. One concern is such code could cause a routine to grow in
+size very quickly if it has to set up a number of registers for a device.
+
+> Sure, this makes sense. But if someone mistakenly does the wrong
+> thing, the compiler just generates the wrong code without any
+> complaint. That's not the Ada way (I hope).
+>
+>>   Expecting the compiler to give you this level of control is
+>> probably overkill.  Do you have examples of other languages that
+>> promise this level of control?  If so, how is it specified?
+
+No I don't, and in a way that's kind of the point. Ada is good at allowing
+people to model the actual problem in ways that some other languages are not. I
+was just looking to enhance Ada's abilities further.
+
+> So far as I can tell, other languages don't *need* this sort of
+> control, because a hardware register would never be modeled as a
+> composite type. In C, for instance, one would generally use
+> bit-masking operations to get at the parts of the register, so it would only be read as a whole.
+
+Exactly. In C, the register is treated as an opaque integer and any meaning to
+those bitfields is placed in header files as opaque constants with no internal
+structure as far as the compiler is concerned. As well as not looking as
+readable in the code as bitfields would be, this severely reduces the ability of
+the compiler to do error checking at compile time.
+
+> I agree with you that an explicit temporary is needed. We don't want
+> to get into implicit volatile operations (everything must appear in the source).
+> But that means that any individual component access to a hardware
+> register is a mistake.
+
+Given the arguments above, I think C.6(15) is probably going to stand as-is so I
+accept a temporary is needed in current Ada compilers as they exist today. I'll
+discuss the partial aggregate option for future Ada versions on the other
+thread.
+
+> This, I think that an aspect is needed here that causes the compiler
+> to reject any case where anything other than the exact bits of the
+> entire atomic object would be accesses. That can't be the default for
+> compatibility reasons, but it certainly should be possible. (I can't
+> quite imagine any case where accessing part of an atomic object ever
+> makes sense, for any expected use of atomic, but someone almost
+> certainly has code that expects that to work.)
+>
+> I would suggest an aspect No_Partial_Access, which could only be given
+> on atomic objects. That would have no effect if the atomic object's
+> type was elementary, but for a composite object, it would prevent any
+> direct access to components of the object. That would require that a
+> temporary be used to read or update just part of the object (as it
+> should -- it's important that what happens to the other bits be specified in such a case).
+
+Another way of looking at No_Partial_Access is that, rather than denying
+component access, it (or something like it) could command the compiler to
+generate code which accesses components of the object by accessing the full
+object itself (ie: in units of the object size). If this was not possible, such
+code would be rejected by the compiler.
+
+A specific example for ARM: for a 32-bit record, the compiler would only be able
+to generate code which used ldr (a 32-bit load operation) and would be forbidden
+from generating code which used ldrb (an 8-bit load operation).
+
+Is that a viable option ?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 22, 2014  1:26 PM
+
+Only in the sense that "anything is possible". It would take substantial
+additional work to allow it.
+
+First, it's important to remember that while Atomic doesn't apply to components,
+Volatile does (C.6(8/3)), and Atomic implies Volatile. So the components of a
+composite atomic object are volatile. That means that C.6(20) and C.6(22/2)
+apply to such components.
+
+That means no implicit reads or writes of such components, nor any access to
+extra bits. This last part means that not only CAN a compiler use a byte load to
+read a component of an atomic object, it MUST use such a load if it wants to
+follow C.6(22/2) exactly. Or in short, the language says that a compiler SHOULD
+do the wrong thing for such a component.
+
+We could of course add an exception to the Implementation Advice for components
+of atomic objects that have No_Partial_Access applied. That would complicate an
+otherwise simple rule, but otherwise seems harmless.
+
+In that case, it would be possible for component reads to be implemented by a
+"read whole object atomically/extract component from value" sequence.
+
+But it's not possible for component writes to work that way, because the other
+components have to come from somewhere (except of course in the degenerate case
+of having only one component in the object). If one pre-reads them from the
+atomic object, we get a violation of C.6(20) [remember, these are volatile, so
+implicit reads aren't allowed]. Just using default-initialized components (or
+random junk) doesn't make any sense implicitly - it could change components not
+explicitly accessed in the source. So it seems in any case we have to disallow
+component writes.
+
+As such, I went with the simplest approach (make it possible to detect bugs
+without any semantic change to fix them). Disallowing both reads and writes is
+easy and consistent. That seems more likely to get through the ARG. And in any
+case, we could in the future allow reads compatibly.
+
+Since the real solution to component writes is partial aggregates, component
+writes are not needed anyway. Perhaps component reads should be allowed as that
+would make writing the rest of the code easier. But without partial aggregates,
+reads don't seem to buy anything; you'll need to get in the habit of using
+temporaries for the entire object.
+
+****************************************************************
+
+From: Simon Clubley
+Sent: Wednesday, July 23, 2014  2:31 PM
+
+Thank you for the detailed write-up and analysis Randy.
+
+After reading the various responses, I can see why temporaries are going to have
+to continue to be required for current Ada compilers and why the current
+intrepretation of C.6(15) needs to stand as-is. On the plus side, at least there
+is now a firm write-up on the issue. :-)
+
+Thanks to everyone for their comments,
+
+****************************************************************
+
+From: Matthias Richter
+Sent: Friday, August 15, 2014  7:46 AM
+
+> > I do believe a mechanism is required in Ada itself however. The
+> > special requirements of the register should be declared in the
+> > source code, for the compiler (and maintainers) to see, so that it
+> > can be guaranteed to be honoured when the code is compiled.
+>
+> For special-purpose hardware requirements such as this, it seems
+> better to fetch the word as a whole into a temp, set the bit of
+> interest, and then store the word back as a whole.>
+>   Expecting the compiler to give you this level of control is probably
+>   overkill.  Do you>
+> have examples of other languages that promise this level of control?
+> If so, how is it specified?
+
+Yes, there is one (at least for ARM, see below). It is called 'C'.
+Volatile bitfields in 'C' generally are known as not well-defined regarding
+their layout and therefore they are avoided by many (most?) C programmers, but
+they offer control over the access width the compiler has to use for reads or
+writes of the individual fields.
+
+There are detailed requirements regarding the access width of bitfields in the
+AAPCS (ARM ABI specification). I am not sure if it is defined in the C standard.
+
+The relevant paragraph in the AAPCS
+(http://infocenter.arm.com/help/topic/com.arm.doc.ihi0042e/IHI0042E_aapcs.pdf)
+is:
+
+- 7.1.7.5 Volatile bit-fields - preserving number and width of container
+- accesses
+-
+- When a volatile bit-field is read, its container must be read exactly once
+- using the access width appropriate to the type of the container.
+-
+- When a volatile bit-field is written, its container must be read exactly
+- once and written exactly once using the access width appropriate to the type
+- of the container. The two accesses are not atomic.
+-
+- Multiple accesses to the same volatile bit-field, or to additional volatile
+- bit-fields within the same container may not be merged. For example, an
+- increment of a volatile bit-field must always be implemented as two reads
+- and a write.
+-
+- Note
+- Note the volatile access rules apply even when the width and alignment of
+- the bit-field imply that the access could be achieved more efficiently using
+- a narrower type. For a write operation the read must always occur even if
+- the entire contents of the container will be replaced.
+-
+- If the containers of two volatile bit-fields overlap then access to one
+- bit-field will cause an access to the other. For example, in
+- struct S {volatile int a:8; volatile char b:2};
+- an access to a will also cause an access to b, but not vice-versa.
+- If the container of a non-volatile bit-field overlaps a volatile bit-field
+- then it is undefined whether access to the non-volatile field will cause the
+- volatile field to be accessed.
+
+The type of the container of an individual bitfield dictates the access width to
+be used for reads and writes of this field.
+
+In other paragraphs rules for the layout of structs are defined.
+If a compiler is AAPCS-compliant, the layout is well-defined and predictable,
+although there is no explicit control as with representation clauses like in
+Ada. (I don't know if ABI specifications for other architectures contain similar
+definitions like the AAPCS)
+
+I would expect _at least_ the same level of control with Ada.
+
+Actually, it should be better (whatever better means in this context...)
+because, as pointed out by Randy:
+> This problem happens because us Ada people say "hey, we have a better
+> way to handle bit fields! Just declare an appropriate record and
+> record representation clause and let the compiler handle all of the mess!"
+
+****************************************************************
+
+From: Matthias Richter
+Sent: Sunday, September 14, 2014  9:45 AM
+
+!topic       Adding pragma/aspect to force specific read/write width
+!reference   Ada 2012 RM{clause unsure}
+!from        Matthias Richter 2014-09-14
+!keywords    read write device register bitfields access width
+
+Background
+----------
+Different hardware architectures allow different access widths for reads/writes
+to/from memory or memory-mapped I/O:
+
+1. Only word (e.g. 32 bit) accesses are allowed - the instruction set contains
+   only word read and write instructions
+
+2. Word, halfword and byte (32, 16 and 8 bit) accesses are allowed over the
+   entire address space
+
+3. Word, halfword and byte (32, 16 and 8 bit) accesses are generally allowed,
+   but there are some addresses or address ranges where only word accesses are
+   allowed
+
+In case 1 or 2 there is usually no problem. Compilers know which instructions
+may be used for a particular architecture. In contrast, a compiler usually
+doesn't know when there are restrictions in portions of the address space (case
+3) - and there is currently no way to tell an Ada compiler about such
+restrictions. This problem became visible with the recently introduced Ada
+compilers for ARM microcontrollers. These microcontrollers generally allow word,
+halfword and byte accesses, but some addresses/address ranges (memory-mapped I/O
+registers) must be written and read only as 32 bit words. In this case it is
+possible that a compiler generates illegal instructions. It is very likely that
+other microcontrollers have similar restrictions.
+
+There was a lively discussion on this topic in comp.lang.ada some weeks ago.
+This discussions were focused mainly on atomicity and leaded to the proposal of
+a partial aggregate syntax. As a result, two comments/proposals were sent to
+this list by Simon Clubley. The partial aggregate syntax is an interesting
+feature (and would be an elegant solution for the simultaneous update of
+multiple fields in I/O registers), but i don't think it would solve the problem
+with illegal instructions on architectures with restrictions in portions of
+their address space. I will elaborate on this below.
+
+When does the problem occur?
+----------------------------
+The problem occurs when the follwing conditions are met:
+
+- The hardware has a non-uniform address space with respect to the allowed
+  access width (case 3 above)
+
+- The compiler (strictly speaking its optimiser) knows that a particular write
+  changes only a fraction of a word - or that only a fraction of a read word is
+  actually used. It may then generate a byte (or halfword) write or read which
+  covers only the affected fraction of the word
+
+The generated byte (or halfword) write or read may be illegal for the address in
+question.
+
+On architectures as described in case 2 above, this optimisation is legitimate,
+because in 'normal memory' it leads to exactly the same result as the write/read
+of the entire word. There might be pathologic cases, but usually it leads to
+same result with I/O registers, too.
+
+Architectures as described in case 1 above are obviously the trivial case, this
+kind of optimisation is impossible there.
+
+Typically, partial writes or reads of records with bitfields may be optimised
+this way. The problem was first observed with writes or reads to fields of a
+record which was mapped to a I/O register via representation and address
+clauses. (This observation leads to the already mentioned discussion in
+comp.lang.ada) There may be other situations where this optimisation might
+occur.
+
+Proposal
+--------
+Adding a pragma and/or aspect 'access width' would give the possibility to
+specify the allowed read/write width for a variable.
+
+- The 'access width' may be specified for a subtype or an object
+- The 'access width' may be specified for a record component: Writes or reads of
+  this component must be done with the specified width
+- The 'access width' may be specified for a record: All writes or reads of the
+  record as a whole or of any of its components must be done with the specified
+  width.
+- Writes to components smaller than the given 'access width' must be realised as
+  a read-modify-write cycle
+- Allowed values are the number of bits of the read and write instructions
+  available on the particular architecture (e.g. 8, 16, 32) If other values are
+  given, the compiler shall reject the program
+- Naming: 'access width' is a first proposal. Other (better?) proposals are
+  appreciated
+
+Existing workarounds
+--------------------
+- Don't use records with representation clauses for I/O registers, use bitmasks
+  (like in C) and word read/writes instead. This is - mildly speaking -
+  extremely ugly. Records with representation clauses were always advertised as
+  the better solution in Ada. And indeed, it seems to be a more Ada-like level
+  of abstraction to do it that way.
+
+- Use temporary variables (in fact, make the read-modify-write cycle explicite):
+  Read the entire record, write the field which should be modified and write
+  back the whole record. From my point of view, not an adequate level of
+  abstraction, too. Given the fact that in a typical microcontroller programs *)
+  there are a lot of these register writes and reads, this approach is ugly,
+  too.
+
+*) I examined a program for motor control (not written in Ada, but that doesn't
+matter for this question). In this program, nearly 30% of non-empty code lines
+are containing a read or a write of a I/O register. This is a more or less
+typical value for programs on small or middle-range microcontrollers.
+
+Note 1: There is no guarantee that these workarounds are not affected by the
+access width optimisation and therefore it is theoretically possible that
+illegal instructions are generated. Though it is very probable that a sensible
+compiler will do the 'right' thing here. I would expect a higher level of
+definedness from Ada...
+
+Note 2: On other architectures (case 1 and 2 above), records with representation
+clauses work as expected. It's a pity that they don't work on modern, very
+popular microcontroller families.
+
+Other solutions
+---------------
+In theory, there is a possibility to solve the problem outside the language.
+One could give the compiler a table where the appropiate access widths for
+particular address ranges are specified. This table could look similar to a
+linker script. I don't like this approach: You would have to maintain
+informations about the I/O registers at two places - in the Ada-spec where the
+records with representation clauses are declared and in the said table. I would
+prefer to specify these things at a common place. I would see the allowed access
+width as a complement to the address. (Note: It is enough of annoyance that the
+user has to write these register specifications himself. In the 'C' world this
+is usually done by the processor manufacturer or the compiler vendor)
+
+Atomic or volatile?
+-------------------
+- 'atomic' doesn't inhibit the optimisation described above. A byte write has
+  exactly the same result as a word write which leaves the other three bytes
+  unchanged - if a byte write is allowed at the particular address. And since it
+  is not split in multiple writes, it is 'atomic' in its literal sense.
+
+- For a write to parts of an atomic object I would expect that the full read-
+  modify-write cycle is atomic. On most architectures this is very expensive (it
+  requires things like interrupt locks unless there are special instructions for
+  atomic read-modify-write cycles). I don't think that this kind of things
+  should be done implicitely, so it propably would be best to forbid partial
+  writes to atomic objects. I'm afraid that it would break compatibility with
+  existing compilers to completely forbid it, so at least it should be required
+  for a compiler to emit a warning about possibly unexpected behaviour in this
+  case.
+
+- The semantics of 'volatile' are usually sufficient for register accesses:
+   - An object is read exactly once
+   - An object is written exactly once
+
+It should be clarified that in case of a partial write of an object, this is
+done by a read-modify-write cycle consisting of exactly one read followed by
+exactly on write.
+
+I am not sure if [C.6] allows these read-modify-write cycles. If not, I propose
+to change it
+- existing compilers do it already this way (at least GNAT, I don't know about
+  others)
+- this is the expected behaviour of a programmer who writes this type of low-
+  level routines
+
+Other Languages
+---------------
+In 'C', there is a notion of a 'container type' of a bitfield. That is not the
+type of the struct (record) as one could think, it is a type specifier given
+with each field of a bitfield struct. The AAPCS (ARM ABI specification) requires
+explicitly that accesses to bitfields must be done with the access width
+corresponding to its 'container type'. (See also my comment from 2014-08-15)
+
+So, at least on ARM (with a AAPCS-compliant compiler), 'C' offers the
+possibility to use bitfields with full control over the access width and with
+predictable representation (this is defined also in the AAPCS).
+
+It's a pity that this is not possible with Ada...
+
+
+Conclusion
+----------
+
+To make records with representation clauses useable for the access to IO
+registers (as advertised since the very beginnings of Ada) on today's
+microcontrollers, a possibility to specifiy an allowed access width
+(complementing the address clause) is highly desirable and should be added to
+the language. Existing workarounds are 1) ugly and 2) their correct working is
+not really guaranteed. Even in 'C' it is possible to use a very similar
+construct (at least and especially on the microcontroller family suffering from
+the problem in Ada).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, September 30, 2014  5:04 PM
+
+...
+> - 'atomic' doesn't inhibit the optimisation described above.
+
+Yes it does. C.6(22/2) says that accessing only part of the bits is wrong.
+(Note that this is Implementation Advice only because what it means to access
+bits of the object is undefined and undefinable in Ada terms. We believe that IA
+is stronger than an requirement in this case because an implementation is
+required to document any IA that is not followed.) Remember that all atomic
+objects are also volatile.
+
+> A byte write has exactly the same result as a word write which leaves
+> the other three bytes unchanged - if a byte write is allowed at the
+> particular address. And since it is not split in multiple writes, it
+> is 'atomic' in its literal sense.
+
+No, such a write clearly violates C.6(22/2).
+
+The problem discussed on comp.lang.ada came about because the object in question
+was composite. That means that all of the components are also volatile. Thus,
+accessing a single component HAD to be done as a byte read or write -- as the
+component itself is volatile -- such an operation is not even atomic (the whole
+object is not considered). A compiler that wrote the entire object in this case
+would be violating C.6(22/2) for the component.
+
+That's the bug: a composite volatile variable that must be accessed in a fixed
+size can only be accessed as a whole, never as an individual component. The
+requirement C.6(20) and the advice C.6(22/2) together mean that the program
+source must not attempt such an operation (if the read/write size actually
+matters).  The Ada compiler ought to give some support for this (but it can't be
+the default for compatibility reasons and because in many situations there is no
+problem). I am proposing an aspect for this purpose (as a response to Simon
+Clubley's question).
+
+> - For a write to parts of an atomic object I would expect that the
+> full read- modify-write cycle is atomic.
+
+See above. Writing to a part of an atomic object is going to result in nonsense
+because of the other rules of the language. Making some sort of atomic
+read/write cycle is going to break the semantics of the necessarily volatile
+components. The only sensible thing is to prevent writing part of an atomic
+object altogether, which ought to be done with help from the compiler (not the
+current situation of telling people not to do that). That's the point of the
+proposed aspect.
+
+[I'm being a little more vague than usual because I haven't actually written up
+the AI yet, I'll probably do that later this week.]
+
+****************************************************************
