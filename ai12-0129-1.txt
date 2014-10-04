@@ -1,0 +1,215 @@
+!standard 9.5.1(4)                          14-10-03   AI12-0129-1/01
+!class Amendment 14-10-03
+!status work item 14-10-03
+!status received 14-09-09
+!priority Medium
+!difficulty Easy
+!subject Make protected objects more protecting
+
+!summary
+
+A Boolean aspect Exclusive_Functions is added to the language.
+
+!question 
+
+The design of containers assumes that they are not accessed
+concurrently, on the ground that access can be protected with
+protected objects if necessary.
+
+However, containers provide functions that modify the state of the
+container; it is therefore not possible to access these through
+protected functions, as these can be called concurrently.
+
+Should protected objects be improved to make them appropriate to
+protect structures with side-effect functions, like the standard
+containers? (yes)
+
+!proposal
+
+Add a boolean aspect "exclusive_functions" for protected types and
+single protected objects to forbid concurrent execution of protected
+functions.
+
+!wording
+
+** TBD. Probably put it into 9.5.1, since it would be repealing
+the unless part of 9.5.1(4): "A new protected action is not started
+on a protected object while another protected action on the same
+protected object is underway, unless both actions are the result of
+a call on a protected function."
+
+!discussion
+
+According ARM Ap3/2, there is no correctness guarantee on concurrent
+calls involving overlapping objects passed by reference. Indeed, most
+implementations of the standard containers break when the same
+container is used concurrently, even when the container is declared
+constant.
+
+The usual way of allowing concurrent access to unsafe objects is to
+encapsulate them in a protected object.
+
+However, protected functions still allow concurrent access to (a
+constant view) of private objects. So the most natural way of writing
+a protected container is still unsafe:
+
+   protected type Protected_Container is
+      procedure Insert (Key : in Key_Type; Element : in Element_Type);
+      function Element (Key : in Key_Type) return Element_Type;
+   private
+      Unsafe_Container : Ordered_Map_Instance.Map;
+   end Protected_Container;
+
+Moreover, there is no easy way to actually realize this is unsafe,
+since it compiles without warning, and concurrent read access on usual
+objects is usually safe.
+
+Programmers aware about the issue can restrict themselves to use only
+protected procedures and entries, which guarantees non-concurrency on
+private data:
+
+   protected type Safe_Protected_Container is
+      procedure Insert (Key : in Key_Type; Element : in Element_Type);
+      procedure Element (Key : in Key_Type; Element : out Element_Type);
+   private
+      Unsafe_Container : Ordered_Map_Instance.Map;
+   end Safe_Protected_Container;
+
+However, such a procedure Element is counter-intuitive, and makes
+client code heavier because contained elements can no longer be used
+in a more complex expression, explicit temporary variables have to be
+used instead.
+
+Also, this construction only works when Element_Type is definite. To
+use indefinite containers safely by using only protected procedures
+and entries, another layer is needed, e.g. using an indefinite holder
+or an access type.
+
+Moreover, the whole workaround is fragile, since there is no way to
+ensure protected functions won't be carelessly added in the future by
+a programmer not aware of the rationale.
+
+So current version of Ada doesn't seem to adequately allow concurrency
+protection for objects whose read-only concurrent access is not safe,
+like standard containers, but it can be the case for user types as
+well.
+
+It would be much easier and foolproof to have an aspect for protected
+types, protected objects, and/or individual protected functions, that
+make protected function have concurrency semantics of protected
+procedures, ensuring non-concurrent use of private objects, while
+remaining syntactically a function.
+
+From an implementation point of view, it would just mean that
+protected function calls would use the same semaphore as protected
+procedures; some implementations may even already use only one kind of
+semaphores for both. Implementation burden would likely range from
+null to minimal.
+
+!ASIS
+
+No impact.
+
+!ACATS test
+
+!appendix
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, September 9, 2014  10:56 AM
+
+This is my homework from the last meeting, although I subcontracted most of
+it to Natacha Porté who initially raised the issue (she's the one in the CC).
+[This is version /01 of the AI - Editor.]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September 9, 2014  11:26 AM
+
+To me, this does not seem completely appropriate for an "aspect."  This is a
+significant semantic change and should probably be reflected in a
+corresponding syntax change for protected functions.
+
+Now that we allow in-out parameters for function, perhaps something like the
+following would communicate the idea:
+
+protected type Protected_Container is
+   ...
+   function Element (in out Protected_Container; Key : in Key_Type) return Element_Type;
+   ...
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, September 9, 2014  1:16 PM
+
+This particular proposal seems like a bad idea for several reasons:
+    1) Protected operation declarations do not normally mention the
+       protected object as an explicit parameter; this proposal is
+       therefore *very* different.
+
+    2) The "current instance" rule means that the name
+       "Protected_Container" in the proposed declaration of
+       Element denotes an object, not a type. (Obviously this
+       objection could be worked around as was done with
+       access_definitions).
+
+    3) Ambiguity. Is the explicit parameter instead of or in
+       addition to the usual implicit parameter? Again, this could
+       be worked around but it would be ugly.
+
+#1 is really the main objection.
+
+However, I agree with your objection to the original proposal.
+
+Perhaps this could be addressed by defining a new Convention; that might also
+help straighten out any interactions with interface types.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, September 9, 2014  3:05 PM
+
+> To me, this does not seem completely appropriate for an "aspect."
+> This is a significant semantic change and should probably be reflected 
+> in a corresponding syntax change for protected functions.
+
+Not such a big change, as it simply forces a semantic that is already allowed.
+Certainly not as big as synchronization => by_entry
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, September 9, 2014  4:20 PM
+
+I tend to agree with J-P here.  What's the big deal?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, September 9, 2014  4:37 PM
+
+Me too. This is just turning off an implementation permission. Sounds like an
+aspect to me.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, September 9, 2014  4:47 PM
+
+I withdraw my objection to the aspect proposal.
+
+My objection would stand if we were talking about allowing functions to have
+a non-constant view of the protected object, but we aren't.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September 9, 2014  9:10 PM
+
+I presumed we were wanting to be "honest" about the parameter mode for the
+protected object.  I suppose if we are just keeping a constant view, then the
+aspect is adequate.
+
+****************************************************************
+
