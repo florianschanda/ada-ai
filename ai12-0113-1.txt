@@ -1,4 +1,6 @@
-!standard 6.1.1(39/3)                                14-05-15  AI05-0113-1/01
+!standard 6.1.1(7/3)                                14-10-06  AI05-0113-1/02
+!standard 6.1.1(18/3)
+!standard 6.1.1(38/3)
 !standard 7.3.2(23/3)
 !class binding interpretation 14-05-15
 !status work item 14-05-15
@@ -42,25 +44,70 @@ Should this be corrected somehow? (Yes.)
 
 !wording
 
-Add after 6.1.1(39/3): [Note: I'm not sure the best place to put this.]
+Revise 6.1.1(7/3):
 
-Evaluations of class-wide preconditions and postconditions takes place using
-the actual nominal types for the parameters of type T and of access-to-T. In
-particular, these parameters are not converted to type T'Class or
-access-to-T'Class as the resolution of the expression might imply.
+   Within the expression for a Pre'Class or Post'Class aspect for a
+   primitive subprogram {S} of a tagged type T, a name that denotes a
+   formal parameter {(or S'Result)} of type T is interpreted as [having
+   type T'Class] {though it had a (notional) type NT that is a visible
+   formal derived type whose ancestor type is T}. Similarly, a name that
+   denotes a formal access parameter {(or S'Result)} of type access-to-T
+   is interpreted as having type access-to-{NT} [T'Class]. [AARM
+   Redundant: {The result of this interpretation is that the only
+   operations that can be applied to such names are those defined for
+   such a formal derived type.} This ensures that the expression is
+   well-defined for a primitive subprogram of [a]{any} type descended
+   from T.]
 
-AARM Ramification: This means that calls within the class-wide precondition
-are statically bound for a statically bound call. Calls within the class-wide
-precondition are not redispatching for statically bound calls; they are
-dispatching for dispatching calls.
+(In Static Semantics)
 
-AARM Implementation Note: This might take care if the class-wide precondition
-check is made at the call site. For class-wide precondition and postcondition
-checks made within the body of a subprogram, this means that the calls are
-statically bound to the type of that subprogram. (A dispatching call will
-execute the correct body for that case.)
+Revise 6.1.1(18/3) as follows:
 
-** TBD - some similar rule is needed for Type_Invariants. I'll wait to find
+   If a Pre'Class or Post'Class aspect is specified for a primitive
+   subprogram {S} of a tagged type T, {or such an aspect defaults to
+   True}, then {a corresponding expression} [the associated expression]
+   also applies to the corresponding primitive subprogram {S} of each
+   descendant of T.  {The *corresponding expression* is constructed from
+   the associated expression as follows:
+
+   *  References to formal parameters of S (or to S itself)
+      are replaced with references to the corresponding formal
+      parameters of the corresponding inherited or overriding subprogram
+      S (or to the corresponding subprogram S itself).}
+
+AARM Reason: We have to define the corresponding expression this way as
+overriding routines are only required to be subtype conformant; in particular,
+the parameter names can be different. So we have to talk about corresponding
+parameters without mentioning any names.
+
+   The primitive subprogram S is illegal if it not abtract and the
+   corresponding expression for a Pre'Class or Post'Class aspect would be
+   illegal.
+
+AARM Reason: We allow illegal corresponding expressions on abstract
+subprograms as they could never be evaluated, and we need to allow such
+expressions to contain calls to abstract subprograms.
+
+---
+
+Revise 6.1.1(38/3) as follows:
+
+(In Dynamic Semantics)
+
+   The class-wide precondition check for a call to a subprogram or entry
+   {S} consists solely of checking the class-wide precondition
+   expressions that apply to the denoted callable entity (not
+   necessarily {to} the one that is invoked). {Any operations within
+   such an expression that were resolved as primitive operations of the
+   (notional) formal derived type NT, are in the evaluation of the
+   precondition bound to the corresponding operations of the type
+   identified by the controlling tag of the call on S.  [AARM Redundant:
+   This applies to both dispatching and non-dispatching calls on S.]}
+
+** TBD: some dynamic semantics rule for class-wide postconditions?? Not
+   sure - RLB.
+
+** TBD - some similar rules are needed for Type_Invariants. I'll wait to find
 out if the above will fly before going further.
 
 !discussion
@@ -170,6 +217,86 @@ The additional guarantee allows analyzing dispatching calls without knowing the
 exact body that they will reach, as we know that all bodies will have the
 precondition Pre'Class. Such analysis can only be done for the P11 hierarchy
 via full program analysis.
+
+---
+
+We define the meaning of Pre'Class in terms of a nominal formal derived
+type in order that only primitive operations of the type can be used
+in the expression. The original Ada 2012 definition of the types as T'Class
+also has a runtime effect that we do not want (as noted above).
+
+In addition, defining the parameters as having T'Class introduces other
+problems. For instance, with a global variable:
+    type T is tagged ...;
+    G : T'Class := ...;
+    function Is_Valid_2 (A, B : T) return Boolean;
+    procedure Proc (X : T)
+       with Pre'Class => Is_Valid_2 (X, G);
+If X is considered to have T'Class, this expression is legal (both operands
+being dynamically tagged). But this doesn't make sense for an inherited type:
+    type T1 is new T with ...;
+    -- inherits Is_Valid_2 (A, B : T1) return Boolean;
+    -- inherits Proc (X : T)
+    --   with Pre'Class => Is_Valid_2 (X, G);
+But this Pre'Class makes no sense, as G does not match type T1.
+
+If we simply left the parameters having type T, then non-primitive operations
+of the type could be used in Pre'Class -- but descendant types
+have no such operations. We could have rechecked the Pre'Class for each
+later subprogram, but that causes problems if visibility has changed
+somehow (especially for class-wide operations).
+
+On the other hand, a formal derived type has just the operations that we want
+to allow (primitive operations) but no others. In particular, G in the example
+above does not match the NT type, so the above problem can't happen.
+
+---
+
+We have to recheck the legality of the corresponding expression, just like in
+a generic instantiation. In particular, a call to a primitive subprogram could
+be illegal because it is abstract:
+
+      package Pkg3 is
+         type T is abstract tagged null record;
+         function Is_Ok (X : T) return Boolean is abstract;
+         procedure Proc (X : T) with Pre'Class => Is_Ok (X); -- Illegal.
+      end Pkg3;
+
+(Note that Proc could be called in a statically bound call with a type
+conversion of some object to T.)
+
+We can't just check this once, because whether a routine is abstract can
+be changed when deriving:
+
+      package Pkg4 is
+         type T is tagged null record;
+         function Is_Ok (X : T) return Boolean;
+         procedure Proc (X : T) with Pre'Class => Is_Ok (X); -- OK.
+      end Pkg4;
+
+      with Pkg4;
+      package Pkg5 is
+         type NT is abstract new Pkg4.T null record;
+         function Is_Ok (X : NT) return Boolean is abstract;
+         -- inherits Proc, Pre'Class => Is_Ok (X); -- Illegal.
+      end Pkg5;
+
+We don't check this for abstract routines, since a statically bound call is
+illegal, and there cannot be objects with the tag of an abstract type, so
+there can't be any dispatching calls that land there, either.
+
+Note carefully that resolution is not redone (again like a generic
+instantiation); only the legality checks. The resolution of global variables
+and the like is unchanged from the original expression.
+
+---
+
+We've added a mention that even the implicit Pre'Class of True is inherited.
+That follows from the Liskov Substitution Principle -- the precondition of
+an overridden routine has to be the same or weaker than that of the parent
+routine. There is nothing weaker than True, so if a routine does not have
+an explicit Pre'Class, it can't usefully be given a Pre'Class later in the
+derivation tree. This topic is further explored in AI12-013x-1.
 
 !ASIS
 
@@ -510,7 +637,8 @@ Sent: Tuesday, July 22, 2014  11:15 AM
 
 > As Steve knows, my opinion is that it is very important that the tag
 > used for calling the subprogram matches the tag used for evaluating
-> the class-wide precondition.  Hence, if Pre'Class involves a call on an abstract subprogram, Program_Error is raised.
+> the class-wide precondition.  Hence, if Pre'Class involves a call on an
+> abstract subprogram, Program_Error is raised.
 >
 > An alternative would be to require that the Pre'Class aspect not
 > include a call on an abstract function if the associated subprogram is
@@ -1509,5 +1637,522 @@ From: Steve Baird
 Sent: Friday, July 25, 2014  7:13 PM
 
 Sounds good. I think we are close.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Sunday, August 2, 2014  3:46 PM
+
+I am on the hook to produce some new wording related to Pre'Class.
+Here is the current wording:
+
+Paragraph 6.1.1(7/3):
+
+(In Name Resolution)
+
+   Within the expression for a Pre'Class or Post'Class aspect for a primitive
+   subprogram of a tagged type T, a name that denotes a formal parameter of type
+   T is interpreted as having type T'Class. Similarly, a name that denotes a
+   formal access parameter of type access-to-T is interpreted as having type
+   access-to-T'Class. [Redundant: This ensures that the expression is
+   well-defined for a primitive subprogram of a type descended from T.]
+
+Paragraph 6.1.1(18/3):
+
+(In Static Semantics)
+
+   If a Pre'Class or Post'Class aspect is specified for a primitive subprogram
+   of a tagged type T, then the associated expression also applies to the
+   corresponding primitive subprogram of each descendant of T.
+
+Paragaraph 6.1.1(33/3):
+
+(In Dynamic Semantics)
+
+   The class-wide precondition check begins with the evaluation of any enabled
+   class-wide precondition expressions that apply to the subprogram or entry. If
+   and only if all the class-wide precondition expressions evaluate to False,
+   Assertions.Assertion_Error is raised.
+
+Paragraph 6.1.1(38/3):
+
+(In Dynamic Semantics)
+
+   The class-wide precondition check for a call to a subprogram or entry
+   consists solely of checking the class-wide precondition expressions that
+   apply to the denoted callable entity (not necessarily the one that is
+   invoked).
+
+---------
+
+Here is an attempt at a re-write:
+
+Let's start by eliminating 6.1.1(7/3) and see if we can do all the magic in
+(18/3):
+
+(In Static Semantics)
+
+Revise (18/3) as follows:
+
+   If a Pre'Class or Post'Class aspect is specified for a primitive subprogram
+   {S} of a tagged type T, {or such an aspect defaults to True}, then {a
+   corresponding expression} [the associated expression] also applies to the
+   corresponding primitive subprogram {S} of each descendant of T.  {The
+   *corresponding expression* is constructed from the associated expression as
+   follows:
+
+   *  References to formal parameters or the result of S are replaced with
+      references to the corresponding formal parameters or result of the
+      inherited or overriding subprogram S;
+   *  Non-dispatching calls to primitive subprograms of T are replaced with
+      non-dispatching calls to the corresponding primitive subprograms of the
+      descendant of T, if the controlling tag of the call is determined by
+      references to controlling parameters or results of the primitive
+      subprogram S.}
+
+---
+
+We need to add a legality rule somewhere:
+
+   {A Pre'Class or Post'Class aspect for a primitive subprogram S of a tagged
+   type T is illegal if it contains a non-dispatching call on a primitive
+   subprogram of T, if the controlling tag of the call is determined by
+   references to controlling parameters or results of the primitive subprogram
+   S, as well to other operands that are not tag indeterminate and are not
+   references to controlling parameters or results of S.}
+
+Revise (38/3) as follows:
+
+(In Dynamic Semantics)
+
+   The class-wide precondition check for a call to a subprogram or entry {S}
+   consists solely of checking the class-wide precondition expressions that
+   apply to the denoted callable entity (not necessarily the one that is
+   invoked). {If the call is a dispatching call to S, then any non-dispatching
+   calls within a Pre'Class expression associated with S, whose controlling tag
+   is determined by references to controlling parameters or results of the
+   subprogram S, become dispatching calls when the class-wide precondition is
+   evaluated.}
+
+----------
+
+Fire away!
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Friday, August 8, 2014  6:55 PM
+
+I have had no feedback on this proposal.  It is of high priority to the folks
+building SPARK 2014, so if this approach does or does not seem reasonable,
+please comment!
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August 8, 2014  10:12 PM
+
+> I have had no feedback on this proposal.
+
+Jeez, it's summer. Some of us are trying to avoid unnecessary pain. ;-)
+
+> It is of high
+> priority to the folks building SPARK 2014, so if this approach does or
+> does not seem reasonable, please comment!
+
+Sigh. OK. (I'm on the hook with you for this AI anyway, as the original author,
+so I suppose...)
+
+
+> Here is an attempt at a re-write:
+>
+> Let's start by eliminating 6.1.1(7/3) and see if we can do all the
+> magic in (18/3):
+
+So "Delete 6.1.1(7/3)" is the first instruction in the AI. And you are not
+making any change to 6.1.1(33/3) [the AI doesn't need to mention it].
+
+> (In Static Semantics)
+>
+> Revise (18/3) as follows:
+>
+>    If a Pre'Class or Post'Class aspect is specified for a primitive
+> subprogram {S} of a tagged type T, {or such an aspect defaults to
+> True}, then {a corresponding expression} [the associated expression]
+> also applies to the corresponding primitive subprogram {S} of each
+> descendant of T.  {The *corresponding expression* is constructed
+> from the associated expression as follows:
+>
+>    *  References to formal parameters or the result of S are
+> replaced with references to the corresponding formal parameters or
+> result of the inherited or overriding subprogram S;
+>    *  Non-dispatching calls to primitive subprograms of T are
+> replaced with non-dispatching calls to the corresponding primitive
+> subprograms of the descendant of T, if the controlling tag of the
+> call is determined by references to controlling parameters or
+> results of the primitive subprogram S.}
+
+Humm. I'm not sure the second bullet is really needed. With 6.1.1(7/3) gone, the
+normal resolution rules apply. Or do you mean for the "corresponding expression"
+not to be resolved at all?
+
+Maybe I'm think of a different model than you are. I was thinking that the
+Pre'Class expression is duplicated for each subprogram, with the specified
+substitutions, with all of the other steps occurring afterwards. (That's how
+default expressions work, right?) In that case, the binding to subprograms takes
+place during the resolution. It seems necessary to re-resolve the expression
+because of the possible presence of non-primitive subprograms and the like
+(which won't resolve for descendants).
+
+Perhaps you are trying to resolve the expression only once. I'd guess that would
+be better in the sense that it ensures that the expression doesn't change
+because of visibility for the descendants, but it surely complicates the model.
+
+---
+
+Less important: terminology. "Non-dispatching calls of primitive subprograms of
+T" is a mouthful. I guess it's formally correct (since 3.9.2(1/2) does define
+"dispatching call", but I think it would be better to follow 3.9.2 more closely.
+3.9.2 says that all calls on primitive operations of T are "calls on dispatching
+operations". It then talks about the controlling tag being either statically
+tagged, dynamically tagged, or tag indeterminate. I think it would be better to
+talk about "calls on dispatching operations of T whose tag is statically
+determined" (using the terminology of 3.9.2(15)), because then you don't have to
+talk about primitive operations at all, avoiding the need to stick in a
+negative. (This also would mean that other kinds of dispatching calls,
+specifically to abstract formal subprograms, would be covered, if there is some
+way for them to get involved in a Pre'Class expression. If there is, we
+certainly would want them to work the same way as a primitive operation.)
+
+---
+
+Since the only way to reference the result of S is via the Result attribute, it
+might be better to say that than to talk about the "result of S". It really
+confused me at first. Maybe two bullets would make more sense:
+*  References to formal parameters of S are replaced with references to the
+   corresponding formal parameters of the inherited or overriding subprogram S;
+*  References to S'Result are replaced with references to S'Result of the
+   inherited or overriding subprogram S;
+
+> ---
+>
+> We need to add a legality rule somewhere:
+>
+>    {A Pre'Class or Post'Class aspect for a primitive subprogram S of
+> a tagged type T is illegal if it contains a non-dispatching call on
+> a primitive subprogram of T, if the controlling tag of the call is
+> determined by references to controlling parameters or results of the
+> primitive subprogram S, as well to other operands that are not tag
+> indeterminate and are not references to controlling parameters or
+> results of S.}
+
+This is your attempt to prevent the non-resolving descendant problem. But it's
+not enough: what about a call on a non-primitive subprogram having a parameter
+or result of T?
+
+    package P1 is
+        type T is ...
+        package Inner is
+            function Is_OK (A : T) return Boolean;
+        end Inner;
+        procedure Foo (A : in T)
+            with Pre'Class => Is_OK(A);
+    end P1;
+
+    with P1;
+    package P2 is
+       type NT is new P1.T with ...
+       procedure Foo (B : in NT); -- (1)
+    end P2;
+
+(1) would have a Pre'Class of "Is_OK (B)"; but that doesn't make any sense
+because there is no Is_OK for type NT, so this would not resolve. Hopefully this
+is covered by the rules.
+
+> Revise (38/3) as follows:
+>
+> (In Dynamic Semantics)
+>
+>    The class-wide precondition check for a call to a subprogram or
+> entry {S} consists solely of checking the class-wide precondition
+> expressions that apply to the denoted callable entity (not
+> necessarily the one that is invoked). {If the call is a dispatching
+> call to S, then any non-dispatching calls within a Pre'Class
+> expression associated with S, whose controlling tag is determined by
+> references to controlling parameters or results of the subprogram S,
+> become dispatching calls when the class-wide precondition is
+> evaluated.}
+
+Same here for the terminology: it would be better to say "calls to a dispatching
+operation within a Pre'Class expression associated with S, whose controlling tag
+is {statically} determined by references to controlling parameters or results of
+the subprogram S, become dispatching calls when the class-wide precondition is
+evaluated." Or something like that.
+
+---
+
+I don't see an attempt to address the Baird problem of an abstract routine:
+
+      package Pkg is
+        type T is abstract tagged null record;
+        function Is_Ok (X : T) return Boolean is abstract;
+        procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+      end Pkg;
+
+      with Pkg;
+      package Pkg2 is
+        type NT is new Pkg2.T with ...
+        function Is_OK (X : NT) return Boolean;
+        procedure Proc (X : NT);
+      end Pkg2;
+
+      package body Pkg2 is
+        procedure Proc (X : NT) is
+        begin
+            -- Call parent operation:
+            Proc (T(X)); -- (2)
+        end Proc;
+        ...
+      end Pkg2;
+
+The precondition of call (2) is Is_OK (T), which is calling an abstract
+function. We had discussed making the precondition illegal for this case, or
+having it raise Program_Error (I prefer the former). But I don't see any rules
+that cover that.
+
+Note that this can happen "after the fact" -- any legality rule has to be
+rechecked after substitution for every Pre'Class and Post'Class expression.
+(That is, after every inheritance.) Checking just at the original definition
+isn't enough.
+
+For example:
+
+      package Pkg3 is
+        type T is tagged null record;
+        function Is_Ok (X : T) return Boolean;
+        procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+      end Pkg3;
+
+      with Pkg3;
+      package Pkg4 is
+        type NT is abstract new Pkg3.T with ...
+        function Is_OK (X : NT) return Boolean is abstract;
+        procedure Proc (X : NT);
+      end Pkg4;
+
+      with Pkg4;
+      package Pkg5 is
+        type NNT is new Pkg4.NT with ...
+        function Is_OK (X : NNT) return Boolean;
+        procedure Proc (X : NNT);
+      end Pkg5;
+
+      package body Pkg5 is
+        procedure Proc (X : NNT) is
+        begin
+            -- Call parent operation:
+            Proc (NT(X)); -- (3)
+        end Proc;
+        ...
+      end Pkg5;
+
+(3) has a statically bound precondition that calls an abstract routine. If we
+were to add a legality rule, it would have to reject Pkg4 as violating it (the
+contents of Pkg3 are fine, so it can't be purely a rule on the initial Pre'Class
+expression).
+
+We need to solve this here because it's a new problem introduced by the new
+static binding substitutions (it doesn't exist before, as there cannot be any
+objects of a abstract type, so you can't dispatch to them).
+
+This is one of the reasons I was thinking that the expression would be
+re-resolved (because that would automatically trigger the normal legality rules
+against calling an abstract subprogram). But that has other problems (one could
+make it so the expression didn't have the same effect in a descendant, which
+would defeat the purpose).
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Saturday, August 9, 2014  2:17 PM
+
+...
+> Perhaps you are trying to resolve the expression only once. I'd guess
+> that would be better in the sense that it ensures that the expression
+> doesn't change because of visibility for the descendants, but it
+> surely complicates the model.
+
+I think re-resolving would open up a big can of worms.  After all, this new
+expression is likely located in a different package, and so re-resolving names
+would be very much hit or miss.  So I was imagining that all the names are
+resolved once, and now we are talking about substituting *entities*, not
+*names*.  I think it is actually simpler, not more complicated, to do it that
+way. ...
+
+...
+> (1) would have a Pre'Class of "Is_OK (B)"; but that doesn't make any sense
+> because there is no Is_OK for type NT, so this would not resolve. Hopefully
+> this is covered by the rules.
+
+I agree we need a more general legality rule that says the pre'class is illegal
+if, after making such a substitution, the actual type of an operand in a call
+would no longer match the corresponding formal type, or an operand used in some
+other context would no longer be legal.   So we don't re-do name resolution, but
+we recheck the legality rules.
+
+This is somewhat similar to what happens in the spec of a generic instance.
+Perhaps we could create a closer analogy to generic instantiation, where the
+parameters and result of type T or access T of the original subprogram are
+treated as though they are of a formal extension type.  E.g.
+
+    function Foo(A : access T) return T
+      with Pre'Class => Is_OK(A.all),
+           Post'Class => Foo'Result > A.all;
+
+becomes, notionally:
+
+    generic
+       type NT is new T with private;
+    function Foo(A : access NT) return NT
+       with Pre'Class => Is_OK(A.all),
+            Post'Class => Foo'Result > A.all;
+
+So rather than treating these operands as being of type T'Class, which was the
+original approach, we instead treat them as being of a type NT that is a formal
+extension of T, and so "constructing" the corresponding Pre'Class or Post'Class
+expression becomes essentially a generic instantiation.  T
+
+> ... I don't see an attempt to address the Baird problem of an abstract routine:
+>
+>        package Pkg is
+>          type T is abstract tagged null record;
+>          function Is_Ok (X : T) return Boolean is abstract;
+>          procedure Proc (X : T) with Pre'Class => Is_Ok (X);
+>        end Pkg;
+
+Perhaps the "formal type extension" model might help here as well.  If the
+subprogram with the Pre'Class or Post'Class aspect is not abstract, then the
+generic must be legal when the formal extension is instantiated with type T
+itself.
+
+***************************************************************
+
+From: Jeff Cousins
+Sent: Thursday, August 14, 2014  3:32 AM
+
+My pennyworth's.
+Randy's re-wordings generally seem clearer.
+The proposed legality rule takes the form:
+
+... is illegal if ... T, if ... S, as well ... S.
+
+I would have expected another "and" or "or" somewhere.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Thursday, August 14, 2014  3:55 PM
+
+If we go with the formal type extension model, then I think the legality rules
+will be significantly simplified.
+
+I'll try to propose something concrete using the formal type extension model.  I
+think it is a better fit to the problem than our original T'Class approach, and
+feels a bit more intuitive (to me, at least!).
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, August 21, 2014   8:17 PM
+
+In filing this mail, I had some additional thoughts...
+
+Tucker Taft writes:
+> If we go with the formal type extension model, then I think the
+> legality rules will be significantly simplified.
+>
+> I'll try to propose something concrete using the formal type extension
+> model.  I think it is a better fit to the problem than our original
+> T'Class approach, and feels a bit more intuitive (to me, at least!).
+
+Yes, but be careful to deal with non-primitive operations sensibly. You had
+written:
+
+> This is somewhat similar to what happens in the spec of a generic instance.  Perhaps we
+> could create a closer analogy to generic instantiation, where the parameters and result of
+> type T or access T of the original subprogram are treated as though they are of a formal
+> extension type.  E.g.
+>
+>    function Foo(A : access T) return T
+>      with Pre'Class => Is_OK(A.all),
+>           Post'Class => Foo'Result > A.all;
+>
+>becomes, notionally:
+>
+>    generic
+>       type NT is new T with private;
+>    function Foo(A : access NT) return NT
+>       with Pre'Class => Is_OK(A.all),
+>            Post'Class => Foo'Result > A.all;
+
+I'm presuming that the idea is that this is resolved when the Pre'Class is
+initially compiled (that corresponds to compiling the generic for a generic
+unit), and then the substitutions are done for each individual subprogram (that
+corresponds to the instantiation).
+
+This is very clean for operations of T, since non-primitives that happen to take
+a T are not imported into the notional generic and thus would not (initially)
+compile (operations that aren't visible clearly won't resolve).
+
+But that doesn't seem to work so well for other non-primitives, since they
+aren't imported into the generic, either.
+
+If Is_OK was class-wide:
+
+     function Is_OK (A : in T'Class) return Boolean;
+
+it should be usable in the Pre'Class expression (as it would properly work in
+any inherited subprogram).
+
+Similarly, a global function should work. If we had:
+
+    function Bar(A : T) return Natural
+      with Pre'Class => Is_OK(A) and Database_is_Ready;
+
+[ignore for the moment that it would probably be better to fold
+"Database_is_Ready" into the Is_OK function, because not every design is
+"better"; we need to support anything reasonable, not just those that are best.]
+
+Your notional generic would be:
+
+    generic
+       type NT is new T with private;
+    function Bar(A : T) return Natural
+      with Pre'Class => Is_OK(A) and Database_is_Ready;
+
+which would not compile unless Database_is_Ready is imported somehow.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Friday, August 22, 2014   1:15 AM
+
+Sent from my iPhone
+
+> ...
+> 
+> Your notional generic would be:
+> 
+>    generic
+>       type NT is new T with private;
+>    function Bar(A : T) return Natural
+>      with Pre'Class => Is_OK(A) and Database_is_Ready;
+> 
+> which would not compile unless Database_is_Ready is imported somehow.
+
+
+The "notional" generic would be resolved in the same visibility context as the
+Pre'class aspect specification, augmented with the notional generic formals.
+So I am not sure globals require any special processing. 
 
 ***************************************************************
