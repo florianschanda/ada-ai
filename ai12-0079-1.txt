@@ -94,6 +94,154 @@ correctly enforced.
 
 !appendix
 
+From: Tucker Taft
+Sent: Monday, October 6, 2014  10:27 AM
+
+The recent paper submitted to HILT by Steve Michell, Miguel Pinho, Brad Moore,
+and myself, suggests more details about a Global annotation for Ada, based on
+the SPARK 2014 work. This relates to AI12-0079.  Below is the section on this
+from the final paper.
+
+-Tuck
+-----
+
+One of the strengths of Ada is that it was carefully designed to allow the
+compiler to detect many problems at compile time, rather than at run time.
+Programming for parallel execution in particular is an activity that requires
+care to prevent data races and deadlocks. It is desirable that any new
+capabilities added to the language to support parallelism also allow the
+compiler to detect as many such problems as possible, as an aid to the
+programmer in arriving at a reliable solution without sacrificing performance
+benefits.
+
+A common source of erroneousness in languages that support concurrency and
+parallelism are data races, which occur when one thread of execution attempts to
+read or write a variable while another thread of execution is updating that same
+variable. Such a variable is global in the sense that it is globally accessible
+from multiple threads of execution. In the current Ada standard, threads of
+execution are tasks. In this proposal, tasklets are another form of execution
+threads.
+
+Eliminating concurrency and parallelism problems associated with non-protected
+global variables is an important step towards improving the safety of the
+language. To that end, we propose the addition of a Global aspect to the
+language.  The main goal in the design of this aspect is to identify which
+global variables and access-value dereferences a subprogram might read or
+update.
+
+The inspiration for this aspect comes from the SPARK language [24], which has
+always had global annotations. Earlier versions of SPARK augmented a subset of
+Ada with annotations added as specially formatted comments, which were used for
+static analysis by the proof system. With the addition of aspects to Ada in Ada
+2012, SPARK 2014 has changed its annotations to use aspects, including the
+“Global” annotation. To encourage convergence with SPARK we are starting from
+the SPARK Global aspect. However, for Ada, it is necessary to extend this idea
+to cover a broader spectrum of usage, since Ada is a more expressive programming
+environment than SPARK. The Global aspect in SPARK 2014 is applied to subprogram
+specifications, and is of the following form;
+
+with Global =>(Input => ...,
+                In_Out => ..., Output => ...)
+
+where “…” is either a single name, or a parenthesized list of names, and Input,
+In_Out, and Output identify the global variables of the program that are
+accessed by this subprogram, in read-only, read-write, or write-only mode,
+respectively. If there are no global variables with a particular parameter mode,
+then that mode is omitted from the specification. If there are only global
+inputs, and no outputs or in-outs, then this syntax can be further simplified
+to:
+
+with Global => ...
+
+where again "..." is a single name, or a parenthesized list of names.
+Finally, if there are no global inputs, in-outs, nor outputs, then:
+with Global => null
+is used.
+
+We needed to refine the notion of SPARK's Global aspect, because SPARK does not
+support access types, and because SPARK relies on an elaborate mechanism for
+handling the abstract “state” of packages.  The refinements we are proposing are
+the following:
+
+1.	Allow the name of an access type A (including "access T") to stand-in
+	for the set of objects described by:
+(for all X convertible to A => X.all)
+
+2.	Allow the name of a package P to stand-in for the set of objects
+	described by:
+(for all variables X declared in P => X)
+
+3.	Allow the word synchronized to be used to represent the set of global
+	variables that are tasks, protected objects, or atomic objects.
+
+Note that references to global constants do not appear in Global annotations. In
+the absence of a global aspect, the subprogram is presumed to read and write an
+unspecified set of global variables, including non-synchronized ones.
+
+...
+
+If one wants to know whether a subprogram has side-effects, it is important to
+know about all data that might be read or written. Access types introduce
+difficulties in determining such side-effects, since the side-effects might
+result after a dereference of a series of pointers to reach an object to be
+updated.  Our proposal addresses this by allowing the programmer to specify the
+name of an access type in a Global aspect. This would be essentially equivalent
+to writing something like;
+
+Global => (In_Out => *.all)
+
+except we can be more specific about the type of the access values being
+dereferenced. For example, consider a visible access type declared as;
+
+type Acc is access T;
+
+and a subprogram that has a value of type Acc in local variable Local, which it
+then uses to read and update an object via Local.all.  It would not be very
+useful to write:
+
+Global => (In_Out => Local.all)
+
+since "Local" means nothing to the caller.  But it could write:
+
+Global => (In_Out => Acc)
+
+to indicate that the caller should be aware that a call on this subprogram is
+updating some object by dereferencing an access value of type Acc. Another
+problematic case involves specifying in a Global aspect a variable that is
+declared inside a package body.  Directly naming such a variable would not have
+meaning to the caller of the subprogram, and would violate encapsulation.
+Similarly, suppose an access type is declared inside the body or private part of
+package P. In both these cases, we treat the private updatable objects as a part
+of the overall state of package P.  We then simply indicate that the subprogram
+is updating some or all of the state of package P:
+
+Global => (In_Out => P)
+
+Now suppose that the objects being updated are all protected or atomic objects.
+Then the caller doesn't really need to worry about which objects are being read
+or updated.  It is always safe to call the subprogram concurrently.  It has some
+side effects, so you cannot assume it is a "pure" subprogram. In this case, we
+could describe the effects as:
+
+Global => synchronized
+
+if it only reads synchronized objects, or:
+
+Global => (In_Out => synchronized)
+
+if it might update synchronized objects as well.
+
+One might be concerned that the number of globals in a subprogram higher in the
+call structure of a larger program might be unmanageable to specify in a Global
+aspect. To address this concern we propose a shorthand for the Global aspect:
+
+Global => (In_Out => all)
+
+where “all” represents all global variables. If the number of non-synchronized
+globals does get large, then it is likely that the subprogram cannot be used in
+a parallel context anyway, hence using all is generally adequate.  By default,
+the global aspect is (In_Out => all) for normal subprograms, and null for
+subprograms in a declared-pure package.
 
 ****************************************************************
 
