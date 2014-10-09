@@ -1,0 +1,595 @@
+!standard 6.1.1(17/3)                                14-10-09  AI05-0131-1/01
+!standard 6.1.1(18/3)
+!class binding interpretation 14-10-09
+!status work item 14-10-09
+!status received 14-08-01
+!priority Medium
+!difficulty Medium
+!qualifier Omission
+!subject Inherited Pre'Class when unspecified on initial subprogram
+!summary
+
+If the initial definition of a primitive subprogram of a tagged type does
+not specify Pre'Class, the corrsponding subprograms of descendant types
+inherit a class-wide precondition of True. 
+
+!question
+
+Consider the following declarations:
+
+    type T is tagged ...
+    procedure P (A : in out T); -- (1)
+
+
+    type TT is new T with ...
+    function Is_OK (A : in TT) return Boolean;
+    procedure P (A : in out TT) with Pre'Class => Is_OK (A); -- (2)
+
+
+    S_Obj : TT;
+    T_Obj : T'Class := T'Class(S_Obj);
+
+    P (S_Obj); -- (3)
+    P (T_Obj); -- (4)
+
+What precondition is evaluated for each of these calls? (Assume all
+are enabled and no exceptions are raised.)
+
+For (3), the specified Pre'Class is evaluated; 6.1.1(18/3) says that no
+precondition is inherited (since none are specified on (1)). So the
+precondition that is evaluared is Is_OK(S_Obj).
+
+For (4), there is no specified precondition (6.1.1(38/3) says that we don't
+care about the class-wide preconditions of the actual body, only the subprogram
+that is nominally invoked). However, we'll dispatch to the body of P,
+effectively giving us the same effect of the call (3) -- except that the
+precondition is different. The body of P cannot assume anything, as there
+is no effective precondition.
+
+Note that the results would be different if (1) has explicitly been given
+a Pre'Class of True. Then the precondition of both calls would be effectively
+True. Something seems wrong here, should this be fixed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+[Optional] Add after 6.1.1(17/3):
+
+   Pre'Class shall not be specified for an overriding primitive
+   subprogram of a tagged type T unless Pre'Class is specified
+   for the corresponding primitive subprogram of some ancestor of
+   T.
+
+AARM Reason: Any such Pre'Class will have no effect, as it will be
+"or"ed with True. As such, it is highly misleading for readers,
+especially for those who are determining the assumptions that can
+be made in the body of the primitive subprogram. Note that in this
+case there is nothing explicit that might indicate that the
+class-wide precondition is ineffective. This rule does not prevent
+explicitly writing an ineffective class-wide precondition (for
+instance, if the parent subprogram has explicitly specified a
+precondition of True).
+
+Revise 6.1.1(18/3) as follows:
+
+   If a Pre'Class or Post'Class aspect is specified for a primitive
+   subprogram of a tagged type T, {or such an aspect defaults to
+   True when no other Pre'Class or Post'Class applies to the subprogram},
+   then the associated expression also applies to the
+   corresponding primitive subprogram of each descendant of T. 
+
+[Editor's note: Tucker included Post'Class in this wording in his
+version that appears in AI12-0113-1. I've kept that, although it is
+irrelevant -- we could just define this for Pre'Class. I also expanded
+his wording to make it clear that the new condition only applies when
+there is nothing specified for Pre'Class, we don't want overriding
+routines to have to re-specify Pre'Class just to prevent the implicit
+True from counterfeiting the inherited precondition.]
+
+!discussion
+
+Note that specifying a class-wide precondition on (2) [the overriding
+subprogram] is strengthening the the precondition, a violation of
+the Liskov Substituability Principle [LSP]. But Pre'Class is intended to
+directly model LSP.
+
+Thus we say that a overriding a subprogram that has no Pre'Class specified
+causes the new subprogram to inherit a Pre'Class of True.
+
+Note that this only applies to "root" subprograms that don't have Pre'Class;
+overriding subprograms that don't have Pre'Class just inherit whatever
+precondition the original subprogram has. Making an unspecified Pre'Class have
+the value True in this case would just cancel the original class-wide
+precondition, which is certainly not what we want.
+
+---
+
+The change to 6.1.1(18/3) is formally an inconsistency, as it will weaken the
+precondition that applies to statically bound calls (like call (3) in the
+question). This might be a problem if the body of the called subprogram
+(P in the example) assumes that the precondition is checked.
+
+As such, we propose a Legality Rule to effectively change this inconsistency
+into an illegality. Any such Pre'Class would have no effect (it would be
+"counterfeited") and would be dangerously misleading to readers. This
+Legality Rule is optional in that we don't need it to have well-defined
+semantics.
+
+That would make this Legality Rule a candidate for being a suppressible
+error (see AI12-0092-1), should that idea ever make it into the Standard.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+If we include the Legality Rule option, then an ACATS B-test should be
+constructed to test that rule. If we don't include the Legality Rule, we
+need an ACATS C-Test to verify that Pre'Class is inherited as
+True when not specified for the parent, even if Pre'Class is specified
+on the child subprogram.
+
+
+!appendix
+
+From: Steve Baird
+Sent: Friday, August 1, 2014  6:16 PM
+
+In the case where Pre'Class would default to True, does (and
+should) explicitly specifying "Pre'Class => True" follow the usual rules for
+a confirming representation item, or can it (portably) change the dynamic
+semantics of the program?
+
+The following is excerpted from an internal AdaCore discussion:
+
+   Ben Brosgol wrote:
+   > In an email exchange a customer raised this question:  if a root
+   > subprogram has a true precondition, and you want to ensure LSP,
+   > should you specify an explicit Pre'Class => True aspect?
+
+   Steve Baird replied:
+   > The question is whether explicitly specifying a Pre'Class of True
+   > is any different than just leaving the aspect unspecified.
+
+After some discussion, Tuck and I concluded that there is an issue here which
+should be corrected or at least clarified.
+
+We'd like such an explicit specification to behave as though it were confirming
+but it appears that it doesn't.
+
+The RM says
+    If a Pre'Class or Post'Class aspect is specified for a primitive
+    subprogram of a tagged type T, then the associated expression also
+    applies to the corresponding primitive subprogram of each
+    descendant of T.
+
+The word "specified" above seems to be at the heart of the matter.
+
+With the current wording, the following analysis (unfortunately)
+applies:
+> So let's consider a subprogram where "no other class-wide precondition
+> applies to the entity" and look at the difference between explicitly
+> specifying True vs. leaving Pre'Class unspecified.
+>
+> case #1 - the callee that is statically named in the call is the given
+> subprogram.
+>    Either way, the caller's Pre'Class check trivially passes
+>    and the callee (which might, dynamically, turn out to be
+>    another subprogram) cannot assume anything more.
+>    So no difference between the two cases.
+>
+> case #2 - the callee that is statically named in the call overrides
+> (an inherited copy) of the given subprogram and that statically named
+> callee has a specified Pre'Class (say, for example, something like
+> Is_Ok (X), where X is a parameter of the subprogram; let's assume that
+> evaluation of Is_Ok has no side-effects and propagates no exceptions,
+> just to keep things simple).
+>
+>    Here, we see a difference for the caller. In the
+>    explicitly-specified-True case, the Pre'Class check cannot
+>    fail (because the Is_Ok result is or'd with True). In the
+>    unspecified case, the check will fail if Is_Ok returns False.
+>
+>    But there is no difference here as far as what the callee can
+>    safely assume because of the possibility of case #1.
+>    In particular, the callee cannot safely assume Is_Ok (X) returned
+>    True.
+>
+> So the only difference for case #2 is that the caller performs a
+> stricter-than-necessary (from the perspective of the callee) check.
+> This is very similar to the situation we see when the dynamic callee
+> is subject to (weakening) Pre'Class conditions that the caller (who
+> sees only the statically denoted callee) doesn't see. The caller
+> performs the checks associated with the statically denoted callee but
+> the dynamically executed callee can only rely on its own (weaker)
+> preconditions.
+
+This does not seem like what we want.
+
+Opinions?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August 1, 2014  7:59 PM
+
+...
+> We'd like such an explicit specification to behave as though it were
+> confirming but it appears that it doesn't.
+
+There is no such thing as confirming for Pre'Class; it is not a representation
+aspect. "Confirming" is only defined for representation aspect (see
+13.1(18.2/3)). That's good, because there are a number of aspects where
+specifying them has to have an effect.
+
+(The whole idea of confirming aspects probably was a mistake, IMHO.
+Compilers should have freedom to do what works best in the absence of
+specification of a representation aspect, which might include not having a
+unique value for aspects like Size. One only wants a requirement if an aspect is
+specified. This prevents defining aspects that actually force a compiler to do
+something.)
+
+> The RM says
+>     If a Pre'Class or Post'Class aspect is specified for a primitive
+>     subprogram of a tagged type T, then the associated expression also
+>     applies to the corresponding primitive subprogram of each
+>     descendant of T.
+>
+> The word "specified" above seems to be at the heart of the matter.
+
+This is correct and intended (I think). It's necessary because Pre'Class
+combines with "or". If an unspecified Pre'Class always was True, then because of
+the "or" any following Pre'Class would necessarily be ignored. (True or
+<anything> always is True.) If we had intended that to be the case, we should
+have banned any such Pre'Class specifications (because they would either
+represent a mistake in understanding or something completely confusing).
+
+For instance,
+
+    type T is tagged ...
+    procedure P (A : in out T); -- (1)
+
+
+    type TT is new T with ...
+    function Is_OK (A : in TT) return Boolean;
+    procedure P (A : in out TT) with Pre'Class => Is_OK (A); -- (2)
+
+The Pre'Class at (2) could never have any effect if (1) is assumed to have a
+Pre'Class of True. If we really meant Pre'Class to work this way, we should not
+even allow a Pre'Class on (2), as it is either misleading or wrong (depending on
+what the programmer expected).
+
+> With the current wording, the following analysis (unfortunately)
+> applies:
+> > So let's consider a subprogram where "no other class-wide
+> > precondition applies to the entity" and look at the difference
+> > between explicitly specifying True vs. leaving Pre'Class unspecified.
+> >
+> > case #1 - the callee that is statically named in the call is the
+> > given subprogram.
+> >    Either way, the caller's Pre'Class check trivially passes
+> >    and the callee (which might, dynamically, turn out to be
+> >    another subprogram) cannot assume anything more.
+> >    So no difference between the two cases.
+> >
+> > case #2 - the callee that is statically named in the call overrides
+> > (an inherited copy) of the given subprogram and that statically
+> > named callee has a specified Pre'Class (say, for example, something
+> > like Is_Ok (X), where X is a parameter of the subprogram; let's
+> > assume that evaluation of Is_Ok has no side-effects and propagates
+> > no exceptions, just to keep things simple).
+> >
+> >    Here, we see a difference for the caller. In the
+> >    explicitly-specified-True case, the Pre'Class check cannot
+> >    fail (because the Is_Ok result is or'd with True). In the
+> >    unspecified case, the check will fail if Is_Ok returns False.
+> >
+> >    But there is no difference here as far as what the callee can
+> >    safely assume because of the possibility of case #1.
+> >    In particular, the callee cannot safely assume Is_Ok (X) returned
+> >    True.
+
+This doesn't make much sense as written. Case #1 is statically bound, and it
+will never actually call the body of the subprogram in case #2.
+
+But if one assumes that case #1 occurs in a *dispatching call*, then you are
+right. (Maybe that's what you meant in the first place, although I can't get it
+from the above.)
+
+That suggests that we blew it, and that Pre'Class should be statically illegal
+on any subprogram whose inherited Pre'Class is True (explicitly or implicitly).
+It does no good whatsoever to allow something which necessarily has to be
+ignored in both the body and in most calls. (This comes back to my original
+suggestion that Pre'Class be only specified on original subprograms and never
+changed. That lost because of a few possible but unlikely examples; this case is
+different however in that it can never provide any actual information.)
+
+> > So the only difference for case #2 is that the caller performs a
+> > stricter-than-necessary (from the perspective of the callee) check.
+> > This is very similar to the situation we see when the dynamic callee
+> > is subject to (weakening) Pre'Class conditions that the caller (who
+> > sees only the statically denoted callee) doesn't see. The caller
+> > performs the checks associated with the statically denoted callee
+> > but the dynamically executed callee can only rely on its own
+> > (weaker) preconditions.
+>
+> This does not seem like what we want.
+
+Humm. This suggests that we have a problem, but the problem is allowing
+Pre'Class to be specified at all on inherited subprograms for which the
+inherited Pre'Class is True. There can be no use to such a Pre'Class if your
+analysis above is correct. (The programmer should be using Pre in such a case,
+it does not have this problem.)
+
+This seems like a high-priority AI to me, because we have to make something
+illegal that's currently allowed. [It cannot mean what the programmer intended,
+because it can't mean anything at all! Allowing that is just a land-mine waiting
+to happen.]
+
+Even so, I'd probably keep the distinction about specification. If someone
+explicitly specifies "Pre'Class => True", they can see that they're doing
+something stupid. OTOH, if they don't specify Pre'Class at all, the stupidity is
+well-hidden. I.e.
+
+     Pre'Class is illegal for a subprogram that overrides a subprogram that does
+     not have Pre'Class specified.
+
+[I suspect this "wording" doesn't properly refer to the overriding subprogram, I
+didn't look that up.] We could try to add something about an explicit
+specification to True, but that's painful because we'd have to decide exactly
+what that means (statically evaluates to True? Statically denotes the literal
+True? Is the literal True? etc.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, August 2, 2014  1:52 PM
+
+> (The whole idea of confirming aspects probably was a mistake, IMHO.
+
+(I tend to agree.)
+
+> This seems like a high-priority AI to me, because we have to make
+> something illegal that's currently allowed.
+
+This is yet another case where a "soft legality rule" makes sense.
+(Yeah, I know, I still haven't written up that AI.) I'd be opposed to
+introducing an incompatibility here, but requiring a diagnostic message makes
+good sense.
+
+>...We could try to add something about an  explicit specification to
+>True, but that's painful because we'd have to  decide exactly what that
+>means (statically evaluates to True? Statically  denotes the literal
+>True? Is the literal True? etc.)
+
+If we decided to go that way, the first possibility seems best.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, August 1, 2014  2:04 PM
+
+>> something illegal that's currently allowed.
+>
+> This is yet another case where a "soft legality rule" makes sense.
+> (Yeah, I know, I still haven't written up that AI.) I'd be opposed to
+> introducing an incompatibility here, but requiring a diagnostic
+> message makes good sense.
+
+What does GNAT do currently? Theoretical talk of incompatibilities is really not
+very helpful, but if GNAT currently allows this, I agree we should treat softly
+in making it illegal, and it is hardly critical to worry about the language for
+soft legality stuff, what is important is that if we decide to go in that
+direction, we should issue a warning in GNAT (it's much easier to add a warning
+in GNAT than to figure out the exactly correct wording of the RM :-))
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, August 2, 2014  3:03 PM
+
+> ... This does not seem like what we want.
+>
+> Opinions?
+
+I think for a "root" operation, the default Pre'Class is effectively True and it
+is the same whether you specify it or not, because clearly any caller through
+this root operation is not performing any Pre'Class check.
+
+For a non-root operation, the default/effective Pre'Class is the "or" of the
+inherited Pre'Class aspects, and if any one of them is True, then this "or" will
+produce True.  For a non-root operation, it is correct that if you don't specify
+it, then it really has no adverse effect, since further descendants have the
+same effective one that applied to this non-root operation.
+
+I would agree that we should encourage a compiler warning if you specify a
+Pre'Class other than True in this latter case.  I don't see a need to make it
+illegal to do so.  In general I can imagine a compiler might generally produce a
+warning if a Pre'Class is specified that it can (easily) determine is completely
+redundant, in that <inherited-pre'class> "or" <new-pre'class> ==
+<inherited-pre'class>, but is not exactly equal to the inherited-pre'class.  Or
+in other words, the new Pre'Class implies the inherited pre'class but does not
+equal it (i.e. it is "strictly stronger" than the inherited one, and so doesn't
+weaken it at all).  And of course anything implies True.
+
+So I do think we need to fix the wording a bit, but given the way Pre'Class
+aspects are used, I don't think this represents an incompatibility, since the
+effective Pre'Class is always determined by the "or" of the Pre'Class aspects
+that any dispatching caller might see.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, August 1, 2014  5:08 PM
+
+> > ... This does not seem like what we want.
+> >
+> > Opinions?
+>
+> I think for a "root" operation, the default Pre'Class is effectively
+> True and it is the same whether you specify it or not, because clearly
+> any caller through this root operation is not performing any Pre'Class
+> check.
+>
+> For a non-root operation, the default/effective Pre'Class is the "or"
+> of the inherited Pre'Class aspects, and if any one of them is True,
+> then this "or" will produce True.  For a non-root operation, it is
+> correct that if you don't specify it, then it really has no adverse
+> effect, since further descendants have the same effective one that
+> applied to this non-root operation.
+
+Excellent point. There is a major difference between what you call "root"
+and "non-root" operations. We clearly need separate rules for them.
+
+Specifically:
+
+   package P1 is
+      type T is tagged ...
+      function Is_OK (A : T) return Boolean;
+      procedure Proc (A : in out T)
+         with Pre'Class => Is_OK (A);
+   end P1;
+
+   with P1;
+   package P2 is
+      type TT is new P1.T with ...
+      procedure Proc (A : in out TT); -- (1)
+   end P2;
+
+There better be a difference for (1) [a "non-root" Proc] as to whether or not
+Pre'Class is specified. We surely want the effective Pre'Class for (1) to be
+"Is_OK (A)" and not "Is_OK (A) or True". OTOH, if Pre'Class is explicitly
+specified on (1):
+      procedure Proc (A : in out TT)
+         with Pre'Class => True;
+then the precondition Pre'Class is indeed "Is_OK (A) or True". So we want the
+effect to be different depending on whether Pre'Class is specified on the
+non-root routine or not.
+
+OTOH, if we reverse it:
+
+   package P3 is
+      type T is tagged ...
+      function Is_OK (A : T) return Boolean;
+      procedure Proc (A : in out T); -- (2)
+   end P3;
+
+   with P3;
+   package P4 is
+      type TT is new P3.T with ...
+      procedure Proc (A : in out TT) -- (3)
+         with Pre'Class => Is_OK (A);
+   end P4;
+
+Then, clearly the precondition on (3) (the "non-root" Proc) needs to be
+"Is_OK(A) or True".
+
+Ergo, we need different rules for what Tucker called "root" or "non-root"
+routines. It doesn't matter if Pre'Class is specified for a "root" routine, it
+always has one. For a "non-root" routine, if it is not specified, it is
+inherited (thus "counterfeiting" any future specified Pre'Class precondition).
+
+My preference is still to have the second situation (declaration (3) above) be
+illegal. To date, we've always made sure that situations where an explicitly
+specified precondition does not necessarily hold in the body cannot occur
+(either by Legality Rules or by semantics).
+
+In particular, 6.1.1(17/3) requires overriding on any subprograms where the
+class-wide precondition would be counterfeited by inheritance. I think this is a
+very similar case. Moreover, the user almost certainly wanted their explicit
+Pre'Class to be enforced (why write it otherwise?); they almost certainly want
+to either write Pre rather than Pre'Class here, (or alternatively, meant to
+write it on the "root" operation). Making it illegal will detect bugs. I'd leave
+the "loophole" such that if the original Pre'Class was explicitly specified as
+True, then the later one would be allowed (even though it still is meaningless).
+That would give users an "out" if they really meant this (although why anyone
+would write that is beyond me).
+
+If we're unwilling to do that, then we will have to change the static semantics
+such that the Pre'Class of a root operation is True if not specified (and
+specifically that class-wide precondition is inherited). (Which is inconsistent
+rather than incompatible, another reason that making it illegal is a better
+choice.) The current situation that the explicit Pre'Class is enforced on some
+calls (statically tagged) but not others (dispatching calls to the root
+operation) is confusing and probably will be thought to be a compiler bug by
+anyone encountering it.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, August 4, 2014  9:57 PM
+
+>> For a non-root operation, the default/effective Pre'Class is the "or"
+>> of the inherited Pre'Class aspects, and if any one of them is True,
+>> then this "or" will produce True.  For a non-root operation, it is
+>> correct that if you don't specify it, then it really has no adverse
+>> effect, since further descendants have the same effective one that
+>> applied to this non-root operation.
+> ... The current situation that the explicit Pre'Class is enforced on
+> some calls (statically tagged) but not others (dispatching calls to
+> the root operation) is confusing and probably will be thought to be a
+> compiler bug by anyone encountering it.
+
+I think the current rule has a plain old wording "bug," and we used the term
+"specified" when we meant "defined" or something like that.  In any case, I
+agree we need to clarify/fix it, such that it is clear that Pre'Class of a root
+operation is True, whether or not you specify it, and that the "True" is
+inherited.  I would be OK with disallowing specifying Pre'Class if you inherit
+"True" from some ancestor, but I don't think it is strictly necessary.  But
+whether the RM says it or not, clearly the "effective" Pre'Class is True if any
+ancestor has it as True, either explicitly or by omission, because there are
+callers who don't check any Pre'Class.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, August 5, 2014  12:33 AM
+
+> That would give users an
+> "out" if they really meant this (although why anyone would write that
+> is beyond me).
+Hmmm... hijacking pre/post for side effects.
+
+For example, you can time a function by starting a timer in the pre and stopping
+it in the post. If you use pre'class and post'class, you can accumulate all
+implementations with a modification in just one place.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August 8, 2014  10:27 PM
+
+> I think the current rule has a plain old wording "bug," and we used
+> the term "specified"
+> when we meant "defined" or something like that.
+
+I guess I disagree here. For the "non-root" case, "specified" is precisely what
+we want. My guess is that we didn't think about the case of adding a class-wide
+precondition later much, because that clearly violates LSP. (It would be
+strengthening the precondition, which isn't allowed by LSP.)
+
+> In any case,
+> I agree we need to clarify/fix it, such that it is clear that
+> Pre'Class of a root operation is True, whether or not you specify it,
+> and that the "True" is inherited.  I would be OK with disallowing
+> specifying Pre'Class if you inherit "True"
+> from some ancestor, but I don't think it is strictly necessary.  But
+> whether the RM says it or not, clearly the "effective" Pre'Class is
+> True if any ancestor has it as True, either explicitly or by omission,
+> because there are callers who don't check any Pre'Class.
+
+Right. If the root operation does not have a Pre'Class, adding one to a
+descendant isn't possible by LSP. The entire point of Pre'Class is to support
+LSP, so the programmer made a mistake (either they wanted Pre as opposed to
+Pre'Class on the descendant, or they want to move the Pre'Class to the root
+operation). Moreover, that Pre'Class is counterfeited, and that counterfeiting
+is implicit (it's not visible in the source code). So I continue to think this
+case should be illegal. (Although I would allow it to happen *explicitly*, both
+because it would give programmers an out if they really meant it -- such as
+J-P's side-effect case, and because it would simplify the rule.)
+
+****************************************************************
