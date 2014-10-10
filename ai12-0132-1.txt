@@ -1,0 +1,170 @@
+!standard 13.14(10.3/3)                                14-10-09  AI05-0132-1/01
+!class binding interpretation 14-10-09
+!status work item 14-10-09
+!status received 14-07-30
+!priority Medium
+!difficulty Medium
+!qualifier Omission
+!subject Freezing of renames-as-body
+!summary
+
+
+!question
+
+AI12-0103-1 appeals to an analogy with renames-as-body in order to determine
+how freezing for expression functions should work.
+
+Unfortunately, a example using renames-as-body has a similar problem
+as the one described in AI12-0103-1 for expression functions:
+
+   package Pack is
+      type Flub is range 0 .. 100;
+      function Foo (A : in Natural) return Natural;
+      function Bar (A : in Natural) return Natural is
+         (A + Flub'Size); -- (A)
+      type Fum is access function Foo (A : in Natural) return Natural;
+      P : Fum := Foo'Access; -- (B)
+      function Foo (A : in Natural) return Natural renames Bar; -- (C)
+      Val : Natural := P.all(5); -- (D)
+   end Pack;
+
+(A) doesn't freeze anything. (B) does not trigger 13.14(10.1/3), since
+Foo is not an expression function. (C) doesn't appear to freeze anything.
+Finally, the call at (D) is legal and passes elaboration checks, but the
+value of the result depends on a representation aspect of the unfrozen
+type Flub.
+
+This hole needs to be plugged somehow, right? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add to the end of 13.14(10.3/3):
+
+If the name of a renames-as-body denotes an expression function, the
+expression of the expression function causes freezing.
+
+!discussion
+
+There isn't any rule in Ada 2012 that causes the freezing of the name of a
+renamed entity.
+
+It may be that we didn't worry about freezing these in Ada 95 and Ada 2005
+because any problems would be detected by a failed elaboration check. For
+instance, an Ada 95 example like the above could have been:
+
+   package Pack2 is
+      type Flub is range 0 .. 100;
+      function Foo (A : in Natural) return Natural;
+      function Bar (A : in Natural) return Natural; -- (A)
+      type Fum is access function Foo (A : in Natural) return Natural;
+      P : Fum := Foo'Access; -- (B)
+      function Foo (A : in Natural) return Natural renames Bar; -- (C)
+      Val : Natural := P.all(5); -- (D)
+   end Pack2;
+
+In this case, nothing freezes Bar, but the call at (D) will raise
+Program_Error, so there will not be any possibility of evaluating something
+unfrozen (like Flub). If Bar had been an instance, it would have frozen
+everything before it.
+
+Thus, it appears that this bug is also related to the introduction of
+expression functions (for which neither the elaboration check nor freezing
+work).
+
+---
+
+The proposed solution applies only to expression functions, as any other
+solution would potentially be incompatible. The author does wonder if there
+is any issue with the convention of the renamed subprogram being changed
+after the renaming, but he doesn't have the mental energy to try to work
+that out. :-)
+
+In the example in the question, the proposed rule means that (C) causes the
+expression of (A) to freeze. Then the call at (D) is safe because Flub has
+been frozen.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+Create an ACATS B-test to check that the case in the question causes a freezing
+error.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, July 30, 2014  8:58 PM
+
+I've just finished doing homework update to AI12-0103-1. But I'm a bit dubious
+about the (near) equivalence between renames-as-body and
+expression-function-as-completion because I can't quite figure out how
+renames-as-body is supposed to work.
+
+The problematical example (thanks, Steve!) for expression-function-as-completion
+was:
+
+   package Pack is
+      type Flub is range 0 .. 100;
+      function Foo (A : in Natural) return Natural;
+      type Bar is access function Foo (A : in Natural) return Natural;
+      P : Bar := Foo'Access; -- (A)
+      function Foo (A : in Natural) return Natural is
+         (A + Flub'Size); -- (B)
+      Val : Natural := P.all(5); -- (C)
+   end Pack;
+
+This is fixed by making (B) freezing of the expression of the expression
+function.
+
+This appears to be essentially the same as a renames-as-body, as the renamed
+entity ought to be frozen at that point. Except that I can't find any rule in
+13.14 that would have that effect. "Renames" is never mentioned anywhere except
+in 13.14(3/3) [which says it doesn't freeze]. The "name" freezing rule of
+13.14(11) would do the trick, except that it requires something to freeze the
+"name" first -- which is what I can't find.
+
+If a renames-as-body *doesn't* freeze the renamed "name", we have the same
+problem as shown above:
+
+   package Pack is
+      type Flub is range 0 .. 100;
+      function Foo (A : in Natural) return Natural;
+      function Bar (A : in Natural) return Natural is
+         (A + Flub'Size); -- (A)
+      type Fum is access function Foo (A : in Natural) return Natural;
+      P : Fum := Foo'Access; -- (B)
+      function Foo (A : in Natural) return Natural renames Bar; -- (C)
+      Val : Natural := P.all(5); -- (D)
+   end Pack;
+
+The call at (D) is legal and passes elaboration checks, but the value of the
+result depends on a representation aspect of the unfrozen type Flub.
+
+The rules we introduced in AI12-0103-1 don't fix this hole, nor does
+13.14(10.1-3/3).  If (C) froze Bar, then one would expect the expression to be
+frozen, too (but unfortunately, that doesn't happen with the current rules -
+only prefixes of 'Access and calls and uses in generic instances cause that
+expression to freeze, and this is none of those.)
+
+Perhaps this is a new problem introduced by the addition of expression functions
+(any Ada 95 case would seem to raise Program_Error or already have been frozen),
+but even that seems weird (we don't want freezing rules to depend on the
+compiler's knowledge that an elaboration check will necessarily fail). If (A) is
+just a normal specification (with a completion in a body somewhere), I don't see
+any rule that would freeze it or the renames-as-body for the call (D).
+
+So, have I missed something or is there a hole here? And is the hole old (just
+wider now) or new? Is there any important value to not freezing the subprogram
+involved in a renames-as-body?
+
+P.S. Gosh, I hate freezing rules. It doesn't get the animosity it deserves since
+we have accessibility and coextensions to take the heat instead. (And
+admittedly, those are a lot worse.)
+
+****************************************************************
