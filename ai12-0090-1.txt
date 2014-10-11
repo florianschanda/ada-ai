@@ -1,4 +1,4 @@
-!standard 9.5.4(5/3)                                   14-10-10  AI05-0090-1/03
+!standard 9.5.4(5/3)                                   14-10-10  AI05-0090-1/04
 !standard 9.5.4(7/3)
 !standard 9.5.4(12/3)
 !class binding interpretation 13-10-31
@@ -11,8 +11,9 @@
 
 !summary
 
-Something sensible happens with the pre- and postconditions when a requeue
-occurs.
+The preconditions of a target entry are evaluated before a call is requeued.
+The postconditions of a target entry have to be the same as those on the
+current entry.
 
 !question
 
@@ -34,59 +35,44 @@ fixed? (Yes.)
 
 !wording
 
-Add after 9.5.4(5/3):
+Add after 9.5.4(5/3) [Legality Rules]:
 
-  For every [Redundant:specific or class-wide] postcondition expression P1
-  that applies to the named entry E1, there shall be exist a postcondition
-  expression P2 that applies to the entry E2 of the innermost
-  enclosing callable construct such that
-    - P1 is fully conformant with the the expression produced by
-      replacing each reference in P2 to a formal parameter of E2
-      with a reference to the corresponding formal paramter of E1; and
+   For every [Redundant:specific or class-wide] postcondition expression P1
+   that applies to the named target E1, there shall be exist a postcondition
+   expression P2 that applies to the entry E2 of the innermost
+   enclosing callable construct such that
+     - P1 is fully conformant with the the expression produced by
+       replacing each reference in P2 to a formal parameter of E2
+       with a reference to the corresponding formal paramter of E1; and
      - if P1 is enabled, then P2 is also enabled.
 
-   AARM Note:
-   Roughly speaking, the postcondition of the requeue target shall imply
-   that of the enclosing callable construct.
+     AARM Note:
+     Roughly speaking, the postcondition of the requeue target is required
+     to imply that of the enclosing callable construct.
 
    The named entry shall not have an applicable specific or class-wide
    postcondition[Redundant:, enabled or not,] which includes an Old
    attribute_reference.
 
-   If the named entry is declared immediately with the task_definition of
+   If the named target is declared immediately with the task_definition of
    a named task type or the protected_definition of a named protected type,
    and if the requeue statement occurs within the body of that type, and
-   if the requeue is an external requeue, then the named entry shall not
+   if the requeue is an external requeue, then the named target shall not
    have a specific or class-wide postcondition[Redundant:, enabled or not]
    which includes a name denoting either the current instance of that
    type or any entity declared within that type's declaration.
 
-[Discussion: This introduces a case where replacing an anonyous
-task/protected type with the "equivalent" type/object declaration pair
-isn't equivalent - the latter version might violate this rule. If this is
-viewed as a problem, the obvious solution is to also ban the construct
-in the case of an anonymous type even though we don't really need to.
-
-We do not attempt to prevent uses in postconditions of things like (instances
-of) Ada.Task_Attributes or Ada.Task_Identification.Current even though
-those might yield different results depending on the identity of the
-task which evaluates the postcondition expression.
-
-There is deliberately no mention of type invariants in the RM wording for
-this AI. The idea is that requeues cannot be used to bypass postcondition
-checks, but they can be used to bypass type invariant checks.]
-
-Insert a new sentence in middle of 9.5.4(7/3):
+Insert a new sentence in middle of 9.5.4(7/3) [Dynamic Semantics]:
 
    The execution of a requeue_statement proceeds by first evaluating the
    procedure_or_entry_name [Redundant:, including the prefix identifying the
    target task or protected object and the expression identifying the entry
    within an entry family, if any]. {Precondition checks are then
-   performed as for a call to the named entry.}
+   performed as for a call to the named requeue target entry or subprogram.}
    The entry_body or accept_statement enclosing the requeue_statement is
    then completed[Redundant:, finalized, and left (see 7.6.1)].
 
-Modify 9.5.4(12/3):
+Modify 9.5.4(12/3) [also in Dynamic Semantics]:
 
    If the requeue target named in the requeue_statement has formal
    parameters, then during the execution of the accept_statement
@@ -107,15 +93,49 @@ the Assertion_Policy is Check, of course.) We need to ensure that E2's
 precondition holds before its body executes, whether or not a requeue is
 a call.
 
+Thus, we require that a requeue check the enabled preconditions of the
+entry E2 before the call is requeued.
+
 One expects the postcondition of E2 will be evaluated, but this is
 problematical if that postcondition includes 'Old references that were never
-evaluated on the original call.
+evaluated on the original call. Moreover, the postcondition of E1 will never
+be evaluated. That means that any promises that the postcondition of E1 makes
+could very well be false.
 
-We can use Legality Rules or dynamic checks to ensure these things are true
-on a requeue. For a Legality Rule, we can use the existing conformance
-mechanism -- we already do that for precondition inheritance. The advantage
-of using Legality Rules is that they can be compatibly relaxed in the future;
-changing runtime rules would be inconsistent.
+Thus, we require that the postconditions of E1 and E2 be the same (fully
+conform). For external requeues, we further require that they don't contain
+any references of parts of the object (such as a task discriminant) which
+might have different values in the different task or protected objects.
+[The objects necessarily are different objects of the same type; otherwise
+the full conformance check would have failed (if the types are different),
+it's an immediate deadlock (if it's the same task object), or it's an
+immediate bounded error that probably raises Program_Error (if it's the
+same protected object). Thus the rule only needs to apply to types and not to
+single objects.] We allow such references if this is an internal call, as
+such references necessarily are to the same object and thus have the same value.
+
+We do not attempt to prevent uses in postconditions of things like (instances
+of) Ada.Task_Attributes or Ada.Task_Identification.Current_Task even though
+those might yield different results depending on the identity of the
+task which evaluates the postcondition expression. That's because Tucker
+doesn't care about the false promise in this case and no one seems to want
+to overrule him. :-) [Seriously, I can't explain why this should be,
+other than that it makes the rule messier to ban them. The minutes only have
+the statement above which is seriously unconvincing. (As noted above, this
+rule only comes into play when the postconditions otherwise fully conform,
+and it only applies on external requeues. As such, it should be triggered
+approximately 0.0001% of the time outside of the ACATS. I may not have
+enough zeros in this value. As such, I'd rather it was foolproof, especially
+given our intent that postconditions don't lie.) - RLB]
+
+We considered the effect on Type Invariants. We eventually concluded that
+the primary use of type invariants is for the writer of the body, so a
+promise to the caller is less important. In addition, type invariants already
+have a number of other holes, so adding one more unlikely way to escape a check
+doesn't change the utility of the feature much. Whereas we believe the checking
+of postconditions cannot be evaded, thus we expect programmers to trust them
+and do not want to introduce any way to have enabled postconditions to be
+unchecked.
 
 !ASIS
 
