@@ -1,0 +1,725 @@
+!standard 13.11.3(5/3)                                14-10-10  AI05-0136-1/01
+!class binding interpretation 14-10-10
+!status work item 14-10-10
+!status received 14-10-08
+!priority Medium
+!difficulty Medium
+!qualifier Omission
+!subject Language-defined packages and aspect Default_Storage_Pool
+!summary
+
+** TBD.
+
+!question
+
+13.11.3(5/3) defines the aspect Default_Storage_Pool that can be used on an
+instance to specify (or override) the default pool used in that instance.
+
+We're wondering about the effect of that aspect on language-defined generic
+units. For instance, it would be useful in some circumstances to use some
+user-defined pool to do allocations in one of the containers, such as
+Ada.Containers.Vectors. Is this expected to work? (???) What happens
+if the pool is does something that the instance isn't expecting, like
+deallocating memory early? (???)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD (some options mentioned in the discussion)
+
+!discussion
+
+Changing the default pool could cause issues for a language-defined package
+that was not expecting such a change. If the pool didn't support some feature
+that the language-defined package was expecting, the package might fail to
+operate as expected.
+
+Similarly, many pools allow deallocation of memory via techniques other than
+the standard language-defined ones; deallocating memory that a language-defined
+package is still using would almost certainly crash the partition. Note that
+the usual bailout (13.11.2(16/3)) will not work in this case, as the evaluation
+of the name is hidden in the body of the language-defined package -- which
+may not even be written in Ada.
+
+While 13.11(21) declares a malfunctioning Allocate routine erroneous, there
+are no such rules for any of the other routines in a Storage_Pool. Any unexpected
+behavior could cause a language-defined package to malfunction.
+
+Note that the use of the default pool by language defined generics varies from
+never (Generic_Elementary_Functions) to unlikely (Bounded containers) to
+maybe (Discrete_Random), to likely (Direct_IO, for file management)
+to certain (Indefinite containers). Whether we want blanket rules for all or
+just for the units that are likely to use the standard pool needs to be decided.
+
+Currently, there is no requirement on how language-defined units are
+implemented. As such, they might use no allocators at all, or use a custom
+pool (for group deallocations, perhaps), or use the default pool. This would
+be portability problem if users start expecting specifying the pool on an
+instance of a language-defined package to have an effect.
+
+We need to have some rules that apply to the use of aspect Default_Storage_Pool
+on a language-defined generic, so that users know what is and is not expected
+to work.
+
+The easiest rule would be to simply disallow the use of aspect
+Default_Storage_Pool on language-defined packages. If we're not prepared to
+decide what this means, it may be best to not allow it at all. Then, in the
+future, we could decide on a meaning unencumbered by existing uses.
+
+Nearly as easy is to declare that any instantiation of a language-defined unit
+with aspect Default_Storage_Pool is erroneous. The only downside to this is
+that it would allow users that don't care or don't understand erroneousness to
+ignore that and do it anyway. That could be a portability problem, but at least
+it would be one clearly noted in the Standard.
+
+No matter what we do, we could also except Pure packages from any rule, since
+they shouldn't have any state, and thus no allocators, anyway.
+
+We could try to be more specific about what causes problems:
+
+For an instance of a language-defined generic unit that has aspect
+Default_Storage_Pool specified:
+   * Execution is erronous if the requirements of 13.11 for Allocate
+     are violated for any call to Allocate for the specified pool.
+   AARM Discussion: We're talking specifically about the definition of erronous
+   execution when a pool is used with an access type; the same rules
+   apply to such a standard package.
+   AARM Ramification: If any memory is deallocated while the instance of the
+   language-defined unit is still using it, execution is erroneous.
+
+We'd probably want to say something about the operations in a pool that
+supports subpools. Indeed, this seems to be missing from 13.11.4; there
+should at a minimum be wording that says that execution is erroneous
+if the address returned from Allocate_From_Subpool does not meet the
+requirements for the address returned from Allocate described in 13.11.
+If we added such wording to 13.11.4, then a minor change is needed above:
+
+   * Execution is erronous if the requirements of 13.11 for Allocate
+     or the requirements of 13.11.4 for Allocate_From_Subpool are
+     violated for any call to Allocate for the specified pool.
+
+I'm not sure if we need any protection against any of the other routines
+malfunctioning. For a regular pool, the existing rule is enough as
+Deallocate problems would necessarily cause the Allocate to fail to meet
+its requirements, and Storage_Size doesn't have any critical meaning anyway.
+That's not so clear for pools that support subpools, as a malfunctioning
+Create_Subpool or Default_Subpool_for_Pool could have serious effects.
+
+
+We could also try to make it work for language-defined units. That would look
+something like:
+
+Implementation Requirements
+
+If a language-defined generic unit declares an access type which is used to
+allocate memory, it shall use the default pool.
+
+AARM Reason: This allows using aspect Default_Storage_Pool to force allocations
+to use a specified pool. Note that we don't make any requirements on the
+size or number of allocations from the default pool, so any pool specified
+as the Default_Storage_Pool for an instance of a language-defined package
+ought to support any reasonable allocations.
+
+We would still need erroneous execution wording like that above.
+
+This isn't going to allow anything useful for pools supporting subpools;
+that would require adding subpool parameters somewhere in the definition
+of the package -- at the point we've lost all transparency.
+
+Also note that en-mass deallocations only could be safe after the instance
+has been destroyed (gone out of scope); we would not want to put any
+additional requirements on how language-defined packages manage memory.
+(In particular, we wouldn't want to prevent the use of memory caches
+in the containers, which could prevent repeated allocate/deallocate
+cycles in some uses.)
+
+
+Note that making it work only matters to generic packages; we don't have a
+mechanism to change the default pool for normal packages.
+
+
+We also could just make some generic packages work (the unbounded and
+indefinite containers, which seem most useful) and leave the others
+unspecified. That may make more sense, since the handling of files
+(for instance) may or may not be able to work in a user-defined pool,
+and it may not matter anyway as many of the I/O packages aren't generic.
+
+For any packages that we're not requiring to work, we need at a minimum
+some sort of erroneous execution wording, and probably a note to say that
+changing the default pool may or may not have any effect; doing that is
+not going to be usefully portable.
+
+
+This is probably enough musings on this topic; we need to decide what we want
+before continuing here.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+Erroneous execution can't be tested. (If we require some units to do something
+useful, we could make ACATS C-Tests to test that.)
+
+!appendix
+
+From: Brad Moore
+Sent: Wednesday, October  8, 2014  9:33 PM
+
+I have been thinking more on this AI lately.
+As we last left this, the idea was to extend the Default_Storage_Pool pragma to
+allow 'Standard' be used to represent the allocation method used by the
+implementation.
+
+I think we are still missing some important capabilities here and I think we may
+still want to consider providing an object declared in some package that can be
+referenced, possibly in addition to the pragma.
+
+I have been working lately with the C++ STL containers on an embedded project,
+and noted that their templates provide an optional argument that may be
+specified during the template (generic) instantiation, to replace the std
+allocator.
+
+It strikes me that this capability would be useful also for the Ada containers.
+There currently does not appear to be a way to override the storage pool used by
+the standard containers.
+
+I think probably the way to add this capability would be to add a defaulted
+generic formal parameter to the containers, where the default identifies the
+implementations default allocator. In this way, the change could be introduced
+in a manner that I believe would be backwards compatible to existing container
+implementations.
+
+Since storage pools are limited types, I think the way to do this would be to
+use an access type, which defaults to the standard pool.
+
+eg. something like;
+
+generic
+    type Index_Type is range <>;
+    type Element_Type is private;
+
+    with function "=" (Left, Right : Element_Type) return Boolean is <>;
+
+    Pool : not null access Root_Storage_Pool'Class
+      := System.Storage_Pools.Standard.Standard_Storage_Pool'Access
+package Ada.Containers.Vectors is
+...
+
+
+However, there currently is no way to obtain an access value to the standard
+storage pool, as far as I can tell.
+
+Bob Duff noted in the email of the AI that one can obtain a declaration for the
+standard pool, by using a renames, as in;
+
+type My_Access_Type is access all String;
+
+The_Standard_Storage_Pool: Root_Storage_Pool'Class
+     renames My_Access_Type'Storage_Pool;
+
+However one cannot use this technique to declare an aliased storage pool object,
+which would be needed to have a default for a generic formal.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October  8, 2014  11:26 PM
+
+...
+> It strikes me that this capability would be useful also for the Ada
+> containers. There currently does not appear to be a way to override
+> the storage pool used by the standard containers.
+
+That's intentional; at least we've discussed this idea in the past and
+determined it to not be worthwhile enough to support. Let me find the AI in
+question ...
+
+Ah, it's part of AI05-0001-1 (which defined the bounded forms). That AI notes
+that specifying the storage pool as considered as an alternative to the bounded
+forms, but that would be complicated to make work.
+
+I wrote a long message in February 2006 on this topic (find it in the AI),
+noting a variety of reasons why it isn't a good idea. You are only addressing
+one, and it's the least important one. It might make sense for some other
+container form, but not for the existing forms (it makes the
+unbounded/indefinite forms unsafe [or at least appear unsafe], and the bounded
+forms don't allocate anything anyway).
+
+---
+
+In any case, having this capability doesn't require changing AI12-0003-1 at all.
+Remember that we already have an aspect for instantiations Default_Storage_Pool;
+that can be used to change the pool used by an instance. So something like:
+
+          package Foobar is new Ada.Containers.Vectors (Integer)
+              with Default_Storage_Pool => My_Pool;
+
+*might* have the effect you are looking for here. It might not work if the
+implementation used an explicit pool in the definition of the container (there's
+no requirement to use the default pool currently).
+
+If we actually wanted to support user-defined pools in the containers, we'd need
+to add some wording requiring the use of the default pool for allocations, as
+well as a bunch of weasel wording about the container being erroneous if the
+user-defined pool deallocates memory other than in reaction to a Deallocate
+call, or if the user-defined pool does something not allowed by 13.11. Of
+course, that might make some clever implementations illegal, so there'd be a
+potential compatibility problem (one that I think wouldn't happen in practice,
+but since the containers are an Ada 2005 thing, there are a number of
+implementations and we surely don't know what they all do -- we'd have to
+check).
+
+But we certainly wouldn't need a name for the standard pool.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, October  9, 2014  12:35 AM
+
+> I wrote a long message in February 2006 on this topic (find it in the
+> AI), noting a variety of reasons why it isn't a good idea. You are
+> only addressing one, and it's the least important one. It might make
+> sense for some other container form, but not for the existing forms
+> (it makes the unbounded/indefinite forms unsafe [or at least appear
+> unsafe], and the bounded forms don't allocate anything anyway).
+
+I read the reasons but didn't find them overly convincing.
+
+1) There is no good way to name the default storage pool.
+     - That wouldn't be the case if we found a good way to name the default
+       storage pool. :-) But as you point out below, we probably don't need
+       this, if we can generally override the default pool on an instantiation.
+
+2) If people are worried about the safety of using a user-defined pool with a
+     container, then they don't have to do that. Though I could see that they
+     might be unpleasantly surprised if things didn't work well when switching
+     to a different compiler vendor. As long as the pools allowed allocations of
+     any size, and didn't attempt to do premature deallocation, I would think
+     they should be relatively safe.
+
+I didn't agree with the comment that the limitations meant that there wouldn't
+be much in the way of useful storage pools that could be used with containers.
+
+Some of the containers I am thinking of, might actually help improve general
+performance issues such as those that are currently being discussed in the other
+thread on tampering checks.
+
+For example, if a container is only being used by one task, it might use a pool
+that doesn't involve synchronization to obtain storage, which could be faster
+than a malloc() like call.
+
+Some container objects are only used as temporary objects that are disposed of
+once the scope of the declaration is left. For those, it might make sense to use
+a storage pool such as a subpool-based pool which follows a simple scheme that
+only allocates storage from the end of a block, and does not have to worry about
+freeing individual objects, and coalescing storage.
+
+The programmer might want to supply a pool more suitable for a real-time
+application, such as a TLSF algorithm (Two Level Segregated Fit), which has O(1)
+cost for malloc, fre, realloc, and memalign.
+
+http://www.gii.upv.es/tlsf/
+
+An embedded system with limited memory resources might use a bounded pool of
+storage with the unbounded containers, when one doesn't know the bounds to
+specify for a bounded container, or might want to use a pool that can map the
+storage to a specific location in memory.
+
+etc.
+
+> ---
+>
+> In any case, having this capability doesn't require changing
+> AI12-0003-1 at all. Remember that we already have an aspect for
+> instantiations Default_Storage_Pool; that can be used to change the
+> pool used by an instance. So something like:
+>
+>            package Foobar is new Ada.Containers.Vectors (Integer)
+>                with Default_Storage_Pool => My_Pool;
+
+Thanks for pointing that possibility out. That goes a long way to addressing the
+need. I think I tried something like;
+
+pragma  Default_Storage_Pool (My_Pool);
+
+package Foobar is new Ada.Containers.Vectors (Integer);
+
+which didn't seem to affect the instantiation, but I should try this again to
+confirm. Or perhaps this is different than applying the aspect to the
+instantiation?
+
+> *might* have the effect you are looking for here. It might not work if the
+> implementation used an explicit pool in the definition of the container
+> (there's no requirement to use the default pool currently).
+
+Maybe it would help if there were implementation advice to not use
+explicit pools in the definition of the standard containers.
+
+> If we actually wanted to support user-defined pools in the containers, we'd
+> need to add some wording requiring the use of the default pool for
+> allocations, as well as a bunch of weasel wording about the container being
+> erroneous if the user-defined pool deallocates memory other than in reaction
+> to a Deallocate call, or if the user-defined pool does something not allowed
+> by 13.11. Of course, that might make some clever implementations illegal, so
+> there'd be a potential compatibility problem (one that I think wouldn't
+> happen in practice, but since the containers are an Ada 2005 thing, there
+> are a number of implementations and we surely don't know what they all do --
+> we'd have to check).
+
+Wording effort would be considered, as you mention...
+
+> But we certainly wouldn't need a name for the standard pool.
+
+That's good to hear.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October  9, 2014  1:09 AM
+
+...
+> I read the reasons but didn't find them overly convincing.
+
+I think they were more convincing in 2006; we didn't have bounded forms yet nor
+subpools (block deallocation was never safe in a pool that contained controlled
+objects).
+
+...
+> 2) If people are worried about the safety of using a user-defined pool
+> with a container, then they don't have to do that. Though I could see
+> that they might be unpleasantly surprised if things didn't work well
+> when switching to a different compiler vendor. As long as the pools
+> allowed allocations of any size, and didn't attempt to do premature
+> deallocation, I would think they should be relatively safe.
+
+It's not about "people being worried about the safety", it's about having to add
+a long list of pool-related reasons that a container could be erroneous. That's
+bad PR even for people who will never use a pool (wow, look at how unsafe these
+things are!) Admittedly, that's in part because we want to be truthful. It also
+would seem to be a portability problem, as a pool that would work with one
+implementation's containers might not work with another's (including an
+"improved" version of the original implementation's containers).
+
+I don't like things that put implicit restrictions on implementations; it's the
+standard's job to do that explicitly and then get out of the way.
+
+...
+> Some container objects are only used as temporary objects that are
+> disposed of once the scope of the declaration is left. For those, it
+> might make sense to use a storage pool such as a subpool-based pool
+> which follows a simple scheme that only allocates storage from the end
+> of a block, and does not have to worry about freeing individual
+> objects, and coalescing storage.
+
+That wouldn't buy much unless the container knew about the subpools; the
+expensive operation (finalization) would still be performed on a
+component-by-component basis and it would be done when the container wanted to
+do it rather than being associated with the subpool destruction. Plus (of
+course) that the container would put everything into the default subpool,
+because it wouldn't know about that. Making every container use a pool with
+subpools would be overkill, especially as the subpool would have to be specified
+for each container for maximum flexibility.
+
+...
+> Thanks for pointing that possibility out. That goes a long way to
+> addressing the need. I think I tried something like;
+>
+> pragma  Default_Storage_Pool (My_Pool);
+>
+> package Foobar is new Ada.Containers.Vectors (Integer);
+>
+> which didn't seem to affect the instantiation, but I should try this
+> again to confirm. Or perhaps this is different than applying the
+> aspect to the instantiation?
+
+I believe the pragma applies only to the generic, not to the instantiation.
+That's why there is a separate aspect. (Well, I'm not that sure why it is this
+way, but I'm sure there is some Bairdian reason. :-)
+
+> > *might* have the effect you are looking for here. It might not work
+> > if the
+> > implementation used an explicit pool in the definition of the
+> > container (there's no requirement to use the default pool currently).
+>
+> Maybe it would help if there were implementation advice to not use
+> explicit pools in the definition of the standard containers.
+
+That'd be one way to handle it, I guess.
+
+> > If we actually wanted to support user-defined pools in the
+> > containers, we'd
+> > need to add some wording requiring the use of the default pool for
+> > allocations, as well as a bunch of weasel wording about the
+> > container being
+> > erroneous if the user-defined pool deallocates memory other than in reaction
+> > to a Deallocate call, or if the user-defined pool does something not allowed
+> > by 13.11. Of course, that might make some clever implementations illegal, so
+> > there'd be a potential compatibility problem (one that I think
+> > wouldn't happen in practice, but since the containers are an Ada
+> > 2005 thing, there
+> > are a number of implementations and we surely don't know what they
+> > all do --
+> > we'd have to check).
+>
+> Wording effort would be considered, as you mention...
+
+Certainly nonzero. And a nonzero chance of introducing a real incompatibility
+with an existing implementation.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, October  9, 2014  9:45 AM
+
+>> If people are worried about the safety of using a user-defined pool
+>> with a container, then they don't have to do that. Though I could see
+>> that they might be unpleasantly surprised if things didn't work well
+>> when switching to a different compiler vendor. As long as the pools
+>> allowed allocations of any size, and didn't attempt to do premature
+>> deallocation, I would think they should be relatively safe.
+>
+> It's not about "people being worried about the safety", it's about
+> having to add a long list of pool-related reasons that a container could
+> be erroneous.
+> That's bad PR even for people who will never use a pool (wow, look at
+> how unsafe these things are!) Admittedly, that's in part because we
+> want to be truthful. It also would seem to be a portability problem,
+> as a pool that would work with one implementation's containers might
+> not work with another's (including an "improved" version of the
+> original implementation's containers).
+
+But don't we already have this case, with your claim that one can do the
+following?
+
+package Foobar is new Ada.Containers.Vectors (Integer)
+     with Default_Storage_Pool => My_Pool;
+
+Incidentally, I tried this with one of the Ada 2012 vendors, ;-)
+
+but got the error message,
+
+    "aspect identifier expected".
+
+And to confirm, I also tried
+
+pragma Default_Storage_Pool (My_Pool);
+package Foobar is new Ada.Containers.Vectors (Integer);
+
+But this did not result in the usage of My_Pool.
+
+Maybe the vendor has not fully implemented the pragma yet, or is choosing to
+ignore it here....
+
+
+>>> If we actually wanted to support user-defined pools in the containers, we'd
+>>> need to add some wording requiring the use of the default pool for
+>>> allocations, as well as a bunch of weasel wording about the container being
+>>> erroneous if the user-defined pool deallocates memory other than in reaction
+>>> to a Deallocate call, or if the user-defined pool does something not allowed
+>>> by 13.11. Of course, that might make some clever implementations illegal, so
+>>> there'd be a potential compatibility problem (one that I think wouldn't
+>>> happen in practice, but since the containers are an Ada 2005 thing, there
+>>> are a number of implementations and we surely don't know what they all do --
+>>> we'd have to check).
+>>
+>> Wording effort would be considered, as you mention...
+>
+> Certainly nonzero. And a nonzero chance of introducing a real
+> incompatibility with an existing implementation.
+
+Since we apparently already support user-defined pools with the
+containers via supplying an aspect on the instantiation, perhaps this
+wording is already needed. :-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October  9, 2014  10:57 AM
+
+> But we certainly wouldn't need a name for the standard pool.
+
+If we decide we want that for other reasons, it might be best to think of it as
+"A standard pool" (as opposed to "THE..."), because in the past, people were
+worried that "the standard pool" implies that implementations must by default
+use the same pool for all types. There is no such implication:  "the standard
+pool" just needs to be suitable for all types (must support all sizes and
+alignments). The implementation can use some other pool(s) if it likes.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October  9, 2014  2:21 PM
+
+> > It's not about "people being worried about the safety", it's about
+> > having to add a long list of pool-related reasons that a container
+> > could be erroneous.
+> > That's bad PR even for people who will never use a pool (wow, look
+> > at how unsafe these things are!) Admittedly, that's in part because
+> > we want to be truthful. It also would seem to be a portability
+> > problem, as a pool that would work with one implementation's
+> > containers might not work with another's (including an "improved"
+> > version of the original implementation's containers).
+>
+> But don't we already have this case, with your claim that one can do
+> the following?
+>
+> package Foobar is new Ada.Containers.Vectors (Integer)
+>      with Default_Storage_Pool => My_Pool;
+
+It's not a "claim", it's 13.11.3(5/3).
+
+And you're right, in that we forgot to say something about the effect of that on
+language-defined packages. We should have either said that it will work, or that
+it won't. As it stands, it's a crap shoot - use is non-portable at best, plus it
+might even break some implementation of some package (what happens for I/O
+packages that allocate file blocks on the heap? Etc.). We shouldn't have put
+vendors at that sort of risk.
+
+> Incidentally, I tried this with one of the Ada 2012 vendors, ;-)
+>
+> but got the error message,
+>
+>     "aspect identifier expected".
+
+They obviously failed to implement 13.11.3(5/3). A bug report would be a good
+idea. (And an ACATS test would be appreciated as well -- one of the most
+important benefits of ACATS tests is that they reduce errors of omission, as no
+one can forget to implement something that is tested.)
+
+> And to confirm, I also tried
+>
+> pragma Default_Storage_Pool (My_Pool); package Foobar is new
+> Ada.Containers.Vectors (Integer);
+>
+> But this did not result in the usage of My_Pool.
+
+Right, that's by definition. The pragma operates on the generic unit, and it is
+whatever is defined in the generic unit that is used in the absence of the
+aspect.
+
+> Maybe the vendor has not fully implemented the pragma yet, or is
+> choosing to ignore it here....
+
+No, their implementation is correct in this case. The pragma should only have an
+effect when the generic unit is compiled (and you're not compiling
+Ada.Containers.Vectors).
+
+> >>> If we actually wanted to support user-defined pools in the
+> >>> containers, we'd
+> >>> need to add some wording requiring the use of the default pool for
+> >>> allocations, as well as a bunch of weasel wording about the
+> >>> container being
+> >>> erroneous if the user-defined pool deallocates memory other than
+> >>> in reaction
+> >>> to a Deallocate call, or if the user-defined pool does something
+> >>> not allowed
+> >>> by 13.11. Of course, that might make some clever implementations illegal, so
+> >>> there'd be a potential compatibility problem (one that I think wouldn't
+> >>> happen in practice, but since the containers are an Ada 2005
+> >>> thing, there
+> >>> are a number of implementations and we surely don't know what they
+> >>> all do --
+> >>> we'd have to check).
+> >>
+> >> Wording effort would be considered, as you mention...
+> >
+> > Certainly nonzero. And a nonzero chance of introducing a real
+> > incompatibility with an existing implementation.
+>
+> Since we apparently already support user-defined pools with the
+> containers via supplying an aspect on the instantiation, perhaps this
+> wording is already needed. :-)
+
+You're right that there is a problem, but it's a general one about the effect of
+this aspect on language-defined generics. Any language-defined generic could
+have this aspect used, but it might make trouble for many of them. I mentioned
+files above, but any language-defined package that uses the heap is at risk.
+
+We at a minimum need a blanket statement about language-defined packages in
+13.11.3. (The easy thing is to declare it erroneous, but that might be
+overkill.) Whether to require it to be meaningful for containers is a separate
+but related question. Either way, we need an AI.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, October 10, 2014  12:01 AM
+
+>> package Foobar is new Ada.Containers.Vectors (Integer)
+>>       with Default_Storage_Pool => My_Pool;
+>
+
+>> Incidentally, I tried this with one of the Ada 2012 vendors, ;-)
+>>
+>> but got the error message,
+>>
+>>      "aspect identifier expected".
+>
+> They obviously failed to implement 13.11.3(5/3). A bug report would be
+> a good idea. (And an ACATS test would be appreciated as well -- one of
+> the most important benefits of ACATS tests is that they reduce errors
+> of omission, as no one can forget to implement something that is
+> tested.)
+
+Attached is a B test and a C test I just wrote to test this and other things
+stated in 13.11.3 (5/3)
+
+The tests expose several issues that are not working correctly with GNAT GPL
+2014 with respect to the Default_Storage_Pool pragma.
+
+[Editor's note: you can find the tests in a forthcoming ACATS update.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October 10, 2014  12:22 AM
+
+...
+> > They obviously failed to implement 13.11.3(5/3). A bug report would
+> > be a good idea. (And an ACATS test would be appreciated as well --
+> > one of the most important benefits of ACATS tests is that they
+> > reduce errors of omission, as no one can forget to implement
+> > something that is
+> > tested.)
+>
+> Attached is a B test and a C test I just wrote to test this and other
+> things stated in 13.11.3 (5/3)
+
+Cool! I wasn't expecting service this fast.
+
+> The tests expose several issues that are not working correctly with
+> GNAT GPL 2014 with respect to the Default_Storage_Pool pragma.
+
+I'm sure Ed will be thrilled to hear that. :-) :-)
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Friday, October 10, 2014  3:47 PM
+
+I couldn't wait ... there goes the weekend!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October 10, 2014  8:58 PM
+
+> I couldn’t wait ... there goes the weekend!
+
+:-)
+
+In your defense, I just noticed that I didn't have the aspect in the list of
+Ada 2012 things to test, either. It turns out that I forgot to mention it in
+the AARM extension note 13.11.3(9.c/3), so anyone who actually trusted those
+rather than carefully reading the text of the Standard probably missed it.
+
+OTOH, the pragma Default_Storage_Pool has an assigned priority of 8 for
+testing, which meant that I would have soon created a test for it had Brad not
+done it first. So Brad merely pushed the pain up a couple of months...
+
+****************************************************************
