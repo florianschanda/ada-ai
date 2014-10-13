@@ -1,4 +1,4 @@
-!standard 7.3.2(3/3)                                13-06-28    AI12-0079-1/00
+!standard 7.3.2(3/3)                                13-10-13    AI12-0079-1/01
 !class Amendment 13-06-28
 !status work item 13-06-28
 !status received 13-06-14
@@ -41,18 +41,79 @@ accomplish that goal.
 
 !proposal
 
-Note that the "new" SPARK (currently in development) will include aspects to
-specify dependencies on globals by subprograms. These can form the root of a
-solution for Ada. They're not enough by themselves, as SPARK does not include
-dynamic memory allocation, so we need to add (at a minimum) support for
-dependence on storage pools to the SPARK mechanism.
+[Note: the following is mostly a direct quote from the paper "Safe
+Parallel Programming in Ada with Language Extensions" prepared for HILT
+2014.]
 
-[Editor's note: The above is all that I know at this point, June 2013. Hopefully,
-we'll have more information when we start working seriously on Ada 2020.]
+To encourage convergence with SPARK we are starting from the SPARK
+Global aspect. However, for Ada, it is necessary to extend this aspect
+to cover a broader spectrum of usage, since Ada includes access types
+and other features not allowed in SPARK.
 
-We had a partially worked out proposal in AI05-0186-1, for types, packages, and
-subprograms. We considered that proposal too immature to use in Ada 2012, but
-at least some of the ideas it embodies could be useful.
+The Global aspect in SPARK 2014 is applied to subprogram specifications,
+and is of the following form:
+
+  with Global => (Input => ...,
+                  In_Out => ..., Output => ...)
+                 
+where “...” is either a single name, or a parenthesized list of names, and
+Input, In_Out, and Output identify the variables global to the
+subprogram that are accessed by this subprogram, in read-only,
+read-write, or write-only mode, respectively. If there are no variables
+global to the subprogram accessed with a particular parameter mode, then
+that mode is omitted from the specification. If there are only global
+inputs, and no outputs or in-outs, then this syntax can be further
+simplified to: 
+
+  with Global => ...
+
+where again "..." is a single name, or a parenthesized list of names.
+
+Finally, if there are no global inputs, in-outs, nor outputs, then:
+
+  with Global => null
+  
+is used.
+
+We need to refine the notion of SPARK's Global aspect, because SPARK
+does not support access types, and because SPARK relies on an elaborate
+mechanism for handling the abstract “state” of packages.  The
+refinements we are proposing are the following:
+
+1.	Allow the name of an access type A (including "access T") to
+stand-in for the set of objects described roughly by: 
+
+   (for all X convertible to A => X.all)
+   
+2.	Allow the name of a package P to stand-in for the set of objects
+described roughly by: 
+
+   (for all variables X declared in P => X)
+   
+3.	Allow the word *synchronized* to be used to represent the set of
+global variables that are tasks, protected objects, or atomic objects.
+
+4.  Allow the word *all* to be used to represent the set of all
+variables global to the subprogram, including variables designated by
+access values of types global to the subprogram.
+
+Note that references to global constants do not appear in Global
+annotations. In the absence of a global aspect, a subprogram in a pure
+package is presumed to reference no global variables (Global => null),
+while a subprogram in an impure package is presumed to read and write an
+unspecified set of global variables, including non-synchronized ones
+(Global => (In-Out => all)).
+
+We also allow a Global aspect on a package, which can be used to establish a
+default for all subprograms declared within the package specification.  The
+default can be overridden for any particular subprogram by specifying the
+Global aspect for that subprogram.
+
+For dispatching operations, a Global'Class aspect may be specified,
+which represents an upper bound on the set of up-level variables that
+any particular overriding of that operation may reference in each of the
+specified modes.  In the absence of a Global'Class aspect, the default
+for the Global aspect is used for the Global'Class aspect.
 
 !wording
 
@@ -61,27 +122,46 @@ at least some of the ideas it embodies could be useful.
 
 !discussion
 
-The global in and global out annotations ought to be descriptive.
-That is, the annotations describe the behavior of the subprogram body,
-initialization/finalization of a type, or elaboration of a package.
-As such, these annotations should be checked. There is no benefit to be gained
-from lying about side-effects; such incorrect information could easily lead
-to incorrect code being generated (if the compiler uses the annotations).
-Moreover, if it is impractical to specify the correct annotations, it makes
-sense to specify none at all.
+Global annotations are critical to being able to perform any sort of modular
+static analysis.
 
-All of the global in and global out annotations proposed can be statically
-checked. It is possible to imagine annotations that cannot be statically
-checked, but these are assumptions as opposed to descriptive. Assumptions are
-a different set of annotations.
+All of the global in, in-out, and out annotations proposed can be
+statically checked.
 
-Note that it is possible to lie about the use of globals of subprograms and other
-entities that are imported. This is of course impossible to check, but thankfully
-is covered by B.1(38.1/2). Incorrect annotations on imported subprograms could
-cause a program to be erroneous.
+Note that it is possible to lie about the use of globals of subprograms
+and other entities that are imported. This is of course impossible to
+check, but thankfully is covered by B.1(38.1/2). Incorrect annotations
+on imported subprograms could cause a program to be erroneous.
+
+SPARK does not currently support identifying particular components of a
+global variable in the Global aspect, but for Ada we plan to allow that.
+This is somewhat inconsistent with what can be specified for parameters,
+since there is no easy way to identify which components of an in-out
+parameter are actually updated. It is possible to specify in a
+postcondition that X.C = X.C'Old and X.D = X.D'Old and ... but that can
+be a maintenance issue as the names and numbers of subcomponents
+changes, and only works for types that have an appropriate "=" operator.
+It might be useful to have another aspect that indicated which
+components of an in-out parameter might be updated, with all others
+presumably being preserved (e.g. Updated => (X.A, X.B)).
+
+Note that SPARK has a "Refined_Global" aspect which can be specified on
+the body of a subprogram, to specify a more restricted set of globals
+for those callers that have visibility on the body.  This could be added
+at a later point if it was felt to be important.
 
 
 !example
+
+  package Random is
+    procedure Set_Seed(Seed : Float);
+       with Global => (Out => Random);
+         --  Initialize state of Random package
+         
+    function Next_Random return Float
+       with Global => (In_Out => Random);
+         --  Update state of Random package
+  end Random;
 
 !ASIS
 
