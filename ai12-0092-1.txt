@@ -1,22 +1,20 @@
-!standard 1.1.5(4)                                  13-11-01    AI12-0092-1/00
-!class Amendment 13-11-031
+!standard 1.1.5(4)                                  14-10-13    AI12-0092-1/01
+!class Amendment 13-11-01
 !status received 13-08-29
 !priority Low
 !difficulty Medium
-!subject Soft errors
+!subject Soft Legality Rules
 !summary
 
-Errors are split into two categories, one for errors that must cause the
-program to fail to compile (hard errors, the usual case), and those that still
-allow the program to be executed (soft errors).
+Soft legality rules are introduced.
 
 !problem
 
 In numerous cases, the ARG has gotten stuck between a rock and a hard place:
 Some situation really IS an error, so we want it to be detected, preferably at
 compile time. But making it illegal is an incompatibility. The ARG then had to
-choose between allowing errors to go undetected (bad) and breaking existing
-code (also bad).
+choose between allowing errors to go undetected (bad) and breaking existing code
+(also bad).
 
 !proposal
 
@@ -24,17 +22,159 @@ code (also bad).
 
 !wording
 
-** TBD.
+RM-1.1.2 says:
+
+    24/3 Each section is divided into subclauses that have a common structure.
+    Each clause and subclause first introduces its subject. After the
+    introductory text, text is labeled with the following headings:
+
+                                   Legality Rules
+
+    27  Rules that are enforced at compile time. A construct is legal if it
+    obeys all of the Legality Rules.
+...
+                               Post-Compilation Rules
+
+    29  Rules that are enforced before running a partition. A partition is legal
+    if its compilation units are legal and it obeys all of the Post-Compilation
+    Rules.
+
+Change RM-1.1.2-(27) to:
+
+    27  Rules that are enforced at compile time. A compilation_unit is legal if
+    it is syntactically well formed and it obeys all the the Legality Rules. If
+    a compilation_unit is illegal, the implementation shall issue one or more
+    diagnostic messages indicating that fact.
+
+    27.1  Each Legality Rule is either "hard" or "soft". Legality Rules are
+    hard, unless explicitly specified as soft. Redundant[The run-time
+    semantics are well defined even in the presence of violations of soft
+    legality rules. There is a mode in which such violations do not
+    prevent the program from running (see 10.2).]  The hard/soft distinction
+    applies in the same way to Syntax and Post-Compilation Rules.
+
+Change RM-1.1.2-(29) to:
+
+    29  Rules that are enforced before running a partition. A partition is legal
+    if its compilation units are legal and it obeys all of the Post-Compilation
+    Rules. If a partition is illegal, the implementation shall issue one or more
+    diagnostic messages indicating that fact.
+
+NOTE: Violation of Syntax, Legality, and Post-Compilation Rules requires a
+diagnostic message, whether the rule is hard or soft.
+
+AARM: The form/wording of diagnostic messages is not defined by the standard.
+
+AARM: There is no implication regarding the severity of soft rules, nor the
+probability that they represent real errors. One soft Legality Rule might be a
+serious issue, while another might be no big deal.
+
+Editor's note:  I expect we can use the heading:
+
+                                   Legality Rules (soft)
+
+to indicate soft rules in most cases. In some cases, we might want to be more
+explicit, as in "This is a soft Legality Rule". No need to get all pedantic
+here.
+
+RM-1.1.5 says:
+
+    1   The language definition classifies errors into several different
+    categories:
+
+    2     * Errors that are required to be detected prior to run time by every
+	    Ada implementation;
+
+    3       These errors correspond to any violation of a rule given in this
+	    International Standard, other than those listed below. In
+	    particular, violation of any rule that uses the terms shall,
+	    allowed, permitted, legal, or illegal belongs to this category. Any
+	    program that contains such an error is not a legal Ada program; on
+	    the other hand, the fact that a program is legal does not mean, per
+	    se, that the program is free from other forms of error.
+
+    4       The rules are further classified as either compile time rules, or
+	    post compilation rules, depending on whether a violation has to be
+	    detected at the time a compilation unit is submitted to the
+	    compiler, or may be postponed until the time a compilation unit is
+	    incorporated into a partition of a program.
+
+That's Ada-83 talk -- since Ada 95, we haven't used magic words "shall",
+"allowed", etc. to indicate kinds of errors -- we explicitly label them Legality
+Rules.  So delete most of the above:
+
+    1   The language definition classifies errors into several different
+    categories:
+
+    2     * Errors that are required to be detected prior to run time by every
+	    Ada implementation;
+
+    3       These errors correspond to any violation of a Syntax Rule, Legality
+            Rule, or Post-Compilation Rule.
+
+RM-10.2 says:
+
+27  The implementation shall ensure that all compilation units included in a
+    partition are consistent with one another, and are legal according to the
+    rules of the language.
+
+Change it to:
+
+27  The implementation shall ensure that all compilation units included in a
+    partition are consistent with one another. A violation of the hard Legality
+    Rules prevents the partition from running. For each soft Legality Rule, the
+    implementation shall provide two modes: one in which a violation of the rule
+    prevents the partition from running, and the other in which a violation does
+    not prevent running. Similar requirements apply to hard/soft Syntax and
+    Post-Compilation Rules.
 
 !discussion
 
-** TBD.
+The primary purpose of soft Legality Rules is to enable the addition of new
+Legality Rules without causing incompatibilities. An example from the past is
+when we added rules disallowing passing the "same" actual parameter to multiple
+formal 'out' parameters of a function. Since functions didn't used to allow
+'out' parameters at all, there was no incompatibility. But for uniformity, it
+made sense to extend these rules to procedures. But that's incompatible, and in
+practice, existing code sometimes does:
 
-Terminology:
-The original proposal was for "fatal error" and "nonfatal error". That wasn't
-liked because it misuses a common (outside of Ada) term.
-We settled on "hard error" and "soft error". Also suggested was "major error"
-and "minor error".
+    Some_Procedure(..., Ignore, Ignore);
+
+There was no good solution: We had a choice between inferior language rules and
+incompatibilities. The "soft" concept solves the dilemma: We could have made the
+new rules soft, thus providing diagnostic messages for questionable code, while
+still retaining compatibility. Individual projects can then decide if or when to
+modify their code to obey the rules. The language designers cannot effectively
+make such decisions; we have no idea how costly it is to coordinate source-code
+changes, possibly across multiple organizations.
+
+Whether we should retroactively soften the 'out' rules should be the subject
+of another AI. Another AI should consider whether "unrecognized pragma" should
+be a soft legality rule. Other possible soft rules:
+   new reserved words.
+   Limited function return (when not immutably limited).
+   Requirement that overriding "=" come early enough to compose.
+
+Rejected terminology: Several alternatives were suggested.  "fatal
+error"/"nonfatal error" -- no good because "fatal error" usually means something
+else (in particular, an error that stops a program dead in its tracks). A
+compiler might consider "missing source file" to be a fatal error. "hard
+error"/"soft error" and "major error"/"minor error" were also considered. But
+it's confusing to use the word "error" at all, because the RM already uses
+"error" to refer to bounded errors, exceptions, and erroneous behavior.
+"Required warning" was also suggested, but people found that to be too weak.
+
+In any case, no terminology can be perfect here, because only the programmer can
+decide whether a given diagnostic message should be taken seriously. For
+example, if you port code containing pragma Defer_Aborts from GNAT to a compiler
+that doesn't support Defer_Aborts, the RM requires a warning. But that's a
+serious error: the program needs to be redesigned. If the pragma is Check, on
+the other hand, the warnings can be safely ignored.
+
+The point of soft errors is to require a diagnostic message. We leave it up to
+implementations whether to word their messages with "warning:" or "HORRIBLE
+ERROR:" or "eh, no big deal", or whatever. And we leave it up to programmers to
+decide when and how to change their code.
 
 !ASIS
 
@@ -42,7 +182,10 @@ No ASIS impact.
 
 !ACATS test
 
-A new class of ACATS tests is needed to test nonfatal errors.
+Soft legality rules should be tested via B tests in the usual way (requiring
+diagnostic messages). In addition, a new C test should be added that violates a
+soft legality rule, and is expected to run in the "allow to run" mode.
+
 
 !appendix
 
@@ -5659,5 +5802,259 @@ and is going around in circles. I am not really interested in what Janus/Ada
 does :-). I suggest Randy take it off line if he wants to pursue it further
 (although I won't contribute any more in any case). Sorry for all the noise.
 
-****************************************************************
+*****************************************************************
 
+From: Bob Duff
+Sent: Monday, October 13, 2014  12:19 PM
+
+New version of AI12-0092-1, Soft legality rules. [Editor's note: This is
+version /01 of the AI.]
+
+*****************************************************************
+
+From: Bob Duff
+Sent: Monday, October 13, 2014  12:37 PM
+
+> New version of AI12-0092-1, Soft legality rules.
+
+To any ARG members planning to go to the upcoming WG9 meeting:
+
+Please take note of this email, which is filed in AI12-0092-1.TXT:
+
+    From: Robert Dewar
+    Sent: Tuesday, September  3, 2013  2:13 PM
+
+    > I am somewhat neutral on the "soft error" concept.  It does allow us
+    > to introduce incompatibilities without "officially" doing so, but our
+    > attempts to do that with "unreserved keywords" always ran into trouble
+    > with WG-9.
+
+    That's just a lack of competent political lobbying IMO!
+
+...and subsequent replies.
+
+History:  ARG has proposed unreserved keywords to preserve compability.
+Every time, WG9 has rejected the idea.  The problem is that there is a conflict:
+
+    (1) On the one hand, programs really shouldn't be using keywords
+        as identifiers, so keywords should be reserved.
+
+    (2) On the other hand, they already do (when new ones are added),
+        so newly added keywords should NOT be reserved.
+
+(1) is a matter of taste/style.  (2) is matter of huge amounts of wasted money.
+IMHO, it's totally irresponsible to place more importance on (1) than on (2).
+
+I'd like to know who on WG9 is so opposed to nonreserved keywords, and why they
+don't consider compatibility more important.
+
+I'd also like to know whether the notion of "soft Legality Rules"
+would solve the problem in their view.  The idea is that we can add a keyword
+like "interface", and add a soft legality rule forbidding the use of "interface"
+as an identifier, thus requiring a diagnostic message, so people can fix their
+programs.  But they don't have to fix them RIGHT NOW.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 13, 2014  1:20 PM
+
+> To any ARG members planning to go to the upcoming WG9 meeting:
+
+It's unlikely that we'll have time to look at any Amendments at this meeting,
+because the meeting is shorter than usual and we have to finish the Corrigendum.
+The only looking at Amendments that we'll likely do is to look at them to see if
+there are any that we want to reclassify as Binding Interpretations so that
+they'll appear in the Corrigendum.
+
+> Please take note of this email, which is filed in AI12-0092-1.TXT:
+>
+>     From: Robert Dewar
+>     Sent: Tuesday, September  3, 2013  2:13 PM
+>
+>     > I am somewhat neutral on the "soft error" concept.  It does allow us
+>     > to introduce incompatibilities without "officially" doing so, but our
+>     > attempts to do that with "unreserved keywords" always ran into trouble
+>     > with WG-9.
+>
+>     That's just a lack of competent political lobbying IMO!
+>
+> ...and subsequent replies.
+
+BTW, the quote is from Tucker (that confused me at first).
+
+...
+> I'd like to know who on WG9 is so opposed to nonreserved keywords, and
+> why they don't consider compatibility more important.
+
+The short answer to the first question was "everyone not from the US". My
+recollections on the second is that they considered the impact on tools and on
+education to be more important. They thought it was important that there would
+be no exceptions to the rules.
+
+> I'd also like to know whether the notion of "soft Legality Rules"
+> would solve the problem in their view.  The idea is that we can add a
+> keyword like "interface", and add a soft legality rule forbidding the
+> use of "interface" as an identifier, thus requiring a diagnostic
+> message, so people can fix their programs.  But they don't have to fix
+> them RIGHT NOW.
+
+My guess (and it's just a guess) is that the root objection is to the option,
+and as such, a suppressible error provides no help.
+
+(Why have you to reverted to calling them "soft errors"? No one liked that
+term.)
+
+I fear that even suppressible errors will be a hard sell, for that same reason.
+I think we'll be able to show that they make things like parallel operations
+safer without being overly restrictive (considering you can always turn off the
+checks and proceed at your own risk). But I remain dubious that they have much
+use for compatibility (there's only a few cases where we have checks that
+sensibly can be turned off).
+
+***************************************************************
+
+From: Bob Duff
+Sent: Monday, October 13, 2014  2:41 PM
+
+> The short answer to the first question was "everyone not from the US".
+> My recollections on the second is that they considered the impact on
+> tools and on education to be more important. They thought it was
+> important that there would be no exceptions to the rules.
+
+Weak arguments, IMHO.  If Robert is right that "That's just a lack of competent
+political lobbying IMO!", then somebody (not me) should do some competent
+political lobbying.  Or maybe some technical lobbying -- to me the
+gratuitous-compatibility issue is compelling.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 13, 2014  3:07 PM
+
+With the change in WG 9 voting away from National Bodies, it seems that it will
+be easier to make and win such arguments. But we'd have to be careful that we
+don't just move the problem to the SC 22 level.
+
+It appears to me that the concern about compatibility is strongly correlated to
+the distance from AdaCore. The further you are from AdaCore, the less likely
+that you find it important. And of course part of that is the word "gratuitous",
+since necessary incompatibility comes from needing to fix previous mistakes.
+IMHO, the most unnecessary incompatibility/inconsistency in Ada 2012 was the
+change in record equality semantics, yet no one is arguing that we should
+eliminate that change. So one could argue that the lack of interest from WG 9 to
+date reflects more their judgment of the relative importance of the
+incompatibility vs. the alternatives.
+
+Anyway, I'm making someone else's argument for them, so I'll stop now.
+
+***************************************************************
+
+From: Dr. Joyce L Tokar
+Sent: Monday, October 13, 2014  6:05 PM
+
+It is worth noting that the direction from SC 22  to conduct working group
+business as a collection of experts, all of which have been designated by a
+National Body or Liaison organization, may have considerable implications as
+documents are put forward for approval above WG 9.  The concept is that the WG
+members advise their given National Bodies when a document is put forward for
+approval. So, if there is a lack of consensus within a given National Body
+within WG 9, then it is plausible for that lack of consensus to result in
+conflicting recommendations to a NB when it comes time to vote.  In my
+experience, such conflicts are realized as a vote against approval or an
+abstention.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 13, 2014  1:15 PM
+
+...
+>     27.1  Each Legality Rule is either "hard" or "soft".  Legality Rules are
+>     hard, unless explicitly specified as soft.
+
+I thought we'd decided to proceed on the idea of "suppressible" errors (as
+opposed to "soft" errors). Any particular reason why you changed the terminology
+back? Or was it just an oversight?
+
+***************************************************************
+
+From: Bob Duff
+Sent: Monday, October 13, 2014  2:40 PM
+
+The previous version of the AI says this:
+
+    Terminology:
+    The original proposal was for "fatal error" and "nonfatal error". That
+    wasn't liked because it misuses a common (outside of Ada) term. We settled
+    on "hard error" and "soft error". Also suggested was "major error" and
+    "minor error".
+
+So I thought "soft" was the final decision.
+
+I explained in the !discussion why "error" is confusing.  Compiler writers (and
+compiler users) talk about "errors" and "warnings" (etc) meaning "various kinds
+of diagnostic messages" and the situations that trigger those messages.  But
+that's not at all how the RM uses the term "error".  See "Classification of
+Errors" in chap 1.  Hence, I went with "soft Legality Rule".  If you want to
+talk about the errors, it's "violations of soft legality rules", which is a
+mouthful, but that's OK because it's rare.
+
+For example, in one message, you wrote:
+
+    (1) The default in standard mode is that it is an error (the program is not
+    allowed to execute).
+
+But that's not at all what the RM says!  Bounded errors, exceptions, and
+erroneous execution are all considered "errors" by the RM, yet they do not stop
+the program from running.
+
+I read through the entire !appendix, and there were positive notes about "soft".
+Many folks like "suppressible", but to me that might imply suppressing the
+diagnostic message, which is exactly the opposite of what we're trying to do.
+
+I don't much care what we call these things (other than that the term "error"
+doesn't fit in very well).  There is no term that is always "right", because
+some of these things are going to be serious errors and some will be minor.
+Only the user can decide.  The only important thing is to require that certain
+things trigger a diagnostic message.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 13, 2014  7:41 PM
+
+> So I thought "soft" was the final decision.
+
+No, that was from the original placeholder AI (which was based on e-mail
+discussion). When we talked about it in a meeting afterwards (Pittsburgh - you
+were there), we decided on "suppressible error", I think because that suggests
+the default direction (detected by default). I didn't update the AI afterwards
+because I thought your were going to do it soon.
+
+> I read through the entire !appendix, and there were positive notes about "soft".
+> Many folks like "suppressible", but to me that might imply suppressing
+> the diagnostic message, which is exactly the opposite of what we're trying to do.
+
+Opposite how? The idea is that these are errors that usually prevent the
+partition from running (at least WRT to the Standard). If one suppresses them,
+you can run the partition. And surely there would be no message in the latter
+case (there's no point in forcing a separate suppression of the message, as most
+projects want to be warning clean as well as error clean, requiring people to
+write two suppression pragmas and/or options would be silly).
+
+Obviously, in the case where they are suppressed there has to be well-defined
+semantics (which might be erroneous in some cases) so whatever happens when they
+are run makes sense. But I don't see any value to a nagging message after
+explicit suppression, and surely no value to *requiring* that (that's up to
+implementers, if they have customers that find an intermediate mode useful).
+
+P.S. Yes, I saw your comments on "error", and I agree that you're right about
+that. So probably we're talking "suppressible Legality Rule" or something like
+that.
+
+P.P.S. And of course I understand Robert's contention that the Ada standard
+can't really specify the default behavior; I think it important that the
+Standard reflect that intent even if it not really enforceable.
+
+***************************************************************
