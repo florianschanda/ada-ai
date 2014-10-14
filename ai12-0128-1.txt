@@ -1,4 +1,4 @@
-!standard C.6(15)                                   14-10-03    AI12-0128-1/01
+!standard C.6(15)                                   14-10-06    AI12-0128-1/02
 !standard C.6(20)
 !standard C.6(22/2)
 !class Amendment 14-10-03
@@ -195,6 +195,25 @@ True" into wording and have it remain readable. Especially as I found that
 I had a few more rules than I originally expected. But we don't strictly
 need it.
 
+---
+
+I'm assuming that C.6(20) is a critical part of C.6, as it allows matching
+the operations to the oddities of the hardware. (In particular, the
+write-only register case noted above.) If that's not true, we may want to
+explore supporting direct component reads/writes using the full size of
+the object (but only by declaration by an aspect, so as to keep
+compatibility).
+
+One thought comes up. If the hardware can't access only the bits of a
+volatile object, what happens for writes? Consider the example below.
+For a read of component Ready, a read of the whole object and a bit-mask
+certainly will work and not violate C.6(20). However, any write of
+of component Ready would have to have a pre-read of the other bits of the
+object before writing the component, and that necessarily would violate
+C.6(20) [there would be no read in the source]. I don't see any rules
+allowing compilers to reject such component accesses or to reject volatile
+objects with such components, so does that mean C.6(20) is baloney?
+Or do we have a hole? Or what?
 
 !example
 
@@ -959,5 +978,725 @@ proposed aspect.
 
 [I'm being a little more vague than usual because I haven't actually written up
 the AI yet, I'll probably do that later this week.]
+
+****************************************************************
+
+From: Matthias Richter
+Sent: Sunday, October 5, 2014  6:55 AM
+
+> > - 'atomic' doesn't inhibit the optimisation described above.
+>
+> Yes it does. C.6(22/2) says that accessing only part of the bits is wrong.
+> (Note that this is Implementation Advice only because what it means to
+> access bits of the object is undefined and undefinable in Ada terms.
+> We believe that IA is stronger than an requirement in this case
+> because an implementation is required to document any IA that is not
+> followed.) Remember that all atomic objects are also volatile.
+>
+> > A byte write has exactly the same result as a word write which
+> > leaves the other three bytes unchanged - if a byte write is allowed
+> > at the particular address. And since it is not split in multiple
+> > writes, it is 'atomic' in its literal sense.
+>
+> No, such a write clearly violates C.6(22/2).
+
+Are these rules meant to be followed literally?
+Or is it sufficient when the behaviour of the program is 'as if' the rules are
+followed?
+
+Apparently, GNAT (respective its makers) has chosen the latter interpretation:
+
+|  7.1.10 Atomic Variables and Optimization
+|
+| There are two considerations with regard to performance when atomic
+| variables are used.
+|
+| First, the RM only guarantees that access to atomic variables be
+| atomic, it has nothing to say about how this is achieved, though there
+| is a strong implication that this should not be achieved by explicit
+| locking code. Indeed GNAT will never generate any locking code for
+| atomic variable access (it will simply reject any attempt to make a
+| variable or type atomic if the atomic access cannot be achieved
+| without such locking code).
+|
+| That being said, it is important to understand that you cannot assume
+| that the entire variable will always be accessed. Consider this example:
+|
+|
+|
+| type R is record
+|
+|    A,B,C,D : Character;
+|
+| end record;
+| for R'Size use 32;
+| for R'Alignment use 4;
+|
+| RV : R;
+| pragma Atomic (RV);
+| X : Character;
+| ...
+| X := RV.B;
+|
+| You cannot assume that the reference to RV.B will read the entire
+| 32-bit variable with a single load instruction. It is perfectly
+| legitimate if the hardware allows it to do a byte read of just the B
+| field. This read is still atomic, which is all the RM requires. GNAT
+| can and does take advantage of this, depending on the architecture and
+| optimization level.
+| Any assumption to the contrary is non-portable and risky. Even if you
+| examine the assembly language and see a full 32-bit load, this might
+| change in a future version of the compiler.
+
+(source: https://docs.adacore.com/gnat-unw-docs/html/gnat_ugn_8.html#SEC97 )
+
+I think, the clause 'if the hardware allows it' in the last paragraph is part
+of the problem: Compilers assume that the smallest addressable unit is the
+same over the whole address space. There is no way to tell a compiler if
+there are exceptions for specific addresses or address ranges.
+
+Same problem in C6(22/2): System.Storage_Unit is a global value.  There is no
+way to tell if there are exceptions for specific addresses or address ranges.
+
+> The problem discussed on comp.lang.ada came about because the object in
+> question was composite. That means that all of the components are also
+> volatile. Thus, accessing a single component HAD to be done as a byte read
+> or write -- as the component itself is volatile -- such an operation is not
+> even atomic (the whole object is not considered). A compiler that wrote the
+> entire object in this case would be violating C.6(22/2) for the component.
+>
+> That's the bug: a composite volatile variable that must be accessed in a
+> fixed size can only be accessed as a whole, never as an individual
+> component. The requirement C.6(20) and the advice C.6(22/2) together mean
+> that the program source must not attempt such an operation (if the
+> read/write size actually matters).  The Ada compiler ought to give some
+> support for this (but it can't be the default for compatibility reasons and
+> because in many situations there is no problem). I am proposing an aspect
+> for this purpose (as a response to Simon Clubley's question).
+
+I still think it would be very useful if it would be possible to directly
+access single fields of a record which is e.g. mapped to an IO register.
+
+It is an adequate level of abstraction, because it reflects the intent of the
+programmer: He don't want to do a read-modify-write cycle (which would be
+explicit if one has to use temporary variables), he simply wants to access a
+single field of the record. The read-modify-write cycle is only a means to an
+end. Of course, the programmer should know that a read-modify-write cycle is
+generated - but someone who does this kind of low-level programming knows
+anyways that there is no other way of doing these accesses.
+
+The semantic of 'C'-bitfields described in the
+
+'Procedure Call Standard for the ARM Architecture'
+http://infocenter.arm.com/help/topic/com.arm.doc.ihi0042e/IHI0042E_aapcs.pdf
+
+may be appropriate:
+
+| 7.1.7.5
+| Volatile bit-fields?preserving number and width of container accesses
+| When a volatile bit-field is read, its container must be read exactly once
+| using the access width appropriate to the type of the container.
+| When a volatile bit-field is written, its container must be read exactly
+| once and written exactly once using the access width appropriate to the
+| type of the container. The two accesses are not atomic. Multiple accesses
+| to the same volatile bit-field, or to additional volatile bit-fields
+| within the same container may not be merged. For example, an increment of
+| a volatile bit-field must always be implemented as two reads and a write.
+| Note Note the volatile access rules apply even when the width and
+| alignment of the bit-field imply that the access could be achieved more
+| efficiently using a narrower type. For a write operation the read must
+| always occur even if the entire contents of the container will be
+| replaced. If the containers of two volatile bit-fields overlap then
+| access to one bit-field will cause an access to the other. For example,
+| in struct S {volatile int a:8; volatile char b:2}; an access to a will
+| also cause an access to b, but not vice-versa.
+| If the container of a non-volatile bit-field overlaps a volatile bit-field
+| then it is undefined whether access to the non- volatile field will cause
+| the volatile field to be accessed.
+
+
+Would this be doable if not the whole record but only its components are
+marked as volatile? A possibility to specify the access width (if it's
+different from System.Storage_Unit) still would be necessary (that would be
+the equivalent of the 'container type' in 'C').
+
+> > - For a write to parts of an atomic object I would expect
+> > that the full read- modify-write cycle is atomic.
+>
+> See above. Writing to a part of an atomic object is going to result in
+> nonsense because of the other rules of the language. Making some sort of
+> atomic read/write cycle is going to break the semantics of the necessarily
+> volatile components. The only sensible thing is to prevent writing part of
+> an atomic object altogether, which ought to be done with help from the
+> compiler (not the current situation of telling people not to do that).
+> That's the point of the proposed aspect.
+
+I wanted to say: 'If partial writes are allowed, I would expect that the full
+read-modify-write cycle is atomic'.
+Because of the problems you mentioned and the fact that atomic read-modify-
+write cycles are quite heavyweight on most architectures, i think as well that
+it would be best to forbid partial writes to atomic objects.
+
+Fortunatetly, in the use case 'IO registers', atomic accesses are rarely
+needed. In a sensible program, there are usually no concurrent accesses to the
+same IO register from multiple tasks. In the rare cases where concurrent
+accesses can occur, the access control can (and should) be programmed
+explicitely.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 6, 2014  8:45 PM
+
+> > No, such a write clearly violates C.6(22/2).
+>
+> Are these rules meant to be followed literally?
+
+Yes.
+
+> Or is it sufficient when the behaviour of the program is 'as if' the
+> rules are followed?
+
+Well, this is not testable in terms of the "effect" of an Ada program - they
+make no change to that effect. That's why they can only be "advice". There is no
+way that such rules could ever be anything more, since the only way to tell if
+they are followed or not is to examine the generated code -- which is out of
+bounds for the Standard and for the ACATS.
+
+OTOH, we have the advice so that the intent of the language is clear (even if it
+doesn't formally mean anything). Thus, if they are violated, you can go to your
+implementer and complain (not that they have to do anything if they don't want,
+but then at least you'll know something about your implementer).
+
+So to answer your question, it's sufficient in the sense that advice can be
+ignored (but that fact ought to be documented), but it clearly violates the
+intent of the advice -- ignoring the advice without documentation of some sort
+is wrong.
+
+> Apparently, GNAT (respective its makers) has chosen the latter
+> interpretation:
+>
+> |  7.1.10 Atomic Variables and Optimization
+> |
+> | There are two considerations with regard to performance when atomic
+> | variables are used.
+> |
+> | First, the RM only guarantees that access to atomic variables be
+> | atomic, it has nothing to say about how this is achieved, though
+> | there is a strong implication that this should not be achieved by
+> | explicit locking code. Indeed GNAT will never generate any locking
+> | code for atomic variable access (it will simply reject any attempt
+> | to make a variable or type atomic if the atomic access cannot be
+> | achieved without such locking code).
+> |
+> | That being said, it is important to understand that you cannot
+> | assume that the entire variable will always be accessed. Consider this example:
+> |
+> |
+> |
+> | type R is record
+> |
+> |    A,B,C,D : Character;
+> |
+> | end record;
+> | for R'Size use 32;
+> | for R'Alignment use 4;
+> |
+> | RV : R;
+> | pragma Atomic (RV);
+> | X : Character;
+> | ...
+> | X := RV.B;
+> |
+> | You cannot assume that the reference to RV.B will read the entire
+> | 32-bit variable with a single load instruction. It is perfectly
+> | legitimate if the hardware allows it to do a byte read of just the B
+> | field. This read is still atomic, which is all the RM requires. GNAT
+> | can and does take advantage of this, depending on the architecture
+> | and optimization level.
+> | Any assumption to the contrary is non-portable and risky. Even if
+> | you examine the assembly language and see a full 32-bit load, this
+> | might change in a future version of the compiler.
+>
+> (source:
+> https://docs.adacore.com/gnat-unw-docs/html/gnat_ugn_8.html#SEC97 )
+
+Actually, their documentation is misleading here, but not in the way that you
+are hoping. RV.B is an access to a volatile object, and as such C.6(22/2)
+applies to it. Therefore, if the machine supports an 8-bit read, then the
+compiler ought to use it to avoid accessing the other bits of the object. Using
+a 32-bit read is wrong if an 8-bit read is available; it violates the advice and
+that fact should be documented somehow. This is NOT any sort of optimization,
+it's the way things are prescribed to work.
+
+Expecting this to work means that you're expecting the Advice to be followed in
+some cases and ignored in other cases, and you're pretty much expecting the
+compiler to guess in which cases you think that is important. (Note again that
+none of this discussion has anything in particular to do with Atomic; these
+rules apply to all Volatile objects and Atomic is just a special case of that.)
+
+> I think, the clause 'if the hardware allows it' in the last paragraph
+> is part of the problem: Compilers assume that the smallest addressable
+> unit is the same over the whole address space. There is no way to tell
+> a compiler if there are exceptions for specific addresses or address
+> ranges.
+>
+> Same problem in C6(22/2): System.Storage_Unit is a global value.
+> There is no way to tell if there are exceptions for specific addresses
+> or address ranges.
+
+The combination of C.6(20) and C.6(22/2) makes this irrelevant -- if you don't
+WRITE any accesses of incorrect size, you won't GET any accesses of incorrect
+size. But any component access is certain to be of incorrect size for the object
+as a whole, so you must not write those.
+
+> > The problem discussed on comp.lang.ada came about because the object
+> > in question was composite. That means that all of the components are
+> > also volatile. Thus, accessing a single component HAD to be done as
+> > a byte read or write -- as the component itself is volatile -- such
+> > an operation is not even atomic (the whole object is not
+> > considered). A compiler that wrote the entire object in this case would
+> > be violating C.6(22/2) for the component.
+> >
+> > That's the bug: a composite volatile variable that must be accessed
+> > in a fixed size can only be accessed as a whole, never as an
+> > individual component. The requirement C.6(20) and the advice
+> > C.6(22/2) together mean that the program source must not attempt
+> > such an operation (if the read/write size actually matters).  The
+> > Ada compiler ought to give some support for this (but it can't be
+> > the default for compatibility reasons and because in many situations
+> > there is no problem). I am proposing an aspect for this purpose
+> > (as a response to Simon Clubley's question).
+>
+> I still think it would be very useful if it would be possible to
+> directly access single fields of a record which is e.g. mapped to an IO
+> register.
+
+Lots of things are "very useful" but don't make much sense in the grand scheme
+of Ada. We don't want to introduce incompatibility specifically for this
+relatively unlikely case. For instance, changing the rules so these components
+aren't volatile would almost certainly cause other problems with the language,
+and probably cause problems for existing users who don't have this particular
+size issue.
+
+I could imagine some special "notwithstanding" rules for reads of atomic
+components, but I don't think that those alone would be very useful.
+
+OTOH, having a special rule for writes of atomic components is madness, IMHO.
+Such a rule would necessarily require a read-before-write, which would mean that
+C.6(20) would have to be repealed for them. I think that C.6(20) is the
+cornerstone of the C.6 rules. One reason is that it means that you can access
+write-only registers purely in Ada. If you have an implicit read-before-write,
+that would fail on hardware with write-only device registers. You could say
+"users with write-only registers ought to avoid using components", but that just
+means that we'd be swapping one problem for another nearly as likely problem.
+
+Now, it's possible that my thinking on C.6(20) is not shared by the rest of the
+ARG. In that case, C.6 needs a pretty significant overhaul, and that would
+necessarily be incompatible (at least formally) by eliminating guarentees. (I've
+not heard anyone express the opinion that C.6 needs such a overhaul, but I could
+be wrong.)
+
+To me, this is an area where abstraction is a bad idea, mainly because there are
+as many different rules for accessing hardware devices as there are devices. We
+want Ada to be able to manage as many of them as possible, and having volatile
+objects be WYISIWYG makes that possible.
+
+> It is an adequate level of abstraction, because it reflects the intent
+> of the
+> programmer: He don't want to do a read-modify-write cycle (which would
+> be explicit if one has to use temporary variables), he simply wants to
+> access a single field of the record. The read-modify-write cycle is
+> only a means to an end. Of course, the programmer should know that a
+> read-modify-write cycle is generated - but someone who does this kind
+> of low-level programming knows anyways that there is no other way of doing these accesses.
+
+This I quite doubt; you're assuming that programmers are thinking at this very
+low level when writing this code. But the entire reason for using Ada is to get
+away from that level (else a small assembler subprogram would probably be
+better), people are unlikely to remember it. And you have the same problem as
+before, now it's just on write-only 32-bit-only registers instead of all
+32-bit-only registers.
+
+I could see trying to make reads do only 32-bit accesses in such cases, but the
+problem is avoiding incompatibilities with existing code that is perfectly happy
+with the existing smaller reads. There'd probably have to be a declaration that
+such reads are what you wanted, which is the point of the proposed aspect (see
+AI12-0128-1, not yet posted but it will be no later than next Monday).
+
+...
+> > See above. Writing to a part of an atomic object is going to result
+> > in nonsense because of the other rules of the language. Making some
+> > sort of atomic read/write cycle is going to break the semantics of
+> > the necessarily volatile components. The only sensible thing is to
+> > prevent writing part of an atomic object altogether, which ought to
+> > be done with help from the compiler (not the current situation of telling
+> > people not to do that).
+> > That's the point of the proposed aspect.
+>
+> I wanted to say: 'If partial writes are allowed, I would expect that
+> the full read-modify-write cycle is atomic'.
+> Because of the problems you mentioned and the fact that atomic
+> read-modify- write cycles are quite heavyweight on most architectures,
+> i think as well that it would be best to forbid partial writes to atomic
+> objects.
+>
+> Fortunatetly, in the use case 'IO registers', atomic accesses are
+> rarely needed. In a sensible program, there are usually no concurrent
+> accesses to the same IO register from multiple tasks. In the rare
+> cases where concurrent accesses can occur, the access control can (and
+> should) be programmed explicitely.
+
+I agree here. I would expect that writing a single component would be fairly
+rare, since usually one has to set most/all of the status bits to trigger an
+I/O. An aggregate makes more sense in that case.
+
+The question of reads of components is more interesting. I didn't want to go
+through the headache of defining rules specifically for that case (I don't think
+such rules could be in the upcoming Corrigendum, while a purely Legality aspect
+might make it in). And I didn't think they were particularly useful without some
+sort of write rule. But perhaps it's not going to make the Corrigendum anyway,
+and maybe they're useful enough, in which case more expansive rules might work.
+
+Anyway, stay tuned...
+
+****************************************************************
+
+From: Matthias Richter
+Sent: Sunday, October 12, 2014  8:43 AM
+
+> > Are these rules meant to be followed literally?
+>
+> Yes.
+>
+> > Or is it sufficient when the behaviour of the program is 'as if' the
+> > rules are followed?
+>
+> Well, this is not testable in terms of the "effect" of an Ada program
+> - they make no change to that effect. That's why they can only be
+> "advice". There is no way that such rules could ever be anything more,
+> since the only way to tell if they are followed or not is to examine
+> the generated code -- which is out of bounds for the Standard and for
+> the ACATS.
+>
+> OTOH, we have the advice so that the intent of the language is clear
+> (even if it doesn't formally mean anything). Thus, if they are
+> violated, you can go to your implementer and complain (not that they
+> have to do anything if they don't want, but then at least you'll know
+> something about your implementer).
+
+I don't think I have a reason to complain if the "effect of the program" is
+really the same - then it doesn't matter how it is realized. As you said, it
+cannot be tested anyways. My definition of the "effect of the program" includes
+all side effects and also the temporal order of actions. It certainly does not
+include the exact timing - as far as I know no high level language claims to
+give control over this.
+
+> > > That's the bug: a composite volatile variable that must be
+> > > accessed in a fixed size can only be accessed as a whole, never as
+> > > an individual component. The requirement C.6(20) and the advice
+> > > C.6(22/2) together mean
+> > > that the program source must not attempt such an operation (if the
+> > > read/write size actually matters).
+
+I still find the combination of C.6(20) and C.6(22/2) very confusing:
+C.6(22/2) requires that "exactly the bits of the object and no others" should be
+accessed _only_ if the size of the volatile object is a multiple of
+System.Storage_Unit. C.6(22/2b) and (22/2c) in the AARM make clear that when
+this condition is not met (the size of the object is not a multiple of
+System.Storage_Unit), it is allowed to access bits outside of the object. It is
+not said that then the access isn't allowed at all. In C.6(22/2b) not only
+bit-mapped record component, but also packed array components are mentioned. At
+least in the case of a packed array the 'neighbors' of a volatile component are
+inevitably volatile, too. So it isn't said that the access is only allowed if
+the 'neighbors' are not volatile, either.
+
+But now, C.6(20) comes into play. It categorical forbids all accesses to
+volatile objects which are not explicitely written in the program - at least, I
+would interpret it this way. This is a contradiction to the intent expressed in
+C.6(22/2b) and (22/2c).
+
+I have the impression that this overshoots the mark.
+In C.6(20a...i) in the AARM show a number of optimazations which must be
+prevented for volatile objects. These rules are needed, but I see no reason
+- to forbid the access to bits outside the object, but residing inside the same
+  smallest accesible unit
+- to forbid the extra read to the same smallest accesible unit which is needed
+  for a read-modify-write cycle
+
+In the very rare cases where the extra read would cause unintended side effects
+(e. g. registers, where a read triggers an action), one should simply not write
+partial write operations, since it is clear that they cannot be realized without
+a read-modify-write. I other than this special case, the extra read doesn't
+harm.
+
+Since existing compilers (at least GNAT, I must admit that I don't know what
+others do) are working this way, I would suggest to relax the requirements of
+C.6(20) as described before.
+
+I don't generally like the idea to adopt paradigms from the 'C' world, but the
+paragraph about 'volatile bit fields' in the AAPCS (I quoted that paragraph in
+my last mail) looks well-thought-out.
+
+> > I still think it would be very useful if it would be possible to
+> > directly access single fields of a record which is e.g. mapped to an
+> > IO register.
+>
+> Lots of things are "very useful" but don't make much sense in the
+> grand scheme of Ada. We don't want to introduce incompatibility
+> specifically for this relatively unlikely case.
+
+It is not unlikely. In typical microcontroller programs, there may be such
+operations in about every third line. Ada was always advertised as suitable for
+low level programming as well as for large software systems. It seems, that the
+low level aspect was not as visible as it becomes now with the available of Ada
+implementations for microcontrollers.
+
+> For instance, changing the rules so these components aren't volatile
+> would almost certainly cause other problems with the language, and
+> probably cause problems for existing users who don't have this
+> particular size issue.
+>
+> I could imagine some special "notwithstanding" rules for reads of
+> atomic components, but I don't think that those alone would be very useful.
+>
+> OTOH, having a special rule for writes of atomic components is
+> madness, IMHO. Such a rule would necessarily require a
+> read-before-write, which would mean that C.6(20) would have to be
+> repealed for them. I think that C.6(20) is the cornerstone of the C.6
+> rules. One reason is that it means that you can access write-only
+> registers purely in Ada. If you have an implicit read-before-write,
+> that would fail on hardware with write-only device registers. You
+> could say "users with write-only registers ought to avoid using
+> components", but that just means that we'd be swapping one problem for another nearly as likely problem.
+
+I indeed would say that. That way round it looks more logical, because it is
+obvious, that is really impossible to write components smaller than/not a
+multiple of an adressable unit if a register is not readable, because no one
+(including a compiler) can know what to put in the 'other' bits.
+
+> Now, it's possible that my thinking on C.6(20) is not shared by the
+> rest of the ARG. In that case, C.6 needs a pretty significant
+> overhaul, and that would necessarily be incompatible (at least
+> formally) by eliminating guarentees. (I've not heard anyone express
+> the opinion that C.6 needs such a overhaul, but I could be wrong.)
+>
+> To me, this is an area where abstraction is a bad idea, mainly because
+> there are as many different rules for accessing hardware devices as
+> there are devices. We want Ada to be able to manage as many of them as
+> possible, and having volatile objects be WYISIWYG makes that possible.
+>
+> > It is an adequate level of abstraction, because it reflects the
+> > intent of the
+> > programmer: He don't want to do a read-modify-write cycle (which
+> > would be explicit if one has to use temporary variables), he simply
+> > wants to access a single field of the record. The read-modify-write
+> > cycle is only a means to an end. Of course, the programmer should
+> > know that a read-modify-write cycle is generated - but someone who
+> > does this kind of low-level programming knows anyways that there is
+> > no other way of doing these accesses.
+>
+> This I quite doubt; you're assuming that programmers are thinking at
+> this very low level when writing this code.
+
+I'm not assuming it, I'm quite confident of it. It may better to introduce a
+'successful' in the sentence: 'Someone who successfully does this kind of low-
+level programming...' To succesful use the integrated peripherals of a
+microcontroller, you need to know in detail how they work internally and what
+every bit in the registers does. Arduino & Co. are spreading the illusion that
+this knowledge isn't needed anymore, but that doesn't work except for very
+simple applications. If you have this level of knowledge, than it is a trivial
+fact that accesses to fractions of a adressable unit must result in a
+read-modify-write cycle.
+
+> But the entire reason for using Ada
+> is to get away from that level (else a small assembler subprogram
+> would probably be better)
+
+Given the frequency of occurence of such operations, this could be translated to
+"don't use Ada, write your program in assembly language"... And I definetely
+want to get away from _that_.
+
+> I agree here. I would expect that writing a single component would be
+> fairly rare, since usually one has to set most/all of the status bits
+> to trigger an I/O. An aggregate makes more sense in that case.
+
+My experience is the other way round. Writes to multiple bits / fields occur
+mainly in initialization code. Often, in that code registers are written as a
+whole. If only some bits / fields need to be written, this can often be replaced
+by a write of the entire register, since the values of the remaining bits are
+usually known - this could be used as a workaround for the non- existing partial
+aggregates. During the 'normal' execution of the program (after finishing the
+initialization part), most accesses affect only single bits or single fields.
+
+Examples:
+- A bit is written to start an A/D-conversion or a serial transmission or...
+- A bit is written to enable/disable a specific interrupt source
+- A bit is written to reset a counter
+- A 3-bit field is written to select one (of eight) analog inputs
+- A bit is read to see if the A/D converter is ready ...
+That multiple fields must be accessed at the same time, is quite rare. More
+often a specific sequence of accesses is required.
+
+
+> The question of reads of components is more interesting. I didn't want
+> to go through the headache of defining rules specifically for that
+> case (I don't think such rules could be in the upcoming Corrigendum,
+> while a purely Legality aspect might make it in). And I didn't think
+> they were particularly useful without some sort of write rule. But
+> perhaps it's not going to make the Corrigendum anyway, and maybe
+> they're useful enough, in which case more expansive rules might work.
+>
+> Anyway, stay tuned...
+
+Perhaps we should separate the two loosely coupled topics?
+
+1. How can components smaller than the adressable unit be accessed?/should that
+   be allowed at all?
+
+2. How can the value of System.Storage_Unit be overridden for a specific object?
+   (to guarantee that inappropriate instructions are never generated for
+   accesses to that object, in case that the hardware doesn't allow the same
+   access width for this object like in System.Storage_Unit globally specified)
+
+When i wrote my orignal comment/proposal (basially topic 2.), I didn't realize
+that 1. could be a question at all - perhaps because with GNAT it simply worked
+as I expected it to work - with the exception of the special case when byte
+accesses are not allowed anywhere.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 13, 2014  9:15 PM
+
+> I don't think I have a reason to complain if the "effect of the
+> program" is really the same - then it doesn't matter how it is
+> realized. As you said, it cannot be tested anyways. My definition of
+> the "effect of the program"
+> includes all side effects and also the temporal order of actions. It
+> certainly does not include the exact timing - as far as I know no high
+> level language claims to give control over this.
+
+But you can complain if the operation accesses bits other than those that are
+part of the object (which is the point in question). That's not really part of
+the "effect" of the program in Ada terms, but it still would violate the
+Implementation Advice. But only when you access the *whole* object.
+
+> > > > That's the bug: a composite volatile variable that must be
+> > > > accessed in a fixed size can only be accessed as a whole, never
+> > > > as an individual component. The requirement C.6(20) and the
+> > > > advice
+> > > > C.6(22/2) together mean
+> > > > that the program source must not attempt such an operation (if
+> > > > the read/write size actually matters).
+>
+> I still find the combination of C.6(20) and C.6(22/2) very confusing:
+> C.6(22/2) requires that "exactly the bits of the object and no others"
+> should be accessed _only_ if the size of the volatile object is a
+> multiple of System.Storage_Unit.
+> C.6(22/2b) and (22/2c) in the AARM make clear that when this condition
+> is not met (the size of the object is not a multiple of
+> System.Storage_Unit), it is allowed to access bits outside of the
+> object. It is not said that then the access isn't allowed at all.
+> In C.6(22/2b) not only bit-mapped record component, but also packed
+> array components are mentioned. At least in the case of a packed array
+> the 'neighbors' of a volatile component are inevitably volatile, too.
+> So it isn't said that the access is only allowed if the 'neighbors'
+> are not volatile, either.
+
+The discussion in C.6(22.2b) and C.6(22.2c) only make sense for reads, IMHO.
+C.6(20) is a requirement and as such it has priority over any advice.
+
+So my opinion is that writing volatile components that would *require* a
+read-before-write cannot be allowed. But that's MY opinion, not the opinion of
+the whole ARG.
+
+If read-before-write is allowed, then IMHO C.6(20) is garbage and needs serious
+changes to make it clear that read-before-write is allowed (which means that
+safe access write-only things cannot be guarenteed).
+
+...
+> In the very rare cases where the extra read would cause unintended
+> side effects (e. g. registers, where a read triggers an action), one
+> should simply not write partial write operations, since it is clear
+> that they cannot be realized without a read-modify-write. I other than
+> this special case, the extra read doesn't harm.
+
+Now you've destroyed your own argument: you're saying that the current situation
+is OK in special situations. But YOUR special situation (which is pretty
+unlikely as well) is important enough to have all kinds of extra mechanism in
+the language. I don't think that's going to fly.
+
+...
+> > Lots of things are "very useful" but don't make much sense in the
+> > grand scheme of Ada. We don't want to introduce incompatibility
+> > specifically for this relatively unlikely case.
+>
+> It is not unlikely. In typical microcontroller programs, there may be
+> such operations in about every third line.
+> Ada was always advertised as suitable for low level programming as
+> well as for large software systems. It seems, that the low level
+> aspect was not as visible as it becomes now with the available of Ada
+> implementations for microcontrollers.
+
+I would not have expected most devices to be that brain-damaged. In my (very
+limited) experience, such devices were pretty rare (most were properly
+memory-mapped); what was common was write-only ports (and reads that trigger
+events). But you only want to fix one of those three cases, and your suggestion
+would make the situation much worse for those other cases (since it would look
+like it would work, but it wouldn't).
+
+...
+> > But the entire reason for using Ada
+> > is to get away from that level (else a small assembler subprogram
+> > would probably be better)
+>
+> Given the frequency of occurence of such operations, this could be
+> translated to "don't use Ada, write your program in assembly
+> language"...
+> And I definetely want to get away from _that_.
+
+I'd put that more into the category of "don't use brain-damaged devices".
+:-) But most of these effects happen because the devices have side-effects when
+read or written or both -- and you don't want to address that. I think one has
+to address both situations.
+
+Moreover, I don't want programmers to have to understand much more than the
+layout and address of the device that they're programming. Otherwise, you're
+still requiring "high-priests" to program anything embedded, which is silly. (I
+certainly didn't understand any of the stuff you're talking about when I
+programmed devices back in the day.)
+
+> Perhaps we should separate the two loosely coupled topics?
+>
+> 1. How can components smaller than the adressable unit be
+> accessed?/should that be allowed at all?
+
+This is only interesting for writes.
+
+> 2. How can the value of System.Storage_Unit be overridden for a
+> specific object? (to guarantee that inappropriate instructions are
+> never generated for accesses to that object, in case that the hardware
+> doesn't allow the same access width for this object like in
+> System.Storage_Unit globally specified)
+
+System.Storage_Unit has nothing to do with how an memory is addresses. I don't
+know why you keep focusing on that. If a machine has bit instructions, they
+probably would be used but that isn't suddenly going to cause Storage_Unit to be
+1. You're interested in having more control over instruction selection, and
+that's it.
+
+> When i wrote my orignal comment/proposal (basially topic 2.), I didn't
+> realize that 1. could be a question at all - perhaps because with GNAT
+> it simply worked as I expected it to work - with the exception of the
+> special case when byte accesses are not allowed anywhere.
+
+As best as I can tell, there's little appetite for doing anything here. I at
+least wanted to do something so that a programmer with this problem would know
+that they have to write whole object accesses. I think the odds that we would go
+any further are slim (particularly as it's highly unlikely that the third-party
+code generators that most vendors use could be restricted more than they already
+are - we already had to weaken Volatile to make it closer to the C definition
+for this reason).
 
 ****************************************************************
