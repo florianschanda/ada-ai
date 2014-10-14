@@ -1,0 +1,1116 @@
+!standard A(3/4)                             14-10-13   AI12-0139-1/00
+!standard A.18(5)
+!class Amendment 14-10-13
+!status work item 14-10-13
+!status received 14-10-03
+!priority Low
+!difficulty Easy
+!subject Containers and multitasking
+
+!summary
+
+** TBD.
+
+!problem
+
+With the advent of parallel operations (see AI12-0119-1), programs
+are going to be using data structures from multiple tasks much
+more often. The Ada containers design does not require an implementation
+that allow multiple tasks to use the same container. Such a container
+ought to be available.
+
+!proposal
+
+Unknown. It's not clear whether the existing containers could work for
+parallel operations, as the fact that the container being read is
+implicit (in the cursor for most operations) means that almost all container
+operations appear to access global memory. That will often violate the rules
+of parallel operations, and greatly limit what can be done without turning
+off checking.
+
+Additionally, it's unclear whether any sort of safe container could have
+sufficient performance, and it's definitely unclear whether we want unsafe
+containers in the language definition.
+
+!wording
+
+** TBD.
+
+!discussion
+
+
+!ASIS
+
+No impact.
+
+!ACATS test
+
+!appendix
+
+From: Tucker Taft
+Sent: Friday, October  3, 2014  9:23 PM
+
+It is a real drag that iterating over a container seems to require setting one
+or more flags to prevent tampering, which seems to require some sort of trick to
+update a possibly read-only container, as well as introducing race conditions
+when concurrent tasks are iterating over the same container, etc.
+
+Suppose we allowed implementations to go a different route, where they could
+maintain a per-task table of containers-being-iterated.  This table would never
+get very big, and the tampering checks would be allowed to be implemented by
+checking if the container about to be updated is in the table.  Clearly it is
+generally erroneous to update a container from another task while it is being
+iterated, and we weren't trying to protect against that in any case.   We could
+more generally say that even if appropriate task signaling is done, etc. to
+avoid a true data race, it is still erroneous for a separate task to tamper with
+a container while it is being iterated.  Once we make that statement, we can use
+per-task tables for all of the within-task tampering checks, and avoid the
+problems mentioned above with having to set flags in read-only containers, and
+create race conditions when two tasks want to iterate the same container.
+
+This depends on efficient per-task storage of some sort, which many operating
+systems are beginning to provide.  You probably would *not* want to use a
+conventional task attribute, as those generally require a heavier-weight O/S
+call.
+
+This might argue for some kind of more efficient task attribute, which is only
+visible to the current task, and could be mapped to typical O/S per-task
+storage.  Or perhaps it could be controlled by a defaulted generic parameter of
+Task_Attributes, which would indicate whether the attribute should be visible
+from other tasks.
+
+***************************************************************
+
+From: Tullio Vardanega
+Sent: Monday, October  6, 2014  11:04 AM
+
+I like this idea.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Monday, October  6, 2014  11:41 AM
+
+> I like this idea.
+
+I'm very much in favor of somehow solving the race condition issue.
+
+I think the appropriate way to proceed is for some Ada implementer to implement
+Tucker's idea, and see if it's efficient enough. I don't think ARG should be
+discussing this without that information.
+
+Note that the tampering checks are not the only thing that makes the containers
+inefficient.
+
+> On 04/10/2014 04:23, Tucker Taft wrote:
+> > This depends on efficient per-task storage of some sort, which many
+> > operating systems are beginning to provide.
+
+On any machine with a decent number of registers (not x86 :-( ), I'd like to
+store a pointer to the current thread-control-block in a register.  I don't know
+why more operating systems don't do that.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, October  6, 2014  11:52 AM
+
+> I think the appropriate way to proceed is for some Ada implementer to
+> implement Tucker's idea, and see if it's efficient enough.
+> I don't think ARG should be discussing this without that information.
+
+What I think is worth discussing is whether we could live with the limitation
+that even if two tasks coordinate properly, you don't need to detect tampering
+performed by one such task while the other is iterating.  That is, it is fine if
+the tampering checks only detect tampering performed by the same task as the one
+doing the iterating.  It certainly seems acceptable to me...
+
+I also think your comment has the danger of getting us back into the
+chicken-and-egg, where a vendor won't devote resources to implement something if
+it isn't being considered for standardization, and we aren't allowed to consider
+something for standardization until some vendor implements it.
+
+> Note that the tampering checks are not the only thing that makes the
+> containers inefficient.
+
+It might be nice to have a concise list of these problems.  Could you provide a
+start for that?
+
+>>> This depends on efficient per-task storage of some sort, which many
+>>> operating systems are beginning to provide.
+>
+> On any machine with a decent number of registers (not x86 :-( ), I'd
+> like to store a pointer to the current thread-control-block in a
+> register.  I don't know why more operating systems don't do that.
+
+I think efficient thread-local storage is becoming nearly ubiquitous.
+
+***************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, October  6, 2014  12:02 PM
+
+>> Note that the tampering checks are not the only thing that makes the
+>> containers inefficient.
+
+But right now this is the biggest hit when using containers in non-concurrent
+situations: having to finalize a cursor on every iteration to clear the
+tampering bits is a horrible hit.  The performance comparison with containers in
+other languages  makes them unacceptable at once.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Monday, October  6, 2014  1:12 PM
+
+> What I think is worth discussing is whether we could live with the
+> limitation that even if two tasks coordinate properly, you don't need
+> to detect tampering performed by one such task while the other is iterating.
+
+I can.  But then, I can live without tampering checks entirely.
+
+>...That is, it is fine if the tampering checks only  detect tampering
+>performed by the same task as the one doing the iterating.  It
+>certainly  seems acceptable to me...
+>
+> I also think your comment has the danger of getting us back into the
+> chicken-and-egg, where a vendor won't devote resources to implement
+> something if it isn't being considered for standardization, and we
+> aren't allowed to consider something for standardization until some vendor
+> implements it.
+
+Well, AdaCore is already planning to expend some resources on fast containers,
+although I don't know exactly how much and when. You can agitate within AdaCore
+to make that happen.
+
+I also don't know whether we will manage to make fast containers with the same
+interface as the standard ones. I kind of doubt it.
+
+> > Note that the tampering checks are not the only thing that makes the
+> > containers inefficient.
+>
+> It might be nice to have a concise list of these problems.  Could you
+> provide a start for that?
+
+I don't think I have time to do a thorough study right now.  In my work on the
+pretty printer, I took a different approach.  Vectors were WAY too slow.
+Instead of figuring out in detail why, I wrote my own Fast_Vectors, which
+supports only the operations I needed.  E.g. it has Append, but not Insert.
+
+Fast_Vectors is not safe.  E.g. it exports a function that returns a pointer to
+the underlying array.  Sounds like a recipe for dangling pointers, but in
+practice it's not.  You just have to get into the habit of doing:
+
+    X : Elems_Array renames Elems (V) (1 .. Last_Index (V));
+    ... -- operate on X, but don't do Append (etc) while X still exists
+
+I find that usage very natural -- typical code IME goes in phases:
+build the vector, operate read-only, append some more, operate read-only, ...
+
+In a multi-tasking program, it would be: build the vector, then spawn a bunch of
+tasks to operate read-only.
+
+No tampering checks, either, and I don't recall any bugs related to that.
+
+> I think efficient thread-local storage is becoming nearly ubiquitous.
+
+It's about time.  We've all known how to do that for decades.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Monday, October  6, 2014  1:18 PM
+
+> >> Note that the tampering checks are not the only thing that makes
+> >> the containers inefficient.
+>
+> But right now this is the biggest hit when using containers in
+> non-concurrent situations: having to finalize a cursor on every
+> iteration to clear the tampering bits is a horrible hit.  The
+> performance comparison with containers in other languages makes them
+> unacceptable at once.
+
+True, but they might still be unacceptable after the suggested change.
+If I were going to work on this, I'd first determine the speedup we can get by
+entirely removing the checks, because that's easy to implement compared to
+Tucker's suggestion.
+
+***************************************************************
+
+From: Arnaud Charlet
+Sent: Monday, October  6, 2014  2:01 PM
+
+> I can.  But then, I can live without tampering checks entirely.
+
+Agreed, tampering checks seem just too misguided IMO, and introducing complex
+task specific data won't solve that in GNAT, so I do not see that as a viable
+way to improve efficiency of containers in GNAT.
+
+> Well, AdaCore is already planning to expend some resources on fast
+> containers, although I don't know exactly how much and when.
+> You can agitate within AdaCore to make that happen.
+
+Right. We should feel free to start with another API here and simplify things,
+instead of trying to "fix things" on the current API.
+
+> I also don't know whether we will manage to make fast containers with
+> the same interface as the standard ones.
+> I kind of doubt it.
+
+Agreed, this shouldn't be a prerequisite for this investigation.
+
+At this point, even though it's sad to say, I think we've gone too far in terms
+of overengineering the containers API, and made it very inefficient, for only a
+relative added safety (and this safety actually is hurting users who are getting
+tampering check error instead of getting the proper behavior when e.g.
+manipulating temp object), so it's probably time to restart from scratch (which
+is a big surprise to me given how many containers have already been written in
+the world in the past decades).
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, October  6, 2014  2:14 PM
+
+>> I can.  But then, I can live without tampering checks entirely.
+>
+> Agreed, tampering checks seem just too misguided IMO, and introducing
+> complex task specific data won't solve that in GNAT,...
+
+Actually, it is pretty simple, compared to the current tampering bits.  It is
+just a stack of iterators in progress.  Typically the stack will be empty when
+it is checked, namely when you try to update a container.
+
+> ... so I do not see that
+> as a viable way to improve efficiency of containers in GNAT.
+
+I think that may be a premature assessment.
+
+> ... so it's probably time to restart from scratch (which is a big
+> surprise to me given how many containers have already been written in
+> the world in the past decades).
+
+That might be fine for AdaCore's own library, but is not really practical for
+the Ada standard.  The ARG needs to address the efficiency of the current
+containers.
+
+***************************************************************
+
+From: Arnaud Charlet
+Sent: Monday, October  6, 2014  2:23 PM
+
+> Actually, it is pretty simple, compared to the current tampering bits.
+> It is just a stack of iterators in progress.  Typically the stack will
+> be empty when it is checked, namely when you try to update a
+> container.
+
+Anything involving task-specific data isn't just "pretty simple" in GNAT
+unfortunately.
+
+> >... so I do not see that
+> >as a viable way to improve efficiency of containers in GNAT.
+>
+> I think that may be a premature assessment.
+>
+> >... so it's probably time to restart from scratch (which is a big
+> >surprise to me given how many containers have already been written in
+> >the world in the past decades).
+>
+> That might be fine for AdaCore's own library, but is not really
+> practical for the Ada standard.  The ARG needs to address the
+> efficiency of the current containers.
+
+My point is that we probably need a pause here on containers and let the dust
+settle on one hand (and gather more feedback from users), and let AdaCore on the
+other hand experiment on their own, without giving too much direction/guidance.
+
+To give a more positive feedback, the 'for X of ...' loop syntax is really very
+convenient and a real improvement in Ada 2012 (and not just for containers, for
+arrays as well). We just need to make the underlying implementation of such
+simple to express loops more efficient now.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  6, 2014  9:24 PM
+
+> It is a real drag that iterating over a container seems to require
+> setting one or more flags to prevent tampering, which seems to require
+> some sort of trick to update a possibly read-only container, as well
+> as introducing race conditions when concurrent tasks are iterating
+> over the same container, etc.
+
+I think we need a better problem statement than "it is a real drag". :-) In
+particular, there's no need to worry about race conditions with concurrent
+tasks, since any uncontrolled access is erroneous anyway, and if the access is
+properly controlled, the operations will happen sequentially anyway.
+
+> Suppose we allowed implementations to go a different route, where they
+> could maintain a per-task table of containers-being-iterated.  This
+> table would never get very big, and the tampering checks would be
+> allowed to be implemented by checking if the container about to be
+> updated is in the table.  Clearly it is generally erroneous to update
+> a container from another task while it is being iterated, and we
+> weren't trying to protect against that in
+> any case.   We could more generally say that even if
+> appropriate task signaling is done,
+> etc. to avoid a true data race, it is still erroneous for a separate
+> task to tamper with a container while it is being iterated.  Once we
+> make that statement, we can use per-task tables for all of the
+> within-task tampering checks, and avoid the problems mentioned above
+> with having to set flags in read-only containers, and create race
+> conditions when two tasks want to iterate the same container.
+
+I don't like introducing additional erroneous cases even when you do everything
+right (in this case, use appropriate task signaling). Moreover, it seems that
+the idea of allowing suppression of tampering checks also covers this area
+(because with the checks suppressed, any violation of tampering is erroneous).
+So I don't see this is adding anything, but perhaps that's because I don't
+understand the problem you're trying to solve.
+
+Moreover, this certainly isn't going to address any performance problems (this
+will make the checks more expensive in the general case, although one could
+imagine structuring them so they remain cheap if no objects are in the tampering
+state). After all, the main performance problem is using finalization to clear
+the tampering state, and this proposal does nothing for that.
+
+Finally, it seems to me that one could build a lock-free (somewhat of a
+misnomer) version of this based on a per-instance table for all tasks. If you're
+willing to take the performance hit of the more complex check, you could avoid
+having tampering values in the objects way and still not require any additional
+special rules.
+
+[The basic idea is that one has an atomic length for the table which takes on a
+special value that is used while the table is being modified, then the check is
+something like:
+      if Tamper_Len = 0 then
+          return; -- OK.
+      else
+         while Tamper_Len = Modification_in_Progress loop
+             Yield; -- Or whatever to allow another task to run if one is ready for this processor.
+         end loop;
+         for I in 1 .. Tamper_Len loop
+             if Container'Access = Tamper_Tab(I) then
+                  raise Program_Error;
+             end if;
+         end loop;
+      end if;
+There might be a problem with this if there is no lock for protected actions (as
+in single-processor ceiling locking), as there is a possibility that the Yield
+might happen inside of a protected action. But the modification we're waiting
+for is not in a protected action, so we're OK so long as no additional protected
+action could be started. I think that has to be true on a multiprocessor.
+
+One could also use a scheme like this in a regular protected object, but I'd
+expect that to be much more expensive in general. Note that in the above, the
+while loop could only run if multiple tasks are operating on objects associated
+with the instance, that's probably not going to be very common.
+
+Adding a object to the table would something like (this isn't quite right,
+there's a race at the start if multiple tasks tried to enter a tampering
+object):
+     while Tamper_Len = Modification_in_Progress loop
+         Yield; -- Or whatever to allow another task to run if one is ready for this processor.
+     end loop;
+     Temp_Len := Tamper_Len;
+     Tamper_Len := Modification_in_Progress;
+     Tamper_Tab(Temp_Len+1) := Container'Access;
+     Tamper_Len := Temp_Len+1;
+]
+
+> This depends on efficient per-task storage of some sort, which many
+> operating systems are beginning to provide.  You probably would *not*
+> want to use a conventional task attribute, as those generally require
+> a heavier-weight O/S call.
+
+My suggestion above doesn't require that nor does it require any erroneousness.
+Neither scheme improves performance, although neither would add much expense in
+the normal case that no objects are in tampering regions.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  6, 2014  9:26 PM
+
+> >> Note that the tampering checks are not the only thing that makes
+> >> the containers inefficient.
+> >
+>
+> But right now this is the biggest hit when using containers in
+> non-concurrent situations: having to finalize a cursor on every
+> iteration to clear the tampering bits is a horrible hit.  The
+> performance comparison with containers in other languages  makes them
+> unacceptable at once.
+
+AI12-0111-1 discusses this. In Paris, we discussed the idea of an aspect to
+suppress the tampering checks (it would have to be on the instance to work). We
+assigned this AI (and idea) to one Ed Schonberg -- is there any feedback on it??
+
+***************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, October  6, 2014  9:37 PM
+
+Sorry, swamped by other tasks (so to speak).  Using an aspect on the instance
+might work, but off-hand we would really need two versions of the container
+packages: I don’t see an extra actual parameter determining whether to use
+controlled types or not in the implementation of references;  there is too much
+machinery in each container package that depends on this.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  6, 2014  10:05 PM
+
+Right, that's what we expected when we talked about it. The idea was that the
+aspect would chose which actual package to instantiate.
+
+J-P even suggested that we just have Unsafe_Vectors and the like in the
+language, but I remember that Tucker was very opposed to that. (I personally
+wouldn't care, it would only be a few paragraphs in the Standard and we have
+plenty of other Unchecked_ packages in the language already.) That would be a
+bit less mechanism, but I do agree that it is appealing if it works at least
+somewhat like other forms of Suppress.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  6, 2014  9:36 PM
+
+...
+> I don't think I have time to do a thorough study right now.
+> In my work on the pretty printer, I took a different approach.
+> Vectors were WAY too slow.  Instead of figuring out in detail why, I
+> wrote my own Fast_Vectors, which supports only the operations I
+> needed.  E.g. it has Append, but not Insert.
+
+Of course. That was always the intent: if the standard containers are too slow
+for your purposes, write your own that's better. There can't be a
+one-size-fits-all container.
+
+> Fast_Vectors is not safe.  E.g. it exports a function that returns a
+> pointer to the underlying array.  Sounds like a recipe for dangling
+> pointers, but in practice it's not.  You just have to get into the
+> habit of doing:
+>
+>     X : Elems_Array renames Elems (V) (1 .. Last_Index (V));
+>     ... -- operate on X, but don't do Append (etc) while X still
+> exists
+
+Of course, if "trusting the programmer" was a good enough way to do development,
+we wouldn't need Ada and all of the static and dynamic checks that it provides.
+After all, if you are "in the habit" of doing things right, any old programming
+language will do. I hope that Ada can do better (at least by default -- after
+all, in practice, most performance problems are not where the programmer expects
+them to be).
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  6, 2014  9:40 PM
+
+> > >> Note that the tampering checks are not the only thing that makes
+> > >> the containers inefficient.
+> >
+> > But right now this is the biggest hit when using containers in
+> > non-concurrent situations: having to finalize a cursor on every
+> > iteration to clear the tampering bits is a horrible hit.  The
+> > performance comparison with containers in other languages makes them
+> > unacceptable at once.
+>
+> True, but they might still be unacceptable after the suggested change.
+
+They'd have to be, since the problem is the finalization overhead, not the
+tampering value itself (that's just an increment or decrement, which is dirt
+cheap). Tucker's scheme is more expensive than that (not a lot, but it surely
+could not be cheaper). I think Tucker's scheme is aimed at multitasking, not
+efficiency per-se (although I can't tell from his original message).
+
+Besides, people keep talking about iterators, but the problem is not with them
+but with Reference/Constant_Reference (which are part of some iterators, but
+have their own tampering checks).
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October  6, 2014  10:00 PM
+
+...
+> At this point, even though it's sad to say, I think we've gone too far
+> in terms of overengineering the containers API, and made it very
+> inefficient, for only a relative added safety (and this safety
+> actually is hurting users who are getting tampering check error
+> instead of getting the proper behavior when e.g. manipulating temp
+> object), so it's probably time to restart from scratch (which is a big
+> surprise to me given how many containers have already been written in
+> the world in the past decades).
+
+The primary purpose of the tampering checks were to make the containers have the
+same level of safety as an array object. Without them, it would be just too
+dangerous to use the containers on indefinite types (which was one of the major
+purposes behind them).
+
+One could get rid of them if one had sufficient proof capabilities to detect
+problems statically (which probably would require a different containers
+definition, since the current definition doesn't tell you what container is
+being read). One certainly can get rid of a lot of the checks associated with
+Reference/Constant_Reference simply based on how they're used (but of course
+that requires front-end support).
+
+I don't buy that the safety is really hurting users because every case where a
+tampering check is made is potentially dangerous. I'd like to see an example of
+these supposely extra errors "when manipulating temp object".
+
+Note that one reason that the tampering checks are as conservative as they are
+is to limit dependency on the underlying implementation. For instance, an
+implementation of a list that uses separate nodes probably wouldn't have
+problems with a modification so long as it isn't of the node itself or an
+adjacent node. But we wanted to allow other implementations as well, so we don't
+make the checks that specific. If we got rid of the tampering checks altogether,
+users (and implementers!) would be effectively tied to a particular
+implementation strategy -- since what would work in one implementation might
+cause a crash in another -- testing would be insufficient to guarentee
+portability (you can't really test for the absence of erroneousness).
+
+I'm in favor of the idea of allowing suppression of the tampering checks (we
+allow suppression of a lot of other things and the sky doesn't fall), but I want
+the default to remain safe. It certainly will in our compiler.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October  7, 2014  10:04 AM
+
+> >     X : Elems_Array renames Elems (V) (1 .. Last_Index (V));
+> >     ... -- operate on X, but don't do Append (etc) while X still
+> > exists
+>
+> If course, if "trusting the programmer" was a good enough way to do
+> development, we wouldn't need Ada and all of the static and dynamic
+> checks that it provides. After all, if you are "in the habit" of doing
+> things right, any old programming language will do.
+
+I think your analogy is inapt.  For array indexing (say), you can't prevent
+out-of-bounds indexing via any "habits" -- every indexing operation is an
+opportunity for making a mistake, and run-time checks help.
+
+In contrast, the above renaming habit is easy to follow, and (IME) effective in
+preventing bugs.  No guarantees, of course.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October  8, 2014  11:57 PM
+
+> I think your analogy is inapt.  For array indexing (say), you can't
+> prevent out-of-bounds indexing via any "habits" -- every indexing
+> operation is an opportunity for making a mistake, and run-time checks
+> help.
+
+I disagree that there is a huge difference. Even for array indexing, there are
+"habits" that you can use to reduce error, at least in Ada: "always use the
+'Range attribute when iterating", "always use a membership after calculating an
+array index".
+
+> In contrast, the above renaming habit is easy to follow, and
+> (IME) effective in preventing bugs.  No guarantees, of course.
+
+It's only effective if every subprogram you call in the scope of the renames
+knows about the "habit". Which is hard in a project of any size, where someone
+(including you) might add something down the road that breaks the "habit"
+without even realizing that it is called from such a region.
+
+I tend to think that any requirement on a programmer that isn't checked either
+at compile-time or runtime is a bug waiting to happen. I know I've regretted
+many, many shortcuts that we've taken over the years (and the above is a
+shortcut at best). But I know you don't think that way (you don't buy the
+seatbelt analogy, while I wouldn't consider suppressing checks and assertions in
+production code unless performance needs required that, and even then I often
+try to eliminate or hoist the checks by adjusting the code rather than
+suppressing them).
+
+***************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October  7, 2014  10:09 AM
+
+>...  The ARG needs to address the efficiency of the current containers.
+
+That's as may be, but you're not going to get efficiency by chatting in ARG
+meetings, nor emailing arg@.  Experimentation is the only way.
+
+On the other hand, the issue of two tasks having read-only access to a container
+is probably appropriate for ARG discussion.  Even there, I'd like to see
+efficiency experiments before final decisions are made.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October  7, 2014  11:23 AM
+
+>> It is a real drag that iterating over a container seems to require
+>> setting one or more flags to prevent tampering, which seems to
+>> require some sort of trick to update a possibly read-only container,
+>> as well as introducing race conditions when concurrent tasks are
+>> iterating over the same container, etc.
+>
+> I think we need a better problem statement than "it is a real drag".
+> :-) In particular, there's no need to worry about race conditions with
+> concurrent tasks, since any uncontrolled access is erroneous anyway,
+> and if the access is properly controlled, the operations will happen
+> sequentially anyway.
+
+The idea was that if we don't require implementations to detect tampering by
+other tasks, then you can create a tampering check that is local to a given
+task, and does not introduce a race condition by directly modifying the
+container being iterated.
+
+> I don't like introducing additional erroneous cases even when you do
+> everything right (in this case, use appropriate task signaling).
+> Moreover, it seems that the idea of allowing suppression of tampering
+> checks also covers this area (because with the checks suppressed, any
+> violation of tampering is erroneous). So I don't see this is adding
+> anything, but perhaps that's because I don't understand the problem you're trying to solve.
+
+I am trying to make the 99% case more efficient, where the (presumably
+unintended) tampering is done by the task doing the iterating.  If you have to
+protect against a different task coming in and doing the tampering, then you
+have to create some kind of global synchronized flag indicating that an
+iteration is occurring.  Similarly, you will need a complex synchronized flag if
+you don't want a race condition when two separate threads iterate over the same
+container.  If we can allow these checks to be local to a task, then there is no
+need for a synchronized flag.
+
+> Moreover, this certainly isn't going to address any performance
+> problems (this will make the checks more expensive in the general
+> case, although one could imagine structuring them so they remain cheap
+> if no objects are in the tampering state). After all, the main
+> performance problem is using finalization to clear the tampering
+> state, and this proposal does nothing for that. ..
+
+I think it is a serious performance and/or safety problem if you can't allow two
+tasks to iterate concurrently over the same container.
+
+***************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, October  8, 2014  7:45 AM
+
+> I don't think I have time to do a thorough study right now.  In my work on
+> the pretty printer, I took a different approach.  Vectors were WAY too slow.
+> Instead of figuring out in detail why, I wrote my own Fast_Vectors, which
+> supports only the operations I needed.  E.g. it has Append, but not Insert.
+
+In our, admittedly limited, use of Containers, for vectors we use Append but
+not Insert.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October  8, 2014  11:47 PM
+
+...
+> I am trying to make the 99% case more efficient, where the (presumably unintended)
+> tampering is done by the task doing the iterating.  If you have to protect against
+> a different task coming in and doing the tampering, then you have to create some
+> kind of global synchronized flag indicating that an iteration is occurring.
+
+(1) Tampering is used for more than just iteration, and most of the problems are
+    in fact not related to iteration. Focusing too closely on iteration will
+    obscure the needed fixes.
+
+(2) As I noted with my sample code, that global flag is pretty cheap - it's a
+    single atomic object.
+
+> Similarly, you will need a complex synchronized flag if you don't want a race
+> condition when two separate threads iterate over the same container.
+
+No, you just need a test-and-set on the flag. I showed that in my example code
+(I forgot the test-and-set, but that's mainly because you can't write that in
+straight Ada). Adding or removing containers from the list just lock it (that is
+a pretty cheap operation, so there's no point in doing anything fancy). [If you
+have an optimized protected object as GNAT supposedly does, a protected object
+used only for exclusion would do the trick too.]
+
+> If we can allow these checks to be local to a task, then there is no need
+> for a synchronized flag.
+
+True, but if the cost is to expand erroneous execution even when locks are used
+to serialize access, that's just nasty.
+
+...
+> > Moreover, this certainly isn't going to address any performance
+> > problems (this will make the checks more expensive in the general
+> > case, although one could imagine structuring them so they remain
+> > cheap if no objects are in the tampering state). After all, the main
+> > performance problem is using finalization to clear the tampering
+> > state, and this proposal does nothing for that. ..
+>
+> I think it is a serious performance and/or safety problem if you can't
+> allow two tasks to iterate concurrently over the same container.
+
+Given that allowing multiple tasks to even access the same container is not
+guarenteed by the language, it's hard to call whatever it takes to do that a
+"performance" problem. For the perspective of portable code, you simply can't
+have multiple tasks iterating over the same container. In the absence of a
+change in what the language requires, performance of things that you can't do is
+irrelevant.
+
+Going forward, there is certainly going to be interest in providing parallel
+operations on containers. The problem is that the specifications of the
+containers as currently defined aren't going to work well in conjunction with
+the features proposed to support parallelism. In particular, (as I discovered
+when I worked on one of the early global in/out proposals) the fact that the
+container isn't a parameter to most read operations means that it's not possible
+to bound what's read in a meaningful manner. And there's not going to be much
+safe parallelism if global in has to be set to "all". (I would expect that is
+also a problem with proof, but I'm not an expert on that.)
+
+As such, I suspect that we'll need special parallel containers (even for
+read-only uses) with a somewhat different interface. The existing containers
+aren't going anywhere (they date back to Ada 2005), but I think it's likely that
+they'll have to remain mainly for use in single tasking cases.
+
+(And a side note: With the tampering checks suppressed, there would be no
+efficiency problem from those checks, so I don't see a major issue from that.
+For tasking, you have to use an expensive implementation when the checks are on,
+but when suppressed you surely wouldn't use that implementation. It's much less
+intrusive than to introduce additional erroneousness for people that don't need
+additional performance.)
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October  9, 2014  12:17 AM
+
+> >...  The ARG needs to address the efficiency of the current containers.
+>
+> That's as may be, but you're not going to get efficiency by chatting
+> in ARG meetings, nor emailing arg@.  Experimentation is the only way.
+
+Huh? We know (from Ed's reports) that the problem is caused by the finalization
+required to clear the tampering state after a call to Reference. (Since that
+integral to the user-defined indexing for the containers, it gets used a lot.)
+The question is how to get rid of that overhead. That's a language decision, not
+really an implementation one.
+
+There's the possibility of the front-end eliminating that overhead (without any
+language change) in the case where the creation and finalization of the result
+of Reference occur with no calls in between. That should be common, as most
+direct uses of components would qualify:
+   A := List(Cur).Component;
+
+However, there certainly would be programs that can't be optimized that way.
+In particular, any time the result is passed as a parameter, we'd have to assume
+that the called subprogram could tamper. (That in fact is precisely the case
+that the checks are intended to catch, because such tampering could destroy the
+passed object while it is still being used.) It's probably the case that there
+will exist programs that are still too inefficient even with the possible
+optimizations.
+
+The only way to eliminate the overhead from all programs is to (at the language
+level) turn off the tampering check. That has to be done on an
+instantiation-wide basis (because the bulk of the overhead is from the result of
+the Reference function, and its overhead can only be removed if it knows that
+there is no place where a tampering check can be expected to fail - that is,
+there can't be anywhere for the current container where the checks aren't
+suppressed).
+
+There are only two sensible ways to proceed at this point (at least, no one has
+come up with any other ideas):
+(1) Define a set of Unchecked_xxx containers, identical except that they have no
+    tampering checks (erroneousness instead for what would have been a failed
+    check).
+(2) Define an aspect of the instantiation of a container which allows
+    suppressing the tampering checks. An undetected failed check makes the
+    program erroneous, in the normal way for suppressed checks.
+
+In both cases, the expected use would be much like pragma Suppress (test with
+checks on, turn them off for production).
+
+When we discussed this in Paris, we were leaning toward #2, but we wanted to get
+feedback from Ed and others as to whether such an aspect would be too hard to
+implement (as it would have to essentially chose an alternate body for the
+generic container).
+
+I think we have to get rid of this problem before we can even find out if there
+are any other performance issues (in the single tasking case), because this one
+has such an impact.
+
+In any case, only the ARG can settle on a final solution to the problem, as a
+language change of some sort is needed. And the parameters of the problem are
+well-understood -- I worried about it when it was defined, but became convinced
+that it wasn't that much more expensive than the other parts of the accessor.
+Apparently, I was wrong about that -- that's when we needed experimentation, not
+now.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October  9, 2014  7:40 AM
+
+> (1) Tampering is used for more than just iteration, and most of the
+> problems are in fact not related to iteration. Focusing too closely on
+> iteration will obscure the needed fixes.
+> (2) As I noted with my sample code, that global flag is pretty cheap -
+> it's a single atomic object. ...
+
+On a multi-core machine or more generally a multi-processor, updating an atomic
+object is unfortunately not cheap.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Thursday, October  9, 2014  11:05 AM
+
+> Huh? We know (from Ed's reports) that the problem is caused by the
+> finalization required to clear the tampering state after a call to
+> Reference.
+
+No, we don't know that's THE problem.  We know it's A problem, and we can guess
+that it might well be the biggest problem. But we also know that there are other
+efficiency problems.
+
+>... (Since that integral to the user-defined indexing for the
+>containers, it gets used a lot.) The question is how to get rid of that
+>overhead. That's a language decision, not really an implementation one.
+
+Sure, we will need some language design work, but we need to start with
+experimentation.  I have some ideas about efficiency, but I'm not going to
+discuss them here (yet).
+
+I assure you I will vote against any change whose purpose is efficiency, unless
+we have good experimental results.
+
+> When we discussed this in Paris, we were leaning toward #2, but we
+> wanted to get feedback from Ed and others as to whether such an aspect
+> would be too hard to implement (as it would have to essentially chose
+> an alternate body for the generic container).
+
+Then let's quit chatting about it until Ed and others produce such feedback.
+
+> I think we have to get rid of this problem before we can even find out
+> if there are any other performance issues (in the single tasking
+> case), because this one is has such an impact.
+
+We have to get rid of it as an experiment -- we don't have to worry about RM
+wording at this point.
+
+> In any case, only the ARG can settle on a final solution to the
+> problem, as
+                                            ^^^^^
+> a language change of some sort is needed.
+
+Yes, "final".
+
+>...that's when we needed
+> experimentation, not now.
+
+Yes.  Let's not repeat the mistake of designing for efficiency without knowing
+the facts.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October  9, 2014  3:01 PM
+
+> > Huh? We know (from Ed's reports) that the problem is caused by the
+> > finalization required to clear the tampering state after a call to
+> > Reference.
+>
+> No, we don't know that's THE problem.  We know it's A problem, and we
+> can guess that it might well be the biggest problem.
+> But we also know that there are other efficiency problems.
+
+We do? I've not heard of anything other than the tampering issue for
+single-tasking use (the 99% case as Tucker put it).
+
+I don't consider multitasking use a "performance issue", since the containers
+were not designed for such use, they're not required to work for such use, and
+reading without write protection is seriously unsafe IMHO. Ergo, I believe we
+need special containers for such uses, changing the existing ones makes no
+sense.
+
+As far as single-tasking goes, the containers are just wrappers around what
+you'd write yourself. It's hard for me to imagine any performance problem with
+that beyond those caused by implementation choices. (By that I mean things that
+aren't required by the specification; for instance, my containers implementation
+contains 99% dangling pointer detection, but that's not required by the
+standard. I could imagine that in some uses the cost of those checks would be a
+problem (especially the extra memory used which might be significant for small
+elements). The checks required are cheap (null cursor and wrong container
+detection are just single compares, for instance). Those things could only
+matter on the bleeding edge, and the Ada containers (any containers, for that
+matter) can never work on the bleeding edge. You have to go to custom code at
+that point.
+
+> >... (Since that integral to the user-defined indexing for the
+> >containers, it gets used a lot.) The question is how to get rid of
+> >that overhead. That's a language decision, not really an implementation one.
+>
+> Sure, we will need some language design work, but we need to start
+> with experimentation.  I have some ideas about efficiency, but I'm not
+> going to discuss them here (yet).
+
+Quite honestly, I don't think that there is any point to making containers be
+bleeding edge efficient. There is no possibility that any language-defined
+package will be able to meet critical needs. The big value of the containers is
+to off-load the memory management complications; the performance just needs to
+be good enough so that they can be used in the 95% of non-critical applications.
+You can *always* do better with a hand-written and tuned algorithm, after all.
+
+The issue here is that the tampering on Reference is making it impractical to
+use in a lot more than 5% of the critical uses.
+
+> I assure you I will vote against any change whose purpose is
+> efficiency, unless we have good experimental results.
+
+You are against check suppression? Amazing. That seems like a good idea
+regardless of whether it solves everyone's performance issues.
+
+> > When we discussed this in Paris, we were leaning toward #2, but we
+> > wanted to get feedback from Ed and others as to whether such an
+> > aspect would be too hard to implement (as it would have to
+> > essentially chose an alternate body for the generic container).
+>
+> Then let's quit chatting about it until Ed and others produce such
+> feedback.
+
+Knowing Ed, that will never happen, so the above is the same as doing nothing at
+all. And the griping will continue.
+
+<Rant>
+I'm sick and tired of people complaining that the containers (and other parts of
+Ada, too) are not what they never were intended to be. They were intended to be
+safe and correct for single-tasking use. That's it; it's easier to write them
+yourself if all you care about it performance. (I can write a simple linked list
+in 10 minutes, and it will be faster than any container could possibly be.) The
+advantage of the containers is that they contain checking that you would never
+bother with in a hand-written data structure and that they handle all of the
+memory management for you. Performance only matters to the extent that it is
+significantly worse than one would expect, as with Reference. We were not
+interested in getting the last ounce of performance out of these - that could
+only be done by abandoning all of the goals and writing them precisely as most
+would be hand -- no checking at all, no consistency at all, etc.
+
+I'm not remotely interested in seeing such stuff (fast but unsafe containers) in
+the Standard. I don't even want to waste time talking about them.
+
+Moreover, we're surely not going to abandon the current containers (as they were
+introduced in Ada 2005). So anything new has to be an addition, not a change.
+(There's no chance of improving the performance without changing the
+specifications to remove sloth-inducing operations, as anything on that line can
+be done without involving the ARG in the first place.)
+
+So I find performance discussion pointless, with the exception of clearly
+defined problem areas (in this case, Reference needing to use finalization). For
+everything else, implementers should simply do it and not complain here.
+</Rant>
+
+...
+> >...that's when we needed
+> > experimentation, not now.
+>
+> Yes.  Let's not repeat the mistake of designing for efficiency without
+> knowing the facts.
+
+You said too much:
+
+> Let's not repeat the mistake of designing for efficiency.
+
+There is a very specific overly expensive check in the current design, we need
+to address that, and we need to do it immediately so that the containers can be
+used as intended.
+
+Beyond that, I'm strongly opposed to making any changes to the current
+containers in the name of efficiency. Efficiency was never a goal for these
+containers, beyond "good enough". And they're "good enough" with the possible
+exception of the tampering check for Reference. This is just about a "dead body"
+issue for me - "container churn" is the one thing that we were trying to prevent
+with Ada.Containers. If we can't even resist tinkering ourselves (and thus
+breaking people's programs), we're lost.
+
+If you or anyone else wants to experiment with their own container design, go to
+it. There are at least as many container designs as there are people. But that
+has nothing to do with the Standard.
+
+***************************************************************
+
+From: Edmond Schonberg
+Sent: Thursday, October  9, 2014  4:24 PM
+
+>>> When we discussed this in Paris, we were leaning toward #2, but we
+>>> wanted to get feedback from Ed and others as to whether such an
+>>> aspect would be too hard to implement (as it would have to
+>>> essentially chose an alternate body for the generic container).
+>>
+>> Then let's quit chatting about it until Ed and others produce such
+>> feedback.
+>
+> Knowing Ed, that will never happen, so the above is the same as doing
+> nothing at all. And the griping will continue.
+
+Thanks for the vote of confidence!  In fact, swamped by other tasks (including
+assorted nits like aspect Default_Storage_Pool, apparently dropped on the floor,
+and a bevy of impatient customers)  I don’t expect to have much time to go back
+to playing with alternate implementations of containers.  A few users that have
+large computer-intensive programs declared them unusable for their application,
+and rolled their own.  Jeff wrote interesting ACATS tests that made sure that
+the same heavy-duty finalization machinery is present in all containers.  I
+suspect that over time other libraries will appear, with different interfaces,
+and be eventually incorporated into RM 2020. These will not have tampering
+checks. If customer demand increases we might explore optimizing some typical
+loops, but right now this has priority epsilon.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October  9, 2014  4:50 PM
+
+> > Knowing Ed, that will never happen, so the above is the same as
+> > doing nothing at all. And the griping will continue.
+>
+> Thanks for the vote of confidence!
+
+Sorry about that. I should know better than to take my annoyance with one person
+out on some bystander. But...
+
+> In fact, swamped by other
+> tasks (including assorted nits like aspect Default_Storage_Pool,
+> apparently dropped on the floor, and a bevy of impatient customers)  I
+> don't expect to have much time to go back to playing with alternate
+> implementations of containers.  A few users that have large
+> computer-intensive programs declared them unusable for their
+> application,  and rolled their own.  Jeff wrote interesting ACATS
+> tests that made sure that the same heavy-duty finalization machinery
+> is present in all containers.  I suspect that over time other
+> libraries will appear, with different interfaces, and be eventually
+> incorporated into RM 2020. These will not have tampering checks. If
+> customer demand increases we might explore optimizing some typical
+> loops, but right now this has priority epsilon.
+
+...you then essentially agree with my point. :-) You're too busy to do the sorts
+of experiments that Bob seems to be asking for. Which leaves us in a quandary:
+do we provide a method of suppressing tampering checks in the hopes that it is
+sufficient to solve the most pressing problems? Or do we wait for Godot to
+attempt to solve this?
+
+I know where I stand: suppressing checks has a long history in Ada specifically
+for performance improvement. Redesigning the existing containers isn't an option
+for them (ever), and leaving them with performance that is not "good enough" for
+the Reference case makes no sense. I.e., the proposed suppression aspect is a
+simple fix to the existing problem without destroying safety for all or
+requiring a wholesale redesign.
+
+BTW, a proper multitasking container doesn't need tampering checks, as an
+attempt to write a container being read would simply be blocking. The tampering
+situation for a different task would just wait, and the same task would then
+cause deadlock. (The downside being that the locking would need similar
+management to the tampering checks, so I don't know if it's really possible to
+increase the performance.)
+
+A container without either checks or locks does not belong in the standard,
+IMHO. (There are lots of private containers out there, and these might be best
+as one of those.)
+
+***************************************************************
