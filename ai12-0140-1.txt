@@ -1,0 +1,248 @@
+!standard 13.1.1(34/3)                                  14-10-13  AI05-0140-1/01
+!class binding interpretation 14-10-13
+!status work item 14-10-13
+!status received 14-07-10
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Access to unconstrained partial view when full view is constrained
+!summary
+
+???
+
+!question
+
+I have a following code which is accepted by GNAT and ICCAda, but
+rejected by Janus/Ada:
+
+with Ada.Unchecked_Deallocation;
+
+package UNC is
+
+   type My_String (<>) is limited private;
+   type My_String_Access is access My_String;
+private
+   type My_String is new String;
+   procedure Free is new
+     Ada.Unchecked_Deallocation (My_String, My_String_Access);
+
+end UNC;
+-- end of example code
+
+Janus/Ada gives me error:
+In File C:\work\unconstrained-constrained\unc.ads at line 10
+--------------
+    9:     procedure Free is new
+   10:       Ada.Unchecked_Deallocation (My_String, My_String_Access);
+----------------------------------------------------^
+*ERROR* Formal and actual must both be constrained or unconstrained
+(6.4.10) [RM 12.5.4(3)]
+
+The full view of My_String is constrained, while My_String_Access designates
+the partial view of My_String, which is unconstrained.
+
+The question is: Is the example code legal or not? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+[** Too late to make a proposal, sorry. - RLB **]
+
+!discussion
+
+** It's too late to make a proper wording proposal, so I'll gather up a few
+arguments and then leave it until some future time to figure out a possible
+wording change. Since I'm the center of this one, that's not ideal, but it
+is what it is - Randy Brukardt.
+
+(1) I originally told the questioner (privately) that the code appeared
+illegal to me, because I couldn't find any rule in the Standard that would
+make it legal. He then brought it to Ada-Comment for clarification.
+
+(2) I've come to believe that it would be too weird to not allow it, so we
+need to decide how this is to be justified by the Standard. (Possibly with
+additional wording.)
+
+(3) One important point: the view designated by an access type never changes
+during the lifetime of the access type. For example, access-to-incomplete
+remains that during the entire lifetime of the type. (We have rules that allow
+us to treat the incomplete types as complete in various contexts -
+3.10.1(2.2-2.6/3)). It would be inconceivable to me that partial views and
+incomplete views work differently on this point.
+
+(4) In the absense of some some other rule, the partial view and full view
+could not statically match, as the partial view has unknown discriminants
+and the full view does not.
+
+(5) Usually, the rules involving additional "characteristics" handle cases
+like this, but the constrainedness of a type is not a "characteristic"
+(which are listed in 3.4).
+
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+We probably need an ACATS C-test like the example in the question.
+
+!appendix
+
+!topic Access to unconstrained partial view when full view is constrained
+!reference 12.5.4(3)
+!from Tero Koskinen 10-07-14
+!keywords unconstrained constrained partial view
+!discussion
+
+I have a following code which is accepted by GNAT and ICCAda, but
+rejected by Janus/Ada:
+
+with Ada.Unchecked_Deallocation;
+
+package UNC is
+
+   type My_String (<>) is limited private;
+   type My_String_Access is access My_String;
+private
+   type My_String is new String;
+   procedure Free is new
+     Ada.Unchecked_Deallocation (My_String, My_String_Access);
+
+end UNC;
+-- end of example code
+
+Janus/Ada gives me error:
+In File C:\work\unconstrained-constrained\unc.ads at line 10
+--------------
+    9:     procedure Free is new
+   10:       Ada.Unchecked_Deallocation (My_String, My_String_Access);
+----------------------------------------------------^
+*ERROR* Formal and actual must both be constrained or unconstrained
+(6.4.10) [RM 12.5.4(3)]
+
+
+Full view of My_String is constrained, while My_String_Access designates
+the partial view of My_String, which is unconstrained.
+
+The question is:
+Is the example code legal or not?
+
+PS. Originally found when compiling Adalog's debug package:
+http://www.adalog.fr/compo2.htm#Debug
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, July 11, 2014  9:26 AM
+
+Your code is legal.  Janus seems to be freezing the fact that the designated type of My_String_Access is unconstrained, rather than recomputing it based on visibility at the point of generic instantiation.  The rule for static matching between the designated subtype of a formal and actual has nothing to do with where the access type is declared.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July 14, 2014  6:54 PM
+
+You don't give any justification for this position. I couldn't find any in the RM. I wouldn't expect a property of an access type to change over its life without some explicit wording for that.
+
+For a counter-example, access-to-incomplete types are always considered that during their full lifetime - that does not change because of visibility. We have special rules that say that they are treated as complete when the completion of the incomplete type is available. (See 3.10.1(2.2/2-2.6/3)).
+
+We've got rules defining that characteristics behave this way, but whether a type is constrained or not does not appear to be a characteristic -- at least its not mentioned in the list in 3.4(8/2).
+
+So I don't see any RM reason for your interpretation. Perhaps there is a usability one (although I think it would have to be fairly strong given the destruction of the model that types are defined by their definition, which we adhere to despite the often nonsense results that one gets).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, July 14, 2014  7:40 PM
+
+>> Your code is legal.  Janus seems to be freezing the fact that the 
+>> designated type of My_String_Access is unconstrained, rather than 
+>> recomputing it based on visibility at the point of generic 
+>> instantiation.  The rule for static matching between the designated 
+>> subtype of a formal and actual has nothing to do with where the 
+>> access type is declared.
+>
+> You don't give any justification for this position. I couldn't find 
+> any in the RM. I wouldn't expect a property of an access type to 
+> change over its life without some explicit wording for that.
+
+But this is not a property of the access type, it is a property of the designated type. 
+Furthermore, these are exactly the *same* type, so it is downright weird if they don't match each other statically.  If you want other analogies, the properties of a composite type change when more information is learned about the component type.  See 7.3(3/3).  But my main claim is that this is not a property of the access type at all.  It is a property of the designated type, and you can use whatever you know about the designated type, even if it is "more" than is known where the access type is declared.
+
+You mention access-to-incomplete -- that seems a perfect example of this.  Anywhere you can see the completion of the incomplete type, you can use that information, no matter where the access-to-incomplete type is declared.  Yes we have extra wording to that effect in 3.10.1(2.4), but that wording is not saying anything profound.  We just had to be careful because of the oddities associated with limited with's.  There are no such subtleties for other properties relating to designated types.
+
+> For a counter-example, access-to-incomplete types are always 
+> considered that during their full lifetime - that does not change 
+> because of visibility. We have special rules that say that they are 
+> treated as complete when the completion of the incomplete type is available. (See 3.10.1(2.2/2-2.6/3)).
+>
+> We've got rules defining that characteristics behave this way, but 
+> whether a type is constrained or not does not appear to be a 
+> characteristic -- at least its not mentioned in the list in 3.4(8/2).
+>
+> So I don't see any RM reason for your interpretation. Perhaps there is 
+> a usability one (although I think it would have to be fairly strong 
+> given the destruction of the model that types are defined by their 
+> definition, which we adhere to despite the often nonsense results that one gets).
+
+Well it sounds like an AI would be helpful to clarify this, but for me you are inappropriately associating a property of the designated type with the access type.  The properties of the designated type change as you learn more about the designated type.  The particular access type involved is somewhat irrelevant, as far as I am concerned, and especially as far as static matching is concerned.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July 14, 2014  8:29 PM
+
+> But this is not a property of the access type, it is a property of the 
+> designated type.
+> Furthermore, these are exactly the *same* type, so it is downright 
+> weird if they don't match each other statically.
+
+They're the same type but different views of that type. They don't necessarily have to match (certainly different subtypes of a type don't have to match). But I do agree that a user would find it weird if they didn't match (this I hadn't previously noticed).
+  
+> If you want other analogies, the properties of a composite type change 
+> when more information is learned about the component type.  See 
+> 7.3(3/3).
+
+Um, that's the syntax for a private extension.
+
+You probably meant 7.3.1(3/3), which is of course the "characteristics" rule that I referred to. The problem being that whether or not a type is constrained doesn't appear to be a "characteristic" (these are defined in 3.4(8/2). Perhaps it should be.
+
+> But my main claim is that
+> this is not a property of the access type at all.  It is a property of 
+> the designated type, and you can use whatever you know about the 
+> designated type, even if it is "more" than is known where the access 
+> type is declared.
+
+Even if it is, it doesn't appear to be a "characteristic" that appears when you have more visibility.
+ 
+> You mention access-to-incomplete -- that seems a perfect example of 
+> this.  Anywhere you can see the completion of the incomplete type, you 
+> can use that information, no matter where the access-to-incomplete 
+> type is declared.  Yes we have extra wording to that effect in 
+> 3.10.1(2.4), but that wording is not saying anything profound.  We 
+> just had to be careful because of the oddities associated with limited 
+> with's.
+> There are no such subtleties for other properties relating to 
+> designated types.
+
+Harmph. You seem to have conveniently forgotten about all of the problems with "additional characteristics", especially in generics. I'd say there's a pile of subtleties for other properties (including which properties are in fact included). I know there's quite a pile of ACATS tests on these weird cases (and I'd probably be strung up by implementers if I created any more :-).
+
+...
+> Well it sounds like an AI would be helpful to clarify this, but for me 
+> you are inappropriately associating a property of the designated type 
+> with the access type.  The properties of the designated type change as 
+> you learn more about the designated type.  The particular access type 
+> involved is somewhat irrelevant, as far as I am concerned, and 
+> especially as far as static matching is concerned.
+
+It's pretty clear to me that we're statically matching the private view (which is what the access type designates) to the full view (which is what the generic has for an actual). The view designated by an access type never changes! The question is whether the "characteristics" (the only things that rely on visibility) include everything needed for static matching. It's certainly true that the private view has more characteristics at the point of this instance than it does at the point of the declaration of the access type, but does it have enough for static matching? Static matching is quite a bit tougher than simple type matching, after all.
+
+We could simply say that they statically match, but that seems dangerous if there is any way for a visibility hole to be involved (that is, a case where both the partial and full views are visible but the relationship between them is not visible). [I can't think of one off-hand, but there are so many ways to create those that I can't convince myself that it is impossible.] And of course we'd have to be careful that other subtypes don't get sucked into such a special rule.
+
+****************************************************************
