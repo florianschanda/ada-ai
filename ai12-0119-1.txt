@@ -1,4 +1,4 @@
-!standard 5.5.2 (2/3)                              14-06-20    AI12-0119-1/00
+!standard 5.5.2 (2/3)                              14-10-13    AI12-0119-1/01
 !class Amendment 14-06-20
 !status work item 14-06-20
 !status received 14-06-17
@@ -7,7 +7,8 @@
 !subject Parallel operations
 !summary
 
-** TBD.
+New syntax and semantics to facilitate parallelism via Parallel Loops
+and Parallel Blocks 
 
 !problem
 
@@ -26,20 +27,527 @@ in the code as a task.
 
 !proposal
 
-This proposal depends on the facilities for aspect Global (AI12-0079-1) and
-for aspect Potentially_Blocking (AI12-0026-1).
+This proposal depends on the facilities for aspect Global (AI12-0079-1) 
+and for aspect Potentially_Blocking (AI12-0064-1).
+Those proposals allow the compiler to statically determine where 
+parallelism may be introduced without introducing data races.
 
-** Proposal TBD.
+This proposal informally introduces the semantic notion of a Parallel 
+OPportunity (POP) and a tasklet to the language. POPs are places in 
+program text where work can be spawned to parallel executing workers 
+that work in concert to correctly execute the algorithm. Tasklets are 
+the notational (logical) units within a task that are executed in 
+parallel with each other.
+
+The goals of this proposal are:
+- To permit existing programs to benefit from parallelism through 
+  minimal restructuring of sequential programs into ones that permit 
+  more parallel execution;
+- To support the development of complete programs that maximize 
+  parallelism;
+- To efficiently guide the compiler in the creation of effective 
+  parallelism (without oversubscription) with minimal input from the 
+  programmer;
+- To support the parallel reduction of results calculated by parallel 
+  computation; 
+- To avoid syntax that would make a POP erroneous or produce noticeably 
+  different results if executed sequentially vs in parallel.
+
+An important part of this model is that if the compiler is not able to
+verify that the parallel computations are independent, then a warning 
+will be issued at compile time (See AI12-0079-1 and AI12-0064-1 for
+ways on how this can happen). 
+
+Note that in this model the compiler will identify any code where a 
+potential data race occurs (following the rules for concurrent access 
+to objects as specified in the Language Reference Manual RM 9.10(23), 
+and point out where objects cannot be guaranteed to be independently 
+addressable. If not determinable at compile-time, the compiler may 
+insert run-time checks to detect data overlap.
+
+Another issue is the underlying runtime. In this model, tasklets are 
+orthogonal to tasks. Regardless of implementation, tasklets are 
+considered to execute in the semantic context of the task where they 
+have been spawned, which means that any operation that identifies a 
+task, such as those in Task_Identification, will identify the task in 
+which the tasklet is spawned. On the other hand, calls by different 
+tasklets of the same task into the same protected object are treated as
+different calls resulting in distinct protected actions; therefore 
+synchronization between tasklets can be performed using non-blocking 
+protected operations. Note that this is consistent with the current 
+standard which already supports multiple concurrent calls by a single 
+task in the presence of the asynchronous transfer of control capability 
+(RM 9.7.4 (23)).
+
+There are two areas of this proposal; one that introduce capabilities 
+for parallel blocks and another that introduces capabilities for 
+parallel loops.
+
+Parallel Blocks
+---------------
+
+Parallel blocks may be used to specify that two or more parts of an
+algorithm may be executed in parallel with each other.
+
+Semantics: A parallel block statement encloses two or more sequences of
+statements (two or more "parallel sequences") separated by the reserved
+word "and".  Each parallel sequence represents a separate tasklet, but 
+all within a single Ada task. Task identity remains that of the 
+enclosing Ada task, and a single set of task attributes is shared 
+between the tasklets. 
+
+With respect to the rules for shared variables (see RM 9.10(13)), two 
+actions occurring within two different parallel sequences of the same 
+parallel block are not automatically sequential, so execution can be 
+erroneous if one such action assigns to an object, and the other reads 
+or updates the same object or a neighboring object that is not 
+independently addressable from the first object.  The appropriate use of
+atomic, protected, or task objects (which as a group we will call 
+synchronized objects) can be used to avoid erroneous execution. 
+
+In addition, the new Global and Potentially_Blocking aspects may be 
+specified to enable the static detection of such problems at compile 
+time (see AI12-0079-1 and AI12-0064-1). 
+
+Any transfer of control out of one parallel sequence will initiate the 
+aborting of the other parallel sequences not yet completed.  Once all
+other parallel sequences complete normally or abort, the transfer of 
+control takes place.  If multiple parallel sequences attempt a transfer
+of control before completing, one is chosen arbitrarily and the others
+are aborted.
+
+If an exception is raised by any of the parallel sequences, it is 
+treated similarly to a transfer of control, with the exception being 
+propagated only after all the other sequences complete normally or due 
+to abortion.  If multiple parallel sequences raise an exception before 
+completing, one is chosen arbitrarily and the others are aborted. The 
+parallel block completes when all of the parallel sequences complete, 
+either normally or by being aborted. 
+
+Note that aborting a tasklet need not be preemptive, but should prevent 
+the initiation of further nested parallel blocks or parallel loops.
+
+Parallel Loops
+--------------
+
+A common approach to parallelizing loops is to break the loop iterations
+into chunks where each chunk consists of a subset of the entire 
+iteration set, and may be as small as a single iteration, up to as large
+as the entire number of iterations, or somewhere in-between. In Ada,
+each chunk becomes a separate tasklet. 
+
+This proposal gives the programmer some degree of control over the
+parallelization of for loops into appropriately sized chunks, but
+without requiring that they specify the exact chunk size or the number
+of chunks. In addition, to deal with data dependences, this proposal
+supports per-thread copies of relevant data, and a mechanism of reducing
+these multiple copies down to a final result at the end of the 
+computation.
+
+To indicate that a loop is a candidate for parallelization, the reserved
+word "parallel" may be inserted immediately after the word "in" or "of"
+in a "for" loop, at the point where the "reverse" reserved word is 
+allowed. Such a loop will be broken into chunks, where each chunk is 
+processed sequentially. 
+
+For data that is to be updated within such a parallelized loop, the 
+notion of a parallel array is provided, which corresponds to an array 
+with one element per chunk of a parallel loop. 
+
+When a parallel array is used in a parallelized loop, the programmer is
+not allowed to specify the specific index, but rather uses "<>" to 
+indicate the "current" element of the parallel array, appropriate to the 
+particular chunk being processed. 
+
+The user may explicitly control the number of chunks into which a 
+parallelized loop is divided by specifying the bounds of the parallel 
+array(s) used in the loop. All parallel arrays used within a given loop
+must necessarily have the same bounds. 
+
+If parallel arrays with the same bounds are used in two consecutive 
+parallelized loops over the same container or range, then the two loops
+will be chunked in the same way. Hence, it is possible to pass data 
+across consecutive loops through the elements of a parallel array that
+is common across the loops. 
+
+Parallel arrays are similar to normal arrays, except that they are 
+always indexed by Standard.Integer, and they are likely to be allocated 
+more widely spaced than strictly necessary to satisfy the algorithm, to 
+avoid sharing cache lines between adjacent elements. This wide spacing 
+means that two parallel arrays might be interspersed, effectively 
+turning a set of separate parallel arrays with common bounds, into an 
+array of records, with one record per loop chunk, from a storage layout 
+point of view.
+
+Note that the same rules presented for parallel blocks above apply to 
+the update of shared variables and the transfer of control to a point 
+outside of the loop, and for this purpose each iteration (or chunk) is 
+treated as equivalent to a separate sequence of a parallel block.
+
+Automatic reduction of parallel arrays
+--------------------------------------
+
+It will be common for the values of a parallel array to be combined at 
+the end of processing, using an appropriate reduction operator.
+Because this is a common operation, this proposal provides a language-
+defined attribute which will do this reduction, called "Reduced".
+This attribute can eliminate the need to write a final reduction loop.
+
+The Reduced attribute will automatically reduce the specified parallel 
+array using the operator that was used in the assignment statement that
+computed its value.
+
+For large parallel arrays, this reduction can itself be performed in 
+parallel, using a tree of computations. The reduction operator to be 
+used can also be specified explicitly when invoking the Reduced 
+attribute, using a Reducer and optionally an Identity parameter.
+
+An explicit Reducer parameter is required when the parallelized loop 
+contains multiple operations on the parallel array. More generally, the 
+parameterized Reduced attribute with an explicit Reducer parameter may 
+be applied to any array, and then the entire parallel reduction 
+operation will be performed. 
 
 !wording
 
+[note: this section is incomplete. More work is needed for wording]
+
+Append to Introduction (28)
+"A paralel block statement requests that two or more sequences of 
+ statements should execute in parallel with each other."
+
+"5.6.1 Parallel Block Statements
+
+[A parallel_block_statement encloses two or more sequence_of_statements
+where all the sequence_of_statements can execute in parallel with each 
+other.]
+
+Syntax
+
+parallel_block_statement ::= 
+    parallel
+      sequence_of_statements
+    and
+      sequence_of_statements
+   {and
+      sequence_of_statements}
+    end parallel;
+
+Static Semantics
+
+Each sequence_of_statements represents a separate thread of control that
+proceeds independently and concurrently between the points where they
+interact with other tasks and with each other.
+
+AARM - An implementation should statically treat each 
+sequence_of_statements as a separate thread of control, but whether they
+actually execute in parallel or sequentially should be a determination
+that is made dynamically at run time, dependent on factors such as the
+available computing resources.
+
+Examples
+
+Example of a parallel block statement: 
+
+   parallel
+     Foo(Z);
+   and
+     Bar(X, Y);
+   and
+     Put_Line ("Executing Foo and Bar in parallel with Other_Work");
+     Other_Work;
+   end parallel;
+
+Bounded (Run-Time) Errors
+
+It is a bounded error to invoke an operation that is potentially 
+blocking within a sequence_of_statements of a parallel block. 
+"
+
+Add C.7.1 (5.1)
+
+The Task_Id value associated with each sequence_of_statements of a 
+parallel_block_statement is the same as that of the enclosing
+parallel_block_statement.  
+
+AARM - Each sequence_of_statements of a parallel block are treated
+as though they are all executing as the task that encountered the 
+parallel block statement.
+
+Change 9.10 (13)
+
+"Both actions occur as part of the execution of the same task {unless 
+they are each part of a different sequence_of_statements of a parallel 
+block statement}"
+
+Modify H.5 (1/2)
+
+"The following pragma forces an implementation to detect potentially 
+blocking operations within a protected operation {or within a 
+sequence_of_statements of a parallel_block_statement}"
+
+H.5 (5/2)
+
+"An implementation is required to detect a potentially blocking 
+operation within a protected operation {or within a 
+sequence_of_statements of a paralell_block_statment}, and to raise 
+Program_Error (see 9.5.1). "
 
 
-** TBD.
+H.5 (6/2)
+
+"An implementation is allowed to reject a compilation_unit if a 
+potentially blocking operation is present directly within an entry_body 
+or the body of a protected subprogram {or a sequence_of_statements of a
+parallel_block_statement}. "
+
 
 !discussion
 
-** TBD.
+There is a continuing trend of exponential growth of computational 
+elements embedded on a single chip. This has led to significant 
+challenges for software designers and implementers. Prior to 2005, the 
+increase in transistor count corresponded to a similar increase in CPU 
+clock speed, which boosted performance of sequential algorithms. Since 
+then, CPU clock speeds have leveled off for reasons of practicality, and
+chip manufacturers have instead moved towards multicore technologies as
+a means of achieving performance increases.
+
+As parallel technologies become more prevalent in the form of new 
+emerging hardware platforms, safety concerns need to consider the
+paradigm shift from sequential to parallel behaviour.  It is a paradigm 
+that has been for a long time contained within a specialized domain of 
+high-performance computing, but that is now required in all domains of 
+computing systems. 
+
+It is important for the programmer to indicate places in the code
+where parallelism is desired, which allows the reader to better 
+understand the algorithm, and allows the programmer to receive 
+confirmation from the compiler whether the desired parallelism is safe,
+or even worthwhile. 
+
+This proposed model does not define syntax for the explicit 
+parallelization of individual subprogram calls, since such 
+parallelization can be performed implicitly by the compiler, when it 
+knows that the calls are free of side-effects. This is facilitated by 
+annotations identifying global variable usage on subprogram 
+specifications (see AI12-0079-1). 
+
+Parallel Blocks
+---------------
+
+example:
+      declare
+         X, Y : Integer;
+         Z : Float;
+      begin
+
+         parallel
+            X := Foo(100);
+         and
+            Z := Sqrt(3.14) / 2.0;
+            Y := Bar(Z);
+         end parallel;
+            
+         Put_Line(“X + Y=” & Integer'Image(X + Y));
+      end;
+
+In this example, the calculation of Z and Y occur sequentially with
+respect to each other, but in parallel with the calculation of X. Note 
+that the compiler, using the rules specified in AI12-0079-1, may 
+complain if the parallel sequences might have conflicting global 
+side-effects. 
+
+The parallel block construct is flexible enough to support recursive 
+usage as well, such as:
+
+   function Fibonacci (N : Natural) return Natural is
+      X, Y : Natural;   
+   begin
+      if N < 2 then
+         return N;
+      end if;
+
+      parallel
+        X := Fibonacci (N – 2);
+      and
+        Y := Fibonacci (N – 1);
+      end parallel;
+
+      return X + Y;
+   exception
+      when others =>
+         Log ("Unexpected Error");
+   end Fibonacci; 
+
+We considered allowing the parallel block to be preceded with an 
+optional declare part, and followed with optional exception handlers, 
+but it was observed that it was more likely to be useful to have objects
+that are shared across multiple parallel sequences to outlive the 
+parallel block, and that having exception handlers after the last 
+parallel sequence could easily be misconstrued as applying only to the 
+last sequence.  Therefore we reverted to the simpler syntax proposed 
+above. This simpler syntax is also more congruous with the syntax for
+select statements. Because there are no local declarations, there was 
+also no point in having a statement_identifier (block label) for a 
+parallel block. This is actually not entirely true. Allowing an exit
+statement to replace a goto that targets the location following the
+end of the select statement seems useful. To allow such a statement,
+a block label might be needed to identify the parallel block that is
+being exited. It was felt that the need for allowing an exit statement
+in a parallel block could be the subject of a separate AI.
+
+Parallel Loops
+--------------
+
+In most compute-intensive applications, a significant proportion of the 
+computation time is spent in loops, either iterating over 
+arrays/container data structures, or systematically searching a large 
+solution space. To benefit from parallel hardware, the computation 
+associated with a loop should be spread across the available processors.
+
+One approach, presuming the iterations of the loop have no data 
+dependences between them, is to treat each iteration of the loop as a 
+separate tasklet, and then have the processors work away on the set of 
+tasklets in parallel. However, this introduces overhead from the queuing
+and de-queuing of work items, and the communication of results from each
+work item. Furthermore, there often are data dependences between 
+iterations, and creating a separate work item for each iteration can 
+introduce excessive synchronization overhead to deal safely with these
+interdependences. Therefore, it is common to break large arrays, and/or
+the loops that iterate over them, into chunks (or slices or tiles), 
+where each chunk is processed sequentially, but multiple chunks can be 
+processed in parallel with one another.
+
+Note: Allowing the parallel keyword on while loops was considered, but
+was discarded since while loops cannot be easily parallelized, because
+the control variables are inevitably global to the loop.
+
+For example, here is a simple use of a parallelized loop, with a 
+parallel array of partial sums (with one element per chunk), which are 
+then summed together (sequentially) to compute an overall sum for the 
+array:
+
+ declare
+   Partial_Sum : array (parallel <>) of Float 
+               := (others => 0.0);
+   Sum : Float := 0.0;
+ begin
+   for I in parallel Arr'Range loop
+     Partial_Sum(<>) := Partial_Sum(<>) + Arr(I);
+   end loop;
+
+   for J in Partial_Sum'Range loop
+     Sum := Sum + Partial_Sum(J);
+   end loop;
+   Put_Line ("Sum over Arr = " & Float'Image (Sum));
+ end;
+
+In this example, the programmer has merely specified that the 
+Partial_Sum array is to be a parallel array (with each element 
+initialized to 0.0), but has not specified the actual bounds of the 
+array, using "<>" instead of an explicit range such as "1 .. 
+Num_Chunks". In this case, the compiler will automatically select the 
+appropriate bounds for the array, depending on the number of chunks 
+chosen for the parallelized loops in which the parallel array is used.
+
+In the above case, we see "Partial_Sum(<>)" indicating we are 
+accumulating the sum into a different element of the Partial_Sum in each 
+distinct chunk of the loop.
+
+To illustrate the use of common chunking used between consecutive loops, 
+here is a pair of parallelized loops that produce a new array that is 
+the cumulative sum of the elements of an initial array. The parallel 
+arrays Partial_Sum and Adjust are used to carry data from the first 
+parallelized loop to the second parallelized loop:
+
+ declare
+   Partial_Sum    : array (parallel <>) of Float    := (others => 0.0);
+   Adjust         : array(parallel Partial_Sum'Range) of Float 
+                                                    := (others => 0.0);
+   Cumulative_Sum : array (Arr'Range) of Float      := (others => 0.0);
+ begin
+   --  Produce cumulative sums within chunks
+   for I in parallel Arr'Range loop
+     Partial_Sum(<>) := Partial_Sum(<>) + Arr(I);
+     Cumulative_Sum(I) := Partial_Sum(<>);
+   end loop;
+
+   --  Compute adjustment for each chunk
+   for J in Partial_Sum'First..Partial_Sum'Last-1 loop
+     Adjust(J+1) := Adjust(J) + Partial_Sum(J);
+   end loop;
+
+   --  Adjust elements of each chunk appropriately
+   for I in parallel Arr'Range loop
+     Cumulative_Sum(I):= Cumulative_Sum(I)+Adjust(<>);
+   end loop;
+
+   --  Display result
+   Put_Line("Arr, Cumulative_Sum");
+
+   for I in Cumulative_Sum'Range loop
+      Put_Line(Float'Image(Arr(I)) & ", " &  
+               Float'Image(Cumulative_Sum(I)));
+   end loop;
+ end;
+
+Note that this feature eliminated the need to reference two different 
+elements of the same array (element I and element I – 1) within any of 
+the parallel loop bodies. This reduces expression complexity and 
+eliminates data race issues at chunk boundaries, where the I – 1th 
+element could refer to an element of another chunk.
+
+Note also that chunking is not explicit in parallelized loops, and in 
+the above example, the compiler is free to use as few or as many chunks 
+as it decides is best, though it must use the same number of chunks in 
+the two consecutive parallelized loops because they share parallel 
+arrays with common bounds. The programmer could exercise more control 
+over the chunking by explicitly specifying the bounds of Partial_Sum, 
+rather than allowing it to default. For example, if the programmer 
+wanted these parallelized loops to be broken into "N" chunks, then the 
+declarations could have been:
+
+ declare
+   Partial_Sum : array (parallel 1..N) of Float := (others => 0.0);
+   Adjust      : array (parallel Partial_Sum'Range) of Float 
+                                                := (others => 0.0);
+   ...
+
+Automatic Reduction of parallel arrays.
+---------------------------------------
+As is illustrated above by the first example, it will be common for the 
+values of a parallel array to be combined at the end of processing, 
+using an appropriate reduction operator. In this case, the Partial_Sum 
+parallel array is reduced by "+" into the single Sum value.
+
+The use of the 'Reduced attribute can can eliminate the need to write 
+the final reduction loop in the first example, and instead we could have 
+written simply:
+   Put_Line ("Sum over Arr = " & Float'Image (Partial_Sum'Reduced));
+
+The Reduced attribute will automatically reduce the specified parallel 
+array using the operator that was used in the assignment statement that 
+computed its value -- in this case the "+" operator appearing in the 
+statement:
+     Partial_Sum(<>) := Partial_Sum(<>) + Arr(I);
+
+To illustate specification for the 'Reduced attribute including the
+optional Identity parameter, consider:
+
+ Put_Line ("Sum over Arr = " &
+           Float'Image (Partial_Sum'Reduced(Reducer => "+", 
+                                            Identity => 0.0)));
+
+The parameter names are optional, so this could have been:
+ Put_Line("Sum over Arr = " & 
+          Float'Image (Partial_Sum'Reduced("+", 0.0)));
+
+Since we also allow the 'Reduced attribute to be applied to an array,
+the first example could have been completely replaced with simply:
+
+ Put_Line ("Sum over Arr = " & Float'Image (Arr'Reduced("+", 0.0)));
+
 
 !ASIS
 
