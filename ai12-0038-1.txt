@@ -1,4 +1,4 @@
-!standard E.2.1(7/1)                           14-06-23    AI12-0038-1/04
+!standard E.2.1(7/1)                           14-10-13    AI12-0038-1/05
 !standard E.2.1(8/1)
 !class binding interpretation 12-11-28
 !status Corrigendum 2015 12-12-31
@@ -41,8 +41,8 @@ given in E.2.1(8).
 Modify E.2.1(7/1):
 
    * it shall not contain a library-level declaration of an access type that
-     designates a class-wide type, {or a type with a part that is of a}
-     task type, or protected type with entry_declarations.
+     designates a class-wide type, {nor a type with a part that is of a}
+     task type[,] or protected type with entry_declarations.
 
 Modify E.2.1(8):
    Notwithstanding the definition of accessibility given in 3.10.2, the
@@ -57,6 +57,11 @@ Modify E.2.1(8):
 
 !discussion
 
+The change to E.2.1(7/1) is recognizing that tasks and protected objects
+with entries are bad news in an access collection (aka heap) within a
+shared-passive partition, whether they are whole objects or parts
+of other objects.
+
 The accessibility rule of E.2.1(8) is intended to prevent pointers being
 created in a shared-passive package that point "back" into the data area
 of some particular active partition. Unfortunately, this doesn't work if
@@ -66,6 +71,74 @@ access type from a declared-pure package is used in a shared-passive
 package, it "inherits" the accessibility rules of the referencing
 shared-passive package.
 
+!examples
+
+Here is an example of the original E.2.1(8) rule:
+
+   package P1 is
+      X : aliased Integer;
+   end P1;
+
+   package P2 is
+      pragma Shared_Passive(P2);
+      type Acc is access all Integer;
+   end P2;
+
+   with P1, P2;
+   package P3 is
+      Z : P2.Acc := P1.X'Access; -- legal? (No.)
+   end P3;
+
+P2 does not depend semantically on P1, so the above is illegal.
+However, if we were to add a "with P1" in P2's context clause, then it
+would be legal, provided, of course, that P2 could legally depend on P1.
+That is only possible if P1 is itself a shared-passive package, since
+it cannot be "Pure" given that it has a variable. (Note that we could make X
+an aliased constant, and make "Acc" an "access constant" type, and then
+P1 could be a Pure package.)
+
+This rule makes sense because unless P2 depends on P1, there is no
+guarantee that P1 will live as long as P2. We don't want a value of
+type P2.Acc designating an object in a package that doesn't live as long
+as P2. For shared-passive packages, it is semantic dependence that
+determines relative longevity.
+
+Here is the problem that the new rule is intended to address:
+
+   package P0 is
+      pragma Pure(P0)
+      type Pure_Acc is access all Integer;
+      for Pure_Acc'Storage_Size use 0;
+   end P0;
+
+   package P1 is
+      X : aliased Integer;
+   end P1;
+
+   with P0;
+   package P2 is
+      pragma Shared_Passive(P2);
+      type Rec is record
+         Ptr : P0.Pure_Acc;
+      end record;
+   end P2;
+
+   with P1, P2;
+   package P3 is
+      Z : P2.Rec := (Ptr => P1.X'Access); -- legal? (No.)
+   end P3;
+
+Here we have used an access type from the pure package P0 within a
+library-level type declaration in shared-passive package P2. In P3 we
+set a value of that type to designate an object in P1. Just because P0
+was originally declared in a pure package doesn't change the story. We
+definitely don't want any type defined in P2 to have a value that
+contains a pointer to an object in a package that doesn't live as long
+as P2. So we want "P0.Pure_Acc" to "inherit" the same accessibility
+rule that P2.Acc had in the first example, if P0.Pure_Acc is used in a
+library-level declaration of P2. That is the gist of the addition
+to the rule in E.2.1(8).
+
 !corrigendum E.2.1(7/1)
 
 @drepl
@@ -74,7 +147,7 @@ designates a class-wide type, task type, or protected type with
 @fa<entry_declaration>s.>
 @dby
 @xbullet<it shall not contain a library-level declaration of an access type that
-designates a class-wide type, or a type with a part that is of a task type, or
+designates a class-wide type, nor a type with a part that is of a task type or
 protected type with @fa<entry_declaration>s.>
 
 !corrigendum E.2.1(8)
@@ -96,7 +169,7 @@ is as though the access type were declared in the shared-passive package.
 !ACATS test
 
 An ACATS B-Test should be created to check that the new rule is actually
-enforced.
+enforced; the example in discussion could be used as a basis.
 
 !ASIS
 
@@ -488,5 +561,16 @@ within a library-level declaration of a shared-passive package, that it
 effectively "inherits" the special accessibility rule of access types declared
 in shared-passive packages.  I didn't work out all of the implications, but I
 think this is approximately right... [This is version /03 of the AI.]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 13, 2014  1:23 PM
+
+Here is an update to AI12-0038, which relates to how accessibility works in
+shared-passive packages, and in particular as it relates to using access types
+declared in a pure package.  I mostly just added a couple of examples.
+
+[This is version /05 of the AI - Editor.]
 
 ****************************************************************
