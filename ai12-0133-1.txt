@@ -1,5 +1,7 @@
-!standard 7.3.2(10.3/3)                                14-10-13  AI05-0133-1/02
+!standard 7.3.2(10.3/3)                                14-11-13  AI05-0133-1/03
 !class binding interpretation 14-10-09
+!status Corrigendum 2015 14-11-13
+!status ARG Approved 7-0-1  14-10-18
 !status work item 14-10-09
 !status received 14-08-28
 !priority Low
@@ -15,12 +17,12 @@ by default.
 
 7.3.2(10/3) talks of "default initialization" which 
 isn't obviously defined (it's not in the index of the Standard).
-Was "initialized by default" intended? (Yes?)
+Was "initialized by default" intended? (Yes.)
 
 Typically, invariant checks are not made on objects declared within the
 package body. But 7.3.2(10/3) has no such exception. That means that
 temporary objects and <> in aggregates are at risk of Assertion_Error
-even in the body. Is this intended? (Yes??)
+even in the body. Is this intended? (Yes.)
 
 !recommendation
 
@@ -30,18 +32,24 @@ even in the body. Is this intended? (Yes??)
 
 Modify 7.3.2(10/3):
 
-After successful [default] initialization of an object of type T that{ is
-initialized by default (see 3.3.1)}, the check is performed on the new object;
+After successful [default] initialization of an object of type T{ by default
+(see 3.3.1)}, the check is performed on the new object{ unless the partial
+view of T has unknown discriminants};
+
+AARM Reason: The check applies everywhere, even in the package body, because
+default initialization has to work the same for clients as it does within the
+package. As such, checks within the package are either harmless or will uncover a
+bug that could also happen to a client. However, if the partial view of the type
+has unknown discriminants, no client of the package can declare a
+default-initialized object. Therefore, no invariant check is needed, as all
+default initialized objects are necessarily inside the package.
 
 !discussion
 
 The term "default initialization" is not defined. It makes more sense to
-to use a defined term.
-
-Note that this assumes that the rule was intended to apply to all objects
+to use a defined term. That ensures that it applies to all objects
 initialized by default (including <> components of aggregates, components of
-larger objects, stand-alone objects, etc.). If the rule was only intended to
-apply to object declarations, then it needs rewording.
+larger objects, stand-alone objects, etc.).
 
 The author had some concern about the ordering rules that get dragged along
 with "initialized by default". However, those aren't a problem here, because
@@ -50,28 +58,19 @@ issues will have been sorted out first.
 
 ---
 
-For the second question, we believe that no special exception is needed.
-Default initialization of a type is the same inside or outside of a unit,
-so it needs to pass the checks no matter where it occurs. As such, the
-rule is simplified by having it apply everywhere. As such, we make no
-change.
+For the second question, normally it does not matter whether or not it is
+checked within the package. Default initialization of a type is the same
+inside or outside of a unit, so it needs to pass the checks no matter where
+it occurs. As such, the rule is simplified by having it apply everywhere.
 
-However, the author is dubious of this rationale. (He isn't willing to try
-to reword this rule to make a body exception, so he came up with the best
-rationale for no change possible. :-) If the private type with a type
-invariant has unknown discriminants, then no default initialization is
-allowed outside of the package. In that case, checking the invariant could
-only happen inside the package, which makes no sense (and could make it
-difficult to construct objects as default initialized objects and components
-could raise Assertion_Error).
+However, if the private type with a type invariant has unknown discriminants,
+then no default initialization is allowed outside of the package. In that case,
+checking the invariant could only happen inside the package, which makes no
+sense (and could make it difficult to construct objects as default initialized
+objects and components could raise Assertion_Error). Therefore, we add an
+exception specifically for this case.
 
-Less likely is the case where Assertion_Error is raised by some but not all
-possible discriminant values.
-
-Perhaps all we ought to do is except default initialized objects if the
-partial view has unknown discriminants?
-
-Example:
+Example of possible issues if a type with unknown discriminants is checked:
 
     package P is
        type T (<>) is private;
@@ -98,13 +97,15 @@ Example:
        begin
           if Val = 1 then
              declare
-                Temp : T; -- Raises Assertion_Error during default init.
+                Temp : T; -- No check here. If there was one, the check would
+                          -- fail and raise Assertion_Error during default init.
              begin
                 Temp.A := new Integer'(1);
                 return Temp;
              end;
           elsif Val = 2 then
-             return Foo : T := (A => <>) do -- OK, no exception.
+             return Foo : T := (A => <>) do -- OK, no exception whether or not
+                                            -- a check is made.
                 Foo.A := new Integer'(Val);
              end return;
           else
@@ -112,7 +113,8 @@ Example:
              -- in the body (although it would probably be in some other
              -- subprogram):
              declare
-                 N : Node := (C => <>, N => null); -- Raises Assertion_Error.
+                 N : Node := (C => <>, N => null); -- No check here. If there was
+                     -- one, the check would fail and raise Assertion_Error.
              begin
                  N.C.A := new Integer'(Val);
                  return N.C;
@@ -121,8 +123,19 @@ Example:
        end Make;
     end P;
 
-Neither of the places where "Raises Assertion_Error" should do so, since
-they're inside of the package and are just constructing values to return.
+Neither of the places marked "no check here" should have a check, since
+they're inside of the package and are just constructing values to return to
+the client.
+
+!corrigendum 7.3.2(10/3)
+
+@drepl
+@xbullet<After successful default initialization of an object of type @i<T>,
+the check is performed on the new object;>
+@dby
+@xbullet<After successful initialization of an object of type @i<T> by default
+(see 3.3.1), the check is performed on the new object unless the partial view
+of @i<T> has unknown discriminants;>
 
 !ASIS
 
@@ -130,8 +143,10 @@ No ASIS effect.
 
 !ACATS test
 
-This should be tested in the ACATS test that checks that 7.3.2(10/3) is implemented;
-a separate test is not needed.
+This should be tested in the ACATS test that checks that 7.3.2(10/3) is
+implemented; a separate test is not needed. The test should include an example
+like the one in the Discussion that no check is made for a private type with
+unknown discrimiants.
 
 !appendix
 
