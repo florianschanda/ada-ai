@@ -1,5 +1,7 @@
-!standard 13.11.3(5/3)                                14-10-10  AI05-0136-1/01
+!standard 13.11.3(5/3)                                14-11-18  AI05-0136-1/02
 !class binding interpretation 14-10-10
+!status Corrigendum 2015 14-11-18
+!status ARG Approved 7-0-1  14-10-18
 !status work item 14-10-10
 !status received 14-10-08
 !priority Medium
@@ -8,7 +10,8 @@
 !subject Language-defined packages and aspect Default_Storage_Pool
 !summary
 
-** TBD.
+The effect of aspect Default_Storage_Pool on language-defined generic units
+is implementation-defined.
 
 !question
 
@@ -18,9 +21,9 @@ instance to specify (or override) the default pool used in that instance.
 We're wondering about the effect of that aspect on language-defined generic
 units. For instance, it would be useful in some circumstances to use some
 user-defined pool to do allocations in one of the containers, such as
-Ada.Containers.Vectors. Is this expected to work? (???) What happens
+Ada.Containers.Vectors. Is this expected to work? (Maybe.) What happens
 if the pool is does something that the instance isn't expecting, like
-deallocating memory early? (???)
+deallocating memory early? (Whatever 13.11 says.)
 
 !recommendation
 
@@ -28,7 +31,10 @@ deallocating memory early? (???)
 
 !wording
 
-** TBD (some options mentioned in the discussion)
+Add after 13.11.3(5/3):
+
+The effect of specifying aspect Default_Storage_Pool on an instance of a
+language-defined generic unit is implementation-defined.
 
 !discussion
 
@@ -39,83 +45,47 @@ operate as expected.
 
 Similarly, many pools allow deallocation of memory via techniques other than
 the standard language-defined ones; deallocating memory that a language-defined
-package is still using would almost certainly crash the partition. Note that
-the usual bailout (13.11.2(16/3)) will not work in this case, as the evaluation
-of the name is hidden in the body of the language-defined package -- which
-may not even be written in Ada.
+package is still using would almost certainly crash the partition.
 
-While 13.11(21) declares a malfunctioning Allocate routine erroneous, there
-are no such rules for any of the other routines in a Storage_Pool. Any unexpected
-behavior could cause a language-defined package to malfunction.
+13.11(21) declares a malfunctioning Allocate routine erroneous. The wording of
+that rule covers premature or malfunctioning Deallocate routines, via the statement
+about the memory not being used for any other purpose. We believe this wording is
+general enough that it would also apply within a language-defined unit, even though
+the Allocate calls are not visible in the specification.
 
-Note that the use of the default pool by language defined generics varies from
-never (Generic_Elementary_Functions) to unlikely (Bounded containers) to
-maybe (Discrete_Random), to likely (Direct_IO, for file management)
-to certain (Indefinite containers). Whether we want blanket rules for all or
-just for the units that are likely to use the standard pool needs to be decided.
+There doesn't seem to be a counterpart to 13.11(21) for pools that support subpools.
+This is an issue that's not directly related to this question, so it is handled in
+a separate AI.
 
 Currently, there is no requirement on how language-defined units are
 implemented. As such, they might use no allocators at all, or use a custom
 pool (for group deallocations, perhaps), or use the default pool. This would
 be portability problem if users start expecting specifying the pool on an
-instance of a language-defined package to have an effect.
+instance of a language-defined package to have a particular effect.
 
 We need to have some rules that apply to the use of aspect Default_Storage_Pool
 on a language-defined generic, so that users know what is and is not expected
-to work.
+to work. We adopted the easiest rule, which is just to say that it is
+implementation-defined. This puts no requirements on implementers other than
+to document whether the default storage pool is used by a language-defined
+generic.
 
-The easiest rule would be to simply disallow the use of aspect
-Default_Storage_Pool on language-defined packages. If we're not prepared to
-decide what this means, it may be best to not allow it at all. Then, in the
-future, we could decide on a meaning unencumbered by existing uses.
+Note that the use of the default pool by language defined generics varies from
+never (Generic_Elementary_Functions) to unlikely (Bounded containers) to
+maybe (Discrete_Random), to likely (Direct_IO, for file management)
+to certain (Indefinite containers). It's unclear whether we would want to
+have the same rules for all of these packages.
 
-Nearly as easy is to declare that any instantiation of a language-defined unit
-with aspect Default_Storage_Pool is erroneous. The only downside to this is
-that it would allow users that don't care or don't understand erroneousness to
-ignore that and do it anyway. That could be a portability problem, but at least
-it would be one clearly noted in the Standard.
+For instance, for Pure packages, there should be no state and thus no
+allocators. For such packages, there would be no effect to any rule.
 
-No matter what we do, we could also except Pure packages from any rule, since
-they shouldn't have any state, and thus no allocators, anyway.
-
-We could try to be more specific about what causes problems:
-
-For an instance of a language-defined generic unit that has aspect
-Default_Storage_Pool specified:
-   * Execution is erronous if the requirements of 13.11 for Allocate
-     are violated for any call to Allocate for the specified pool.
-   AARM Discussion: We're talking specifically about the definition of erronous
-   execution when a pool is used with an access type; the same rules
-   apply to such a standard package.
-   AARM Ramification: If any memory is deallocated while the instance of the
-   language-defined unit is still using it, execution is erroneous.
-
-We'd probably want to say something about the operations in a pool that
-supports subpools. Indeed, this seems to be missing from 13.11.4; there
-should at a minimum be wording that says that execution is erroneous
-if the address returned from Allocate_From_Subpool does not meet the
-requirements for the address returned from Allocate described in 13.11.
-If we added such wording to 13.11.4, then a minor change is needed above:
-
-   * Execution is erronous if the requirements of 13.11 for Allocate
-     or the requirements of 13.11.4 for Allocate_From_Subpool are
-     violated for any call to Allocate for the specified pool.
-
-I'm not sure if we need any protection against any of the other routines
-malfunctioning. For a regular pool, the existing rule is enough as
-Deallocate problems would necessarily cause the Allocate to fail to meet
-its requirements, and Storage_Size doesn't have any critical meaning anyway.
-That's not so clear for pools that support subpools, as a malfunctioning
-Create_Subpool or Default_Subpool_for_Pool could have serious effects.
-
-
-We could also try to make it work for language-defined units. That would look
-something like:
+If we wanted to make it work for some packages, we could have used a rule
+like:
 
 Implementation Requirements
 
-If a language-defined generic unit declares an access type which is used to
-allocate memory, it shall use the default pool.
+If the language-defined generic unit <wowzers> declares an access type
+which is used to allocate memory, it shall use the default pool.
 
 AARM Reason: This allows using aspect Default_Storage_Pool to force allocations
 to use a specified pool. Note that we don't make any requirements on the
@@ -123,11 +93,9 @@ size or number of allocations from the default pool, so any pool specified
 as the Default_Storage_Pool for an instance of a language-defined package
 ought to support any reasonable allocations.
 
-We would still need erroneous execution wording like that above.
-
-This isn't going to allow anything useful for pools supporting subpools;
-that would require adding subpool parameters somewhere in the definition
-of the package -- at the point we've lost all transparency.
+Even wording like this isn't going to allow anything useful for pools
+supporting subpools; that would require adding subpool parameters somewhere
+in the definition of the package -- at the point we've lost all transparency.
 
 Also note that en-mass deallocations only could be safe after the instance
 has been destroyed (gone out of scope); we would not want to put any
@@ -136,25 +104,26 @@ additional requirements on how language-defined packages manage memory.
 in the containers, which could prevent repeated allocate/deallocate
 cycles in some uses.)
 
-
 Note that making it work only matters to generic packages; we don't have a
 mechanism to change the default pool for normal packages.
 
+We didn't do this as its unclear that the benefits outweight the costs (in
+particular, in implementation constraints). The rule would eliminate one
+tool (custom pools) from the implementer's performance enhancement toolbox.
 
-We also could just make some generic packages work (the unbounded and
-indefinite containers, which seem most useful) and leave the others
-unspecified. That may make more sense, since the handling of files
-(for instance) may or may not be able to work in a user-defined pool,
-and it may not matter anyway as many of the I/O packages aren't generic.
+!corrigendum 13.11.3(5/3)
 
-For any packages that we're not requiring to work, we need at a minimum
-some sort of erroneous execution wording, and probably a note to say that
-changing the default pool may or may not have any effect; doing that is
-not going to be usefully portable.
-
-
-This is probably enough musings on this topic; we need to decide what we want
-before continuing here.
+@dinsa
+The language-defined aspect Default_Storage_Pool may be specified for a 
+generic instance; it defines the default pool for access types within an
+instance. The expected type for the Default_Storage_Pool aspect is
+Root_Storage_Pool'Class. The @fa<aspect_definition> must be a @fa<name>
+that denotes a variable. This aspect overrides any Default_Storage_Pool
+pragma that might apply to the generic unit; if the aspect is not specified,
+the default pool of the instance is that defined for the generic unit.
+@dinst
+The effect of specifying aspect Default_Storage_Pool on an instance of a
+language-defined generic unit is implementation-defined.
 
 !ASIS
 
@@ -162,8 +131,7 @@ No ASIS effect.
 
 !ACATS test
 
-Erroneous execution can't be tested. (If we require some units to do something
-useful, we could make ACATS C-Tests to test that.)
+Implementation-defined behavior can't be tested.
 
 !appendix
 
