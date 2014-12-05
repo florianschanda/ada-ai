@@ -1,0 +1,777 @@
+!standard A.5.2(20)                          14-12-04   AI12-0144-1/01
+!standard A.5.2(32)
+!class Amendment 14-12-04
+!status work item 14-12-04
+!status received 14-11-06
+!priority Low
+!difficulty Easy
+!subject Make Discrete_Random more flexible
+
+!summary
+
+Add an more general function Random to Discrete_Random.
+
+!problem
+
+A recent StackOverflow question asked how to write a function:
+
+    function generate_random_number (n: in Positive) return Integer is
+
+to generate one random number in the range 0..n.  n could be different
+for each call.
+
+It looks like this isn't easily possible using Ada.Numerics.Discrete_Random,
+since a new instantiation of Discrete_Random must be declared inside
+generate_random_number, and a new generator variable of type
+Instantiation.Generator needs to be declared. The questioner tried Reset
+to reset the generator to a time-dependent state each time, but this failed
+because the procedure was being called faster than the clock was changing.  
+
+The most direct way to accomplish something like
+this seems to be to use Float_Random, reset the generator, and then
+perform the needed computations to yield a discrete random number.
+This is unfortunate, because the Discrete_Random packages are no doubt
+already performing these or related computations, and hopefully doing
+it in a way that produces the best results, which is not trivial; but
+these computations aren't available to a program (unless a compiler
+vendor makes them available through a non-standard package).
+
+!proposal
+
+(See wording.)
+
+!wording
+
+Add after A.5.2(20):
+
+function Random (Gen   : Generator;
+                 First : Result_Subtype;
+                 Last  : Result_Subtype) return Result_Subtype;
+
+Add after A.5.2(32):
+
+function Random (Gen   : Generator;
+                 First : Result_Subtype;
+                 Last  : Result_Subtype) return Result_Subtype;
+
+Obtains the "next" random number from the given generator, relative to its
+current state, according to an implementation-defined algorithm. The result
+of the function in an instantiation of Numerics.Discrete_Random is within the
+range First .. Last, and is delivered as a value of the generic formal subtype
+Result_Subtype. 
+
+!discussion
+
+The author ran into this problem with a hobby solitare program. It was
+necessary to use a reproducible generator (thus using a single generator
+created using Reset with an Initiator parameter). The algorithm for dealing
+cards is to create an array containing all of the cards, then select one from
+that array using a random generator. Then close up the array, and repeat the
+selection on the array (minus the selected card). This means you want to
+select with ranges 1..52, then 1..51, then 1..50, etc.
+
+That's not possible with the Ada 95 definition of Discrete_Random.
+
+If this was 1994, we should have simply defined Random in Discrete_Random as
+follows:
+
+function Random (Gen   : Generator;
+                 First : Result_Subtype := Result_Subtype'First;
+                 Last  : Result_Subtype := Result_Subtype'Last) return Result_Subtype;
+
+This allows leaving out the First parameter if it matches that of the formal
+subtype (which it usually will).
+
+Unfortunately, that is more incompatible, as renames and access-to-subprogram
+matching would fail (whereas the proposed solution is only incompatible if
+there are use-clause conflicts with the profile, which is unlikely).
+
+!ASIS
+
+No impact.
+
+!ACATS test
+
+!appendix
+
+!topic Allow random numbers for different discrete subtypes using same generator
+!reference RM12 A.5.2
+!from Adam Beneschan 14-11-06
+!discussion
+
+This arose from a StackOverflow question in which a questioner wanted
+to write a function:
+
+    function generate_random_number (n: in Positive) return Integer is
+
+to generate one random number in the range 0..n.  n could be different
+for each call.
+
+It looks like this isn't easily possible using
+Ada.Numerics.Discrete_Random, since a new instantiation of
+Discrete_Random must be declared inside generate_random_number, and a
+new generator variable of type Instantiation.Generator needs to be
+declared.  The questioner tried Reset to reset the generator to a
+time-dependent state each time, but this failed because the procedure
+was being called faster than the clock was changing.  
+
+Perhaps there are ways to get this to work with an initiator parameter
+on Reset.  However, the most direct way to accomplish something like
+this seems to be to use Float_Random, reset the generator, and then
+perform the needed computations to yield a discrete random number.
+This is unfortunate, because the Discrete_Random packages are no doubt
+already performing these or related computations, and hopefully doing
+it in a way that produces the best results, which is not trivial; but
+these computations aren't available to a program (unless a compiler
+vendor makes them available through a non-standard package).
+
+I think there should be a way to generate random numbers for different
+discrete ranges using the same generator.  Several possibilities come
+to mind:
+
+(1) Add to Discrete_Random:
+
+    function Random (Gen : Ada.Numerics.Float_Random.Generator) 
+        return Result_Subtype;
+
+    which would allow the program to set up one common generator using
+    Float_Random. 
+
+(2) Add to Float_Random:
+
+    generic
+        type Result_Subtype is (<>);
+    function Random (Gen : Generator) return Result_Subtype;
+
+    Basically the same as #1.
+
+(3) Add a new non-generic package that defines a common generator type
+    that could be used in Random functions in Discrete_Random and
+    Float_Random.  This package would also define a common State type
+    and provided the Reset, Save, Image, and Value subprograms
+    currently provided by Float_Random and Discrete_Random.
+
+Since this question came from a StackOverflow poster who could have
+just been experimenting, I can't say how useful in practice this
+feature would be.  It does seem like a flaw that it's missing,
+however. 
+
+***************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, November 6, 2014  3:17 PM
+
+> It looks like this isn't easily possible using 
+> Ada.Numerics.Discrete_Random
+
+Isn't it possible to use a random generator on Natural and return
+Value mod n + 1 ?
+
+(the quality of the random numbers might not be as good for big n's,
+but it may be sufficient in practice)
+
+***************************************************************
+
+From: Adam Beneschan
+Sent: Thursday, November 6, 2014  4:47 PM
+
+Sure, if you don't want a uniform distribution.  Unless the number of values
+in Natural (2**m for some m) is divisible by (n + 1), doing this will result
+in some values in the range being generated with a higher probability than
+others.
+
+There are ways to make things uniform.  The point is that the implementors
+of Discrete_Random have, I presume, already figured out how to do this (I
+think they would have to in order to satisfy Annex G); why should we require
+that those with the kind of problem I wrote about have to reinvent the wheel?
+
+***************************************************************
+
+
+From: Pascal Obry
+Sent: Thursday, November 6, 2014  4:10 PM
+
+> Isn't it possible to use a random generator on Natural and return 
+> Value mod n + 1 ?
+> 
+> (the quality of the random numbers might not be as good for big n's, 
+> but it may be sufficient in practice)
+> 
+
+Or better, just use Ada.Numerics.Float_Random and multiply by N.
+
+***************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, November 7, 2014  2:32 AM
+
+> Sure, if you don't want a uniform distribution.  Unless the number of 
+> values in Natural (2**m for some m) is divisible by (n + 1), doing 
+> this will result in some values in the range being generated with a 
+> higher probability than others.
+
+Well, correct my maths if I'm wrong, but it seems to me that the average
+unbalance is (2**m rem (n+1)) / 2**m.
+
+If what is needed is a dice-4, dice-6 and dice-12, the unbalance would be
+neglectible (even up to n=2**20 for a 32 bits generator).
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Friday, November 7, 2014  6:44 PM
+
+This problem happened to me in a hobby program: I needed to assign playing
+cards to a Solitare layout. I wanted to use a reproducible generator (thus
+using a single generator created using Reset with an Initiator parameter).
+To properly deal cards, it's best to create an array containing all of the
+cards, then select one from that array using a random generator. Then close
+up the array, and repeat the selection on the array (minus the selected card).
+This means you want to select with ranges 1..52, then 1..51, then 1..50, etc.
+
+Since m in this case is 52!, I'm pretty sure that no 32-bit or even 64-bit
+generator is going to be uniform using your formula.
+
+I ended up using Float_Random, using a loop to avoid having to do any sort of
+conversion out of float. (I couldn't find any way to make that work and still
+keep a uniform distribution.)
+
+It would have been nice to be able to use Discrete_Random for this case,
+especially as every simulation problem that I've ever dealt with has had this
+form. (None of which ever were work related, so I've never thought to bring
+this up at the ARG level.) What is the value of having a package that never
+can be used on actual problems??
+
+Interestingly, I ended up with a better generator having used Float_Random,
+since our Discrete_Random is not going to generate an exactly uniform
+distribution -- it has the same conversion problems that I couldn't find any
+way to avoid with the card dealer. It's "good enough" for small ranges (like
+dice or cards) [as noted by J-P's formula], but some large ranges would have
+a noticeable non-uniformity. Probably should fix that someday. (And we all
+know "Someday Never Comes" - thanks to Credence Clearwater Revival. :-)
+
+***************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, November 7, 2014  11:59 PM
+
+>> Isn't it possible to use a random generator on Natural and return 
+>> Value mod n + 1 ?
+>>
+>> (the quality of the random numbers might not be as good for big n's, 
+>> but it may be sufficient in practice)
+>>
+> 
+> Or better, just use Ada.Numerics.Float_Random and multiply by N.
+
+This doesn't work.
+
+During the making of Ada95, there was a huge discussion between numerician
+about whether it was possible to make a discrete generator out of a floating
+one, and after megabytes of e-mail, the conclusion was that it was not
+possible.
+
+I'm not enough of a numerician to explain why,
+
+***************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Saturday, November 8, 2014  12:12 AM
+
+> This means you want to select with ranges 1..52, then 1..51, then 
+> 1..50, etc.
+> 
+> Since m in this case is 52!, I'm pretty sure that no 32-bit or even 
+> 64-bit generator is going to be uniform using your formula.
+
+?? m (if you refer to the number used as a parameter to the function we are 
+discussing) is 52, then 51, ... Certainly a "small number" for the generator
+bias.
+
+As I use to say, I'm not a numerician, I just know enough of numerics to
+realize how easy it is to make incorrect statements about numerics when you
+are not a numerician. So I'm asking:
+
+1) Is it a real problem? (i.e. worth spending time on it - we should take
+advice of real numericians)
+
+2) What do other languages do? (to be fair, having a functionality is not
+enough if there is no guarantee of uniformity - anybody can write a bad random
+generator).
+
+***************************************************************
+
+From: Jeffery R. Carter
+Sent: Saturday, November 8, 2014  12:36 AM
+
+>>> Isn't it possible to use a random generator on Natural and return 
+>>> Value mod n + 1 ?
+>>>
+>>> (the quality of the random numbers might not be as good for big n's, 
+>>> but it may be sufficient in practice)
+
+For some applications (games, for example) the statistics of the RNG may not
+be important, but for others, they are very important.
+
+Given an RNG that returns uniformly distributed values in 0 .. 2 ** M - 1
+(Unsigned_32, for example, where M=32), taking R rem (N + 1) gives uniformly
+distributed results only when M rem (N + 1) = 0. All other cases will not be
+satisfactory for strict uses.
+
+>> Or better, just use Ada.Numerics.Float_Random and multiply by N.
+>>
+> This doesn't work.
+
+Right. Rounding R * N to the nearest integer results in zero and N appearing
+about 1/2 as often as 1 .. N - 1. That may not be acceptable even for some of
+the less strict uses.
+
+A better approach is to truncate R * (N + 1), but even that isn't acceptable
+for strict uses. This is the approach taken by the Random_Int function in
+PragmARC.Universal_Random.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, November 8, 2014  1:26 AM
+
+> > This means you want to select with ranges 1..52, then 1..51, then 
+> > 1..50, etc.
+> > 
+> > Since m in this case is 52!, I'm pretty sure that no 32-bit or even 
+> > 64-bit generator is going to be uniform using your formula.
+> 
+> ?? m (if you refer to the number used as a parameter to the function 
+> we are discussing) is 52, then 51, ... Certainly a "small number" for 
+> the generator bias.
+
+To use the *existing* Discrete_Random, you have to use an m that is a factor
+of all of them, as you can't create a new generator for each step (and you'd
+have to do that to use different instantiations).
+
+To use the float generator, you don't use "m" at all.
+
+> As I use to say, I'm not a numerician, I just know enough of numerics 
+> to realize how easy it is to make incorrect statements about numerics 
+> when you are not a numerician.
+
+Same here. But I know that I couldn't get even acceptable results out of the
+existing random generators without extreme care (and I don't have critical
+requirements) -- essentially I had to never convert the float value to any
+discrete type. (And I can't be certain I got it right as it is.) You noted
+that multiplying by N isn't enough, nor is truncating (that caused values to
+occassionally be out of range). I used a loop and a float compare to avoid
+that problem, but it might have left an extra value into one of the end
+intervals. I don't know of any way to avoid that problem (which is at least
+small enough for my purposes, given the float value is a long float, so we
+have n/2**53, which is pretty darn small).
+
+Note that Jeff Carter said the same thing:
+
+> Right. Rounding R * N to the nearest integer results in zero and N appearing
+> about 1/2 as often as 1 .. N - 1. That may not be acceptable even for some of
+> the less strict uses.
+
+It wasn't for my card dealing application, for which I wanted to simulate more
+than 100,000 deals (sometimes running into millions of deals).
+
+> A better approach is to truncate R * (N + 1), but even that isn't acceptable
+> for strict uses. This is the approach taken by the Random_Int function in
+> PragmARC.Universal_Random.
+
+That didn't even work for me, as there was a non-zero chance of R = 1.0; in
+that case the result ended up indexing out of the range of the upper end of
+the selection array (that's how I found out it was still wrong, a bizarre
+Constraint_Error after simulating several thousand deals). I ended up putting
+that value into the uppermost bin; that's makes the uppermost bin slightly more
+likely to be selected, but never more often than 52/2**53, which seemed small
+enough for my application. (That would take roughly 2**40 simulations to be
+significant.) I don't know of any way to avoid that problem, perhaps that's
+the source of the issue that J-P remembered reading about.
+
+But how to do this perfectly I don't know. The implementation of
+Discrete_Random in Janus/Ada is probably worse than that, because using a loop
+isn't practical if the range is more than a few hundred items, and I probably
+didn't have a real truncation operation available when I wrote it.
+
+Which I believe I had to do, because no "real numerician" provided an
+implementation that actually would work for Janus/Ada as it existed in the
+1990s. The Float_Random was from Ken Dritz, but I don't think there was ever a
+matching Discrete_Random implementation (and I could find none in the
+literature). Probably it would be easier to find these things today (no Google
+in 1996), but of course rewriting and retesting that is a low priority in the
+absence of some customer demand.
+
+> So I'm asking:
+> 
+> 1) Is it a real problem? (i.e. worth spending time on it - we should 
+> take advice of real numericians)
+
+It's certainly a real problem in that there is a class of applications where
+neither Discrete_Random nor Float_Random (as currently defined) can be used to
+provide completely uniform behavior. Perhaps there is some numerical reason
+that the problem can never be solved, but we will need to be convinced of that.
+
+> 2) What do other languages do? (to be fair, having a functionality is 
+> not enough if there is no guarantee of uniformity - anybody can write 
+> a bad random generator).
+
+I don't think that other languages even had an equivalent for Discrete_Random
+back in the 1990s. Whether that's changed, I don't know; none of the languages
+I've ever used has had anything other than a float version.
+
+As such, this seems to be a self-made Ada problem. Whether or not the landscape
+for other languages has changed, it seems amazingly restrictive to have to
+select every random number from the same range. There are a lot of problems
+where that simply doesn't work.
+
+Perhaps there is some numerical reason for Discrete_Random (I don't recall the
+discussions that J-P mentioned, but that doesn't mean much for something that
+happened over 20 years ago) that would prevent it from being useful for a large
+class of problems. If that's true, it should be documented in the AARM so that
+at least us language lawyers will know why it can't be useful.
+
+I think this means that we'll need an AI and someone will have to be tasked to
+go off and scour the Internet for information. (We're never going to have
+enough "real numericians" in the ARG.)
+
+***************************************************************
+
+From: Bob Duff
+Sent: Saturday, November 8, 2014  9:26 AM
+
+> For some applications (games, for example) the statistics of the RNG 
+> may not be important, but for others, they are very important.
+
+Depends on whether you're playing for money.  I'd like to play blackjack
+against a program that uses the "mod N" method.  ;-)
+
+I thought the standard way to get a random integer in the range
+(say) 1 .. 6 is to get a random integer in the range (say) 0 .. 2**31-1, and
+throw away results >= 2_147_483_646. 2_147_483_646 is the largest multiple of
+6 <= 2**31-1. Do this in a loop until you get a number in 0 .. 2_147_483_645.
+THEN do the "mod 6" and add 1.
+
+That loop terminates, and usually goes round just once.
+It's not much harder to program than the plain "mod 6" method.
+
+J-P wrote:
+
+> As I use to say, I'm not a numerician, ...
+
+Is that a French word?  I've never heard it.  When I put "define numerician"
+in google, it defines "numeration".  ;-) I assume you mean "numerical analyst".
+I'm not one, either! Neither are most programmers, which is why it's good to
+have this sort of thing in the predefined libraries.
+
+Randy wrote:
+
+> I don't think that other languages even had an equivalent for 
+> Discrete_Random back in the 1990s. Whether that's changed, I don't 
+> know; none of the languages I've ever used has had anything other than 
+> a float version.
+
+Lots of languages have pseudo-random generators that produce integers.
+Few have any strict requirements, which makes them useless for serious work
+if portability is desired.
+
+For example, C has rand(), which returns an int in the range 0 .. RAND_MAX.
+RAND_MAX = 2**31-1 on my machine. Some implementations of rand() are pretty
+bad, or so I've heard.  I'm pretty sure rand() dates back to the early days of
+C, so before 1990s.
+
+> I think this means that we'll need an AI and someone will have to be 
+> tasked to go off and scour the Internet for information. (We're never 
+> going to have enough "real numericians" in the ARG.)
+
+Or ask somebody who knows what they're talking about (unlike me).
+For example, Ken Dritz or Paul Hilfinger.
+
+***************************************************************
+
+From: Jeffrey R. Carter
+Sent: Saturday, November 8, 2014  11:56 AM
+
+>> A better approach is to truncate R * (N + 1), but even that isn't acceptable
+>> for strict uses. This is the approach taken by the Random_Int function in
+>> PragmARC.Universal_Random.
+> 
+> That didn't even work for me, as there was a non-zero chance of R = 
+> 1.0; in that case the result ended up indexing out of the range of the 
+> upper end of the selection array (that's how I found out it was still 
+> wrong, a bizarre Constraint_Error after simulating several thousand 
+> deals). I ended up putting that value into the uppermost bin; that's 
+> makes the uppermost bin slightly more likely to be selected, but never 
+> more often than 52/2**53, which seemed small enough for my 
+> application. (That would take roughly 2**40 simulations to be 
+> significant.) I don't know of any way to avoid that problem, perhaps 
+> that's the source of the issue that J-P remembered reading about.
+
+Other than Ada.Numerics.Float_Random, I've never used an RNG that produces
+1.0, and I tend to forget that Float_Random may. My comment was for RNGs that
+don't. Universal_Random, for example, produces all multiples of 2**(-24) from
+zero to 1 - 2**(-24), so the truncation approach works fine with it.
+
+There is still a problem, similar to the problem with the remainder method for
+a discrete generator. The RNG produces M unique values in 0 .. 1-e. If
+M rem N /= 0, then the results of the truncation method are not uniformly
+distributed. (Universal_Random, for example, produces 2**24 unique values, and
+2**24 rem 52 /= 0.)
+
+***************************************************************
+
+From: Jeffrey R. Carter
+Sent: Saturday, November 8, 2014  2:43 PM
+
+> Depends on whether you're playing for money.  I'd like to play 
+> blackjack against a program that uses the "mod N" method.  ;-)
+
+Then it's a business for someone. Not entirely a game.
+
+> I thought the standard way to get a random integer in the range
+> (say) 1 .. 6 is to get a random integer in the range (say) 0 .. 
+> 2**31-1, and throw away results >= 2_147_483_646.
+> 2_147_483_646 is the largest multiple of 6 <= 2**31-1.
+> Do this in a loop until you get a number in 0 .. 2_147_483_645.  THEN 
+> do the "mod 6" and add 1.
+> 
+> That loop terminates, and usually goes round just once.
+> It's not much harder to program than the plain "mod 6" method.
+
+Are we sure the results are uniformly distributed?
+
+> Some implementations of rand() are pretty bad, or so I've heard.
+
+The Turbo Pascal random number generator was very bad. If you plotted
+consecutive values as (x, y) coordinates you got vertical lines! But on one
+project I worked on that had pretty strict requirements for its random values,
+we combined it with another, not-great linear-congruential generator and got
+acceptable results.
+
+***************************************************************
+
+From: Tero Koskinen
+Sent: Saturday, November 8, 2014  3:21 PM
+
+> 2) What do other languages do? (to be fair, having a functionality is 
+> not enough if there is no guarantee of uniformity - anybody can write 
+> a bad random generator).
+
+OpenBSD uses arc4random and arc4random_uniform(uint32_t upper_bound) functions
+for random numbers in LibreSSL (and other places also).
+
+Implementation for arc4random_uniform (which returns 32-bit unsigned integer
+below the specified value) is found from
+https://github.com/libressl-portable/openbsd/blob/master/src/lib/libc/crypt/arc4random_uniform.c
+
+And pasted here, in case the link does not work:
+uint32_t
+arc4random_uniform(uint32_t upper_bound) {
+  uint32_t r, min;
+  if (upper_bound < 2)
+    return 0;
+  /* 2**32 % x == (2**32 - x) % x */
+  min = -upper_bound % upper_bound;
+  /*
+   * This could theoretically loop forever but each retry has
+   * p > 0.5 (worst case, usually far better) of selecting a
+   * number inside the range we need, so it should rarely need
+   * to re-roll.
+   */
+  for (;;) {
+    r = arc4random();
+    if (r >= min)
+      break;
+  }
+  return r % upper_bound;
+}
+
+arc4random itself is found from
+https://github.com/libressl-portable/openbsd/blob/master/src/lib/libc/crypt/arc4random.c
+
+Operating system specific helper functions are at
+https://github.com/libressl-portable/openbsd/tree/master/src/lib/libcrypto/crypto
+
+They (OpenBSD/LibreSSL developers) have spent some time tuning their random
+generator, so I would assume it is good enough for most purposes.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, November 8, 2014  3:36 PM
+
+> Other than Ada.Numerics.Float_Random, I've never used an RNG that 
+> produces 1.0, and I tend to forget that Float_Random may. My comment 
+> was for RNGs that don't.
+
+I think that they all don't effectively. My recollection is that Float_Random
+generates a 64-bit random integer (2**64-1), and when that is scaled into a
+float value, it essentially rounds to 1.0. The definition of Float_Random
+means that we don't have to avoid that. (Although I do wonder if 0.0 and 1.0
+are as likely to occur as any other bit pattern.) In any case, I used the
+implementation provided by Ken Dritz (and his associated test program), which
+was part of the Ada 9x work. [The test program isn't in the ACATS as its
+nature is to sometimes fail a couple of trials; he used 40 trials and it's
+OK if it passes at least 38. But it still can be OK and fail more often,
+since it's supposed to be random, after all. I've seen 4 failures on a single
+run (the next run typically has none). As an ACATS test, that wouldn't be of
+much use, since it would be theortically possible to fail all 40 trials and
+still be good. Note that a generator that *always* passed all of the trials
+would be insufficiently random, it would have a pattern to keep the Chi-squares
+low.] I *could* have done something wrong, but I doubt it.
+
+Discrete_Random is a different kettle of fish (I don't think there was a
+reference implementation, if there was, I didn't use it, or it was wrong).
+
+***************************************************************
+
+From: Pascal Pignard
+Sent: Monday, November 10, 2014  2:39 PM
+
+Let's take the initial proposal from Adam:
+(1) Add to Discrete_Random:
+   function Random (Gen : Ada.Numerics.Float_Random.Generator) 
+       return Result_Subtype;
+
+My understanding of the given problem is how to produce a "random" integer
+in a range specified at each call from a pseudo random generator of a known
+quality which produce for example 32 bits with each bit having the same
+probability at each draw.
+
+So for range as 0..(2**n)-1, it's trivial -> take n bits in the random number.
+
+For the other ranges, I'll take the example of a dice of 20 sides thus in
+range 1..20.
+
+Let's admit that adding an integer to a random number keeps the quality of
+this number. It's like a translation.
+
+So we can translate to 0..19.
+
+Take the greatest power of two minus one less than 19, that is 15 or (2**4)-1,
+so take four bits of the random number.
+
+Note: whatever the position of the bits as the have the same probability for
+each. Thus we have a random u in range 0..15.
+
+Take now two others bits, so we have a random v in range 0..3.
+
+Take one more bit, so we have a random w  in range 0..1.
+
+Add then all x = u + v + w, so we have a random x  in range 0..19.
+
+Plus one, we have a random x in range 1..20.
+
+Of course we have to care if the number of random bits fits in the range of
+the random generator and maybe others things like to get a high quality n bits
+pseudo random generator.
+
+It seems then feasible to get such a function.
+
+***************************************************************
+
+From: Gustaf Thorslund
+Sent: Monday, November 10, 2014  3:39 PM
+
+> Add then all x = u + v + w, so we have a random x  in range 0..19.
+> Plus one, we have a random x in range 1..20.
+
+No, I'm afraid you cannot do that. If you have two dice and add the numbers of
+them you will not get an even distribution (7 being the most common sum). It
+should not be too much work calculating the distribution of your suggestion.
+
+If you on the other hand (like Bob Duff already suggested) throw away the
+numbers outside the range, and retry until you get a value inside the range,
+you should get an even distribution over that range. If you for example would
+roll a six sided dice, throw away and retry every time you get a six, you will
+basically get a five sided dice since those values will still be an even
+distribution.
+
+As Bob also said you would throw away the values outside an even multiple of
+the range, else you'll need to loop for awhile if you want to make a dice out
+of a 64 bit number.
+
+Looks like the code Tero posted also loops until it finds a value inside a
+range.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 11, 2014  12:16 AM
+
+> > Add then all x = u + v + w, so we have a random x  in range 0..19.
+> > Plus one, we have a random x in range 1..20.
+> 
+> No, I'm afraid you cannot do that. If you have two dice and add the 
+> numbers of them you will not get an even distribution
+> (7 being the most common sum). It should not be too much work 
+> calculating the distribution of your suggestion.
+
+Right. When dealing with probabilities and distributions and the like, the
+operative phrase is that "everything you know is wrong". In particular,
+ordinary mathematics can't used to combine probabilities, and in fact little
+can be done at all if the probabilities aren't independent.
+ 
+> If you on the other hand (like Bob Duff already suggested) throw away 
+> the numbers outside the range, and retry until you get a value inside 
+> the range, you should get an even distribution over that range. If you 
+> for example would roll a six sided dice, throw away and retry every 
+> time you get a six, you will basically get a five sided dice since 
+> those values will still be an even distribution.
+> 
+> As Bob also said you would throw away the values outside an even 
+> multiple of the range, else you'll need to loop for awhile if you want 
+> to make a dice out of a 64 bit number.
+> 
+> Looks like the code Tero posted also loops until it finds a value 
+> inside a range.
+
+Clearly, we can write such a function.
+
+The question is how to add it to the existing Ada libraries.
+
+I don't like any of Adam's suggestions, because they all cause
+cross-contamination of the float and discrete libraries (which should be
+independent, IMHO). Moreover, they all continue needing to use one
+instantiation per range of values, which is trying to shoehorn something
+dynamic into a compile-time construct. It can be done, but it's clunky at
+best.
+
+I'd go with a much more straightforward approach:
+
+function Random (Gen   : Generator;
+                 First : Result_Subtype := Result_Subtype'First;
+                 Last  : Result_Subtype := Result_Subtype'Last) return Result_Subtype;
+
+Obtains the "next" random number from the given generator, relative to its
+current state, according to an implementation-defined algorithm. The result
+of the function in an instantiation of Numerics.Discrete_Random is within the
+range First .. Last, and is delivered as a value of the generic formal subtype
+Result_Subtype. 
+
+---
+
+The question with this is whether we can accept the level of incompatibility
+that's associated with changing the profile of a library-defined function.
+The suggested change would allow calls to be unchanged, but would break any
+renames or access-to-subprogram uses.
+
+We could avoid that by using overloading instead, leaving the existing function
+alone and dropping the default values of the parameters. That's slightly less
+flexible (usually, you'd only want to give Last), but it's more compatible.
+(It's still not 100% compatible, because of use-visibility and the possibility
+of user-defined Random functions.)
+
+function Random (Gen   : Generator;
+                 First : Result_Subtype;
+                 Last  : Result_Subtype) return Result_Subtype;
+
+Obtains the "next" random number from the given generator, relative to its
+current state, according to an implementation-defined algorithm. The result
+of the function in an instantiation of Numerics.Discrete_Random is within the
+range First .. Last, and is delivered as a value of the generic formal subtype
+Result_Subtype. 
+
+***************************************************************
+
+
