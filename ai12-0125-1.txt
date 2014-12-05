@@ -1,14 +1,14 @@
-!standard 3.5(31/2)                                     14-08-11    AI12-0125-1/01
+!standard 3.5(31/2)                                     14-12-04    AI12-0125-1/02
 !class Amendment 14-08-11
 !status work item 14-08-11
 !status received 14-08-08
 !priority Low
 !difficulty Easy
-!subject Add Object'Succ and 'Pred
+!subject Add Object'Inc and 'Dec
 
 !summary
 
-Define Succ and Pred procedures with an object prefix.
+Define Inc and Dec procedures with an object prefix.
 
 !problem
 
@@ -39,70 +39,82 @@ Add somewhere in 3.5: (Note that the attribute list doesn't appear to be in any
 obvious order, so perhaps these are best added at the tail end.)
 
 For a prefix X that denotes a variable of a scalar type: 
-X'Succ   Denotes a parameterless procedure that updates X with the result of
-         S'Succ(X), where S is the nominal subtype of X.
+X'Inc   Denotes a parameterless procedure that updates X with the result of
+        S'Succ(X), where S is the nominal subtype of X.
 
-X'Pred   Denotes a parameterless procedure that updates X with the result of
-         S'Pred(X), where S is the nominal subtype of X.
+X'Inc(N)   Denotes a parameterless procedure that updates X with the result of
+           S'Succ(X) repeated N times, where S is the nominal subtype of X.
 
-[Alternatively, we could describe the entire procedure:
-    procedure X'Succ is
-       *Obj* : *S* renames X;
+X'Dec   Denotes a parameterless procedure that updates X with the result of
+        S'Pred(X), where S is the nominal subtype of X.
+
+X'Dec(N)   Denotes a parameterless procedure that updates X with the result of
+           S'Pred(X) repeated N times, where S is the nominal subtype of X.
+
+Alternatively, we could describe the entire procedure:
+    procedure X'Succ (N : *universal_integer* := 1) is
+       *Obj*  : *S* renames X;
+       *Temp* : *S* := Obj;
     begin
-       *Obj* := *S*'Succ(*Obj*);
-    end X'Succ;]
+       for I in 1 .. N loop
+         *Temp* := *S*'Succ(*Temp*);
+       end loop;
+       *Obj* := *Temp*;
+    end X'Succ;
 
+AARM Ramification: The prefix X in the above attributes is evaluated once,
+read once, and written once (this latter matters if X is volatile). The
+equivalent code written explicitly (unless renames and temporaries are used)
+evaluates the prefix multiple times, which could produce different results
+if X involves a function. This also reduces the chance of accidentally writing
+X differently in the two uses in X := S'Succ(X); which can happen if X is
+lengthy or complex.
+
+Legality Rules
+
+The argument N used in the attribute_designators for the repeat count for the
+Inc and Dec attributes shall be a static expression of some integer type with
+a positive (nonzero) value. 
 
 !discussion
 
-Note that in these forms, the prefix name is evaluated precisely once (as in
-the rename in the semantic description above), so this is not completely
-equivalent to X := S'Succ(X) if the evaluation of X has any side-effects.
+The form of the wording for the N parameter is similar to that used for First
+and Last in 3.6.2.
 
 These aspects are similar to the magic Inc and Dec subprograms in Modula.
 Indeed, the author originally thought that the purpose of the Succ and Pred
 attributes in Ada was the same as the Modula ones; it was a surprise that they
 don't work that way and are actually overly wordy. (The author hardly ever
-uses these attributes; this form would make them much more useful.)
+uses Succ and Pred attributes; the proposed attributes would be much more
+useful.)
 
 
 These attributes (unfortuately) do not chain: since these are procedures,
-   X'Succ'Succ
-is illegal. It has to be written as X'Succ; X'Succ.
+   X'Inc'Inc
+is illegal.
 
-An alternative proposed in the past would be to allow an optional argument to
-these attributes, which would provide a repeat factor. In this option,
-   X'Succ(2)
-would be the same as X'Succ; X'Succ without the repeat evaluation.
+As writing X'Inc; X'Inc; is annoying and reintroduces the potential for errors
+that we are trying to remove, we provide an optional form with a repeat count.
+Thus X'Inc'Inc should be written X'Inc(2).
 
-The definition would be something like:
-    procedure X'Succ (Count : *universal_integer* := 1) is
-       *Obj* : *S* renames X;
-    begin
-       for I in 1 .. Count loop
-         *Obj* := *S*'Succ(*Obj*);
-       end loop;
-    end X'Succ;
-(preferably with a permission/requirement to do the read and write only once,
-even for a volatile X).
+We require the repeat count to be static in order to avoid the potential for
+confusion that otherwise would arise when the prefix type is an integer type.
+In particular, X'Inc(X) is illegal (as X has to be a variable). Confusing
+Inc and Succ is likely (they do similar operations), and receiving the result
+X**2 from X'Inc(X) is likely to be a surprise.
 
-We did not propose this as it would be prone to misuse when the object is of
-an integer type. In particular, someone confusing the subtype and object forms
-might write:
-   X'Succ(X)
-when they really meant just
-   X'Succ
-and it would be legal and they'd get a very surprising result (X*2) from the
-first form. We could prevent this problem by requiring the expression to be
-a static expression (X necessarily having to be a variable) but that would
-also restrict the usefulness of the construct.
+Additionally, requiring the count to be static makes it clearer that this is
+not an addition/subtraction operation. In particular, this does not use
+any user-defined "+" or "-" operator. A := A + B is not necessarily the same
+as A'Inc(B), even if A has an integer type and B is static.
 
 
 This issue was originally raised in AI05-0187-1. Most of the discussion on
 that AI centered on a ":=+" shorthand. That proved to be problematical when
 user-defined operations were involved; when the target and operators are
 overloaded in some way, X := X + 1 and X :=+ 1 could resolve to different
-operations. That's not a problem for Succ and Pred, which are only predefined.
+operations. That's not a problem for Inc and Dec, which only use the
+predefined Succ and Pred.
 
 
 !ASIS
