@@ -30,7 +30,7 @@ private
 end UNC;
 -- end of example code
 
-Janus/Ada gives me error:
+Janus/Ada gives me an error:
 In File C:\work\unconstrained-constrained\unc.ads at line 10
 --------------
     9:     procedure Free is new
@@ -50,43 +50,119 @@ The question is: Is the example code legal or not? (Yes.)
 
 !wording
 
-** TBD.
+Add after 3.2(7):
 
-[** Too late to make a proposal, sorry. - RLB **]
+AARM Ramification: "Null constraint" includes the cases of no explicit constraint,
+as well as unknown discriminants and unconstrained array type declarations
+(which are explicit ways to declare no constraint).
+
+Add to 4.9.1(2/3):
+
+A subtype of a private type P that has a null constraint statically matches
+the first subtype of the full type of P.
 
 !discussion
 
-** It's too late to make a proper wording proposal, so I'll gather up a few
-arguments and then leave it until some future time to figure out a possible
-wording change. Since I'm the center of this one, that's not ideal, but it
-is what it is - Randy Brukardt.
+The vendor error message refers to 12.5.4(3):
+For a formal access-to-object type, the designated subtypes of the formal and
+actual types shall statically match. 
 
-(1) I originally told the questioner (privately) that the code appeared
-illegal to me, because I couldn't find any rule in the Standard that would
-make it legal. He then brought it to Ada-Comment for clarification.
+The the text of the vendor error message (and the associated question) is wrong,
+as 3.7(26) says that "Any subtype of a type with unknown discriminants is an
+unconstrained and indefinite type." (This is repeated in 3.2(9) and 3.3(22/3).)
+So the private type My_String is unconstrained. Similarly, the full type
+My_String is unconstrained.
 
-(2) I've come to believe that it would be too weird to not allow it, so we
-need to decide how this is to be justified by the Standard. (Possibly with
-additional wording.)
+However, it is unclear if the formal and actual types do in fact statically
+match in this case.
 
-(3) One important point: the view designated by an access type never changes
-during the lifetime of the access type. For example, access-to-incomplete
-remains that during the entire lifetime of the type. (We have rules that allow
-us to treat the incomplete types as complete in various contexts -
-3.10.1(2.2-2.6/3)). It would be inconceivable to me that partial views and
-incomplete views work differently on this point.
+First, it is true that My_String_Access designates a different view (and thus
+subtype) than the subtype denoted by My_String. The view designated by an access
+type does not change during the lifetime of the type. Thus we need to determine
+if the partial view and full view statically match in this case.
 
-(4) In the absense of some some other rule, the partial view and full view
-could not statically match, as the partial view has unknown discriminants
-and the full view does not.
+[Editor's note: That's definitely true for incomplete views (see 3.10.1(2.2-2.6/3)).
+I can't find as clear an indication for partial views, but it would be nonsense
+for incomplete views to work completely differently than partial views. Most
+properties are "characteristics" of the type anyway; here we're concerned about
+matching of subtypes.]
 
-(5) Usually, the rules involving additional "characteristics" handle cases
-like this, but the constrainedness of a type is not a "characteristic"
-(which are listed in 3.4).
+The important part of 4.9.1(2/3) is "A subtype statically matches another
+subtype of the same type if they have statically matching constraints..." (the
+rest is about predicates and access types, neither of which apply here). There
+is no exception for unconstrained subtypes here, so we have to match the
+constraints even in that case.
 
-(6) One could imagine just declaring that a partial view statically matches
-the corresponding full view, but that might have issues of its own. (Such
-as how far we go with subtypes.)
+Statically matching constraints is defined directly above. Clearly, none of the
+bullets 4.9.1(1.2-1.4/2) apply. Does 4.9.1(1.1/2)? (Careful: "null constraint"
+has nothing to do with "null exclusion"s.) A "null constraint" is understood to
+be the the lack of an explicit constraint. Again, it's clear that an unknown
+discriminant is not nothing; it's an explicit not-a-constraint.
+
+But wait! 3.2(7/2) gives a definition for "null constraint" (in parens, and
+oddly IMHO): "(the case of a null constraint that specifies no restriction is
+also included)". So does an unknown discriminant "specify no restriction"??
+
+Surely, an unknown discriminant specifies something. Indeed, it specifies
+fewer restrictions than giving no constraint at all (as private types
+have to be completed with definite types unless unknown discriminants appear).
+So one could make a pedantic argument that a null constraint does not include
+no constraint at all, as even that puts requirements on the full types.
+
+Still, the Dewar rule would suggest that 3.2(7/2) needs to apply to unknown
+discriminants. After all, having the partial view not statically matching
+the full view of the same type would be annoying. We should at least add
+an AARM note explaining this case.
+
+However, this explanation leaves the author wondering. What if we had tried
+the example implied by the subject of this AI? That is:
+
+package UNC2 is
+   type My_String (<>) is limited private; -- "null constraint"
+   type My_String_Access is access My_String;
+private
+   type My_String is new String(1..10); -- "index constraint"
+   procedure Free is new
+     Ada.Unchecked_Deallocation (My_String, My_String_Access);
+end UNC2;
+
+Now none of the 4 bullets in 4.9.1(1-1.4/2) are true (even assuming that
+unknown discriminants are a null constraint); the full view has an
+explicit constraint and the partial view has none. Ergo, the partial
+view and the full view don't statically match, and thus the instantiation
+should be illegal.
+
+However, every compiler that we tested this code on accepted it. (Even the
+compiler in the original question -- go figure! Perhaps there is an ACATS
+test requiring this to work.) There doesn't seem to be any justification for
+this. We can make this more explicit by writing out the subtypes:
+
+package UNC3 is
+   type My_String (<>) is limited private; -- "null constraint"
+   subtype My_String_P is My_String;
+   type My_String_Access is access My_String_P;
+private
+   type My_String is new String(1..10); -- "index constraint"
+   subtype My_String_F is My_String;
+   procedure Free is new
+     Ada.Unchecked_Deallocation (My_String_F, My_String_Access);
+end UNC3;
+
+Here, there is no possible reason (given the current wording) for My_String_P
+and My_String_F to statically match: constraints are not a "characteristic"
+that appear for a private type.
+
+After all, this is essentially the same as
+   type An_Array is array (Positive range <>) of Integer;
+   subtype An_Array_P is An_Array;
+   subtype Con_An_Array is An_Array(1..10);
+   subtype An_Array_F is Con_An_Array;
+and we *know* An_Array_P and An_Array_F don't statically match.
+
+To fix this, we have to use the narrowest possible rule, because we surely
+don't want to allow anything beyond the minimum necessary. Thus, we've
+added a sentence saying that the subtype of a private type that has a
+null constraint always matches the first subtype of the full type.
 
 !ASIS
 
