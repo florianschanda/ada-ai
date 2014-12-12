@@ -1,4 +1,4 @@
-!standard 13.1.1(34/3)                                  14-10-19  AI05-0138-1/02
+!standard 13.1.1(34/3)                                  14-12-08  AI05-0138-1/03
 !standard 4.1.5(5/3)
 !standard 4.1.6(6/3)
 !standard 4.1.6(7/3)
@@ -13,7 +13,10 @@
 !subject Iterators of formal derived types
 !summary
 
-???
+We define the notion of an "immutable" aspect, and declare Default_Iterator,
+Iterator_Element, Implicit_Dereference, Constant_Indexing, and
+Variable_Indexing to be immutable aspects. These aspects don't allow
+redefinition for derived types.
 
 !question
 
@@ -37,23 +40,37 @@ There is a contract problem here.
 
 Insert after 13.1.1(34/3).
 
-   Certain type-related aspects are defined to be *immutable*.
+  Certain type-related aspects are defined to be *immutable*.
 
-   If an immutable aspect is directly specified for a type T, then that
-   aspect shall not be directly specified for any other descendant of T.
+  If an immutable aspect is directly specified for a type T, then any
+  explicit specification of that aspect for any other descendant of T
+  shall denote the same entities as the inherited aspect.
 
-[Alternatively:
-   If an immutable aspect is directly specified for a type T, then any
-   explicit specification of that aspect for any other descendant of T
-   shall be confirming.
-]
+  In addition to the places where Legality Rules normally apply (see
+  12.3), this rule applies also in the private part of an instance of a
+  generic unit.
 
-   In addition to the places where Legality Rules normally apply (see
-   12.3), this rule applies also in the private part of an instance of a
-   generic unit.
+  Redundant: [The Default_Iterator, Iterator_Element, Implicit_Dereference,
+  Constant_Indexing, and Variable_Indexing aspects are immutable.]
 
-   The Default_Iterator. Implicit_Dereference, Constant_Indexing,
-   and Variable_Indexing aspects are defined to be immutable.
+----
+
+Add to the (currently nonexistent) Legality Rules section of 4.1.5 (after 4.1.5(5/3)):
+
+    The Implicit_Dereference aspect is immutable (see 13.1.1).
+
+    The Implicit_Dereference aspect shall not be
+    specified on a full_type_declaration if the type has a discriminated
+    or tagged partial view.
+
+    The Implicit_Dereference aspect shall not be
+    inherited by a full_type_declaration if the type has a discriminated
+    or tagged partial view which does not inherit the Implicit_Dereference
+    aspect.
+
+    In addition to the places where Legality Rules normally apply (see
+    12.3), these rules apply also in the private part of an instance of a
+    generic unit.
 
 ----
 
@@ -68,25 +85,38 @@ Replace 4.1.6(6-8/3)
 
 with
 
-     The Constant_Indexing or Variable_Indexing aspect shall not be
-     specified on a full_type_declaration if the type has a tagged
-     partial view.
+    The Constant_Indexing and Variable_Indexing aspects are immutable (see 13.1.1).
+
+    The Constant_Indexing or Variable_Indexing aspect shall not be
+    specified on a full_type_declaration if the type has a tagged
+    partial view.
+
+    The Constant_Indexing or Variable_Indexing aspect shall not be
+    inherited by a full_type_declaration if the type has a
+    tagged partial view which does not inherit the given
+    aspect.
+
+[Editor's note: This subclause already has the generic boilerplate, so
+we don't need to add it here.]
 
 ----
 
 Add at the end of the Legality Rules section of 5.5.1 (after 5.5.1(21/3):
 
+    The Default_Iterator and Iterator_Element aspects are immutable (see 13.1.1).
+
     The Default_Iterator or Iterator_Element aspect shall not be
     specified on a full_type_declaration if the type has a tagged
     partial view.
 
-----
+    The Default_Iterator or Iterator_Element aspect shall not be
+    inherited by a full_type_declaration if the type has a
+    tagged partial view which does not inherit the given
+    aspect.
 
-Add to the (currently nonexistent) Legality Rules section of 4.1.5 (after 4.1.5(5/3)):
-
-    The Implicit dereference aspect shall not be
-    specified on a full_type_declaration if the type has a discriminated
-    partial view.
+    In addition to the places where Legality Rules normally apply (see
+    12.3), these rules apply also in the private part of an instance of a
+    generic unit.
 
 !discussion
 
@@ -100,37 +130,67 @@ Similarly, the note in 4.1.6
 is fine as it stands. [Editor's note: AI12-0104-1 removed the above wording
 and replaced it by a User Note, which is OK.]
 
-The new Legality rules in 4.1.5 and 5.5.1 are needed so that privacy is
-not compromised by these rules.
+The new Legality rules in 4.1.5, 4.1.6, and 5.5.1 are needed so that privacy
+is not compromised by these rules.
 
-     package Pkg1 is
-        type Rec is record Int : Integer; end record;
-        R1, R2 : aliased Rec;
+The first new rule (which was already present in 4.1.6) is needed to prevent
+problems like this one:
 
-        type T1 (D1, D2 : access Rec) is private;
+   package Pkg1 is
+      type Rec is record Int : Integer; end record;
+      R1, R2 : aliased Rec;
 
-        generic
-           type Descendant is new T1;
-        package G is
-           X : Descendant (R1'Access, R2'Access);
-           function F return Integer;
-        end;
-     private
-        type T1 (D1, D2 : access Rec) is null record with
-          Implicit_Dereference => D1; -- Illegal by new rule.
-     end;
+      type T1 (D1, D2 : access Rec) is private;
 
-     package body Pkg1 is
-         package body G is
-          function F return Integer is (X.Int);
-         end G;
-     end;
+      generic
+         type Descendant is new T1;
+      package G is
+         X : Descendant (R1'Access, R2'Access);
+         function F return Integer;
+      end;
+   private
+      type T1 (D1, D2 : access Rec) is null record with
+         Implicit_Dereference => D1; -- Illegal by new rule.
+   end;
 
-     package Pkg2 is
-        use Pkg1;
-        type T2 is new T1 with Implicit_Dereference => D2; -- No check here.
-        package I is new G (T2); -- Trouble here if T1 was legal.
-     end;
+   package body Pkg1 is
+      package body G is
+         function F return Integer is (X.Int);
+      end G;
+   end;
+
+   with Pkg1;
+   package Pkg2 is
+      use Pkg1;
+      type T2 is new T1 with Implicit_Dereference => D2; -- No check here.
+      package I is new G (T2); -- Trouble here if T1 was legal.
+   end;
+
+The second new rule is needed to prevent hidden inheritance.
+
+   package Pkg3 is
+      type Parent is tagged null record;
+      type Child (D : access Integer) is new Parent with null record
+         with Implicit_Dereference => D;
+   end Pkg3;
+
+   with Pkg3;
+   package Pkg4 is
+      type Priv is Pkg3.Parent with private;
+   private
+      type Priv is Pkg3.Child with null record;
+         -- Illegal by new rule: Priv would have hidden Implicit_Dereference.
+   end Pkg4;
+
+   with Pkg1;
+   package Pkg4.Child is
+      use Pkg4;
+      type T3 (D2 : access Integer) is new Priv
+         with Implicit_Dereference => D2; -- No check possible here.
+   end Pkg4.Child;
+
+Type T3 would have two Implicit_Dereferences, both visible in the body of
+Pkg4.Child, for different discriminants.
 
 !ASIS
 
