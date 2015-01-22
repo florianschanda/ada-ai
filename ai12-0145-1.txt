@@ -1,0 +1,183 @@
+!standard 13.11.4(20/3)                                   15-01-21  AI05-0145-1/01
+!class binding interpretation 15-01-21
+!status work item 15-01-21
+!status received 14-12-04
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Pool_of_Subpool returns null when called too early
+!summary
+
+Pool_of_Subpool returns null if called before Set_Pool_of_Subpool is called
+on the subpool handle.
+
+!question
+
+What does Pool_of_Subpool return if Set_Pool_of_Subpool has never been called
+for the specific subpool handle? (Null.) 13.11.4(20/3) only says this about
+about Pool_of_Subpool:
+
+An access to the pool that a subpool belongs to can be obtained by calling
+Pool_of_Subpool with the subpool handle.
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 13.11.4(20/3):
+
+Each subpool *belongs* to a single storage pool (which will always be a pool
+that supports subpools). An access to the pool that a subpool belongs to can
+be obtained by calling Pool_of_Subpool with the subpool handle.
+Set_Pool_of_Subpool causes the subpool of the subpool handle to belong to the
+given pool; this is intended to be called from subpool constructors like
+Create_Subpool. Set_Pool_of_Subpool propagates Program_Error if the subpool
+already belongs to a pool.{ If Set_Pool_of_Subpool has not yet been called
+for a subpool, Pool_of_Subpool returns *null*.}
+
+!discussion
+
+There are at least two plausable ways for such a call to happen
+
+(1) Create_Subpool (or other constructor) forgets to call Set_Pool_of_Subpool.
+    (Equivalently, Pool_of_Subpool is called within a subpool constructor
+    before the call to Set_Pool_of_Subpool).
+
+(2) A pool creator visibly extends Root_Subpool, and then:
+
+    My_Subpool_Object : My_Subpool_Type;
+    My_Subpool : Subpool_Handler := My_Subpool_Object'access;
+    ... Pool_of_Subpool(My_Subpool) ... -- ??
+
+    Equivalently, the user extends Root_Subpool themselves.
+
+    Pool creators aren't supposed to extend Root_Subpool visibly (they're
+    supposed to do it in the package body) and users aren't supposed to extend
+    these types at all, but we have no way to enforce intended use in this
+    case.
+
+It appears that the intent was for Pool_of_Subpool to return null in such a
+case. Two reasons why:
+(A) There is no "not null" on the return type, while we used that on almost
+    every other access type in this package. Thus we expected "null" to be
+    returned in some case, and this is the only case where that would have
+    been possible.
+(B) Pool_of_Subpool is used in a Pre'Class in the package, and it seems
+    unlikely that we'd want failure of that precondition to raise anything
+    other than Assertion_Error.
+
+In addition, the existing implementation returns null in this case. For all
+of these reasons, we add wording to say that null is returned if
+Set_Pool_of_Subpool has not yet been called.
+
+!corrigendum 13.11.4(20/3)
+
+@drepl
+Each subpool @i<belongs> to a single storage pool (which will always be a pool
+that supports subpools). An access to the pool that a subpool belongs to can
+be obtained by calling Pool_of_Subpool with the subpool handle.
+Set_Pool_of_Subpool causes the subpool of the subpool handle to belong to the
+given pool; this is intended to be called from subpool constructors like
+Create_Subpool. Set_Pool_of_Subpool propagates Program_Error if the subpool
+already belongs to a pool.
+@dby
+Each subpool @i<belongs> to a single storage pool (which will always be a pool
+that supports subpools). An access to the pool that a subpool belongs to can
+be obtained by calling Pool_of_Subpool with the subpool handle.
+Set_Pool_of_Subpool causes the subpool of the subpool handle to belong to the
+given pool; this is intended to be called from subpool constructors like
+Create_Subpool. Set_Pool_of_Subpool propagates Program_Error if the subpool
+already belongs to a pool. If Set_Pool_of_Subpool has not yet been called
+for a subpool, Pool_of_Subpool returns @b<null>.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+We could have an ACATS C-Test to check that null is returned, but it would
+have minimal value.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Thursday, December 4, 2014  9:01 PM
+
+I'm working on my homework (highly recommended for the rest of you, too! :-)
+and I was trying to figure out if there was any way for a pool to fail that
+doesn't involve a malfunctioning Allocate or Allocate_From_Subpool. I didn't
+find any, but I have a question.
+
+We have a routine Pool_of_Subpool which is not intended to be overridden by
+the pool creator (it's supposed to be provided by the implementer). The
+wording says this about it:
+
+"An access to the pool that a subpool belongs to can be obtained by calling
+Pool_of_Subpool with the subpool handle."
+
+That doesn't tell us much. We later find out that we can set (once) the pool
+of a subpool by calling Set_Pool_of_Subpool.
+
+But nothing says what happens if Set_Pool_of_Subpool was not called for a
+particular Subpool_Handle.
+
+I can think of at least two ways that can happen:
+(1) Create_Subpool (or other constructor) forgets to call Set_Pool_of_Subpool.
+    (Equivalently, Pool_of_Subpool is called within a subpool constructor
+    before the call to Set_Pool_of_Subpool).
+(2) A pool creator visibly extends Root_Subpool, and then:
+
+    My_Subpool_Object : My_Subpool_Type;
+    My_Subpool : Subpool_Handler := My_Subpool_Object'access;
+    ... Pool_of_Subpool(My_Subpool) ... -- ??
+
+Equivalently, the user extends Root_Subpool themselves.
+
+Pool creators aren't supposed to extend Root_Subpool visibly (they're supposed
+to do it in the package body) and users aren't supposed to extend these types
+at all, but we have no way to enforce proper use here.
+
+So what happens in this case?
+
+(A) What does GNAT do? (I could write a program to find out, but then I'd have
+    to make it an ACATS test, and this seems like the kind of corner case we
+    don't really want in the ACATS, as it should only occur if someone misuses
+    the subpool package.)
+
+(B) What do WE want it to do?
+
+There are two obvious choices: raise Program_Error, or return null. I suspect
+the intention was that it return null, for two reasons: (1) there is no "not
+null" on the return type, while we used that on almost every other access type
+in this package. (2) Pool_of_Subpool is used in a Pre'Class in the package, and
+we'd probably rather have that raise Assertion_Error rather than Program_Error
+in this case. (Although that's not a very big deal.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, December 5, 2014 11:01 AM
+
+> ... (A) What does GNAT do? (I could write a program to find out, but 
+> then I'd have to make it an ACATS test, and this seems like the kind 
+> of corner case we don't really want in the ACATS, as it should only 
+> occur if someone misuses the subpool package.)
+
+GNAT returns null.
+
+> (B) What do WE want it to do?
+>
+> There are two obvious choices: raise Program_Error, or return null. I 
+> suspect the intention was that it return null, for two reasons: (1) 
+> there is no "not null" on the return type, while we used that on 
+> almost every other access type in this package. (2) Pool_of_Subpool is 
+> used in a Pre'Class in the package, and we'd probably rather have that 
+> raise Assertion_Error rather than Program_Error in this case. 
+> (Although that's not a very big deal.)
+
+GNAT returns null.  Seems fine to me.
+
+****************************************************************
