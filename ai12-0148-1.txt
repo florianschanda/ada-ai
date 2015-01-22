@@ -1,0 +1,1456 @@
+!standard 13.11(xx)                                   15-01-21  AI05-0148-1/01
+!class binding interpretation 15-01-21
+!status work item 15-01-21
+!status received 14-04-12
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Dangling references
+!summary
+
+The objects in a subpool cease to exist during a call to
+Unchecked_Deallocate_Subpool before the call to Deallocate_Subpool.
+
+The object deallocated by an instance of Unchecked_Deallocation ceases to
+exist before the call to Deallocate.
+
+It is a Bounded Error to evaluate the value of an access object that is a
+dangling reference; execution is erronous if an access object whose value
+is a dangling reference is dereferenced.
+
+!question
+
+(1) 13.11.2(10/2) says that the object deallocated by an instance of
+Unchecked_Deallocation ceases to exist after the call to that instance.
+There is no such wording in 13.11.5. That implies that Deallocate_Subpool
+cannot free the memory used by the objects in the subpool, as they still exist
+and thus can be accessed without causing erroneous execution.
+
+But that is madness, since it defeats the entire purpose of having subpools.
+Should we add wording about the objects ceasing to exist? (Yes.)
+
+(2) 13.11.2(9/3) says that Deallocate is called during the execution of an
+instance of Unchecked_Deallocation. 13.11.2(10/2) says that the object
+deallocated by an instance of Unchecked_Deallocation ceases to exist after
+the call to that instance. 13.11(21) says that execution is erroneous if the
+allocated storage from a pool is used for any other purpose while the pool
+element still exists. That means that there is a (short) window after a
+call to Deallocate when the object contained still exists, which means that
+actually making memory available for reuse immediately within Deallocate is
+an incorrect implementation (as it is possible that the memory would be
+used for another purpose before the object ceases to exist). But that is
+madness, since it means that the typical way that user-defined pools are
+constructed is wrong.
+
+We should fix the wording so the deallocated object ceases to exist before
+Deallocate is called, right? (Yes.)
+
+(3) Consider what happens if a pool object and the access type that uses it
+are in the same scope:
+
+     A_Pool : Some_Pool_Type;
+
+     type Acc is access ...
+        with Storage_Pool => A_Pool;
+
+Considering only the objects allocated for Acc and not explicitly deallocated,
+7.6.1 says that the following happens in the listed order:
+
+    The collection of type Acc is finalized.
+    A_Pool is finalized.
+    The collection and A_Pool cease to exist when the master is left.
+
+If the finalization of A_Pool frees the memory associated with the collection
+(which is a very likely implementation), then it will have been freed before the
+objects in the collection have ceased to exist. Thus, if the memory is reused
+immediately, then the program execution is erroneous. But that is madness,
+since it means that the typical way that user-defined pools are constructed
+is wrong.
+
+Should this be changed? (No.)
+
+(4) Consider:
+
+      Ptr1 := new Designated;
+      Ptr2 := Ptr1;
+      Free (Ptr1);
+      Ptr3 := new Designated;
+      if Ptr2 = Ptr3 then -- !
+
+If the implementation uses just a machine address for the representation of an
+access value, and if Free makes the memory used by the allocator for Ptr1
+available for reuse, and the allocator for Ptr3 in fact uses the same memory,
+then Ptr2 and Ptr3 will in fact contain exactly the same bit pattern. However,
+4.5.2(12) makes it pretty clear that the only time that the equality of Ptr2 and
+Ptr3 can return True is when the designed objects are the same. That's clearly
+not the case here (the first allocated object no longer exists, but if we ignore
+that it's not the same as the second allocated object, and if we take that into
+account, something that doesn't exist still can't be the same as something that
+does exist). (The same will be true for a number of other implementations of
+access values.) Thus, the implementation has to avoid reusing memory, or has to
+use some more complex represenation for access values. But that is madness,
+since it means that typical Ada implementations (in particular ones that match
+the representation of an access value with the one used by C) are wrong (and
+because of an obscure corner-case at that).
+
+Should this be fixed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 13.11.2(10/2):
+
+After {the finalizaton step of} Free(X), the object designated by X, and any
+subcomponents (and coextensions) thereof, no longer exist; their storage can be
+reused for other purposes.
+
+Add after 13.11.2(15): [in the Bounded Error section]
+
+An access value that designates a nonexistent object is called a
+"dangling reference".
+
+   AARM Discussion: These can result from use of Unchecked_Deallocation,
+   Unchecked_Deallocate_Subpool, and attribute Unchecked_Access.
+   Bad results from Unchecked_Conversion and from stream-oriented attributes
+   are abnormal by 13.9.1, which is stronger and thus takes precedence.
+
+[Editor's note: We could consider changing 13.9.1(6/2) and 13.9.1(6.1/2) to
+only apply to composite objects and let this definition govern access objects
+in those cases rather than "abnormal". In that case, this definition probably
+should be placed in 13.9.1. But there doesn't seem to be any compelling
+reason to worry about what happens with junk values in those cases; in
+particular, there's little reason to allow them to be compared and assigned
+without causing erroneous execution.]
+
+It is a bounded error to pass an object to a predefined equality
+operator if any part of the object is a dangling reference.
+It is a bounded error for the first operand of a membership test to
+be a dangling reference, or to have a discriminant that has a dangling
+reference. Either Constraint_Error or Program_Error is raised, or the result
+is either True or False.
+
+   AARM Reason: If a dangling reference is compared with another access
+   value, a result of either True or False is allowed. We need to allow this
+   so that simple implementations of access values (for instance, as a bare
+   address) can work if the memory in question is reused. There are similar
+   issues with the result of a memebership operation.
+
+Redundant[If a dangling reference is dereferenced (implicitly or explicitly),
+execution is erroneous (see below).]
+
+[Editor's note: Bob's wording didn't have this, but then the following
+paragraph made it sound like the program should "proceed normally" in that
+case. Causing erroneous execution should never be described as "normal"!]
+
+In other contexts, it is a bounded error to evaluate an expression
+whose result is a dangling reference. Either Constraint_Error or
+Program_Error is raised, or execution proceeds normally.
+
+   AARM Discussion: This non-equality, non-membership case applies
+   to access values, but not composite objects containing access values.
+   If a dangling reference is assigned into an object,
+   including being passed to a formal parameter, that object also contains
+   a dangling reference afterwards.
+
+   Since these rules do not apply to composite objects, assignments of
+   composite objects with subcomponents that are dangling references have to
+   work normally; no exception can be raised, but the target object will have
+   subcomponents that are dangling references, and a (direct) use of one of
+   those subcomponents can again trigger these rules. This is similar to the
+   way that assignments of invalid subcomponents are handled (see 13.9.1).
+
+   AARM Reason: We allow Constraint_Error to be raised here so that dangling
+   reference and null pointer checks can be combined into a single check. If
+   different exceptions are required, then the checks have to be made
+   separately - but there's little semantic difference (neither designate a
+   usable object).
+
+Add after 13.11.5(7/3):
+
+* All of the objects allocated from the subpool cease to exist.
+
+[Editor's note: This is a bit weird, because we have two dynamic actions and a
+static semantic action rolled together. But we need to be quite specific as to
+when the object no longer exists. An alternative would be to make it a separate
+sentence similar to the change suggested above, given before 13.11.5(10/3):
+"After the finalization step of Unchecked_Deallocate_Subpool, all of the
+objects allocated from the subpool cease to exist." It's not clear to me
+that this better.]
+
+
+
+!discussion
+
+We define the term "dangling reference" to characterize the case where an
+access value designates a nonexistent object. We then define the results of
+various operations on such values. The definition partially subsumes the rule
+of 13.11.2(16/3) about evaluating the name of a nonexistent object, but we
+leave that rule as we cannot be certain that all such cases are covered.
+This fixes question (4).
+
+We also add wording to 13.11.5 to say that the objects in the subpool cease
+to exist after finalization, but before the call to Deallocate_Subpool. That
+fixes question (1).
+
+We move the wording in 13.11.2 to says that the object being deallocated
+ceases to exist after finalization but before the call to Deallocate. That
+fixes question (2).
+
+We do not try to fix (3). It was suggested that we say that the collection
+ceases to exist when the pool object is finalized. However, all that does is
+move the bump under the rug, as any use of the objects in the collection
+after finalization of the storage pool would then become erroneous. Such
+access is currently not erroneous by itself (although the implementation of
+the pool most likely would make it erroneous anyway).
+
+With the current rules, a pool implemented as expected could make execution of
+the program formally erroneous if the memory is reused before the objects
+cease to exist. However, a program may be formally erroneous, but no bad
+effects will occur unless the program tried to use the (already finalized)
+objects while they still exist after the pool was finalized (and thus the
+objects do not have any memory assigned to them). That will not affect the
+vast majority of programs as no one will use those objects after finalization.
+Thus the problem is more one of formal definition than one of any practical
+importance. As 7.6.1 is a very complex set of wording, rewriting it to fix
+this problem is not appealing. Therefore, we chose to not fix the problem at
+this time.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+The Bounded Error effects could be tested with a C-Test, but that is not very
+important since either result is allowed (especially as a custom pool would
+need to be used to ensure that same address is used for multiple allocations),
+and we usually don't test for implementation choices. Most of the remaining
+effects involve erroneous execution, which is not testable.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Thursday, December 4, 2015  9:46 PM
+
+Since Steve and Adam haven't provided many pedantic topics lately, let me pick
+up some of the slack. :-)
+
+I've been considering exactly what 13.11(21) means. Here's the entire paragraph
+again:
+
+If Storage_Pool is specified for an access type, then if Allocate can satisfy
+the request, it should allocate a contiguous block of memory, and return the
+address of the first storage element in Storage_Address. The block should
+contain Size_In_Storage_Elements storage elements, and should be aligned
+according to Alignment. The allocated storage should not be used for any other
+purpose while the pool element remains in existence. If the request cannot be
+satisfied, then Allocate should propagate an exception [(such as
+Storage_Error)]. If Allocate behaves in any other manner, then the program
+execution is erroneous.
+
+The expectation is that this (and this alone) is sufficient to cover any
+possible broken user-defined storage pool, letting the compiler off the hook for
+anything bad that happens in that case.
+
+The key is the sentence about the allocated storage not being used for another
+purpose. This prevents problems with malfunctioning Deallocate routines, as well
+as problems that occur if some outside actor (or an additional interface) frees
+memory too soon.
+
+However, it depends on limiting the lifetime of the memory to the time that the
+"pool element is in existence". What is that time?
+
+The obvious notion is that it's related to when the allocated item ceases to
+exist. Mostly, this is defined by 7.6.1(11/3) and other wording in 7.6.1.
+13.11.2(10/2) applies for Unchecked_Deallocation. Important aside: 13.11.5 seems
+to be missing matching wording for objects in a subpool deallocated by
+Unchecked_Deallocate_Subpool -- there should be a statement there that those
+objects cease to exist after a call to UDS. So far as I can tell, they never
+cease to exist! We surely want 13.11.2(16/3) to apply to pointers made dangling
+by UDS.
+
+(Returning to the original discussion:) The problem here is that these objects
+cease to exist too late for the pool. Consider Unchecked_Deallocation. The
+object ceases to exist after Unchecked_Deallocation returns. But the call to
+Deallocate happens during the execution of UD -- before the point when the
+object ceases to exist. That means that if Deallocate frees the memory in such a
+way that it is "used for some other purpose" (such as putting it on a free chain
+or giving it back to the OS), the program is erroneous even though it is
+following the intended usage of a pool.
+
+This is clearly a violation of the Dewar rule. Moreover, in this case, it's hard
+to imagine how the difference could matter (who can access the object between
+the call to Deallocate and the returning of UD?).
+
+But let's look at another case:
+
+     A_Pool : Some_Pool_Type;
+
+     type Acc is access ...
+        with Storage_Pool => A_Pool;
+
+[that is, both the pool object and the access type are in the same scope.]
+Considering only the objects allocated for Acc and not explicitly deallocated,
+7.6.1 says that the following happens in the listed order:
+
+    The collection of type Acc is finalized.
+    A_Pool is finalized.
+    The collection and A_Pool cease to exist when the master is left.
+
+If the finalization of A_Pool frees the memory associated with the collection
+(which is a very likely implementation), then it will have been freed before the
+objects in the collection have ceased to exist. Again, if the memory is reused
+immediately, then the program execution is erroneous, even though the intended
+implementation model was followed.
+
+We've again violated the Dewar rule. In this case, however, we could in fact see
+an effect. That's because it's possible to access objects after they are
+finalized and before they cease to exist, and in general, such cases are NOT
+erroneous. However, if one uses a storage pool in the same master in such a
+case, that program execution immediately becomes erroneous (and in fact that
+might even be necessary if the expected implementation model is followed).
+
+Note, of course, that just because execution is erroneous doesn't mean that
+something bad HAS to happen. The problem of having erroneous execution too broad
+is simply that tools and readers trying to detect possible erroneous execution
+have to assume the worst, and that leads to users avoiding usage of features
+that are perfectly safe in practice.
+
+It seems to me that we *really* mean that the pool element ceases to exist when
+Deallocate or Deallocate_Subpool is called (even though the actual object
+continues to exist for a short time after that). But it's not so clear as to
+what should happen when a pool is finalized. Allowing the pool elements to cease
+to exist at that point means that we could have objects that exist but have no
+backing memory. That better be erroneous. OTOH, leaving things as they are means
+that a pool cannot clean up after itself without (potentially) making the
+containing program erroneous. That's unappealing, but perhaps this is what we
+have to do.
+
+This question (with the exception of the missing wording in 13.11.5) may simply
+be best ignored, since it isn't likely that any implementation is going to
+exactly follow 13.11(21) anyway. What implementers take 13.11(21) to mean is
+that they don't have to worry about malfunctioning pools, and that is exactly
+the intent. Perhaps it isn't worth trying to explain what that means in detail.
+OTOH, it does help users to know what they can and cannot expect to work
+portably. Maybe an AARM note is enough, since the most problematic cases are
+close to pathologies anyway.
+
+Thoughts? Or has everyone dozed off by this point? :-)
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, December 5, 2015  9:48 AM
+
+> This is clearly a violation of the Dewar rule. Moreover, in this case,
+> it's hard to imagine how the difference could matter (who can access
+> the object between the call to Deallocate and the returning of UD?).
+
+Easy. Another task of higher priority could call Allocate. I see no statement
+about thread-safeness of Unchecked_Deallocation or Deallocate vis-a-vis Allocate
+and 'new' in the standard. There should be, solving this particular issue,
+including the angels on the tip of the pin, which then become invisible and the
+object can peacefully die anytime during the Unchecked_Deallocation. before or
+after the block gets hooked on the freelist.
+
+Or, joining the dancing angels, 13.11.2 does NOT say that the object ceases to
+exist after the call on Free. It merely says that it no longer exists. It makes
+no statement as to when lightning hit it (even if the text implies that the call
+(begin) of Deallocate is the very instance of it going up in smoke, since how
+can an object exist without its storage?). In the latter case, it might suffice
+to make Deallocate/Allocate thread-safe.
+
+Can anybody point out a statement that makes Allocation/Deallocation in whatever
+form thread-safe? If not, this is a much needed fix to the language.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, December 5, 2015  10:27 AM
+
+In answer to Randy's question, a collection should cease to exist upon scope
+exit, or upon (the start of) finalization of its storage pool, whichever comes
+first.
+
+I agree that the *start* of Unchecked_*_Deallocation should be the point where
+an object ceases to exist.
+
+As far as task safety, there is no requirement that a user-defined storage pool
+be thread safe, unless it might be used from multiple tasks.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, December 5, 2015  12:04 PM
+
+> I agree that the *start* of Unchecked_*_Deallocation should be the
+> point where an object ceases to exist.
+
+Don't we have problems if the object in question ceases to exist before it has
+been finalized?
+
+Subject to this constraint, I agree that we want it to cease to exist as early
+as possible,
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, December 5, 2015  12:43 PM
+
+> Don't we have problems if the object in question ceases to exist
+> before it has been finalized?
+
+Good point.  I should have said that it ceases to exist within
+Unchecked_*_Deallocation immediately after any finalization is complete.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, December 5, 2015  11:00 AM
+
+> Can anybody point out a statement that makes Allocation/Deallocation
+> in whatever form thread-safe? If not, this is a much needed fix to the
+> language.
+
+Isn't it the case that everything has to be thread-safe in Ada, unless
+explicitely stated otherwise (baring user provided code, of course) ?
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, December 5, 2015  11:55 AM
+
+Don't we know from Containers that that isn't so (other than for Queues)?
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, December 5, 2015 12:05 PM
+
+>> Isn't it the case that everything has to be thread-safe in Ada, unless
+>> explicitely stated otherwise (baring user provided code, of course) ?
+>
+> Don't we know from Containers that that isn't so (other than for Queues)?
+
+Eveyrthing has to be thread safe if there are no shared variables in sight.
+Certainly for example two separate tasks should be able to use two separate
+containers with no problems. To what are you referring Jeff?
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, December 5, 2015  2:32 PM
+
+Two tasks using the same Container is pretty common.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, December 5, 2015  2:57 PM
+
+> Two tasks using the same Container is pretty common. ...
+
+Then they better synchronize their actions carefully!
+
+It is only the Synchronized_Queues that do their own internal synchronization.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, December 5, 2015  2:59 PM
+
+> Two tasks using the same Container is pretty common.
+
+But on the face of things, that's access to a shared variable, and to me, you
+cannot assume this will work (in fact it likely won't work because of tampering
+checks etc, even for reading!)
+
+So to me, absent some extra special guarantee, you need synchronization between
+tasks using the same container.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, December 5, 2015  5:34 PM
+
+Yes we know that but there's been no shortage of users who assumed at first that
+Containers included some sort of mutex.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, December 5, 2015  5:48 PM
+
+Well I have no objection to a note pointing out that this is not the case! There
+is of course no basis for such an assumption!
+
+Note that people assume Put_Line also can be used from multiple tasks, sadly
+this is also wrong!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, December 5, 2015  12:34 PM
+
+...
+> Isn't it the case that everything has to be thread-safe in Ada, unless
+> explicitely stated otherwise (baring user provided code, of course) ?
+
+But that's only true if there are no shared variables involved. And clearly, two
+allocators from the same pool are operating on a shared variable, so there is no
+requirement for them to be task-safe. Moreover, it would be quite expensive to
+require task safety for user-defined pools (especially when there is no need),
+and it would make virtually every user-defined pool example that I know of
+(including the ones in the RM) wrong. We should not go there.
+
+The only possible question is whether the default pool requires task safety.
+That probably ought to be a yes, but I don't think the language currently makes
+that a requirement.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, December 5, 2015  12:49 PM
+
+> Can anybody point out a statement that makes Allocation/Deallocation
+> in whatever form thread-safe? If not, this is a much needed fix to the
+> language.
+
+The intent is that user-defined pools are thread-safe or not, at the whim of the
+programmer.  The implementation-provided default pool(s) have to be thread safe.
+I think that goes without saying; I wouldn't bother fixing the RM.  It's one of
+those things that won't change the behavior of any implementor or any
+programmer, so it's a waste of time.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, December 5, 2015  1:04 PM
+
+I'm not sure of the "won't change the behavior of anyone". The allocators in
+Janus/Ada are only thread-safe by accident (because we use co-operative tasking
+and there is no tasking operations in the allocators); it's not at all clear
+that I would have realized that that implementation was wrong if/when OS threads
+are used for implementing tasks. (In particular, I don't know if the allocators
+in the U2200 version were task-safe; we never did anything to make that true.) A
+clear statement might help here.
+
+Note that I agree with you if one thinks about the topic. But without anything
+in the RM, why would someone think about that topic? Errors of omission are much
+harder to find than errors of commission. (Similarly, without an explicit rule
+in the RM, there's probably little chance of an ACATS test; there aren't tests
+for things that "go without saying".)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, December 12, 2015  9:48 AM
+
+(I'm putting this previously private mail back on the list because we need the
+possible solution on the record (and able to be vetted by all. - RLB)
+
+Steve Baird writes:
+> On 12/05/2014 03:52 PM, Randy Brukardt wrote:
+> >> What about references to deallocated values in equality comparisons:
+> >> >
+> >> >      Ptr1, Ptr2, Ptr3 : My-Access_Type;
+> >> >    begin
+> >> >      ...;
+> >> >      Ptr1 := Ptr2;
+> >> >      Free (Ptr2);
+> >> >     if Ptr1 = Ptr3 then ...
+> >> >?
+> >> >
+> >> >The equality comparison should be erroneous, but I don't think it
+> >> >is because there is no dereference involved.
+> > Should it? Nothing bad can (or should) happen from such a comparison.
+> > The answer may not be well-defined, but neither possible result
+> > (either True or False) could cause any problems.
+>
+> I agree that the comparison answer shouldn't be well-defined.
+>
+> If your implementation model for pointers (at least in the simplest
+> case) is just an address, then we want to allow something like
+>
+>      Ptr := new Designated;
+>      Free (Ptr);
+>      Ptr := new Designated;
+>
+> to possibly assign the same *address* to Ptr both times.
+> If we capture the first allocator value in another variable and then
+> compare it to the second one, then I agree that an implementation
+> should be allowed to return a result of either True or False.
+>
+> So where is the bounded error or erroneous execution or whatever
+> wording in the RM that justifies this?
+
+I would have expected the invalid/abnormal value wording to handle that.
+
+But actually it's pretty clear that it's not properly handled by the RM.
+
+      Ptr1 := new Designated;
+      Ptr2 := Ptr1;
+      Free (Ptr1);
+      Ptr3 := new Designated;
+      if Ptr2 = Ptr3 then -- !
+
+4.5.2(12) makes it pretty clear that the only time Ptr2 and Ptr3 can return True
+is when the designed objects are the same. That's clearly not the case here (the
+first allocated object no longer exists, but if we ignore that its not the same
+as the second allocated object, and if we take that into account, something that
+doesn't exist still can't be the same as something that does exist). [Indeed,
+this is similar to the zero-size object case, another case where the ARG refused
+to fix the wording to allow the natural result.]
+
+Ergo, Free can't really release the memory unless it has a way to null out Ptr2.
+Which is a clear violation of the Dewar rule, meaning something ought to be
+fixed. Note for Bob Duff: While this isn't going to change the behavior of any
+implementers, and probably not any users either, it's definitely misleading to
+anyone doing formal analysis of Ada programs. They need to know that Ptr2 is
+bad, and not just Ptr2.all (which is all that is currently covered by
+13.11.2(16)).
+
+> My point is that you can misuse an access-to-deallocated access value
+> without dereferencing it and the RM doesn't currently handle this.
+
+I agree, I don't see anything in 13.9.1 that clearly applies. An
+access-to-deallocated access value should be treated as invalid (we don't need
+uses to be erroneous, so "abnormal" is going further than needed), or possibly
+something separate but like invalid.
+
+That (unfortunately) would not fix my problem, through, since the erroneous
+behavior for a pool is written in terms of when the object exists.
+
+Perhaps it's better to use a different term.
+
+So something like (to fix both problems):
+
+Modify 13.11.2(10/2):
+
+After {the finalizaton step of} Free(X), the object designated by X, and any
+subcomponents (and coextensions) thereof, no longer exist; their storage can be
+reused for other purposes. {In addition, any access value that designates any
+part of X becomes *dangling*.}
+
+Add after 13.11.2(15): [in the Bounded Error section]
+
+If the representation of a non-null access object designates an object that no
+longer exists, the object is said to have a *dangling* value. It is a bounded
+error to evaluate the value of such an object. If the error is detected, either
+Constraint_Error or Program_Error is raised. Otherwise, execution continues
+using the dangling value. The rules of the language outside this subclause
+assume that no access objects are dangling. If an object with a dangling value
+is dereferenced (implicitly or explicitly), execution is erroneous (see below);
+otherwise, the semantics of operations on dangling values is unspecified, but
+does not by itself lead to erroneous or unpredictable execution, or to other
+objects becoming abnormal.
+
+[Note: One could put the latter text into 13.9.1 instead; it's closely related
+to invalid representations, the above text is mostly borrowed from there.]
+
+AARM Ramification: If a dangling value is compared with another access value,
+either result is allowed. We need to allow this so that the simple
+implementations of access values as a bare address can work if the memory in
+question is reused. Similarly, a membership operation on a dangling value can
+return either result.
+
+Add after 13.11.5(7/3):
+
+* All of the objects allocated from the subpool cease to exist. Any access
+  values that designate any part of such an object becomes dangling (see
+  13.11.2).
+
+
+---
+
+Alternatively, we could split 13.11.2(9/3) into a list of bullets, and put the
+existence wording between the first and second bullet. That would look like:
+
+3. Free(X), when X is not equal to null, the following actions occur:
+    * Performs finalization of the object designated by X (and any coextensions
+      of the object - see 3.10.2), as described in 7.6.1.
+    * The object designated by X, and any subcomponents (and coextensions)
+      thereof, no longer exist; their storage can be reused for other purposes.
+      In addition, any access value that designates any part of X becomes
+      dangling.
+    * Deallocates the storage occupied by the object designated by X (and any
+      coextensions). If the storage pool is a user-defined object, then the
+      storage is deallocated by calling Deallocate as described in 13.11. There
+      is one exception: if the object being freed contains tasks, the object
+      might not be deallocated.
+
+Note that this is a bit weird, because we have two dynamic actions and a static
+semantic action rolled together. But this makes it much clearer when the object
+no longer exists. Maybe these two bullets should be combined somehow?
+
+---
+
+We could also constrain the semantics of a dangling value further:
+
+The semantics of a dangling value are:
+ * If a dangling value is assigned, the target object also has a dangling value;
+ * If a boolean operation involves a dangling value, the result is unspecified;
+    AARM Ramification: It could be either True or False. Here we are talking
+    about equality ("=") and membership.
+ * If an object with a dangling value is dereferenced (implicitly or
+   explicitly), execution is erroneous (see below).
+
+[Can we do anything else with an access value??]
+
+---
+
+Note: I didn't try to deal with the problem that occurs when a pool and the
+access type are declared in the same declarative part.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, December 13, 2015  9:03 AM
+
+>...Note for Bob Duff: While this isn't going to change the  behavior of
+>any implementers, and probably not any users either, it's  definitely
+>misleading to anyone doing formal analysis of Ada programs.
+
+Actually, I think it might change behavior of implementers and/or users.
+A run-time check for dangling pointers would be useful, and not terribly
+difficult to implement, nor terribly slow.
+
+Implementers and users need to know exactly where such checks can happen.
+Furthermore, I recall some folks who didn't initially understand why "X = Y"
+might be True if X is dangling.
+
+>...They
+> need to know that Ptr2 is bad, and not just Ptr2.all (which is all
+>that is  currently covered by 13.11.2(16)).
+
+Agreed.
+
+I'm quite surprised this isn't covered.  I remember thinking about the issue
+during Ada 9X, so I thought it would be in there somewhere -- but I can't find
+it.
+
+> Modify 13.11.2(10/2):
+>
+> After {the finalizaton step of} Free(X), the object designated by X,
+> and any subcomponents (and coextensions) thereof, no longer exist;
+> their storage can be reused for other purposes. {In addition, any
+> access value that designates any part of X becomes *dangling*.}
+>
+> Add after 13.11.2(15): [in the Bounded Error section]
+>
+> If the representation of a non-null access object designates an object
+> that no longer exists, the object is said to have a *dangling* value.
+> It is a bounded error to evaluate the value of such an object. If the
+> error is detected, either Constraint_Error or Program_Error is raised.
+> Otherwise, execution continues using the dangling value. The rules of
+> the language outside this subclause assume that no access objects are
+> dangling. If an object with a dangling value is dereferenced
+> (implicitly or explicitly), execution is erroneous (see below);
+> otherwise, the semantics of operations on dangling values is
+> unspecified, but does not by itself lead to erroneous or unpredictable
+> execution, or to other objects becoming abnormal.
+
+13.9.1 says "implementation-defined", but you've broadened it to "unspecified"
+here.  I don't much like either "implementation-defined" or "unspecified"; that
+implies that the semantics can be ridiculous, like "set all floating-point
+variables in the program to 17.5".
+
+I think we should define "dangling" concisely, and in one place:
+
+    An access value that designates a nonexistent object is "dangling".
+
+The notion of "nonexistent object" is admittedly weird, but it's already there
+and hasn't caused any trouble.  If we attempt to scatter the definition around,
+we're liable to miss some cases.  You covered Unchecked_Deallocation and subpool
+finalization.  But what about 'Unchecked_Access, which can also produce a
+pointer that later dangles?  What about Unchecked_Conversion of pointers, and
+Address_To_Access_Conversions?
+
+The above wording doesn't cover composite objects containing dangling pointers;
+equality on those should be a bounded error.  Or do you believe that's covered
+by the component-wise definition of "="? So "X = Y" should be a bounded error if
+X or any part of it is dangling. But in other contexts, like "P(X);", it should
+be a bounded error if X is dangling, but not if it is a composite object
+containing dangling access values.
+
+I suppose "X in T" should be a bounded error if X has a discriminant that is a
+dangling access value.
+
+I find the phrase "evaluate the value of... an object" to be weird.
+You don't evaluate values.  You evaluate expressions to produce values.
+I realize the phrase is already in use.
+
+> [Note: One could put the latter text into 13.9.1 instead; it's closely
+> related to invalid representations, the above text is mostly borrowed
+> from there.]
+>
+> AARM Ramification: If a dangling value is compared with another access
+> value, either result is allowed. We need to allow this so that the
+> simple implementations of access values as a bare address can work if
+> the memory in question is reused. Similarly, a membership operation on
+> a dangling value can return either result.
+
+>...
+
+> We could also constrain the semantics of a dangling value further:
+
+That's probably a better approach; it answers my objection to "unspecified"
+semantics above.  How about:
+
+    It is a bounded error to pass an object to a predefined equality
+    operator if any part of the object is dangling.
+    It is a bounded error for the first operand of a membership test to
+    be dangling, or to have a dangling discriminant.
+    Either Program_Error is raised, or the result is either True or
+    False.
+
+    AARM: This is necessary to allow implementations to reuse the memory
+    of objects that no longer exist.
+
+    In other contexts, it is a bounded error to evaluate an expression
+    whose result is dangling. Either Program_Error is raised, or
+    execution proceeds normally.
+
+    AARM: Note that this non-equality, non-membership case applies to
+    access values, but not composite objects containing access values.
+    If a dangling access value is assigned into an object,
+    including being passed to a formal parameter, that object
+    is also dangling.
+
+???Do we really want to allow C_E as well?  I don't much care.
+
+> [Can we do anything else with an access value??]
+
+Not that I know of.
+
+Quoting out of order:
+
+> AARM Ramification: If a dangling value is compared with another access
+> value, either result is allowed. We need to allow this so that the
+> simple implementations of access values as a bare address can work if
+> the memory in question is reused. Similarly, a membership operation on
+> a dangling value can return either result.
+
+I don't think it has anything to do with "bare addresses".  The issue is memory
+reuse, and applies to any imaginable representation of access values.  BTW, it
+could be reuse of heap memory, or reuse of call-stack memory.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, December 13, 2015  8:18 PM
+
+> >...Note for Bob Duff: While this isn't going to change the behavior
+> >of any implementers, and probably not any users either, it's
+> >definitely misleading to anyone doing formal analysis of Ada programs.
+>
+> Actually, I think it might change behavior of implementers and/or users.
+> A run-time check for dangling pointers would be useful, and not
+> terribly difficult to implement, nor terribly slow.
+
+My guess is that implementers that want to do such a check already make it.
+Especially as such checks naturally happen when a access value is dereferenced,
+and in that case, a dangling pointer is erroneous (and as such anything can be
+done).
+
+> Implementers and users need to know exactly where such checks can
+> happen.  Furthermore, I recall some folks who didn't initially
+> understand why "X = Y" might be True if X is dangling.
+
+Right, that was my point. But mainly I stuck in that comment because I felt this
+was a case where implementers would ignore the actual RM words and do the
+sensible thing, and I guessed that would fall into your "why bother" category.
+Obviously, I guessed wrong. :-)
+
+> >...They
+> > need to know that Ptr2 is bad, and not just Ptr2.all (which is all
+> >that is  currently covered by 13.11.2(16)).
+>
+> Agreed.
+>
+> I'm quite surprised this isn't covered.  I remember thinking about the
+> issue during Ada 9X, so I thought it would be in there somewhere --
+> but I can't find it.
+
+I had the same reaction when Steve brought it up. But I looked pretty hard in
+the obvious places, and it isn't there.
+
+> > Modify 13.11.2(10/2):
+> >
+> > After {the finalizaton step of} Free(X), the object designated by X,
+> > and any subcomponents (and coextensions) thereof, no longer exist;
+> > their storage can be reused for other purposes. {In addition, any
+> > access value that designates any part of X becomes *dangling*.}
+> >
+> > Add after 13.11.2(15): [in the Bounded Error section]
+> >
+> > If the representation of a non-null access object designates an
+> > object that no longer exists, the object is said to have a *dangling* value.
+> > It is a bounded error to evaluate the value of such an object. If
+> > the error is detected, either Constraint_Error or Program_Error is raised.
+> > Otherwise, execution continues using the dangling value. The rules
+> > of the language outside this subclause assume that no access objects
+> > are dangling. If an object with a dangling value is dereferenced
+> > (implicitly or explicitly), execution is erroneous (see below);
+> > otherwise, the semantics of operations on dangling values is
+> > unspecified, but does not by itself lead to erroneous or
+> > unpredictable execution, or to other objects becoming abnormal.
+>
+> 13.9.1 says "implementation-defined", but you've broadened it to
+> "unspecified" here.  I don't much like either "implementation-defined"
+> or "unspecified"; that implies that the semantics can be ridiculous,
+> like "set all floating-point variables in the program to 17.5".
+
+I didn't like "implementation-defined" as that requires documentation, and there
+is no possible *useful* documentation in this case. Saying that "=" might return
+True or False doesn't tell the user anything that they can act on, so why
+require telling them anything?
+
+> I think we should define "dangling" concisely, and in one place:
+>
+>     An access value that designates a nonexistent object is "dangling".
+>
+> The notion of "nonexistent object" is admittedly weird, but it's
+> already there and hasn't caused any trouble.  If we attempt to scatter
+> the definition around, we're liable to miss some cases.  You covered
+> Unchecked_Deallocation and subpool finalization.  But what about
+> 'Unchecked_Access, which can also produce a pointer that later
+> dangles?  What about Unchecked_Conversion of pointers, and
+> Address_To_Access_Conversions?
+
+You're right, I forgot about Unchecked_Access. Unchecked_Conversion of a pointer
+is already erroneous, I think. (I didn't check that right now.)
+
+> The above wording doesn't cover composite objects containing dangling
+> pointers; equality on those should be a bounded error.  Or do you
+> believe that's covered by the component-wise definition of "="?
+
+Yes, that's exactly what I thought.
+
+...
+> > We could also constrain the semantics of a dangling value further:
+>
+> That's probably a better approach; it answers my objection to
+> "unspecified" semantics above.  How about:
+>
+>     It is a bounded error to pass an object to a predefined equality
+>     operator if any part of the object is dangling.
+>     It is a bounded error for the first operand of a membership test to
+>     be dangling, or to have a dangling discriminant.
+>     Either Program_Error is raised, or the result is either True or
+>     False.
+>
+>     AARM: This is necessary to allow implementations to reuse the memory
+>     of objects that no longer exist.
+>
+>     In other contexts, it is a bounded error to evaluate an expression
+>     whose result is dangling. Either Program_Error is raised, or
+>     execution proceeds normally.
+>
+>     AARM: Note that this non-equality, non-membership case applies to
+>     access values, but not composite objects containing access values.
+>     If a dangling access value is assigned into an object,
+>     including being passed to a formal parameter, that object
+>     is also dangling.
+>
+> ???Do we really want to allow C_E as well?  I don't much care.
+
+I think it is a good idea, because it allows the implementation to combine the
+Null check and a dangling check on a dereference. (The implementation would have
+to check them separately to raise different exceptions.)
+
+Janus/Ada 83 did this; the dereference check failed if the address was not in
+the current bounds of the heap.
+
+Of course, for Ada 95, I had to get rid of that unless the type is pool-specific
+and uses the default storage pool. But it's still in Janus/Ada in that case, as
+I didn't want to do less checking for identical code in a newer compiler
+version. (In the old CP/M and MS-DOS compilers, the heap would shrink if
+possible during deallocation, so it actually did catch errors, especially in
+mode change situations. For Windows, that doesn't happen, so it only detects
+streaming-in garbage and the like.)
+
+It would have been nice if Root_Storage_Pool had an operation like:
+
+     procedure Check_Validity(
+      Pool : in out Root_Storage_Pool;
+      Storage_Address : in Address) is null;
+
+which would be called on a dereference, after the null check and before actually
+dereferencing. (We had a proposal like this for Ada 2012, but we went with
+generalized references instead.) [An implementation wouldn't actually have to
+call the routine if it knew that it was null (not overridden), so there would
+only be overhead when it is used and for Root_Storage_Pool'Class.]
+
+A routine like this would let one write a storage pool that checked for dangling
+pointers.
+
+> > [Can we do anything else with an access value??]
+>
+> Not that I know of.
+>
+> Quoting out of order:
+>
+> > AARM Ramification: If a dangling value is compared with another
+> > access value, either result is allowed. We need to allow this so
+> > that the simple implementations of access values as a bare address
+> > can work if the memory in question is reused. Similarly, a
+> > membership operation on a dangling value can return either result.
+>
+> I don't think it has anything to do with "bare addresses".
+> The issue is memory reuse, and applies to any imaginable
+> representation of access values.  BTW, it could be reuse of heap
+> memory, or reuse of call-stack memory.
+
+Well, *I* can easily imagine an access representation that would work in the
+face of reuse (at least in 99.9% of the cases). Indeed, it's simple enough that
+one might imagine that the RM writers expected implementers to use it.
+
+Specifically: One could include an object serial number in the access value (set
+when it is allocated, different for each allocation, and copied of course with
+the rest of the pointer when the value is assigned); different objects would
+then have the same address but different serials. (Indeed, that's part of how
+one would typically detect dangling pointers; there would be a matching serial
+number in the object memory -- and if that doesn't match, the pointer is
+dangling.) Such an implementation could tell that the memory had been reused and
+would work as currently defined in the RM. (It wouldn't work 100% of the time as
+it would be possible to write a program that allocated enough objects that the
+serial number wrapped around. But that can be minimized by using more bits for
+the serial number, and there's virtually no chance that one could write a
+black-box test program [like an ACATS test] and run into that issue.)
+
+The point of my note is that we don't want to require such an implementation. I
+think we do have to mention in the note that we want to allow a bare-address
+implementation.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, December 13, 2015  9:33 PM
+
+I'm not a big fan of the term "dangling," but otherwise, I like your approach.
+There seems no need to specify that a comparison using such a value is erroneous
+-- bounded error is adequate.  Assignment or parameter passing, where the target
+access subtype is unconstrained, should also be no worse than bounded error.
+However, if the target access subtype is constrained, then the implied subtype
+check would venture into the land of erroneousness.
+
+As far as alternates to the term "dangling," perhaps "invalid" or "freed."
+"Invalid" is nice because we already have rules about using invalid values.
+Hence, we could say that all copies of the value of an access value whose target
+is freed "become invalid values."
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, December 14, 2015  1:15 PM
+
+> Right, that was my point. But mainly I stuck in that comment because I
+> felt this was a case where implementers would ignore the actual RM
+> words and do the sensible thing, and I guessed that would fall into your
+> "why bother" category. Obviously, I guessed wrong. :-)
+
+;-)
+
+I'm willing to bother in this case, because there are several rules that could
+work.  We could say that "=" returns True or False.  And we could say that other
+things, like passing a dangling pointer as a parameter, just work.  I think we
+want to allow it to raise in these cases, but I don't that's "obvious".
+
+The earlier question, about at which precise moment an object ceases to exist,
+still seems kind of in the angels/pinheads category to me.  ;-)
+
+> Well, *I* can easily imagine an access representation that would work
+> in the face of reuse (at least in 99.9% of the cases). Indeed, it's
+> simple enough that one might imagine that the RM writers expected
+> implementers to use it.
+
+Yes, of course.  [slaps forehead]  I said it's possible to detect dangling
+pointers, and if that's true, then OBVIOUSLY it's possible to make "=" return
+False for dangling pointers.
+
+But if you're going to detect dangling pointers, you ought to raise an
+exception.
+
+> Specifically: One could include an object serial number in the access
+> value
+
+Yes, that method was called "generation counts" at Intermetrics.
+If the counter is 64 bits, you won't run out even if you allocate a new object
+every nanosecond, and your program runs for hundreds of years.  And you could
+(sometimes) use different counters for different types.
+
+The other method I know of requires garbage collection:
+Unchecked_Deallocation marks the heap object as "junk", and every use of every
+pointer checks for that.  Eventually the GC comes along and reclaims the object,
+and nulls-out every pointer to it.  GC's of course know how to find "every
+pointer".
+
+Neither of these methods is super fast.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, December 14, 2015  1:40 PM
+
+> I'm not a big fan of the term "dangling," but otherwise, I like your
+> approach.  There seems no need to specify that a comparison using such
+> a value is erroneous -- bounded error is adequate.  Assignment or
+> parameter passing, where the target access subtype is unconstrained, should
+> also be no worse than bounded error.
+
+Agreed.
+
+>...However, if the target access
+> subtype is constrained, then the implied subtype check would venture
+>into the land of  erroneousness.
+
+Hmm.  Both Randy and I missed that case.  Access subtypes rear their ugly heads
+again!
+
+> As far as alternates to the term "dangling," perhaps "invalid" or
+> "freed."  "Invalid" is nice because we already have rules about using
+> invalid values.  Hence, we could say that all copies of the value of
+> an access value whose target is freed "become invalid values."
+
+What's wrong with "dangling"?  The term "dangling pointer" is understood by
+approximately 100% of all programmers!
+
+I don't much like "invalid", because we use that for scalars that are relatively
+harmless -- no erroneousness.  But if you dereference a dangling pointer, that's
+erroneous.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, December 14, 2015  1:48 PM
+
+> > Well, *I* can easily imagine an access representation that would
+> > work in the face of reuse (at least in 99.9% of the cases). Indeed,
+> > it's simple enough that one might imagine that the RM writers expected
+> > implementers to use it.
+>
+> Yes, of course.  [slaps forehead]  I said it's possible to detect
+> dangling pointers, and if that's true, then OBVIOUSLY it's possible to
+> make "=" return False for dangling pointers.
+
+But I still don't think your AARM note should mention "bare address":
+
+> AARM Ramification: If a dangling value is compared with another access
+> value, either result is allowed. We need to allow this so that the
+> simple implementations of access values as a bare address can work if
+> the memory in question is reused. Similarly, a membership operation on
+> a dangling value can return either result.
+
+An access value could be represented as a fat pointer, or as an offset into some
+memory area (perhaps different memory areas for different types).  Neither of
+those are "bare addresses", and yet they have the same issue as bare addresses.
+I guess the point is that if you want to reuse memory AND you want to implement
+"=" by comparing just the bits of the access values (as opposed to dereferencing
+them or looking them up in tables and such), then "=" on dangling access values
+has to allow True.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, December 14, 2015  2:37 PM
+
+>...  I guess the point is that if you want to  reuse memory AND you
+>want to implement "=" by comparing just the bits of  the access values
+>(as opposed to dereferencing them or looking them up  in tables and
+>such), then "=" on dangling access values has to allow  True.
+
+Or to put it another way, "if you want to reuse memory AND you do not want to
+detect dangling pointers, then ...."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 15, 2015  1:11 PM
+
+...
+> An access value could be represented as a fat pointer, or as an offset
+> into some memory area (perhaps different memory areas for different
+> types).  Neither of those are "bare addresses", and yet they have the
+> same issue as bare addresses.  I guess the point is that if you want
+> to reuse memory AND you want to implement "=" by comparing just the
+> bits of the access values (as opposed to dereferencing them or looking
+> them up in tables and such), then "=" on dangling access values has to
+> allow True.
+
+I intended "bare address" to be an example of a case where we need a relaxed
+rule, surely not the only one. Perhaps some parens would help:
+
+AARM Ramification: If a dangling value is compared with another access value,
+either result is allowed. We need to allow this so that simple implementations
+of access values (for instance, as a bare address) can work if the memory in
+question is reused. Similarly, a membership operation on a dangling value can
+return either result.
+
+You later wrote:
+
+> Or to put it another way, "if you want to reuse memory AND you do not
+> want to detect dangling pointers, then ...."
+
+That's demonstratably False. If you put a serial number into each access value
+(but nowhere else), you can't detect dangling pointers but you can get "=" to
+work as defined in the RM. Indeed, an implementer might do that to get the
+zero-sized object case to work properly (since we've been unwilling to accept
+that such compares don't necessarily work by adjusting the RM language), so it
+might in fact happen in practice. (You'd need a rather pedantic implementer, but
+as both Rational and SofCheck sometimes acted that way in the past, that's by no
+means impossible.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, December 15, 2015  2:54 PM
+
+> AARM Ramification: If a dangling value is compared with another access
+> value, either result is allowed. We need to allow this so that simple
+> implementations of access values (for instance, as a bare address) can
+> work if the memory in question is reused. Similarly, a membership
+> operation on a dangling value can return either result.
+
+That's better, but I'd prefer you replace "either result" with "either True or
+False" (twice).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, December 14, 2015  6:32 PM
+
+>> I'm not a big fan of the term "dangling," ...
+>> As far as alternates to the term "dangling," perhaps "invalid" or
+>> "freed."  "Invalid" is nice because we already have rules about using
+>> invalid values.  Hence, we could say that all copies of the value of
+>> an access value whose target is freed "become invalid values."
+>
+> What's wrong with "dangling"?  The term "dangling pointer" is
+> understood by approximately 100% of all programmers!
+
+I wouldn't mind if we used the term "dangling reference" but "dangling value" is
+something I have never heard before.  So if you want to say "a *dangling
+reference* is an access value that ..." or "an access value is a *dangling
+reference* when ..."  I just really find the use of the term "dangling" on its
+own, or with "value" somewhat bizarre.
+
+> I don't much like "invalid", because we use that for scalars that are
+> relatively harmless -- no erroneousness.  But if you dereference a
+> dangling pointer, that's erroneous.
+
+True, though if you use an invalid value (of the right subtype) as an index into
+an array or as the expression in a case statement, we have special rules to
+avoid erroneousness. It seems pretty similar.  An access value is very much like
+an index into a "heap array."
+
+In any case, as I indicate above, "dangling reference" works for me, but
+"dangling" as a term of its own really seems weird.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, December 15, 2015  6:46 PM
+
+> I wouldn't mind if we used the term "dangling reference" but "dangling
+> value" is something I have never heard before.  So if you want to say
+> "a *dangling reference* is an access value that ..." or "an access
+> value is a *dangling reference* when ..."  I just really find the use of the
+> term "dangling" on its own, or with "value" somewhat bizarre.
+
+I completely agree with Tuck's sentiments on this one!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, December 15, 2015  10:35 AM
+
+> I wouldn't mind if we used the term "dangling reference" but "dangling
+> value" is something I have never heard before.  So if you want to say
+> "a *dangling reference* is an access value that ..." or "an access
+> value is a *dangling reference* when ..."  I just really find the use of the
+> term "dangling" on its own, or with "value" somewhat bizarre.
+
+How about "dangling access value"?  And a "dangling access object" is an object
+whose value is a dangling access value.  I would have preferred Ada go along
+with the rest of the world, and call those things "references" or "pointers",
+instead of inventing the oddball term "access" -- then "dangling reference" or
+"dangling pointer" would work better.  But it's decades too late for that.
+
+> True, though if you use an invalid value (of the right subtype) as an
+> index into an array or as the expression in a case statement, we have special
+> rules to avoid erroneousness.
+> It seems pretty similar.
+
+How is it similar?  In the case of dereferences of access values, we DON'T have
+those special rules.
+
+>...  An access value is very much like an index into a "heap array."
+
+Well, that would be more true if we required dereferences of dangling access
+values to do something non-erroneous.
+
+> In any case, as I indicate above, "dangling reference" works for me,
+> but "dangling" as a term of its own really seems weird.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, December 15, 2015  11:01 AM
+
+>> I wouldn't mind if we used the term "dangling reference" but
+>> "dangling value" is something I have never heard before.  So if you
+>> want to say "a *dangling reference* is an access value that ..." or
+>> "an access value is a *dangling reference* when ..."  I just really find the
+>> use of the term "dangling" on its own, or with "value" somewhat bizarre.
+>
+> How about "dangling access value"?...
+
+I don't see the problem with using "dangling reference."  "Reference" is an
+English word, and we talk about "dereferencing" an access value, so clearly the
+term "reference" is already part of the Ada vocabulary.  And in particular it is
+the "dereference" of an access value that is a "dangling reference" which is
+erroneous.
+
+> ... And a "dangling access object" is an object whose value is a
+> dangling access value....
+
+Do we really need this notion at all?  It is the use of the access value, not
+the evaluation of the object itself, I thought, that is where the bounded error
+occurs.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, December 15, 2015  12:12 PM
+
+> and we talk about "dereferencing" an access value, ...
+
+Good point.
+
+> Do we really need this notion at all?
+
+I don't know.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 15, 2015  1:15 PM
+
+> > I'm not a big fan of the term "dangling," but otherwise, I like your
+> > approach.
+>
+> > As far as alternates to the term "dangling," perhaps "invalid" or
+> > "freed."  "Invalid" is nice because we already have rules about
+> > using invalid values.  Hence, we could say that all copies of the
+> > value of an access value whose target is freed "become invalid values."
+>
+> What's wrong with "dangling"?  The term "dangling pointer" is
+> understood by approximately 100% of all programmers!
+>
+> I don't much like "invalid", because we use that for scalars that are
+> relatively harmless -- no erroneousness.  But if you dereference a
+> dangling pointer, that's erroneous.
+
+I don't care much what the exact term is. But I originally started with calling
+it "invalid", but I had the same feeling as Bob: "invalid" never becomes
+erroneous, but this is different (it often becomes erroneous). It's in fact
+closer to "abnormal" than it is to "invalid", but of course "abnormal" is too
+toxic (we don't want everything to be erroneous). So this is something different
+that's somewhat in-between and thus needs a new term.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, December 15, 2015  4:27 PM
+
+> How about "dangling access value"?  And a "dangling access object" is
+> an object whose value is a dangling access value.  I would have
+> preferred Ada go along with the rest of the world, and call those
+> things "references" or "pointers", instead of inventing the oddball
+> term "access" -- then "dangling reference" or "dangling pointer" would
+> work better.  But it's decades too late for that.
+
+For the record, I like the term access, it avoids the (incorrect) implication
+that a "pointer" is a pointer in the machine sense.
+
+****************************************************************
+
+From: Ben Brosgol
+Sent: Monday, December 15, 2015  9:47 PM
+
+Some ancient Ada history....
+
+The terminology (in the requirements docs) actually started out as "pointer" and
+then shifted to be less implementation oriented.  Here is the progression:
+
+<<
+Woodenman:
+
+B.1.c
+
+The language should provide a pointer mechanism which can be used to point
+within specified composite data structures to build data with shared and/or
+recursive substructure; but variables and expressions of pointer type are not
+desired.
+
+Tinman:
+
+V.D.6.  [POINTER VARIABLES]
+
+The language will provide a pointer mechanism which can be used to build data
+with shared and/or recursive substructure. The pointer property will only affect
+the size of variables (including arrays and record components) of some data
+types. Pointer variables will be as safe in their use as are any other
+variables.
+
+
+Ironman:
+
+3.3.3.I. (3-3I.)  DEFINITIONS OF DYNAMIC TYPES
+
+It shall be possible to define types whose elements are dynamically allocated.
+Elements of such types may have components of their own type and may have
+substructure that can be altered during execution. Such types shall be
+distinguishable from other composite types in their definitions. [Note that such
+types require pointers and heap storage in their implementation. They are
+intended primarily for the support portions of embedded computer software.]
+
+Steelman:
+
+3-3I.  INDIRECT TYPES
+
+It shall be possible to define types whose elements are indirectly accessed.
+Elements of such types may have components of their own type, may have
+substructure that can be altered during execution, and may be distinct while
+having identical component values. Such types shall be distinguishable from
+other composite types in their definitions. An element of an indirect type shall
+remain allocated as long as it can be referenced by the program. [Note that
+indirect types require pointers and sometimes heap storage in their
+implementation.]  >>
+
+The requirements documents are all online (thanks to a heroic effort by Mary Van
+Deusen a few years ago), although the main page has a distinctly reddish hue :-)
+
+http://www.iment.com/maida/computer/redref/index.htm
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 15, 2015  10:11 PM
+
+This is the sort of thing that belongs in the AdaIC archives. I wonder if we
+could get permission to mirror these documents (they shouldn't live in just one
+place).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 15, 2015  10:35 PM
+
+Sounds like a good idea.  I'll check with Mary.
+
+****************************************************************
