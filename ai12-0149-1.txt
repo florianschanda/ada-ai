@@ -1,0 +1,169 @@
+!standard 7.3.2(19.3/4)                                15-01-22  AI05-0149-1/01
+!class binding interpretation 15-01-22
+!status work item 15-01-22
+!status received 15-01-21
+!priority Medium
+!difficulty Easy
+!qualifier Omission
+!subject Type invariants are checked for functions returning access-to-T
+!summary
+
+Type invariants are checked for functions whose result is access to
+type with part of a type with an invariant.
+
+!question
+
+7.3.2(19.3/3) says that the invariant for a type T is checked for
+parameters of an access-to-object-containing-a-part-of-T. But there is not
+corresponding rules for functions that return access types. That seems to
+create a significant hole in the protection provided by type invariants.
+
+Should this hole be plugged? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 7.3.2(19.3/4):
+
+* has an access-to-object parameter {or result} whose designated type has
+  a part of type T, or
+
+Modify AARM 7.3.2(23.a/3):
+
+Invariant checks on subprogram return are not performed on objects that are
+accessible only through access values{ that are subcomponents of some other
+object}. It is also possible to call through an access-to-subprogram value and
+reach a subprogram body that has visibility on the full declaration of a type,
+from outside the immediate scope of the type. No invariant checks will be
+performed if the designated subprogram is not itself externally visible.
+These cases represent "holes" in the protection provided by invariant checks;
+but note that these holes cannot be caused by clients of the type T with the
+invariant{. The designer of the package has to declare a visible type with an
+access to T subcomponent and use it as a parameter or result to subprograms in
+the package, or pass the client an access-to-subprogram value representing a
+private operation of the package. In the absence of such things, all values
+that the client can see will be checked for a private type or extension.}[
+without help for the designer of the package containing T.]
+
+!discussion
+
+As noted in the AARM note above, it is intended that type invariant checks
+aren't made on composite types with subcomponents of an
+access-to-object-with-part-of-T, only on direct
+access-to-object-with-part-of-T. It's not practical to check all such cases,
+as one would have to look through all of the access-to-somethings to do so.
+
+Specifically, if we made the rule stronger by including parts of
+access-to-object types:
+
+* has a parameter or result with a part of an access-to-object type whose
+  designated type has a part of type T, or
+
+There would still be an unchecked case for an access-to type with a part of
+a access-to part of T. And these cases are getting increasingly unlikely.
+
+In any case, since the checks performed are determined by the declarations
+in the visible part of the package containing T, the author of the package
+containing T has complete control over whether any holes exist. So long as
+they do not define a visible type with a subcomponent that is
+access-to-object-with-part-of-T (and do not export any private subprograms
+via an access-to-subprogram type), all possible ways for a value to leave
+the package will be checked. (There is no problem if a private type
+contains a subcomponent of an access type, as any subprogram that provides
+access to that component will necessarily have to have a parameter or result
+that is itself checked.)
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that this check is made.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, January 21, 2015  8:20 PM
+
+It struck me this morning when thinking about the tests that Jeff still could
+write for type invariants that there is a strange-seeming omission in the
+checks. Specifically, the rewritten set of checks performed after return from a
+subprogram call is:
+
+19.4  and either:
+
+19.1/4   * has a result with a part of type T, or
+19.2/4   * has one or more out or in out parameters with a part of type T,
+           or
+19.3/4   * has an access-to-object parameter whose designated type has a
+           part of type T, or
+19.4/4   * is a procedure or entry that has an in parameter with a part of
+           type T,
+
+It seems strange to me that we check access-to-object parameters that might have
+been modified (but probably weren't), but we don't have corresponding rules for
+access-to-object results (which are most likely newly created or changed).
+
+That is, shouldn't we also have a bullet:
+
+   * has an access-to-object result whose designated type has a part of type T,
+     or
+
+[I believe that the existing wording of 19.3/4 is intended to apply to both
+access parameters (anonymous access-to-object types) as well as parameters with
+a named access type, and it makes sense to do the same here.]
+
+An alternative would be just to add "or result" after "parameter" in 19.3/4.
+
+Of course, this is such an obvious omission in the original wording, which we
+faithfully reproduced in the rewritten new wording, that I have to wonder if it
+was intentional. But I can't figure out any advantage to leaving such an obvious
+hole in the type invariant checking, particularly if we are going to require
+similar checks on parameters. So I have to conclude that the entire group
+reviewed this wording (twice!) without noticing the painfully obvious
+non-symmetery. (I plead guilty to having written the entire set of suggested
+test objectives for 7.3.2 without noticing the omission, so that's three times
+for me. I only thought of it today as I was considering whether it would be easy
+to convert one of the tests that Jeff has already written to test the 19.3/4
+objective -- which led to wondering why there wasn't a corresponding result
+objective.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, January 21, 2015  11:04 PM
+
+I agree this is a hole, and almost certainly not intentional.  I think "access
+result" is not yet on most people's internal radar screen (not including Steve,
+of course ;-).  I certainly never think of it when considering feature
+interactions...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 22, 2015  12:24 AM
+
+True enough, although this also should apply to functions returning named access
+types. Which should hardly be a foreign concept to anyone. :-)
+
+[Note that the existing rule and its counterpart here don't apply to parts of
+composite objects. But that was an intentional hole; we decided to limit the
+complication for implementers by not requiring them to find parts of access
+types designating T. I distinctly remember discussing that in Edinburgh. AARM
+7.3.2(23.a/3) mentions that, but gets it wrong (it's only subcomponents of
+access values that aren't checked - it's pretty clear that direct uses of access
+values are checked by 7.3.2(19.3/3)). Should fix that as part of this AI as
+well. In that note, "help for the designer" should be "help from the designer";
+probably that sentence should be broken up and explained better -- something
+like "but note that these holes cannot be caused by clients of the type T with
+the invariant. The designer of the package has to declare a visible type with an
+access to T subcomponent and use it as a parameter or result to subprograms in
+the package, or pass the client an access-to-subprogram alue representing a
+private operation of the package. In the absence of such things, all values that
+the client can see will be checked for a private type or extension."]
+
+****************************************************************
