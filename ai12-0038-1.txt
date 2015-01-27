@@ -1,5 +1,4 @@
-!standard E.2.1(7/1)                           14-10-13    AI12-0038-1/05
-!standard E.2.1(8/1)
+!standard E.2.1(7/1)                           15-01-26    AI12-0038-1/06
 !class binding interpretation 12-11-28
 !status Corrigendum 2015 12-12-31
 !status work item 13-01-04
@@ -28,13 +27,11 @@ directly on shared passive packages to account for this change?  (Yes)
 
 !recommendation
 
-Shared passive packages are not allowed to declare access-to-class-wide
-types, but there is nothing preventing them from referencing an
-access-to-class-wide type declared in a declared-pure package.  We
-propose that when an access type from a declared-pure package is used in
-a shared-passive package, it is treated as though it were declared in
-the shared passive package as far as the special accessibility check
-given in E.2.1(8).
+Shared passive packages shall not reference within a library-level
+declaration a type from a declared-pure package that contains a part
+that is of an access type.  Note that this applies even if the type from
+the declared-pure package is a private type, and hence breaks the normal
+rules of privacy.
 
 !wording
 
@@ -42,38 +39,40 @@ Modify E.2.1(7/1):
 
    * it shall not contain a library-level declaration of an access type that
      designates a class-wide type, {nor a type with a part that is of a}
-     task type[,] or protected type with entry_declarations.
+     task type[,] or protected type with entry_declarations{;
 
-Modify E.2.1(8):
-   Notwithstanding the definition of accessibility given in 3.10.2, the
-   declaration of a library unit P1 is not accessible from within the
-   declarative region of a shared passive library unit P2, unless the
-   shared passive library unit P2 depends semantically on P1.  {Furthermore,
-   for the purposes of accessibility checking, when an access type that is
-   declared within a declared-pure package is used as part of a library-level
-   declaration in a shared-passive package, it is as though the access
-   type were declared in the shared-passive package.}
-
+   * it shall not contain a library-level declaration that contains a name
+     that denotes a type declared within a declared-pure package, if that
+     type has a part that is of an access type}.
 
 !discussion
 
-The change to E.2.1(7/1) is recognizing that tasks and protected objects
-with entries are bad news in an access collection (aka heap) within a
-shared-passive partition, whether they are whole objects or parts
-of other objects.
+The change to the existing bullet of E.2.1(7/1) is recognizing that
+tasks and protected objects with entries are bad news in an access
+collection (aka heap) within a shared-passive partition, whether they
+are whole objects or parts of other objects.
 
-The accessibility rule of E.2.1(8) is intended to prevent pointers being
-created in a shared-passive package that point "back" into the data area
-of some particular active partition. Unfortunately, this doesn't work if
-the access type is declared in something other than a shared-passive
-package, in particular, in a declared-pure package. Hence, when an
-access type from a declared-pure package is used in a shared-passive
-package, it "inherits" the accessibility rules of the referencing
-shared-passive package.
+The new bullet following E.2.1(7/1) is intended to bolster E.2.1(8) to
+ensure that no access value of a "pure" access type could be embedded
+within an object of a shared-passive package, since it might point
+"back" into the data area of some particular active partition.
+
+Shared passive packages are not allowed to declare access-to-class-wide
+types, but there is nothing preventing them from referencing an
+access-to-class-wide type declared in a declared-pure package.
+Furthermore, there is nothing preventing them using a type that has a
+part that is of an access type declared in a declared-pure package.  The
+special shared-passive accessibility rules (E.2.1(8)) prevent creating
+values of an access type declared within the shared-passive package
+itself, that designate objects that might not be within the semantic
+closure of the shared-passive package. But these special accessibility
+rules don't apply to types declared in declared-pure packages, and hence
+values of such types might include references to such shorter-lived
+objects.
 
 !examples
 
-Here is an example of the original E.2.1(8) rule:
+Here is an example to help illustrate the purpose of the original E.2.1(8) rule:
 
    package P1 is
       X : aliased Integer;
@@ -103,12 +102,22 @@ type P2.Acc designating an object in a package that doesn't live as long
 as P2. For shared-passive packages, it is semantic dependence that
 determines relative longevity.
 
-Here is the problem that the new rule is intended to address:
+Here is the problem that the new paragraph after E.2.1(7/1) is intended to
+address:
 
    package P0 is
-      pragma Pure(P0)
+      pragma Pure(P0);
+      type Trouble is private;
+      function Make_Trouble(Z : access Integer) return Trouble;
+   private
       type Pure_Acc is access all Integer;
       for Pure_Acc'Storage_Size use 0;
+      type Trouble is record
+         PA : Pure_Acc;
+      end record;
+
+      function Make_Trouble(Z : access Integer) return Trouble
+        is (Trouble'(PA => Pure_Acc(Z)));
    end P0;
 
    package P1 is
@@ -119,25 +128,30 @@ Here is the problem that the new rule is intended to address:
    package P2 is
       pragma Shared_Passive(P2);
       type Rec is record
-         Ptr : P0.Pure_Acc;
+         Troub : P0.Trouble;  --  legal? (No.)
       end record;
    end P2;
 
    with P1, P2;
    package P3 is
-      Z : P2.Rec := (Ptr => P1.X'Access); -- legal? (No.)
+      Z : P2.Rec := (Troub => P0.Make_Trouble(X'Access));  -- not allowed
    end P3;
 
-Here we have used an access type from the pure package P0 within a
-library-level type declaration in shared-passive package P2. In P3 we
-set a value of that type to designate an object in P1. Just because P0
-was originally declared in a pure package doesn't change the story. We
-definitely don't want any type defined in P2 to have a value that
-contains a pointer to an object in a package that doesn't live as long
-as P2. So we want "P0.Pure_Acc" to "inherit" the same accessibility
-rule that P2.Acc had in the first example, if P0.Pure_Acc is used in a
-library-level declaration of P2. That is the gist of the addition
-to the rule in E.2.1(8).
+Here we have used a type from the pure package P0 within a library-level
+type declaration in shared-passive package P2, and that type has a part
+that is of an access type. In P3 we set a value of that type to
+designate an object in P1. Just because P0 was originally declared in a
+pure package doesn't change the story. We definitely don't want any type
+defined in P2 to have a value that contains a pointer to an object in a
+package that doesn't live as long as P2. So with this new paragraph we
+simply disallow a shared-passive package using such a type, even though
+it requires us to break normal privacy rules.
+
+We originally tried to augment the special accessibility rule, but that
+was inadequate, because accessibility of components is not re-checked on
+composite assignment, and so we felt we had to prevent the declaration
+or use of composite types in shared-passive pacakges that might carry
+pointers to shorter-lived objects.
 
 !corrigendum E.2.1(7/1)
 
@@ -148,23 +162,11 @@ designates a class-wide type, task type, or protected type with
 @dby
 @xbullet<it shall not contain a library-level declaration of an access type that
 designates a class-wide type, nor a type with a part that is of a task type or
-protected type with @fa<entry_declaration>s.>
+protected type with @fa<entry_declaration>s;>
 
-!corrigendum E.2.1(8)
-
-@drepl
-Notwithstanding the definition of accessibility given in 3.10.2, the declaration
-of a library unit P1 is not accessible from within the declarative region of a
-shared passive library unit P2, unless the shared passive library unit P2
-depends semantically on P1.
-@dby
-Notwithstanding the definition of accessibility given in 3.10.2, the declaration
-of a library unit P1 is not accessible from within the declarative region of a
-shared passive library unit P2, unless the shared passive library unit P2
-depends semantically on P1. Furthermore, for the purposes of accessibility
-checking, when an access type that is declared within a declared-pure package
-is used as part of a library-level declaration in a shared-passive package, it
-is as though the access type were declared in the shared-passive package.
+@xbullet<it shall not contain a library-level declaration that contains a
+@fa<name> that denotes a type declared within a declared-pure package, if that
+type has a part that is of an access type.>
 
 !ACATS test
 
@@ -572,5 +574,217 @@ shared-passive packages, and in particular as it relates to using access types
 declared in a pure package.  I mostly just added a couple of examples.
 
 [This is version /05 of the AI - Editor.]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 26, 2015  2:21 PM
+
+Here is an update to AI12-0038, now version 6, relating to shared-passive
+package use of access types from declared-pure packages. It is pretty nasty, in
+that it breaks privacy. But that was the approach chosen by consensus at the
+last ARG meeting because the alternatives seemed worse.
+
+[This is version /06 of the AI - Editor.]
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 26, 2015  3:34 PM
+
+> Here is an update to AI12-0038, now version 6, relating to
+> shared-passive package use of access types from declared-pure packages.  It is pretty nasty, in that it breaks privacy.
+
+I agree it's nasty to break privacy.
+
+>   But that was the approach chosen by consensus at the last ARG
+> meeting because the alternatives seemed worse.
+
+I agree that it's acceptable to break privacy in this case.
+
+Is this the first time we have a legality rule that breaks privacy?
+
+>    * it shall not contain a library-level declaration that contains a name
+>      that denotes a type declared within a declared-pure package, if that
+>      type has a part that is of an access type}.
+
+Shouldn't this wording say explicitly that we're breaking privacy?
+Normally, compile-time rules are understood to refer to visible views of things, but here we intend to refer to the full view(s).
+Something like, "For the purposes of this rule, we refer to the full view of any private types or private extensions."?
+Or, "For the purposes of this rule, the 'parts' include those of the full views of any private types or private extensions."?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 26, 2015  3:51 PM
+
+...
+> Is this the first time we have a legality rule that breaks privacy?
+
+I believe so. I don't think it would have politically flown in the past.
+(Not sure it will now, either, but there's more chance.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, January 26, 2015  3:57 PM
+
+Aren't rep clauses like size clauses examples of legality rules that break
+privacy?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 26, 2015  4:09 PM
+
+How so? You can't have a size clause on a partial view, and you can't give it on
+a type that includes a partial view. The runtime effects of a size clause don't
+effect legality (and of course, there is no privacy in dynamic semantics).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 26, 2015  4:29 PM
+
+As soon as I pressed 'send', I realized that you meant used as a client rather
+than within a single package (which is what I was thinking about for some silly
+reason). Specifically, the size of some type Priv is only defined within the
+private part (because of the rules I was thinking about previously), so in some
+type where it is used, a Size clause has to take into account the size that it
+can't know without looking in the private part.
+
+And you're right that 13.1(12/3) is formally a Legality Rule, and it surely
+breaks privacy for the previous reasons.
+
+However, I always think of representation stuff as part of the dynamic domain,
+so privacy breaking goes with the territory. (My understanding is that was
+precisely how it was handled in the Rational compiler.) So the fact that some of
+the rules are actually Legality Rules is a bit surprising, as they feel like
+something else altogether.
+
+This proposed rule, however, is clearly and solely within the static semantics
+domain, where we've never previously tolerated privacy breaking. Once we adopt
+this rule, we'll have broken the dam and we'll never again consider privacy
+breaking an automatic disqualification for a rule (although I hope we don't
+start adding such rules lightly).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 26, 2015  4:32 PM
+
+> How so? You can't have a size clause on a partial view, and you can't
+> give it on a type that includes a partial view. The runtime effects of
+> a size clause don't effect legality (and of course, there is no
+> privacy in dynamic semantics).
+
+You can put a size clause on a record that contains a component of a private
+type.  The success of that size clause depends on the size of the private type.
+So yes, representation clauses can effectively break privacy.  We also allow
+some categorization pragmas to break privacy, I believe, and certainly
+Restrictions pragmas break privacy.
+
+But this one feels a little nastier, since it is more of a pure semantic issue.
+
+I suppose if we really felt bad, we could add another category such as
+"Shared_Pure" which would ensure that any private types declared therein do not
+contain access types. Shared_Pure could presumably only depend on other
+Shared_Pure, and Shared_Passive could only depend on Shared_Pure.  But this all
+seems a bit of overkill given how few users we have of the distribution annex.
+In 20-15 hindsight <grin>, we should have probably had a different category such
+as Shared_Pure rather than trying to make "Pure" mean something special both as
+far as distribution and as far as being side-effect free.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 26, 2015  4:34 PM
+
+>>     * it shall not contain a library-level declaration that contains a name
+>>       that denotes a type declared within a declared-pure package, if that
+>>       type has a part that is of an access type}.
+>
+> Shouldn't this wording say explicitly that we're breaking privacy?
+
+You are probably right.  We have often struggled with the meaning of "part" in static semantics, and we should probably be more explicit, especially in this very special case.
+
+> Normally, compile-time rules are understood to refer to visible views
+> of things, but here we intend to refer to the full view(s).
+> Something like, "For the purposes of this rule, we refer to the full
+> view of any private types or private extensions."?
+> Or, "For the purposes of this rule, the 'parts' include those of the
+> full views of any private types or private extensions."?
+
+(recursively)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 26, 2015  6:40 PM
+
+...
+> >    * it shall not contain a library-level declaration that contains a name
+> >      that denotes a type declared within a declared-pure package, if that
+> >      type has a part that is of an access type}.
+>
+> Shouldn't this wording say explicitly that we're breaking privacy?
+> Normally, compile-time rules are understood to refer to visible views
+> of things, but here we intend to refer to the full view(s).
+
+Bob's right. Remember that we adopted a blanket rule about the meaning of
+Legality Rules that says that "view of" is always implied. (3.1(7.1/3), from
+AI05-0080-1.) That was done particularly so we didn't have to rewrite every
+Legality Rule where there might be a question. Here we need to hit any readers
+over the head that this is privacy breaking - the normal case does not apply.
+
+> Something like, "For the purposes of this rule, we refer to the full
+> view of any private types or private extensions."?
+> Or, "For the purposes of this rule, the 'parts' include those of the
+> full views of any private types or private extensions."?
+
+Perhaps "For the purposes of this rule, the parts are those of the full views of
+any private types or private extensions."??
+
+And then "AARM reason: This rule breaks privacy by looking into the full views
+of private types. Avoiding privacy breakage here would have required disallowing
+the use in a shared passive package of any private type declared in a
+declared-pure package, which would have been severely incompatible."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 26, 2015  6:52 PM
+
+...
+> I suppose if we really felt bad, we could add another category such as
+> "Shared_Pure" which would ensure that any private types declared
+> therein do not contain access types.
+> Shared_Pure could presumably only depend on other Shared_Pure, and
+> Shared_Passive could only depend on Shared_Pure.  But this all seems a
+> bit of overkill given how few users we have of the distribution annex.
+
+Besides which it would still be incompatible for those users because we'd have
+to ban any use of a private type that originates in a declared-pure package
+(unless the declared-pure package was compiled in Ada 95 mode). Maybe OK if the
+number is small enough, but I'm dubious.
+
+>  In 20-15
+> hindsight <grin>, we should have probably had a different category
+> such as Shared_Pure rather than trying to make "Pure" mean something
+> special both as far as distribution and as far as being side-effect
+> free.
+
+That really was a mistake of Ada 2005, as the Ada 95 Pure worked for both. But
+the problem is that we tried to put lipstick on a pig to make Pure packages more
+useful for the side-effect free case. The trouble is that requiring everything
+side-effect free in a single package (with nothing else included) is
+unrealistic. On top of which, the Pure restrictions aren't enough to use them in
+parallel applications nor to use them in proof rules, so we'll have to have
+something different for those anyway.
+
+Probably should have left Pure packages alone (and mainly for distribution) and
+invented an aspect (say, Global => null :-) for side-effect free subprograms
+that can work for parallel and proof applications. But, as you say, hindsight is
+20-20 (or maybe 20-15 in this case).
 
 ****************************************************************
