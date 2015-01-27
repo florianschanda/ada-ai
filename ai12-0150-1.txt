@@ -1,0 +1,319 @@
+!standard 7.3.2(5/3)                                   15-01-26  AI05-0150-1/01
+!standard 7.3.2(9/3)
+!class binding interpretation 15-01-26
+!status work item 15-01-26
+!status received 15-01-26
+!priority Medium
+!difficulty Medium
+!qualifier Omission
+!subject Class-wide type invariants and statically bound calls
+
+!summary
+
+Class-wide preconditions, postconditions, and type invariants are processed
+using the actual types for the parameters of type T (not always using T'Class).
+In particular, for a statically bound call, the calls within the Type_Invariant'Class expression that apply to the type T are statically bound,
+if the object being checked is itself of a specific type.
+
+!question
+
+RM 7.3.2(5/3) says:
+
+[AARM Redundant: Within an invariant expression, the identifier of the
+first subtype of the associated type denotes the current instance of the
+type.] Within an invariant expression associated with type T, the type
+of the current instance is T for the Type_Invariant aspect and T'Class
+for the Type_Invariant'Class aspect.
+
+However, in analogy with Pre'Class as discussed in AI12-0113-1, simply
+resolving all calls appearing in the Type_Invariant'Class expression for
+a type T by interpreting it as T'Class will cause all calls to be
+dispatching calls, even when applied to objects where their compile-time
+type does not match the underlying tag were it to be converted to
+T'Class.
+
+Should this be corrected? (Yes)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Revise 7.3.2(5/3):
+
+   [AARM Redundant: Within an invariant expression, the identifier of
+   the first subtype of the associated type denotes the current instance
+   of the type.] Within an invariant expression [associated with] {for
+   the Type_Invariant aspect of a} type T, the type of [the]{this} current
+   instance is T[ for the Type_Invariant aspect, and T'Class]{. Within
+   an invariant expression} for the Type_Invariant'Class aspect {of a
+   type T, the type of this current instance is interpreted as though it
+   had a (notional) type NT that is a visible formal derived type whose
+   ancestor type is T. [AARM Redundant: The effect of this
+   interpretation is that the only operations that can be applied to this
+   current instance are those defined for such a formal derived type.
+   This ensures that the invariant expression is well-defined for any
+   type descended from T.]}
+
+Revise 7.3.2(9/3) as follows:
+
+(In Dynamic Semantics)
+
+   If one or more invariant expressions apply to a {non-abstract} type
+   T, then an invariant check is performed at the following places, on
+   the specified object(s):
+
+!discussion
+
+Consider two nearly identical hierarchies of types. First:
+
+   package P11 is
+       type Root is abstract tagged private
+         with Type_Invariant => Is_Valid (Root);
+
+       function Is_Valid (P : in Root) return Boolean;
+
+       function Proc (P : out Root)'
+
+       procedure Proc2 (P : out Root);
+   private
+       ...
+   end P11;
+
+   with P11;
+   package P12 is
+       type Child is new P11.Root with private
+         with Type_Invariant => Is_Valid (Child);
+
+       overriding
+       function Is_Valid (P : in Child) return Boolean;
+
+       overriding
+       procedure Proc (P : out Child);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P12;
+
+   with P12;
+   package P13 is
+       type GrandChild is new P12.Child with private
+         with Type_Invariant => Is_Valid (GrandChild);
+
+       overriding
+       function Is_Valid (P : in Grandchild) return Boolean;
+
+       overriding
+       procedure Proc (P : out Grandchild);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P13;
+
+and the second hierarchy is:
+
+   package P21 is
+       type Root is abstract tagged private
+         with Type_Invariant'Class => Is_Valid (Root);
+
+       function Is_Valid (P : in Root) return Boolean;
+
+       procedure Proc (P : out Root);
+
+       procedure Proc2 (P : out Root);
+   private
+       ...
+   end P21;
+
+   with P21;
+   package P22 is
+       type Child is new P21.Root with private;
+
+       overriding
+       function Is_Valid (P : in Child) return Boolean;
+
+       overriding
+       procedure Proc (P : out Child);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P22;
+
+   with P22;
+   package P23 is
+       type GrandChild is new P22.Child with private;
+
+       overriding
+       function Is_Valid (P : in Grandchild) return Boolean;
+
+       overriding
+       procedure Proc (P : out Grandchild);
+
+       -- Proc2 inherited.
+   private
+       ...
+   end P23;
+
+The only difference between these hierarchies is that the first uses a
+specific Type_Invariant on each type, the second uses a class-wide
+Type_Invariant just on the Root type, allowing it to be inherited by
+descendant types.
+
+Our intent is that these behave identically at runtime, with the only
+difference being that there is an additional guarantee that a new
+descendant of P21.Root will also have the Type_Invariant'Class
+expression (that has to be manually added in the other hierarchy).
+
+
+---
+
+We define the meaning of Type_Invariant'Class in terms of a notional
+formal derived type so that only primitive operations of the type can be
+used in the expression. The original Ada 2012 definition of the current
+instance as T'Class also has a runtime effect that we do not want (as
+noted above).
+
+In addition, defining the current instance as having T'Class introduces
+other problems. For instance, with a global variable:
+    type T is tagged ...
+        with Type_Invariant'Class => Is_Valid_2 (T, G);
+    G : T'Class := ...;
+    function Is_Valid_2 (A, B : T) return Boolean;
+
+If the current instance T is considered to have T'Class, this expression
+is legal (both operands being dynamically tagged). But this doesn't make
+sense for an inherited type:
+    type T1 is new T with ...;
+    --   with Type_Invariant'Class => Is_Valid_2 (T, G)
+    -- inherits Is_Valid_2 (A, B : T1) return Boolean;
+
+But this Type_Invariant'Class makes no sense, as G does not match type
+T1'Class.
+
+If we simply left the current instance having type T, then non-primitive
+operations of the type could be used in Type_Invariant'Class -- but
+descendant types have no such operations. We could have rechecked the
+Type_Invariant'Class for each descendant type, but that causes problems
+if visibility has changed somehow (especially for class-wide
+operations).
+
+On the other hand, a formal derived type has just the operations that we
+want to allow (primitive operations) but no others. In particular, G in
+the example above does not match the NT type, so the above problem can't
+happen.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that this check is made.
+
+!appendix
+
+From: Tucker Taft
+Sent: Monday, January 26, 2015  4:39 PM
+
+Here is a new AI, carved off of AI12-0133 (which dealt with Pre'Class), to deal
+with name resolution of current instances within a Type_Invariant'Class
+expression.  It steals liberally from the Pre'Class AI.
+
+[This is version /01 of the AI - Editor.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 26, 2015  7:55 PM
+
+> Here is a new AI, carved off of AI12-0133 (which dealt with
+
+You mean AI12-0113-1 (you doubled the wrong digit).
+
+> Pre'Class), to deal with name resolution of current instances within a
+> Type_Invariant'Class expression.  It steals liberally from the
+> Pre'Class AI.
+
+In looking at this, you don't have any wording corresponding to the wording in
+6.1.1(37/3):
+
+{Any operations within a class-wide postcondition expression that were resolved
+as primitive operations of the (notional) formal derived type NT, are in the
+evaluation of the postcondition bound to the corresponding operations of the
+type identified by the controlling tag of the call on S. [Redundant: This
+applies to both dispatching and non-dispatching calls on S.]}
+
+It would need that we'd need wording like this somewhere (probably in or after
+7.3.2(22/3), although we have to be careful since not all invariant checks are
+associated with a call. Maybe something like:
+
+{For any invariant check associated with the return from a call on a primitive
+subprogram S, any operations within a class-wide type invariant expression that
+were resolved as primitive operations of the (notional) formal derived type NT,
+are in the evaluation of the type invariant bound to the corresponding
+operations of the type identified by the controlling tag of the call on S.
+[Redundant: This applies to both dispatching and non-dispatching calls on S.].
+Similarly, a type invariant check associated with a view conversion from a
+specific type T are bound to the corresponding operations of the type identified
+by the type T.}
+
+[We also probably would need to define "class-wide type invariant", which not
+currently a term, but one I want to use every time I write wording or notes for
+this clause.] So add something to 7.3.2(3/4), perhaps:
+
+    "Type_Invariant'Class determines a *class-wide type invariant* for a tagged
+    type."
+
+
+===
+
+7.3.2(9/3) seems to represent an unrelated bug in Type_Invariants that you just
+noticed in trying to match the other wording. Probably should say a few words
+about it in the !discussion. Specifically:
+
+    package P is
+       type T is abstract tagged private
+          with Type_Invariant'Class => Is_OK (T);
+
+       function Is_OK (A : in T) return Boolean is abstract;
+
+       procedure Concrete (Obj : in out T);
+
+    private
+       ...
+    end P;
+
+We had better not try to call Is_OK when evaluating the type invariant for
+Concrete. Thus we don't make any invariant checks on the body of Concrete.
+
+This won't cause a hole, since the invariant will be evaluated for the view
+conversion needed to reach the body of Concrete for some derived type.
+Specifically:
+
+    with P;
+    package P2 is
+       type TT is new P.T with private;
+
+       function Is_OK (A : in TT) return Boolean;
+
+       -- inherits procedure Concrete (Obj : in out TT);
+
+    private
+       ...
+    end P2;
+
+A call on the inherited Concrete with an object of type TT includes an implicit
+view conversion to T. This triggers an invariant check via 7.3.2(12-14/3), which
+calls Is_OK on type TT. The same thing happens for a dispatching call. So the
+lack of a check directly on the subprogram is not a problem. (Note that abstract
+types can't use a non-class-wide type invariant, so the invariant is always
+inherited.)
+
+Now it makes more sense to me, hope this explanation will help someone else
+understand it.
+
+****************************************************************
