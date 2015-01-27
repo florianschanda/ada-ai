@@ -1041,3 +1041,766 @@ Standard, when a Default_Storage_Pool aspect or pragma within that same
 compilation unit has the default pool specified as Standard.
 
 ****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 23, 2015  4:57 PM
+
+Humm.
+
+Here's the actual proposed rule:
+
+   A direct_name shall not be a homograph of the package Standard that denotes a
+   declaration other than package Standard when declared within a compilation
+   unit for which the Standard default pool applies.
+
+   AARM Reason: Any use of an identifier with the name Standard resprensenting
+   anything other than the package Standard would be confusing in a compilation
+   unit with Standard specified as the default storage pool. Such a choice for
+   an identifier is not recommended and very unlikely to occur, so a simple rule
+   was chosen to prevent such confusion.
+
+Two problems with this. First, it's incompatible because the Standard storage
+pool applies by default. So this would be enforced everywhere except where there
+is an explicit pragma Default_Storage_Pool. I think you only wanted it to apply
+in the scope of a pragma Default_Storage_Pool.
+
+Second, this seems backwards to me. We're concerned (OK, I'm not, but I'm going
+along with the majority opinion here :-) about entities with the name Standard
+that are visible at the point of a pragma Default_Storage_Pool.
+
+That is,
+   function Standard ...
+
+   pragma Default_Storage_Pool (Standard);
+
+That wouldn't be detected by this rule if the function is in another compilation
+unit (and it seems to require retroactive enforcement within a single unit).
+
+I would have tried something much more direct:
+
+   If the storage_pool_indicator for a pragma or aspect Default_Storage_Pool is
+   Standard, then the pragma or aspect_specification is illegal if there is any
+   declaration with the direct_name Standard (other than the package Standard)
+   that is visible (directly visible??) at the point of the pragma or
+   aspect_specification.
+
+   AARM Reason: Any use of an identifier with the name Standard representing
+   anything other than the package Standard could be confused with the
+   identifier-specific-to-a-pragma Standard specified as the default storage
+   pool. Such a choice for an identifier is not recommended and very unlikely to
+   occur, so a simple rule was chosen to prevent such confusion.
+
+This probably needs some wordsmithing.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 23, 2015  5:07 PM
+
+I didn't make the problem we're trying to solve very clear in my previous note.
+Let me try again.
+
+Better description:
+   function Standard ...
+
+   pragma Default_Storage_Pool (Standard); -- (1) Meaning of Standard here?
+
+In particular, is "Standard" in (1) a call to the function Standard, or the
+identifier-specific-to-a-pragma Standard?
+
+This problem doesn't depend on where the other entity named Standard is
+declared, just that it is visible (and thus is declared before the pragma).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January 23, 2015  6:06 PM
+
+>    A direct_name shall not be a homograph of the package Standard that
+
+A direct_name cannot be a homograph.  Only declarations can.
+Maybe "be" --> "denote" was intended?
+
+I basically agree with Randy's points here, but it occurs to me that this is another example where a "soft legality" rule (or whatever we call it) would be appropriate.  We could say it is softly-illegal to declare anything anywhere called Standard.  No compatibility issues (that's the whole point of soft legality), and any possible confusion gets a diagnostic message.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, January 23, 2015  10:25 PM
+
+>     ... If the storage_pool_indicator for a pragma or aspect
+> Default_Storage_Pool is Standard, then the pragma or
+> aspect_specification is illegal if there is any declaration with the
+> direct_name Standard (other than the package
+> Standard) that is visible (directly visible??) at the point of the
+> pragma or aspect_specification. ...
+
+You don't want to say merely "visible."  You definitely want to say "directly
+visible." There is no problem if there is some sub-sub-package somewhere that
+has a declaration with Standard as its defining identifier, unless you are in
+the scope of a use clause for that sub-sub-package.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Saturday, January 24, 2015  12:50 AM
+
+> Here's the actual proposed rule:
+>
+>     A direct_name shall not be a homograph of the package Standard
+> that denotes a
+>     declaration other than package Standard when declared within a
+> compilation
+>     unit for which the Standard default pool applies.
+>
+>     AARM Reason: Any use of an identifier with the name Standard
+> resprensenting
+>     anything other than the package Standard would be confusing in a
+> compilation
+>     unit with Standard specified as the default storage pool. Such a
+> choice for
+>     an identifier is not recommended and very unlikely to occur, so a
+> simple rule
+>     was chosen to prevent such confusion.
+>
+> Two problems with this. First, it's incompatible because the Standard
+> storage pool applies by default. So this would be enforced everywhere
+> except where there is an explicit pragma Default_Storage_Pool. I think
+> you only wanted it to apply in the scope of a pragma Default_Storage_Pool.
+
+I was and still am thinking this wouldn't be incompatible because as mentioned
+in 13.11.3 (6.3/3) and modified by this AI, if the "default pool" is not
+specified (null, Standard, or some storage pool, then there is no default pool.
+So, this effect only occurs if the default storage pool was explicitly specified
+to be Standard. Or at least that is the impression I got from reading 13.11.3
+(6.3/3), and that was what I was attempting to leverage to avoid compatibility
+issues.
+
+   {AI05-0190-1} [Otherwise, there is no default pool; ...]
+
+>
+> Second, this seems backwards to me. We're concerned (OK, I'm not, but
+> I'm going along with the majority opinion here :-) about entities with
+> the name Standard that are visible at the point of a pragma Default_Storage_Pool.
+>
+> That is,
+>     function Standard ...
+>
+>     pragma Default_Storage_Pool (Standard);
+>
+> That wouldn't be detected by this rule if the function is in another
+> compilation unit (and it seems to require retroactive enforcement
+> within a single unit).
+
+I also considered this, but if it is in another compilation unit, it would not
+be directly visible, unless there was a use clause that made it directly
+visible. Without a use clause, one would have to reference it with a prefix. For
+that case, it is not likely to be confused with the use of Standard in the
+pragma or aspect. I think the case where a use clause makes such a declaration
+visible from some other package is even more remote of a possibility, and less
+likely to be confusing, than the case above where a function Standard is not
+only directly visible to the compiler, but also directly visible to the reader
+of the source code.
+
+>
+> I would have tried something much more direct:
+>
+>     If the storage_pool_indicator for a pragma or aspect
+> Default_Storage_Pool is Standard, then the pragma or
+> aspect_specification is illegal if there is any declaration with the
+> direct_name Standard (other than the package
+> Standard) that is visible (directly visible??) at the point of the
+> pragma or aspect_specification.
+
+I actually started off with something like this. I was using directly visible in
+my initial wording, but I later changed after receiving your email, because of
+your comment that said you'd rather not bring in visibility rules.
+
+i.e.
+ > Indeed, I'd probably implement this check as "if there is more than  > one
+ definition of Standard in the current symboltable, reject the  > pragma". That
+ is, I wouldn't pay any attention to visibility or  > what's being declared.
+
+I also didn't use wording that involved storage_pool_indicator, because the RM
+wording suggested to me that storage_pool_indicator only applied to the pragma
+and not the aspect. The aspect only talks about the values that the aspect can
+have, but otherwise doesn't mention storage_pool_indicator. Also, I believe the
+aspect cannot have the value null, which is another reason I avoided
+storage_pool_indicator. However, the wording does talk about "default pool"
+which is defined in 13.11.3 (4.1/3). And the wording for the aspect and for the
+pragma both use this term, so I thought it best to use wording based on that
+definition, rather than the syntax element, storage_pool_indicator.
+
+I'd be OK with using visibility rules similar to the wording you have above, but
+note that the rule above wouldn't flag;
+
+      pragma Default_Storage_Pool (Standard);
+      function Standard ...
+
+because the function Standard isn't visible to the pragma, whereas the rule I
+had would flag this. Though I do not have any big concerns about this case.
+
+I'm still thinking I'd probably not use Storage_Pool_Indicator though....
+
+So. I'm not clear which is the better approach. Whether to use visibility rules
+or something similar to what I had. I am willing to take another stab at the
+wording, but would like some guidance, after considering the above comments.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Saturday, January 24, 2015  12:59 AM
+
+>>     A direct_name shall not be a homograph of the package Standard
+>> that
+>
+> A direct_name cannot be a homograph.  Only declarations can.
+> Maybe "be" --> "denote" was intended?
+
+Yes, I agree that better captures the intent.
+
+
+>
+> I basically agree with Randy's points here, but it occurs to me that
+> this is another example where a "soft legality" rule (or whatever we
+> call it) would be appropriate.  We could say it is softly-illegal to
+> declare anything anywhere called Standard.  No compatibility issues
+> (that's the whole point of soft legality), and any possible confusion
+> gets a diagnostic message.
+
+I agree with this, though I believe soft legality rules would be a feature that
+would not be appropriate for the corrigenda, whereas this AI is something that
+is being considered for the corrigenda. So perhaps it makes sense to apply a fix
+similar to the proposal for now, and then consider relaxing the rules for this
+and other such cases when and if soft legality rules make it into Ada 202x.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Saturday, January 24, 2015  5:27 AM
+
+> I agree with this, though I believe soft legality rules would be a
+> feature that would not be appropriate for the corrigenda, whereas this
+> AI is something that is being considered for the corrigenda. So
+> perhaps it makes sense to apply a fix similar to the proposal for now,
+> and then consider relaxing the rules for this and other such cases
+> when and if soft legality rules make it into Ada 202x.
+
+For the corrigenda you could just have implementation advice saying the compiler
+should issue a warning msg in this case (in IA sections you can talk about
+warning messages).
+
+If you make it illegal now, you  limit your possibilities for the future
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, January 24, 2015  6:15 AM
+
+> I agree with this, though I believe soft legality rules would be a
+> feature that would not be appropriate for the corrigenda, ...
+
+I think we should use the "soft legality" concept starting in 1995.  ;-) I'm
+puzzled why it's so controversial, and I don't know why it would be
+inappropriate for the corrigenda.
+
+***************************************************************
+
+From: Brad Moore
+Sent: Saturday, January 24, 2015  7:50 AM
+
+Actually, it appears we've already had them since Ada 83.
+
+See RM 2.8 (13) "The implementation shall give a warning message for an
+unrecognized pragma name."
+
+I'm open to considering soft legality for the corrigenda. I just presumed it
+wasn't a possibility because ai12-0092-1 was not mentioned as being a potential
+corrigenda item in Randy's meeting agenda. Given that we already have soft
+legality rules, maybe the ai12-0092-1 is not even needed.
+
+You could think of this as a "required warning", if it appears as a
+implementation requirement. If it just appears as implementation advice, then it
+is a "recommended warning".
+
+For example, if we wanted the rule I suggested to be a required warning, what
+would stop us from using the following wording?
+
+"The implementation shall give a warning message if a direct_name exists that
+{blah blah blah}"
+
+If we only wanted this to be implementation advice, we could do as Robert
+suggested in the previous email.
+
+In this particular case, I think implementation advice seems like it would be
+more appropriate. The check doesn't affect portability, it just points out to
+the user that his code might be confusing to other readers. That way, a compiler
+vendor that didn't want to implement the check could choose not to.
+
+[Most of the further mail in this thread is filed in AI12-0092-1, since it has
+to do with "suppressible errors" or "soft errors" or whatever one calls them.
+I've only filed mail here that is actually related to this pragma and/or aspect.
+- Editor.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, January 24, 2015  4:58 PM
+
+I think this discussion has completely jumped the shark.
+
+The problem we're considering is the confusion that might be caused if some
+happens to have something named "Standard" when the pragma uses "Standard" as a
+name.
+
+But the real issue here is that someone declared something named "Standard". Any
+time a programmer uses a name that already has a well-defined Ada meaning for
+some other purpose (more specifically, the name of any language-defined
+non-overloadable entity), the programmer is asking for confusion. Not just with
+this pragma, but potentially anywhere.
+
+If I write
+   Boolean : Integer;
+I'm not expecting the compiler to give me a warning about confusion when I later
+use the name Boolean somewhere.
+
+Why this case requires any special attention is beyond me. I've been against any
+check anywhere since this issue was originally brought up. If *anything*
+deserves a warning, it's the use of Standard as the name of an entity. But we've
+tolerated that for approximately 1 zillion years. I doubt enough has changed
+about that.
+
+I can see having a check associated with the pragma (it's new, after all, so
+there is no compatibility issue), but I don't see it as necessary. But if we're
+not going to have a required check, then we should say nothing at all
+(implementations can have a warning if they like, but there's no reason
+whatsoever for the Standard to talk about that). This case is highly unlikely
+(and, as Brad noted, most of the time, the conflict would be harmless as
+Standard would not be a storage pool); it's simply not worth the energy that's
+already been put to it.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, January 24, 2015  5:19 PM
+
+...
+> > Two problems with this. First, it's incompatible because the
+> > Standard storage pool applies by default. So this would be enforced
+> > everywhere except where there is an explicit pragma
+> > Default_Storage_Pool. I think you only wanted it to apply in the
+> > scope of a pragma Default_Storage_Pool.
+>
+> I was and still am thinking this wouldn't be incompatible because as
+> mentioned in 13.11.3 (6.3/3) and modified by this AI, if the "default
+> pool" is not specified (null, Standard, or some storage pool, then
+> there is no default pool. So, this effect only occurs if the default
+> storage pool was explicitly specified to be Standard. Or at least that
+> is the impression I got from reading 13.11.3 (6.3/3), and that was
+> what I was attempting to leverage to avoid compatibility issues.
+
+If the name Standard is used, one hopes that 13.11.3(6.3/3) applies. We don't
+want subtly different semantics for
+    pragma Default_Storage_Pool (Standard);
+and no pragma (assuming there are no other pragma Default_Storage_Pools that
+apply).
+
+In particular, the sentence you added after 13.11.3(6.1/3) is unnecessary (and
+incorrect, as the reference to 13.11 in 6.3/3 is critical).
+
+I'd just have added a parenthetical remark to 13.11.3(6.3/3) (and remove the
+"redundant" brackets):
+
+   Otherwise {(including when the default pool is specified as Standard)}, there
+   is no default pool; the standard storage pool is used for the type as
+   described in 13.11.
+
+Humm, that reads funny. Probably drop the part about there being no default
+pool, it doesn't have any semantics:
+
+   Otherwise {(including when the default pool is specified as Standard)}[,
+   there is no default pool;] the standard storage pool is used for the type as
+   described in 13.11.
+
+I'd have to look at the rest of the wording to be sure that works properly.
+
+I hadn't noticed that before.
+
+(If starting from scratch, I would have said that the default default storage
+pool is "Standard", and 13.11 would talk about the default storage pool
+directly. But too much change now.)
+
+> > Second, this seems backwards to me. We're concerned (OK, I'm not,
+> > but I'm going along with the majority opinion here :-) about
+> > entities with the name Standard that are visible at the point of a
+> > pragma Default_Storage_Pool.
+> >
+> > That is,
+> >     function Standard ...
+> >
+> >     pragma Default_Storage_Pool (Standard);
+> >
+> > That wouldn't be detected by this rule if the function is in another
+> > compilation unit (and it seems to require retroactive enforcement
+> > within a single unit).
+>
+> I also considered this, but if it is in another compilation unit, it
+> would not be directly visible, unless there was a use clause that made
+> it directly visible. Without a use clause, one would have to reference
+> it with a prefix. For that case, it is not likely to be confused with
+> the use of Standard in the pragma or aspect. I think the case where a
+> use clause makes such a declaration visible from some other package is
+> even more remote of a possibility, and less likely to be confusing,
+> than the case above where a function Standard is not only directly
+> visible to the compiler, but also directly visible to the reader of
+> the source code.
+
+The use clause case is *far* more likely than having a name in the same scope.
+Especially for those that aren't use-adverse. (Those of us that are use-adverse
+tend to forget that at times.)
+
+I don't think *any* of these cases are confusing, but that's just me. :-)
+
+> > I would have tried something much more direct:
+> >
+> >     If the storage_pool_indicator for a pragma or aspect
+> > Default_Storage_Pool is Standard, then the pragma or
+> > aspect_specification is illegal if there is any declaration with the
+> > direct_name Standard (other than the package
+> > Standard) that is visible (directly visible??) at the point of the
+> > pragma or aspect_specification.
+>
+> I actually started off with something like this. I was using directly
+> visible in my initial wording, but I later changed after receiving
+> your email, because of your comment that said you'd rather not bring
+> in visibility rules.
+>
+> i.e.
+>  > Indeed, I'd probably implement this check as "if there is more than
+> > one definition of Standard in the current symboltable, reject the  >
+> pragma". That is, I wouldn't pay any attention to visibility or  >
+> what's being declared.
+
+You misunderstood my point. I think this check is so unimportant that I won't
+spend a moment implementing the rule as written, just implementing enough to
+pass the (presumably simple) ACATS test. I followed that statement by saying
+that if someone complained, I'd then use visibility as well, but not resolution.
+
+The actual rule has to include visiblility, else there are ripple effects.
+(More on that later.)
+
+> I also didn't use wording that involved storage_pool_indicator,
+> because the RM wording suggested to me that storage_pool_indicator
+> only applied to the pragma and not the aspect. The aspect only talks
+> about the values that the aspect can have, but otherwise doesn't
+> mention storage_pool_indicator.
+
+That's true. I said it needed wordsmithing. ;-)
+
+> Also, I believe the aspect cannot
+> have the value null, which is another reason I avoided
+> storage_pool_indicator. However, the wording does talk about "default
+> pool" which is defined in 13.11.3 (4.1/3). And the wording for the
+> aspect and for the pragma both use this term, so I thought it best to
+> use wording based on that definition, rather than the syntax element,
+> storage_pool_indicator.
+>
+> I'd be OK with using visibility rules similar to the wording you have
+> above, but note that the rule above wouldn't flag;
+>
+>       pragma Default_Storage_Pool (Standard);
+>       function Standard ...
+>
+> because the function Standard isn't visible to the pragma, whereas the
+> rule I had would flag this. Though I do not have any big concerns
+> about this case.
+
+I'd hope not. We really don't want retroactive legality rules. After all, you
+can write:
+
+     Var : Integer;
+     type Integer is range 1 .. 10;
+
+And this is of course confusing, but there is no attempt to prevent it in the
+language. Moreover, every Ada programmer knows that you never have to look at
+anything following a construct to determine its legality. Ada is fundamentally a
+one-pass language (with a few exceptions), this case is way too unimportant to
+break that.
+
+> I'm still thinking I'd probably not use Storage_Pool_Indicator
+> though....
+
+Agreed.
+
+> So. I'm not clear which is the better approach. Whether to use
+> visibility rules or something similar to what I had. I am willing to
+> take another stab at the wording, but would like some guidance, after
+> considering the above comments.
+
+Use visibility rules, but not resolution. As I said, we have to use visibility
+in order to avoid ripple effects (where adding a with makes something unrelated
+illegal). Tucker suggested that it be "directly visible".
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, January 24, 2015  5:19 PM
+
+>...it's simply not worth the
+> energy that's already been put to it.
+
+I agree with Randy 100% on this.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Saturday, January 24, 2015  5:42 PM
+
+> But the real issue here is that someone declared something named "Standard".
+> Any time a programmer uses a name that already has a well-defined Ada
+> meaning for some other purpose (more specifically, the name of any
+> language-defined non-overloadable entity), the programmer is asking
+> for confusion. Not just with this pragma, but potentially anywhere.
+
+Absolutely, and any effort to protect the programmer from the bad effects of
+such horrible usage is IMO misguided.
+
+> If I write
+>     Boolean : Integer;
+> I'm not expecting the compiler to give me a warning about confusion
+> when I later use the name Boolean somewhere.
+>
+> Why this case requires any special attention is beyond me. I've been
+> against any check anywhere since this issue was originally brought up.
+> If *anything* deserves a warning, it's the use of Standard as the name
+> of an entity. But we've tolerated that for approximately 1 zillion
+> years. I doubt enough has changed about that.
+
+I definitely agree wtih that
+
+> I can see having a check associated with the pragma (it's new, after
+> all, so there is no compatibility issue), but I don't see it as
+> necessary. But if we're not going to have a required check, then we
+> should say nothing at all (implementations can have a warning if they
+> like, but there's no reason whatsoever for the Standard to talk about
+> that). This case is highly unlikely (and, as Brad noted, most of the
+> time, the conflict would be harmless as Standard would not be a
+> storage pool); it's simply not worth the energy that's already been put to it.
+
+I  agree with that too!
+
+We so often get into this sequence of events
+
+a) find an obscure worrisome case
+
+b) spend a huge amouint of time worrying about how to fix it
+
+c) spend time implementing the fix
+
+d) number of real users affected: ZERO
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, January 25, 2015  2:21 AM
+
+> The use clause case is *far* more likely than having a name in the
+> same scope. Especially for those that aren't use-adverse. (Those of us
+> that are use-adverse tend to forget that at times.)
+
+But in the presence of a use clause that makes a "Standard" visible, it would
+have no effect, because the only-true Standard is always directly visible, and
+therefore the name "Standard" always resolves to it.
+
+One more reason to consider this is a non-issue...
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, January 25, 2015  8:27 AM
+
+So for use-visibility, such a declaration of "Standard" would never become
+directly visible.
+
+It is only immediate-visbility where there might be an issue, but note that
+immediate-visibility can occur across package boundaries, if "Standard" is
+declared in a parent package and its use occurs in a child package of that
+parent.
+
+I suppose the reason we were considering this rule is to be consistent with how
+Ada treats immdidate-visibility cases.
+
+eg.
+
+    subtype True_False is Boolean;
+    type R is
+       record
+--       Boolean : True_False;  -- Illegal if moved here
+          True : Boolean;
+          Boolean : True_False;  -- legal
+       end record;
+       -- Illegal if you uncomment the first Boolean
+       -- and comment out the second one, because True
+       -- then has immediate-visibility to "Boolean" which
+       -- is then no longer a type but an object
+
+    Standard : R := (True => False,
+                     Boolean => True);
+
+    -- Assertion is not raised due to immediate-visibility
+    T : Boolean := Standard.True;
+    pragma Assert (T = False);
+
+    X : Standard.Boolean; -- Illegal, immediate-visibility applies
+
+    pragma Default_Storage_Pool (Standard);
+    -- Confusion: Does Standard here have immediate-visibility?
+    -- The compiler knows the answer is no.
+    -- The programmer might expect the answer is yes.
+
+I would say the only time the programmer could use the Default_Storage_Pool
+pragma or aspect and get confused is if he declares a variable named Standard
+that is of a type that is an ancestor of
+System.Storage_Pools.Root_Storage_Pool'Class, and then wants to use that storage
+pool in a Default_Storage_Pool pragma or aspect from some place that has
+immediate-visibility to that declaration. He might think he is using his pool
+when in fact he is using the implementations standard storage pool.
+
+This seems like a pretty unlikely situation to deserve special wording. If he
+notices his storage pool is not getting used and wonders why, he should be able
+to figure this out by reading about the pragma in the RM.
+
+But I will rewrite the clause in the proposed AI in terms of
+immediate-visibility, and then we can decide if we want it or not, or whether it
+should be a required warning/suppressable or a hard legality error.
+
+I note that GNAT currently has a warning that warns about redefinition of names
+in Standard, which should warn about this case, but you have to enable the
+warning to see it.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, January 25, 2015  10:24 AM
+
+> This seems like a pretty unlikely situation to deserve special wording.
+> If he notices his storage pool is not getting used and wonders why, he
+> should be able to figure this out by reading about the pragma in the RM.
+
+Yes indeed, WHY this very special case should be considered worthy of a
+mandatory warning when there are hundreds of more dangerous much more likely
+things that do NOT warrant a mandatory warning is completely beyond me. It seems
+that OCD has come to language design :-) :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, January 25, 2015  10:27 AM
+
+> I note that GNAT currently has a warning that warns about redefinition
+> of names in Standard, which should warn about this case, but you have
+> to enable the warning to see it.
+
+True, and surprisinngly this warning (-gnatw.k) is not included -gnatwa.
+That seems like a mistake and I think I will fix it.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, January 25, 2015  11:04 AM
+
+> >> The use clause case is *far* more likely than having a name in the
+> >> same scope. Especially for those that aren't use-adverse. (Those of
+> >> us that are use-adverse tend to forget that at times.)
+> > But in the presence of a use clause that makes a "Standard" visible,
+> > it would have no effect, because the only-true Standard is always
+> > directly visible, and therefore the name "Standard" always resolves to it.
+> >
+> > One more reason to consider this is a non-issue...
+
+Good point, J-P.
+
+>     subtype True_False is Boolean;
+>     type R is
+>        record
+> --       Boolean : True_False;  -- Illegal if moved here
+>           True : Boolean;
+>           Boolean : True_False;  -- legal
+>        end record;
+>        -- Illegal if you uncomment the first Boolean
+>        -- and comment out the second one, because True
+>        -- then has immediate-visibility to "Boolean" which
+>        -- is then no longer a type but an object
+>
+>     Standard : R := (True => False,
+>                      Boolean => True); ...etc.
+
+Cool example, but I think the Obfuscated C Contest is better.  ;-)
+
+> But I will rewrite the clause in the proposed AI in terms of
+> immediate-visibility, and then we can decide if we want it or not, or
+> whether it should be a required warning/suppressable or a hard
+> legality error.
+
+For the record, my idea for "suppressible error" was that then the rule could be
+simpler, and not deal with visibility at all -- just say you can't/shouldn't
+declare ANYTHING called Standard.
+
+But I agree with Robert; let's drop the whole idea.
+
+> I note that GNAT currently has a warning that warns about redefinition
+> of names in Standard, which should warn about this case, but you have
+> to enable the warning to see it.
+
+Probably should be on by default.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, January 25, 2015  11:36 AM
+
+I fear that will cause too many test suite regressions, but we will see, the
+most common thing for people to redeclare is Integer.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, January 25, 2015  9:04 PM
+
+> Then I didn't make myself clear.  I was saying that we could have a
+> rule that forbids declaring anything anywhere with the name Standard.
+> I think that's a good idea anyway, because then you're guaranteed to
+> have a full expanded name for every package.
+>
+> Objection!  That's a gratuitous incompatibility!
+>
+> Answer:  Suppressible Legality Rule.
+
+I have to say I like this more general approach much better than trying to come
+up with a very specific rule for the Default_Storage_Pool pragma.
+
+Putting in a special rule for Default_Storage_Pool feels like a band-aid
+solution. It only discourages the programmer from declaring things called
+Standard, if there happens to be a Default_Storage_Pool pragma specified as
+Standard that has immediate visibilty. We instead should be discouraging the
+programmer from using Standard for all declarations, not just this specific
+case.
+
+Given that GNAT already has a warning for redefining Standard, which hopefully
+covers us against this perceived confusion problem for now until other Ada 2012
+compilers become available, and that the rule is an obscure situation that
+likely doesn't affect anyone anyways, I'd rather leave out this rule we've been
+discussing from this AI, and wait for a suppressable legality rule AI in
+whatever form, to provide a better solution that discourages using the name
+Standard in any declaration.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Sunday, January 25, 2015  9:54 PM
+
+I agree with this, and as a response I intend to experiment with making this
+GNAT warning the default, at least for Standard, and maybe for all the other
+entities, or at least have it included in -gnatwa.
+
+****************************************************************
