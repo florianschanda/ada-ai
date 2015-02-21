@@ -1,0 +1,478 @@
+!standard 5.5.2(5/3)                                   15-02-20  AI05-0151-1/00
+!class binding interpretation 15-02-20
+!status work item 15-02-20
+!status received 15-02-13
+!priority Medium
+!difficulty Easy
+!qualifier Omission
+!subject Meaning of subtype_indication in array component iterators
+!summary
+
+** TBD.
+
+!question
+
+** TBD.
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+** TBD.
+
+!corrigendum 5.5.2(5/3)
+
+@drepl
+@dby
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+** TBD.
+
+
+!appendix
+
+From: Randy Brukardt
+Sent: Friday, February 13, 2015  4:53 PM
+
+Brad and I have been talking about test objectives for "of" iterators (OK, formally known as array component iterators and container element iterators).
+
+Brad's questions boiled down to "what is the semantics of the loop parameter"
+for "of" iterators.
+
+5.5.2(7/3) says that the nominal subtype of the loop parameter is that
+specified.
+
+But that doesn't make much sense. Brad has a test case something like:
+
+    type Arr is array (1 .. 10) of Integer;
+
+    subtype Short is Integer range 1 .. 10;
+
+    Obj : Arr := (2,4,6,8,10,12,14,16,18,20);
+
+    for P : Short of Obj loop
+        case P is
+           when 1 .. 9 => ...
+           when 10 => ...
+        end case; -- Legal, no others needed or allowed.
+    end loop;
+
+The problem here is that some of the components of the array have values outside
+of the nominal subtype of the loop parameter P. Thus the case expression will
+raise Constraint_Error. The programmer cannot write an Others here, even if they
+wanted to.
+
+Brad thought that GNAT was essentially ignoring the specified subtype in favor
+of the actual component type. That would be something like the way renames work.
+But I think we all agree that the way renames work is nasty behavior; and it
+clearly is different than what the wording of 5.5.2 says.
+
+In general, in cases like this, we would require the named subtype to statically
+match the component type (at least for elementary types; we might want a weaker
+rule for tagged types). That would avoid the problem of different constraints.
+
+Part of the problem I have with this is that I have no idea what we were trying
+to do by providing this optional subtype. It's not at all clear to me why just
+using the component subtype (or element subtype) isn't good enough.
+
+Here's what the AI (AI12-0139-2) has to say on that topic:
+
+The subtype_indication is optional, since the Iterator_Element aspect of the
+container type determines the element type. Similarly for an array, the element
+type is simply the array component type. One purpose of the subtype_indication
+might be to tighten the requirements on the elements of the container/array,
+acting essentially as an assertion about the values stored in the
+container/array at the time of the iteration. Another purpose is simply to help
+the reader, and provide an extra check that the Iterator_Element type of the
+container is as expected.
+
+That suggests that it is intended that the constraints on the component type
+could be tightened (or loosened). But that would also imply that there needs to
+be a runtime check that the loop parameter actually has the specified subtype.
+And there's no such check in the dynamic semantics of 5.5.2. It wouldn't make
+sense to *require* the loop parameter to be invalid in some circumstances, but
+that's what happens without a mandated check.
+
+So maybe we need to add something like: "If the array component iterator
+includes a subtype_indication, each element is view-converted to that subtype."
+to 5.5.2(11/3) and 5.5.2(12/3). Note that would have to be checked in both
+directions, if you swap Short and Integer in the above example, you could assign
+a component value of 12 to an array that should only hold values of 1..10.
+
+So, are we missing a runtime check here? Or should we require static matching?
+Or should we treat it like a renames and ignore the constraints completely??
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, February 13, 2015  5:20 PM
+
+> In general, in cases like this, we would require the named subtype to
+> statically match the component type
+
+Static matching seems like the right answer to me.
+
+>... (at least for elementary types; we might  want a weaker rule for
+>tagged types).
+
+Why should tagged types be different?
+
+> Part of the problem I have with this is that I have no idea what we
+> were trying to do by providing this optional subtype. It's not at all
+> clear to me why just using the component subtype (or element subtype) isn't good enough.
+
+I think it aids readability to put the type there.  In fact, I once suggested it
+should be required.  People (Tucker?) told me that was a dumb idea, and I guess
+I now agree, but I still like the option of putting the type.  So long as it
+doesn't introduce exceptions when I mistakenly use the wrong subtype, that is.
+
+> Here's what the AI (AI12-0139-2) has to say on that topic:
+>
+> The subtype_indication is optional, since the Iterator_Element aspect
+> of the container type determines the element type. Similarly for an
+> array, the element type is simply the array component type. One
+> purpose of the subtype_indication might be to tighten the requirements
+> on the elements of the container/array, acting essentially as an
+> assertion about the values stored in the container/array at the time
+> of the iteration. Another purpose is simply to help the reader, and
+> provide an extra check that the Iterator_Element type of the container is
+> as expected.
+>
+> That suggests that it is intended that the constraints on the
+> component type could be tightened (or loosened).
+
+Yes, it does.  I'm surprised.  It just seems like a tripping hazard.
+
+If you want a run-time check, just put:
+
+    pragma Assert (P in Short);
+
+in the loop.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, February 13, 2015  5:48 PM
+
+> So, are we missing a runtime check here? Or should we require static
+> matching? Or should we treat it like a renames and ignore the
+> constraints completely??
+
+Those do seem to be the choices.
+
+I don't think the runtime check works well. For example if you are iterating
+over an uninitialized array of Naturals with the goal of initializing each
+element, a runtime check wouldn't be very helpful.
+
+And, in the case of a variable, just because an element passes the runtime check
+at one point doesn't mean it will stay in the desired subtype for the remainder
+of that iteration of the loop.
+
+So the runtime check solution doesn't really work (and it would probably be
+error-prone if it did).
+
+As you pointed out, the AI says
+> One purpose of the
+> subtype_indication might be to tighten the requirements on the
+> elements of the container/array, acting essentially as an assertion
+> about the values stored in the container/array at the time of the iteration.
+
+It looks like when that was discussed we forgot that we are (or may be) dealing
+with variables, not constants.
+
+If we wanted to have different dynamic semantics for iterating over constants
+vs. over variables, I suppose the runtime check would work in the constant case.
+That seems like a very bad idea.
+
+As you pointed out
+> But I think we all agree that the way renames work is nasty behavior
+
+So that leaves us with static matching.
+
+Bob Duff wrote:
+> Static matching seems like the right answer to me.
+
+I agree.
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Friday, February 13, 2015  5:51 PM
+
+> > In general, in cases like this, we would require the named subtype
+> > to statically match the component type
+>
+> Static matching seems like the right answer to me.
+
+Seems that way to me as well.
+
+> >... (at least for elementary types; we might  want a weaker rule for
+> >tagged types).
+>
+> Why should tagged types be different?
+
+That's not clear to me either.  Static matching also seems right for that case.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 13, 2015  6:23 PM
+
+...
+> > >... (at least for elementary types; we might  want a weaker rule
+> > >for tagged types).
+> >
+> > Why should tagged types be different?
+>
+> That's not clear to me either.  Static matching also seems right for
+> that case.
+
+The fact that the type requirement was written in terms of "covers" rather than
+just "the same" suggests to me that the intent was to allow classwide types
+(essentially a wider constraint) in the case of specific tagged types. I don't
+think T'Class statically matches T.
+
+If we're convinced that that whole idea is nonsense (and it does sound a lot
+like nonsense, especially after Steve's points about the infeasability of a
+runtime check), then static matching is the answer. Probably should dump the
+"covers" wording in that case as well, as it just would appear to promise more
+than possible.
+
+Maybe just replace 5.5.2(5/3) with:
+
+The type of the subtype_indication, if any, of an array component iterator shall
+statically match the component subtype of the type of the iterable_name. The
+type of the subtype_indication, if any, of a container element iterator shall
+statically match the default element subtype for the type of the iterable_name.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 13, 2015  6:31 PM
+
+...
+> > Part of the problem I have with this is that I have no idea what we
+> > were trying to do by providing this optional subtype. It's not at
+> > all clear to me why just using the component subtype (or element
+> > subtype) isn't good enough.
+>
+> I think it aids readability to put the type there.  In fact, I once
+> suggested it should be required.  People (Tucker?) told me that was a
+> dumb idea, and I guess I now agree, but I still like the option of
+> putting the type.  So long as it doesn't introduce exceptions when I
+> mistakenly use the wrong subtype, that is.
+
+Right. But of course then I wonder why we didn't put it on "in" iterators as
+well. It would just be noise for the normal discrete iterator in almost all
+cases, but for the cursor version, the cursor name isn't in the syntax anywhere.
+
+    for I : Short in Short loop -- Pretty silly.
+
+    for I : Short in 1 .. 10 loop -- Still silly, should have used the
+                                  -- above (if you have a name for something, use it)
+
+    for I : Cursor in Container.Iterator loop -- Helps here, but not allowed.
+
+    for I : Short of Obj loop -- Helps here, and is allowed.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, February 13, 2015  7:10 PM
+
+To me, there is a good enough of a reason for limiting this syntax to "of"
+loops.
+
+It reads like a declaration that describes the type of I. Inside the loop, I
+refers to an object of that type.
+
+In "in" loops however, the type of I is an index or iterator. Having a subtype
+in the syntax for that type of loop would be confusing I would think, since
+declarations use the colon to separate the declaration name from its type.
+
+The subtype on the "of" loop also helps to better distinguish these two kinds of
+loops. So I can imagine a coding style might want the subtypes to be explicit,
+as otherwise the two letter difference between "of" and "in" might be considered
+to be subtle.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, February 13, 2015  8:58 PM
+
+I missed that you were thinking for "in" loops that the subtype indication could
+also have been used to describe the type of I in these examples (rather than the
+component of the array or container element). I agree that the benefits of
+specifying the subtype indication for the container cursor case would have been
+similar to the benefits for "of" loops.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, February 13, 2015  9:27 PM
+
+I agree with static matching.  The current wording using "covers" is weird.  I
+don't know what I was/we were thinking.
+
+> ...
+> Maybe just replace 5.5.2(5/3) with:
+>
+> The type of the subtype_indication, if any, of an array component
+> iterator shall statically match the component subtype of the type of
+> the iterable_name. The type of the subtype_indication, if any, of a
+> container element iterator shall statically match the default element
+> subtype for the type of the iterable_name.
+
+The above doesn't really make sense.  A "type" can't statically match a subtype.
+I think you will have to change this to say "the subtype defined by the
+subtype_indication" rather than "the type of the subtype_indication."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 13, 2015  10:00 PM
+
+> The above doesn't really make sense.  A "type" can't statically match
+> a subtype.  I think you will have to change this to say "the subtype
+> defined by the subtype_indication"
+> rather than "the type of the subtype_indication."
+
+Steve noted that privately (not sure why privately). I thought I'd changed all
+of the "type"s to "subtype"s and obviously missed the most important one.
+
+---
+
+In the who cares? category, it strikes me that we have
+    [: subtype_indication]
+for array component iterators, but we don't have
+    [: access_definition]
+as most of the similar places do. I would have expected that we'd allow anything
+here that could be an array component subtype, and we do allow anonymous access
+there. (Why we thought that was good idea escapes me, but whatever. :-)
+
+Alternatively, we could use "component_definition" there (which is really a
+subtype); that would also allow "aliased". Probably overkill, though. (And we'd
+need to match "aliased" to the component subtype.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, February 14, 2015  9:55 AM
+
+> > I think it aids readability to put the type there.  In fact, I once
+> > suggested it should be required.  People (Tucker?) told me that was
+> > a dumb idea, and I guess I now agree, but I still like the option of
+> > putting the type.  So long as it doesn't introduce exceptions when I
+> > mistakenly use the wrong subtype, that is.
+>
+> Right. But of course then I wonder why we didn't put it on "in"
+> iterators as well.
+
+I don't think that would be useful.
+
+>... It would just be noise for the normal discrete iterator in almost
+>all  cases, but for the cursor version, the cursor name isn't in the
+>syntax  anywhere.
+>
+>     for I : Short in Short loop -- Pretty silly.
+
+Agreed.
+
+>     for I : Short in 1 .. 10 loop -- Still silly, should have used the
+> above (if you have a name for something, use it)
+
+Not sure why this is silly, but we already have this:
+
+    for I in Short range 1 .. 10 loop
+
+(By the way, I never say "for I in 1 .. 10" unless I is unused, so it's just a
+"do this 10 times" loop.)
+
+>     for I : Cursor in Container.Iterator loop -- Helps here, but not
+> allowed.
+
+I don't think it helps here.  Of course it's a cursor, tell me something I don't
+know.  ;-)
+
+>     for I : Short of Obj loop -- Helps here, and is allowed.
+
+Here's where it helps.  It's a reminder that Obj is a container of Shorts.  This
+seems entirely different from the previous "Cursor" example -- I don't need a
+reminder that iterators have cursors.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, February 15, 2015  7:34 PM
+
+...
+> >     for I : Cursor in Container.Iterator loop -- Helps here, but not allowed.
+>
+> I don't think it helps here.  Of course it's a cursor, tell me
+> something I don't know.  ;-)
+
+Sure it is a cursor (lower case), but since this is user-defined, we don't know
+the name of the type in question. It's "Cursor" for  a language-defined
+container, but iterators are useful for many other types. And many of those
+types are pre-existing, so they're almost certainly *not* named "Cursor". In my
+various programs, for instance, I can imagine iterators where the cursor would
+be types Symbol_Ptr, Domain_Index, and Menu_Item_Type.
+
+In most other cases in Ada, all you need to do to find the type of something is
+to find its declaration, but that doesn't work for I in this case. You need
+three lookups to find the name for an array component iterator (find the loop to
+find the object, find the  object declaration to find the array type, find the
+array type declaration to find the component type), and thus it makes sense to
+optionally allow it in the iterator (which eliminates two of these steps).
+
+The same is true for a generalized iterator: find the loop to find the iterator
+expression, which typically is a function call, so you have to find the function
+to find the iterator type, then you have to find the instantiation that defines
+that iterator type - which finally will give you the name of the cursor type.
+
+I suppose if you never use a generalized iterator for anything other than a
+container, you'd be right, but I hope our language design is more general than
+that. After all, when this was first proposed, I recall one B. Duff wanting to
+use it for lazy iterations over a lazy list type. I doubt that the elements in
+that type would be identified by type Cursor. And surely you don't mean that
+anyone writing an iterator has to name their type Cursor, even when adding an
+iterator to an existing package.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, February 17, 2015  3:17 AM
+
+Going over a long backlog of discussions...
+
+Le 13/02/2015 23:51, Randy Brukardt a ‚crit :
+> Part of the problem I have with this is that I have no idea what we
+> were trying to do by providing this optional subtype. It's not at all
+> clear to me why just using the component subtype (or element subtype) isn't
+> good enough.
+
+I always claim that a nice feature of Ada is that (except for "for I in 1..10")
+the type of an object always appears at the place where the object is created,
+avoiding to follow chains of declaration. I think the same idea applies here.
+
+About what to do with the subtype:
+
+My initial feeling was to have the check, because I viewed the parameter as an
+assignment, while it is really a renaming of the component. It is therefore
+possible to give a value outside the parameter's declared subtype by direct
+assignment to the array component. Since static matching is better than lying, I
+concur for static matching.
+
+****************************************************************
+
