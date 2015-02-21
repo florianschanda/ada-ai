@@ -1,0 +1,188 @@
+!standard 13.14(3/4)                                   15-02-20  AI05-0155-1/00
+!class binding interpretation 15-02-20
+!status work item 15-02-20
+!status received 15-02-20
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Freezing of operations of incomplete types with completions deferred to a body
+!summary
+
+** TBD.
+
+!question
+
+Consider:
+
+   package Pack is
+ 
+      type Bag_Type is private;
+
+      procedure Add (Bag : in out Bag_Type; Elem : Integer);
+
+   private
+
+      type Set is tagged;
+
+      type Bag_Type is access Set;
+
+      package Inner is
+         -- These can't be primitive for Set, else 3.10.1(9.3/2) is violated.
+         procedure Add (Elem : Integer; To_Set : in out Set);
+         procedure Union (Left, Right : in Set; Result : out Set);
+         procedure Intersection (Left, Right : Set; Result : out Set);
+         function "=" (Left, Right : Set) return Boolean;
+      end Inner;
+
+   end Pack; -- Freezing here.
+
+13.14(3/4) [and earlier versions as well] says that everything exception
+incomplete types are frozen at the end of Pack. This includes the profiles of
+any subprograms declared within Pack.
+
+13.14(14/3) tells us that freezing of a profile freezes each subtype of the
+profile. That means, for example, that freezing the profile of Union freezes
+Set.
+
+But freezing of Set is illegal by 13.14(17/3) [the type is not yet complete].
+[This is why there is an exception for incomplete types in 13.14(3/4),
+otherwise any incomplete type with the completion deferred to a body would be
+illegal.] Thus all of the declarations in package Inner are illegal.
+
+The changes to the usage of incomplete types in Ada 2012 (AI05-0151-1) would
+suggest that these subprograms should be legal. They could be called from a
+child unit without that child having to see the full type for Set, so they
+seem potentially useful. Should such subprograms be allowed? (???.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+** TBD.
+
+!corrigendum 13.14(3/4)
+
+@drepl
+@dby
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+** TBD.
+
+
+!appendix
+
+From: Randy Brukardt
+Sent: Friday, February 28, 2015  5:52 PM
+
+I have had a running conversation with an implementer over a series of tests,
+which has led to a question that suggests that there might be a problem
+(really an oversight) in the freezing rules. (Imagine that!)
+
+Here's the important part of the example:
+
+package Pack is
+
+   type Bag_Type is private;
+
+   procedure Add (Bag : in out Bag_Type; Elem : Integer);
+
+private
+
+   type Set is tagged;
+
+   type Bag_Type is access Set;
+
+   package Inner is
+      -- These can't be primitive for Set, else 3.10.1(9.3/2) is violated.
+      procedure Add (Elem : Integer; To_Set : in out Set);
+      procedure Union (Left, Right : in Set; Result : out Set);
+      procedure Intersection (Left, Right : Set; Result : out Set);
+      function "=" (Left, Right : Set) return Boolean;
+   end Inner;
+
+end Pack; -- Freezing here.
+
+The implementer's complaints led me to look at how this freezes.
+
+13.14(3/4) [and earlier versions as well] says that everything exception
+incomplete types are frozen at the end of Pack. This includes the profiles of
+any subprograms declared within Pack.
+
+13.14(14/3) tells us that freezing of a profile freezes each subtype of the
+profile. That means, for example, that freezing the profile of Union freezes
+Set.
+
+But freezing of Set is illegal by 13.14(17/3) [the type is not yet complete].
+[This is why there is an exception for incomplete types in 13.14(3/4),
+otherwise any Taft-Amendment type would be illegal.] Thus all of the
+declarations in package Inner are illegal.
+
+
+This only matters to Taft-Amendment types like Set in the example. For a type
+that is completed in the package specification, 13.14(17/3) does not apply at
+the end of the package, because the type is in fact complete. For an
+incomplete view, one assumes that types that are imported were previously
+frozen by the end of the compilation unit that contains them and thus don't
+need any freezing. [BTW, I can't find any justification for this view in the
+RM wording; it's something that I wish we'd fix because it comes up
+periodically, but it also seems to fit the Dewar rule as no other
+interpretation makes sense (at least to me). And since it fits the Duff rule
+as well (no one would ever change behavior because of the fix), I've never
+made an AI for it. Interestingly, I made this very same point in the e-mail
+in AI12-0151-1 (June 6, 2009), so maybe it's mainly this case where it
+matters. That e-mail specifically argued that there was no freezing problem
+for incomplete views from limited withs for this sort of case, in response to
+a question from Tucker. It must have satisified everyone, because no further
+discussion occurred on that point.]
+
+
+Note that there is no problem with these profiles freezing without knowing the
+full type. We allow calls on similarly defined subprograms when the parameter
+type is a tagged incomplete view defined by a limited with. The parameters
+have to be passed by reference, and dispatching calls are prevented by
+3.10.1(9.3/2) [primitives aren't allowed].
+
+Such routines can be used in child packages without having to make the actual
+implementation visible. That seems useful to me. (Maybe not useful enough to
+bother changing the language, but certainly useful enough to disqualify this
+case from the ARG gallery of pathologies, honoring Steve Baird. :-)
+
+
+The freezing requirement here says that the expansions in usage of incomplete
+types defined in Ada 2012 are completely unusable for Taft-Amendment types.
+Any use of a Taft-Amendment incomplete type directly as a parameter or result
+will necessarily result in a freezing violation. It's hard to believe we
+intended that.
+
+OTOH, AI12-0151-1 talks exclusively about incomplete views coming from limited
+views. As such, it's possible that we didn't care at all about any changes that
+happened for any other kind of access type.
+
+
+Either way, I'd like to have a decision. If the freezing rule stands, then a
+couple existing tests and a number of objectives are unnecessary, and I need to
+clean up the ACATS and its documentation to reflect that. And if it is going to
+be relaxed somehow, I'm sure the implementer would be interested, and the test
+objectives probably will need a couple of additional cases.
+
+For what it's worth, GNAT appears to accept the example package (and its body)
+without complaint. I didn't try to create a runnable example, so I don't know
+if the result would actually work or if I would get to see one of GNAT's famous
+bug boxes. I'll do that IFF there is some interest in exploring whether the
+freezing rules should allow examples like this. (Of course, if we confirm the
+language, meaning the above is illegal, I'll make a B-Test out of the example
+to ensure that it is getting rejected.)
+
+****************************************************************
+
