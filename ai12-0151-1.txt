@@ -1,4 +1,6 @@
-!standard 5.5.2(5/3)                                   15-02-20  AI05-0151-1/00
+!standard 5.5.2(2/3)                                  15-02-23  AI05-0151-1/01
+!standard 5.5.2(5/3)
+!standard 5.5.2(7/3)
 !class binding interpretation 15-02-20
 !status work item 15-02-20
 !status received 15-02-13
@@ -8,11 +10,74 @@
 !subject Meaning of subtype_indication in array component iterators
 !summary
 
-** TBD.
+The optional subtype specified in an array component iterator or a container
+element iterator must statically match the array component subtype or container
+element subtype.
+
+An anonymous access declaration can be specified in an array component iterator
+if necessary to match the component subtype.
+
+An optional subtype_indication can be provided with a generalized iterator.
 
 !question
 
-** TBD.
+(1) Consider an array component iterator with a specified subtype.
+5.5.2(5/3) says that the specified subtype has to cover the component type of
+the array object. 5.5.2(7/3) says that the nominal subtype of the loop
+parameter is that specified. So consider the following:
+
+   type Arr is array (1 .. 10) of Integer;
+
+   subtype Short is Integer range 1 .. 10;
+
+   Obj : Arr := (2,4,6,8,10,12,14,16,18,20);
+
+   for P : Short of Obj loop
+       case P is
+          when 1 .. 9 => ...
+          when 10 => ...
+       end case; -- Legal, no others needed or allowed.
+   end loop;
+
+The nominal subtype of P is Short, so the case statement does not allow any
+others clause. However, some of the elements have values outside of this
+nominal subtype. Essentially, the language is requiring that the loop
+parameter has invalid values, as there is no check to prevent this.
+
+What is the intent here? (The subtype must statically match.)
+
+(2) The syntax for array component iterators is:
+
+   defining_identifier [: subtype_indication] of [reverse] iterable_name
+
+However, the syntax for the definition of the component subtype of an array
+type includes access_definition. Given our zeal for allowing anonymous access
+everywhere, it's odd that we're not allowing it here. Should it be allowed
+here? (Yes.)
+
+(3) One of the important features of Ada is that in almost all cases, the type
+of an object appears at the place where the object is declared. Thus it is not
+necessary to follow chains of declaration to find the type and subtype of an
+object.
+
+Traditional for loops is the exception to this feature, as the type of I does
+not appear in "for I in 1 .. 10 loop". Here, however, the type is assumed, and
+Ada programmers quickly get used to that.
+
+The reason for allowing the loop parameter to be specified for array component
+iterators and for component element iterators is to preserve this principle (at
+least optionally). Traditional for loops did not need such an option because the
+subtype is drawn directly from the given subtype_indiciation - the only thing
+that is missing is the colon.
+
+However, in a generalized iterator, the name of the cursor subtype does not
+appear anywhere. Again, a search through a chain of declarations is needed to
+find the name of this subtype (it will be found as the actual subtype in the
+instantiation of Ada.Iterator_Interfaces).
+
+It appears that we need to allow specifying the subtype in the case of a
+generalized iterator as well as in the other cases. Should this be done?
+(Yes.)
 
 !recommendation
 
@@ -20,11 +85,117 @@
 
 !wording
 
-** TBD.
+Replace 5.5.2(2/3) with: (Note: square and curly brackets as in syntax, not
+                          wording modifications)
+ iterator_specification ::= 
+    defining_identifier [: loop_parameter_subtype_indication] in [reverse] iterator_name
+  | defining_identifier [: loop_parameter_subtype_indication] of [reverse] iterable_name
+ loop_parameter_subtype_indication ::= subtype_indication | access_definition
+
+Modify 5.5.2(5/3):
+
+{The subtype defined by the subtype_indication, if any, of a generalized iterator
+component iterator shall statically match the iteration cursor subtype.
+The [type of]{subtype defined by} the subtype_indication, if any, of an array
+component iterator shall [cover]{statically match} the component
+[type]{subtype} of the type of the iterable_name. The [type of]{subtype defined
+by} the subtype_indication, if any, of a container element iterator shall
+[cover]{statically match} the default element [type]{subtype} for the type of
+the iterable_name.
+
+Modify 5.5.2(7/3) by swapping the second and third sentences and making the other
+changes indicated:
+
+An iterator_specification declares a loop parameter. In {a generalized
+iterator, }an array component iterator{,} or a container element iterator, if
+a {loop_parameter_}subtype_indication is present, it determines the nominal
+subtype of the loop parameter. In a generalized iterator, {if a
+loop_parameter_subtype_indication is not present, }the nominal subtype of the
+loop parameter is the iteration cursor subtype.  In an array component iterator,
+if a {loop_parameter_}subtype_indication is not present, the nominal subtype of
+the loop parameter is the component subtype of the type of the iterable_name. In
+a container element iterator, if a {loop_parameter_}subtype_indication is not
+present, the nominal subtype of the loop parameter is the default element
+subtype for the type of the iterable_name.
 
 !discussion
 
-** TBD.
+For question 1, we have essentially three choices:
+
+(A) The subtype of the loop parameter works like that of an object renames; it
+is essentially ignored and the component subtype used instead.
+
+(B) The loop parameter is a view conversion of the component, meaning that
+there are extra checks when it is created and assigned.
+
+(C) The subtype of the loop parameter has to statically match that of the
+component subtype.
+
+(A) is misleading to the reader; the subtype doesn't really mean what it says.
+[This is a long-time complaint about renames; compatibility concerns have
+prevented us from fixing them, but the consensus is that they're a bad design.]
+
+(B) means that one might get exceptions raised by the loop itself if the wrong
+subtype is written by accident. Moreover, there has to be some sort of reverse
+check when the component is assigned. In addition, such a check would be
+problematical of the components are uninitialized. A loop to initialize an
+array such as:
+    for Comp : Natural of Obj loop
+        Comp := 10;
+    end loop;
+might raise an exception if the uninitialized junk has a negative value.
+
+(C) is incompatible with the Ada 2012 language as defined. The wording in the
+Ada 2012 standard clearly allows constructions such as in the example, but
+requiring static matching would render it illegal.
+
+Given the potential for confusion, and the early state of Ada 2012 adoption,
+we chose to require static matching. The alternatives either are full of
+potential landmines for the language definition and the user (B), or are
+misleading to the reader (A) and not really helpful (since any constraints
+are ignored, why write them in the first place?).
+
+
+Container element iterators have similar issues with the subtype name
+(question 1) as array component iterators. We adopt the same solution as
+for arrays for them.
+
+
+For question 2, we allow anonymous access types for consistency with other
+kinds of object declaration (including extended return statements and generic
+formal parameters). Whether we should have done that can be argued, but since
+we have, there should not be places where anonymous access types cannot be
+written. Notice that static matching will always fail for container element
+iterators, as the Iterator_Element has to be a "name", and that does not
+include anonymous access types.
+
+
+For question 3, we allow an optional subtype_indication on a generalized
+iterator. We don't want to force readers to look through many declarations
+to find out the type of a loop parameter. We allow that type to be optional,
+however, as it often is obvious from context. (For instance, if one is
+iterating a language-defined container, everyone should know that the
+cursor type is named Cursor and it's defined in the instance that defines
+the container type.) But that's not true for user-defined iterators, which
+may have been added to existing types for which the name "Cursor" is not
+appropriate.
+
+We don't need to allow an access_definition in a generalized iterator, as
+the actual type provided to any generic instance (including an instance of
+Ada.Iterator_Interfaces) is a subtype_mark; it cannot be an anonymous
+access_definition. We use loop_parameter_subtype_indication anyway, just to
+simplify the wording.
+
+
+We could have allowed an optional subtype_indication in a traditional for
+loop as well. But "in" here acts much like ":", so we don't really need
+the extra subtype. And the static matching requirement would mean that
+the same subtype would have to be written twice in most circumstances:
+    for I : Short in Short loop
+A charter member of the department of redundancy department. In addition,
+it would have required additional wording and syntax changes in subclause
+5.5. So this does not seem worthwhile.
+
 
 !corrigendum 5.5.2(5/3)
 
@@ -37,7 +208,7 @@ No ASIS effect.
 
 !ACATS test
 
-** TBD.
+An ACATS B-Test is needed for the static matching check.
 
 
 !appendix
@@ -45,7 +216,8 @@ No ASIS effect.
 From: Randy Brukardt
 Sent: Friday, February 13, 2015  4:53 PM
 
-Brad and I have been talking about test objectives for "of" iterators (OK, formally known as array component iterators and container element iterators).
+Brad and I have been talking about test objectives for "of" iterators (OK,
+formally known as array component iterators and container element iterators).
 
 Brad's questions boiled down to "what is the semantics of the loop parameter"
 for "of" iterators.
@@ -130,7 +302,8 @@ Why should tagged types be different?
 
 > Part of the problem I have with this is that I have no idea what we
 > were trying to do by providing this optional subtype. It's not at all
-> clear to me why just using the component subtype (or element subtype) isn't good enough.
+> clear to me why just using the component subtype (or element subtype) isn't
+> good enough.
 
 I think it aids readability to put the type there.  In fact, I once suggested it
 should be required.  People (Tucker?) told me that was a dumb idea, and I guess
