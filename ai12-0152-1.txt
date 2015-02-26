@@ -1,4 +1,4 @@
-!standard 11.3(2.1/4)                                   15-02-20  AI05-0152-1/00
+!standard 11.3(2.1/4)                                  15-02-20  AI05-0152-1/00
 !class binding interpretation 15-02-20
 !status work item 15-02-20
 !status received 15-02-13
@@ -8,11 +8,99 @@
 !subject Ambiguities in raise expression syntax
 !summary
 
-** TBD.
+Modify the Ada grammar to eliminate ambiguities.
 
 !question
 
-** TBD.
+There appear to be a number of ambiguities in the Ada syntax, mostly
+involving raise expressions.
+
+(A) Consider the expression:
+
+   raise Program_Error with A and B
+
+This could be interpreted as
+
+   (raise Program_Error with A) and B
+or
+   raise Program_Error with (A and B)
+
+The Ada expression grammar does not appear to make a choice in this case.
+
+(B) Consider the object declaration:
+
+   Nasty : Natural := raise TBD_Error with Atomic;
+
+This could be interpreted as:
+
+   Nasty : Natural := (raise TBD_Error) with Atomic;
+
+or
+
+   Nasty : Natural := (raise TBD_Error with Atomic);
+
+A similar problem occurs in component_declarations.
+
+(C) Consider:
+
+   Val : String := "Oops";
+
+   A := (raise TBD_Error with Val);
+
+This is a classic raise_expression. Unfortunately, it's also an
+extension_aggregate, made clearer with parens:
+
+   A := ((raise TBD_Error) with Val);
+
+It should be possible to distinguish these syntactically.
+
+(D) consider the following insane type declaration:
+
+   Atomic : String := "Gotcha!";
+
+   type Fun is new My_Decimal_Type digits raise TBD_Error with Atomic;
+
+This is using a digits_constraint (I purposely used the non-obsolescent one) in
+a subtype_indication in a derived type declaration.
+
+This can be interpreted as:
+
+   type Fun is new My_Decimal_Type digits (raise TBD_Error with Atomic);
+
+or
+
+   type Fun is new My_Decimal_Type digits (raise TBD_Error) with Atomic;
+
+(the latter being an aspect specification for aspect Atomic, lest you've
+forgotten).
+
+Ada 2005 introduced a similar problem:
+
+   A, B : constant Some_Modular_Type := ...;
+
+   type Nutso is new Some_Type digits A and B with private;
+
+This could be interpreted as:
+
+   type Nutso is new Some_Type digits (A and B) with private;
+
+or the "and B" could be interpreted as an interface list.
+
+This of course can't be legal (at least not until we have tagged real types),
+but it does confuse a parser. And it is not far from the legal declaration:
+
+  type Nutso2 is new Some_Type digits A and B with Volatile;
+
+which we surely do have to parse with the current grammar.
+
+We also have a similar problem with type declarations using digits and delta
+constraints:
+
+    type Bad1 is digits raise TBD_Error with Atomic;
+    type Bad2 is delta  raise TBD_Error with Atomic;
+    type Bad3 is digits 5 delta raise TBD_Error with Atomic;
+   
+Should these things be fixed? (Yes.)
 
 !recommendation
 
@@ -20,16 +108,313 @@
 
 !wording
 
-** TBD.
+[Note: We don't attempt to show the actual changes in syntax rules here, as the
+typical insertion {} and deletion [] markers are also used in syntax.]
+
+Replace 3.5.9(5) by:
+
+ digits_constraint ::= 
+   digits *static_*simple_expression [range_constraint]
+
+In 3.5.9(18-19), replace "expression" by "simple_expression" (2 places).
+3.5.9(7) could be changed to put "expression" into the text font, but the
+meaning seems crystal-clear without any change.
+
+Replace 11.3(2.1/4) by:
+
+ raise_expression ::= raise exception_name [with string_simple_expression]
+
+Add after 11.3(2.1/4):
+
+  If an expression that appears in one of the following contexts includes
+  a raise_expression, that raise_expression shall be surrounded by at least
+  one set of parentheses:
+    * object_declaration;
+    * modular_type_definition;
+    * floating_point_definition;
+    * ordinary_fixed_point_definition;
+    * decimal_fixed_point_definition;
+    * default_expression;
+    * ancestor_part.
+
+[Editor's note: "default_expression" is used in component_definition, discriminant_definition, 
+formal_object_definition, and parameter_specification. We don't really need this rule to
+apply to the last, but we'd then have to list the first three in text something like:
+"default_expression when it appears in a component_definition, discriminant_definition, 
+or formal_object_definition;". Seems too messy to me. Should we do that?? - RLB]
+
+    AARM Reason: Unlike conditional expressions, this doesn't say "immediately
+    surrounded"; the only requirement is that it is somehow surrounded by
+    parentheses. We need this restriction in order that raise_expressions
+    cannot be syntactically confused with immediately following constructs
+    (such as aspect_specifications).
+
+    This English-language rule could have been implemented instead by adding 
+    nonterminals initial_expression and initial_relation, which are the same
+    as choice_expression and choice_relation except for the inclusion of
+    membershup in choice_relation. Then, initial_expresion could be used in
+    place of expression in all of the contexts noted. We did not do that
+    because of the large amount of change required, both to the grammar and
+    to language rules that refer to the grammar. A complete grammar is given
+    in AI12-0152-1.
+
+    AARM Discussion: The use of a raise_expression is illegal in each of
+    modular_type_definition, floating_point_definition,
+    ordinary_fixed_point_definition, and decimal_fixed_point_definition
+    as these uses are required to be static and a raise_expression is never
+    static. We include these in this rule so that Ada text has an unambiguous
+    syntax in these cases.
+
+Modify the third sentence of 11.3(4/4):
+
+ [In both of these cases, if a string_expression {or string_simple_expression}
+ is present, the {expression}[expression] is evaluated and its value is
+ associated with the exception occurrence.]
+
+[In the above, the syntax term "expression" is replaced by the text term
+"expression".]
+
+Modify the third sentence of 11.3(4/4):
+
+ In both of these cases, if a string_expression {or string_simple_expression}
+ is present, the {expression}[expression] is evaluated and its value is
+ associated with the exception occurrence.
+
+[In the above, the syntax term "expression" is replaced by the text term
+"expression".]
+
+Modify the third and fourth sentences of 11.4.1(10.1/4):
+
+  For the occurrence raised by a raise_statement or raise_expression with an
+  exception_name and a string_expression {or string_simple_expression}, the
+  message is the string_expression {or string_simple_expression}. For the
+  occurrence raised by a raise_statement or raise_expression with an
+  exception_name but without a string_expression, the message is a string
+  giving implementation-defined information about the exception occurrence. 
+
+Replace J.3(2) by:
+
+  delta_constraint ::= delta *static_*simple_expression [range_constraint]
+
+In J.3(3-10), replace "expression" by "simple_expression" (6 places).
 
 !discussion
 
-** TBD.
+Almost all of these are "dangling else" problems. They didn't occur in the
+original proposal for raise_expression (which proposed that it work like a
+conditional expression). However, early reviewers thought that required too
+many parens. Thus we decided during a meeting to drop the parens altogether,
+without considering the effect on the syntax of other declarations. A more
+judicious approach to dropping parens would have been better, even if it would
+not have appeased everyone. (Consistency with other statements turned into
+expressions would have been a powerful reason for keeping the parens.) However,
+as this feature has been in use for several years, we do not want to make
+as drastic a change as that would be.
 
-!corrigendum 5.5.2(5/3)
+For (A), we chose to make the optional string into a simple_expression.
+Since the expression has to be of type string, this has a minimal difference,
+as someone would have to declare a logical or relational operator with a return
+type of type String for there to be any possibility of noticing the change.
+In that unlikely case, parens would be needed around the string expression.
 
-@drepl
-@dby
+For (B), we note that we cannot tolerate any incompatibility with any existing
+expressions, as initialized object declarations are very common. As such,
+we've adopted a change that only requires parenthesizing raise expressions
+in such a context, as that can only affect code that used raise_expressions
+before they were formally defined. We also only require extra parentheses in
+cases where the raise_expression would have no parentheses at all; if it is
+inside of any parenthesized expression, aggregate, parameter list, or the
+like, no additional parentheses are required.
+
+For (C), a raise expression cannot be legally given as the ancestor expression
+of an extension aggregate, unless qualified, as it does not determine a unique
+specific tagged type (raise_expressions match any type). Thus, we only need to
+make an extension aggregate somehow different than a raise_expression. We adopt
+the same solution as for (B), requiring the raise expression to appear in
+parentheses in an extension aggregate. In this case, that means that
+
+   A := (raise TBD_Error with Val);
+
+is always a raise_expression, no matter what Val is, and
+
+   A := (raise TBD_Error with Comp => Val);
+
+is syntactically illegal (either parens are needed around "raise TBD_Error", or
+"Comp =>" is extra).
+
+For (D), we can note that any use of a raise expression in a fixed or float
+definition, or in a digits or delta constraint, is illegal, as a raise
+expression is not static. Thus the same solution as in (B) is sufficient
+for the raise_expression problem.
+
+However, the Ada 2005-introduced ambiguity with "and" requires a larger change
+to digits and delta constraints.
+
+For both digit_constraint and delta_constraint, changing *static_*expression to
+*static_*simple_expression eliminates the problem.
+
+For delta_constraint, this only requires putting extra parentheses around
+expressions that are necessarily illegal, so this is completely compatible.
+In particular, user-defined operators are not allowed as they are not static,
+memberships, predefined relational operators, and short circuit operations
+always return Boolean (which cannot be "any real type"), and predefined
+logical operators only could be of a Boolean, modular, or array type (none of
+which would match "any real type").
+
+For digits_constraint, all of the same is true, with one exception: logical
+operators of modular types would be allowed. So there is a very unlikely
+incompatibility with this change. For there to be a problem, all of the above
+would need to be true:
+   (1) A modular type is declared in the program, with at least one static
+       constant;
+   (2) A digits_constraint would have to be used as a subtype_indication
+       (unlikely, most such uses are obsolescent, and the others are for
+       the rarely used decimal fixed types);
+   (3) The digits value would have to be created from an expression involving
+       "and", "or", or "xor" (unlikely, most digits values are literals or
+       named numbers).
+And then the digits expression would have to be parenthesized.
+
+The case in question would look like:
+
+   type Modular is mod 2**8;
+   Num : constant Modular := 7;
+
+   type Dec is digits 7 delta 0.01;
+
+   subtype Really is Dec digits Num and 3; -- Legal in Ada 95 & 2005, but not
+                                           -- allowed by syntax change.
+
+The subtype would have to be written:
+
+   subtype Really is Dec digits (Num and 3); -- OK.
+
+Alternatives considered:
+
+We considered using a grammar change rather than an English rule for the
+majority of these cases. That would look like:
+
+Add in 4.4:
+
+initial_expression ::= 
+     initial_relation {and initial_relation}
+   | initial_relation {or initial_relation}
+   | initial_relation {xor initial_relation}
+   | initial_relation {and then initial_relation}
+   | initial_relation {or else initial_relation}
+
+initial_relation ::= 
+     simple_expression [relational_operator simple_expression]
+   | tested_simple_expression simple_expression [not] in membership_choice_list
+
+Replace 3.3.1(2/3) by:
+
+ object_declaration ::= 
+    defining_identifier_list : [aliased] [constant] subtype_indication [:= initial_expression]
+        [aspect_specification];
+  | defining_identifier_list : [aliased] [constant] access_definition [:= initial_expression]
+        [aspect_specification];
+  | defining_identifier_list : [aliased] [constant] array_type_definition [:= initial_expression]
+        [aspect_specification];
+  | single_task_declaration
+  | single_protected_declaration
+
+Replace 3.5.4(4) by:
+
+  modular_type_definition ::= mod *static_*initial_expression
+
+Replace 3.5.7(2) by:
+
+  floating_point_definition ::= 
+    digits static_initial_expression [real_range_specification]
+
+Replace 3.5.9(3-4) by:
+
+  ordinary_fixed_point_definition ::= 
+     delta static_initial_expression  real_range_specification
+
+  decimal_fixed_point_definition ::= 
+     delta static_initial_expression digits static_initial_expression [real_range_specification]
+
+Replace 3.7(6) by:
+
+  default_expression ::= initial_expression
+
+Replace 4.3.2(3) by:
+
+  ancestor_part ::= initial_expression | subtype_mark
+
+However, a large number of Semantic and Legality Rules that refer to these
+syntactic "expression"s would also need to be changed. (Just as was necessary
+in the cases where we did change the grammar.) That seemed like too much
+change.
+
+---
+
+It would be appealing to make the English-language syntax rule apply to all
+raise expressions. This would be more consistent with the way conditional
+expressions and quantified expressions are handled - it makes sense for all
+"expression statements" to be treated similarly syntactically. The effect
+would be as if "initial_expression" above was used in all contexts where an
+expression appears that are not themselves part of a larger expression. For
+example, the expanded rule would apply in if conditions and in return
+expressions.
+
+We did not do this as raise_expression as originally defined has been
+implemented and in use in at least one compiler for several years. While
+stand-alone raise expressions are unlikely in most contexts, some uses likely
+exist and there doesn't seem to be any reason to break those. In particular,
+the construct "return raise TBD_Error;" (or some other convinient exception)
+is suggested for use when providing a body-to-be-defined later for a function.
+This neatly gets around the requirement for "at least one return statement"
+in a function body.
+
+--
+
+Looking in the other direction, we considered a number of rules that would
+change the rules of AI12-0022-1 less.
+
+One suggestion was that parentheses only be required around a raise_expression
+when the optional with part was included. This would be a bit less change, but
+it also would cause a maintenance issue if the "with expr" was added after
+the initial raise_expression was compiled. In that case, the programmer would
+get an annoying "parens required" after adding the with part, while the initial
+compile was legal.
+
+Similarly, a suggestion that the extra parens be required only when the
+expression precedes some other "with" (an aspect specification or the rest of
+an extension aggregate) seems to have maintenance issues. Again, adding an
+aspect specification during maintenance would trigger an annoying "parens
+required". In both of these cases, it's unlikely that the programmer would
+remember the paren requirement, and such a rule would increase Ada's reputation
+for obscure pickyness.
+
+The wildest of these suggestions was to determine whether a "with" was part of
+a preceding raise_expression or part of an aspect specification by determining
+if the first identifier was a possible aspect_mark. The objection to that is
+that the list of possible aspect_marks is implementation-defined, thus the
+meaning of a legal Ada program could differ between implementations.
+
+For instance, imagine that compiler A has an aspect Exact_Size_Only, and
+compiler B does not. Then
+
+   Exact_Size_Only : constant String := "Exact size required!";
+
+   Obj : Boolean := Func or else raise Some_Error with Exact_Size_Only;
+
+would mean
+
+   Obj : Boolean := Func or else (raise Some_Error) with Exact_Size_Only;
+
+when compiled with compiler A, and
+
+   Obj : Boolean := Func or else (raise Some_Error with Exact_Size_Only);
+
+when compiled with compiler B.
+
+While unlikely, this is intolerable; we want implementation-defined stuff to
+possibly change the program from legal to illegal (or vice-versa), not between
+two very different meanings.
 
 !ASIS
 
@@ -37,14 +422,1677 @@ No ASIS effect.
 
 !ACATS test
 
-** TBD.
-
+ACATS B-Tests could be constructed to check that parens are needed around
+raise expressions and the like in these contexts. These would be of rather
+low value, though (the ACATS generally does not include new syntax tests).
 
 !appendix
 
 From: Randy Brukardt
-Sent: Wednesday, January 21, 2015  2:53 PM
+Sent: Friday, February 13, 2015  6:14 PM
 
+I've been working on adding the Ada 2012 and Corrigendum 2015 syntax to
+Janus/Ada so I can get a "second opinion" about the correctness of Ada code in
+ACATS tests. (The recent syntax confusion wouldn't have happened had I had
+another tool to use.)
+
+I wasted a lot of time trying to figure out what was wrong with my grammar
+before I realized that the problem with actually with Ada.
+
+[Note to those of you who read my private e-mail on this -- I've got an
+additional problem at the end of the message, so you may want to read that.]
+
+
+(A) Consider the expression:
+
+   raise Program_Error with A and B
+
+This could be interpreted as
+
+   (raise Program_Error with A) and B
+or
+   raise Program_Error with (A and B)
+
+The Ada expression grammar does not appear to make a choice in this case.
+
+The interesting parts of the grammar are (terminals are written in ALL
+CAPS):
+   expression ::= relation [AND relation]
+                ...
+   relation ::= factor
+              | raise_expression
+                ...
+
+   raise_expression ::= RAISE name [WITH expression]
+
+The non-terminal "raise_expression" is a "relation". Two operands connected by
+"and" is an "expression". The operands of an "expression" are "relation"s.
+
+So the above can be derived as (skipping uninteresting steps): [I'd prefer to
+draw a tree here, but this is plain text.]
+
+   "A" == relation, then expression;
+   "raise Program_Error with A" == raise_expression, then relation;
+   "B" == relation;
+   "raise Program_Error with A and B" == expression
+
+or
+
+   "A" == relation;
+   "B" == relation;
+   "A and B" == expression;
+   "raise Program_Error with A and B" == raise_expression, then relation, then expression
+
+I don't see any reason to choose between these (and my parser generator surely
+didn't).
+
+There is an easy fix in this case. Compatibility is irrelevant as
+raise_expression hasn't yet been published (it will be in the Corrigendum for
+the first time). So we can just make the message a "simple_expression" rather
+than an "expression". That shouldn't matter in practice, because the message has
+to be type String. And AND/OR/XOR/relops/membership are only string if someone
+redefines one of those operators to return type String -- very unlikely. And of
+course using a raise expression directly in the message is a pathology:
+
+   raise Program_Error with raise Constraint_Error with raise Tasking_Error with raise Storage_Error with ""
+
+We don't need to allow that; and people can always put parens around one of
+these things if they insist on doing it.
+
+----------------
+
+(B) Consider:
+
+   Val : String := "Oops";
+
+   A := (raise TBD_Error with Val);
+
+This is a classic raise_expression. Unfortunately, it's also an extension
+aggregate, made clearer with parens:
+
+   A := ((raise TBD_Error) with Val);
+
+Since the ancestor_part expression has to be of "any tagged type", this
+aggregate is arguably illegal. But it's definitely legal syntax.
+
+(I say "arguably illegal" because it isn't clearly illegal. A raise expression
+matches "any tagged type", because it matches anything; but it doesn't identify
+a specific tagged type so that we can determine which components are needed in
+the extension part the aggregate. Thus this has to be illegal, but I can't find
+a rule that would require that. The Dewar rule clearly applies here, though.
+
+The aggregate could clearly be made legal by qualifying the
+raise_expression:
+   A := (Some_Tagged'(raise TBD_Error) with Val);
+
+But when that's done, we syntactically have a qualified_expression rather than a
+raise_expression. Back to our originally scheduled discussion...)
+
+Since we can't decide whether the original expression is a raise_expression or
+an extension_aggregate, we have a problem, as the resolution and legality rules
+are quite different. If A is in fact a derived tagged type, either could have
+been intended.
+
+To fix this, we have to change the syntax of an extension aggregate so it
+doesn't allow unparenthesized raise_expressions. The syntax is now:
+
+extension_aggregate ::=
+    (ancestor_part with record_component_association_list)
+
+ancestor_part ::= expression | subtype_mark
+
+We need to change the latter to:
+
+ancestor_part ::= choice_expression | subtype_mark
+
+Choice_expression does not allow raise_expressions and memberships, but it
+otherwise the same as an expression. Since the ancestor_part has to be "any
+tagged type", no membership can ever legally appear there (it can't be
+overloaded, as its not an operator); and as previously noted, neither can an
+unqualified raise_expression. Thus this change does not have any compatibility
+effect (changing the reason that something is illegal is not considered
+incompatible).
+
+There's an argument for changing it to "simple_expression", but that would be
+incompatible in a highly unlikely case: someone redefined "and" (or "or" or
+"xor") to return a tagged object, AND an infix call to such a function was used
+as an ancestor expression. In that case, parens would be required around the
+expression if we used "simple_expression" and they are not required in Ada 95.
+If I have the energy, I'll write up why "simple_expression" would be better.
+
+(3) To finish up our tour, consider the following insane type declaration:
+
+   Atomic : String := "Gotcha!";
+
+   type Fun is new My_Decimal_Type digits raise TBD_Error with Atomic;
+
+This is using a digits_constraint (I purposely used the non-obsolescent one) in
+a subtype_indication in a derived type declaration.
+
+This can be interpreted as:
+
+   type Fun is new My_Decimal_Type digits (raise TBD_Error with Atomic);
+
+or
+
+   type Fun is new My_Decimal_Type digits (raise TBD_Error) with Atomic;
+
+(the latter being an aspect specification for aspect Atomic, lest you've
+forgotten).
+
+Luckily, this digits_constraint is illegal; the digits value has to be static.
+The same is true for the obsolescent version and the obsolescent
+delta_constraint.
+
+In addition, neither can be a Boolean value (digits is "any integer" and delta
+is "any real").
+
+Thus, we can fix this problem by making the digits_constraint syntax:
+
+digits_constraint ::=  digits static_choice_expression [range_constraint]
+
+BUT, I've got a bonus problem, with Ada 2005 in fact.
+
+Consider the following Bairdian type extension declaration:
+
+   type Nutso is new Some_Type digits A and B with private;
+
+This is possible as the syntax for a derived type is:
+
+ derived_type_definition ::=
+    [abstract] [limited] new parent_subtype_indication [[and interface_list] record_extension_part]
+
+This could be interpreted as:
+
+   type Nutso is new Some_Type digits (A and B) with private;
+
+or the "and B" could be interpreted as an interface list.
+
+This of course can't be legal (at least not until we have tagged real types),
+but it does confuse a parser. And notice its not at all far from the legal
+(assuming A and B are modular values):
+
+  type Nutso2 is new Some_Type digits A and B with Volatile;
+
+which we surely do have to parse with the current grammar.
+
+Thus I want to strongly suggest that we change digits_constraint to:
+
+digits_constraint ::=  digits static_static_expression [range_constraint]
+
+(and similarly for delta_constraint).
+
+This is potentially incompatible, but only in the following very unlikely
+circumstances:
+   (1) Someone used the subtype digits_constraint. (No changes are needed to the
+       syntax of type definitions using digits or delta, just the subtype
+       version.) I don't recall ever seeing one of these outside of an ACATS
+       test; I'm sure someone has written one, but it surely isn't common.
+   (2) Someone declared a modular type.
+   (3) Someone used an expression involving and, or, or xor of static values of
+       the modular to define a digits value (as in type Nutso2, above).
+
+And even if all of that happens, all that they have to do is put parens around
+the expression. Oh, the humanity! :-)
+
+Note that we don't have to worry about compatibilitiy of user-defined operators
+here, because these have to be static. We don't have to worry about anything
+that returns Boolean, because that's not "any integer" or "any real". That just
+leaves the modular operations.
+
+The proposed change would make the noted declarations unambiguous.
+
+[Aside: You might wonder how I got a working Ada 2005 grammar without noticing
+the above. Well, in actual fact, I did notice it, but I thought it was caused by
+something I had done rather than a language bug. The way I fixed it does not
+work with the addition of aspect specifications to the mix, which caused me to
+take another look at it last night and this morning.]
+
+I'll write up an AI along these lines for discussion during our next call.
 
 ****************************************************************
 
+From: Randy Brukardt
+Sent: Friday, February 13, 2015  7:52 PM
+
+...
+> (3) To finish up our tour, consider the following insane type
+> declaration:
+>
+>    Atomic : String := "Gotcha!";
+>
+>    type Fun is new My_Decimal_Type digits raise TBD_Error with Atomic;
+...
+> Thus I want to strongly suggest that we change digits_constraint to:
+>
+> digits_constraint ::=  digits static_static_expression
+> [range_constraint]
+
+Obviously, that should be
+
+ digits_constraint ::=  digits static_simple_expression [range_constraint]
+
+> (and similarly for delta_constraint).
+
+> This is potentially incompatible, but only in the following very
+> unlikely circumstances:
+>    (1) Someone used the subtype digits_constraint. (No changes are
+> needed to the syntax of type definitions using digits or delta, just
+> the subtype version.)
+
+Umm, spoke too soon. *Of course*, the raise expression problem occurs for the
+type definitions as well. But we don't have the problem with "and", so we can
+change all of the type definitions to use "choice_expression". That's
+compatible, because it only changes the behavior of illegal declarations:
+
+    type Bad1 is digits raise TBD_Error with Atomic;
+    type Bad2 is delta  raise TBD_Error with Atomic;
+    type Bad3 is digits 5 delta raise TBD_Error with Atomic;
+
+These ambiguous expressions would no longer be syntactically legal. But they're
+already illegal anyway, because a raise expression isn't static. (This would
+also eliminate memberships, but those are type Boolean, which isn't the right
+type.) So who cares. :-)
+
+P.S. Sure hope I don't find any more of these with my next grammar change!
+:-)
+
+P.P.S. I've done everything except some of the aspect_specification changes.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 13, 2015  9:01 PM
+
+...
+> P.S. Sure hope I don't find any more of these with my next grammar
+> change!
+> :-)
+
+No such luck!
+
+The same problem occurs for an object_declaration:
+
+    Nasty : Natural := raise TBD_Error with Atomic;
+
+(BTW, I hope you've noticed that I've showed why someone might want to write one
+of these things, as a TBD marker.) It also occurs with generic formal objects
+and with component_declarations (all initializing expressions).
+
+We could try to apply the same fix as before to object_declaration:
+
+ object_declaration ::=
+    defining_identifier_list : [aliased] [constant] subtype_indication [:= choice_expression]
+        [aspect_specification];
+
+But this would be incompatible, and object declarations are just too common to
+allow ANY incompatibility.
+
+Specifically:
+    Save : constant Boolean := Obj in Short;
+would become illegal; the expression would have to be in parens:
+    Save : constant Boolean := (Obj in Short);
+
+The real problem is using "with" for both raise statements/expressions and for
+aspect specifications, but it's too late to change that. Changing just raise
+expressions to "when" would work, but then raise statements and raise
+expressions would be different. Blah!
+
+A better solution is to make another kind of expression that allows everything
+but raise_expressions. I called it "init_expression" for the lack of a better
+name. With that change, raise expressions have to be parenthesized in
+initializers, but there are no incompatible changes (remember, raise_expression
+has never been published).
+
+An alternative would be to use English (like we did for conditional expressions)
+to require parens around any raise expressions that occur in initializers. That
+would avoid cluttering up the manual (but not the grammars of implementers).
+
+Another alternative would be to give up on the unparenthesized raise expression
+and treat them like conditional expressions. (That was the original idea, after
+all.)
+
+============
+
+Anyway, the good news is that with "init_expression" getting used appropriately,
+I was able to get a clean grammar pass. That means that there shouldn't be any
+more problems lurking, although I could have missed something necessary.
+
+I had to insert dummy aspect_specifications into expression_function_declaration
+and many others in front of the IS; otherwise, the parser is confused at the IS
+since it doesn't yet know if it has a body (aspect_specification at the IS) or
+an expression_function (aspect_specification at the ;). At least we'll get
+better error handling that way, since it's likely users will make the same
+mistake that the grammar has.
+
+I also don't know I can make the result work in the Janus/Ada compiler. Some of
+the grammar changes needed eliminate various reductions that trigger important
+semantic effects. It will be troublesome to redo things so that some things are
+declared before their container. But that's my problem, not yours...
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, February 13, 2015  9:34 PM
+
+Adding "init_expression" seems like a reasonable approach.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Friday, February 13, 2015  11:46 PM
+
+> (A) Consider the expression:
+>
+>     raise Program_Error with A and B
+>
+> This could be interpreted as
+>
+>     (raise Program_Error with A) and B or
+>     raise Program_Error with (A and B)
+
+This is the interpretation that GNAT chooses
+
+> There is an easy fix in this case. Compatibility is irrelevant as
+> raise_expression hasn't yet been published (it will be in the
+> Corrigendum for the first time). So we can just make the message a
+> "simple_expression" rather than an "expression".
+
+Well to me the question of whether it has been officially published or not is
+rather besides the point. This *is* implemented in GNAT, and people are using
+it. So it is a potential incompatibility in theory, but in practice it seems
+unlikely to cause trouble
+
+  X := (if M then 42 else raise Err with "kjhkjh" & "asdfasf")
+
+works as expected in any case and that is the important case!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, February 14, 2015  10:31 AM
+
+> The same problem occurs for an object_declaration:
+>
+>     Nasty : Natural := raise TBD_Error with Atomic;
+
+This is the same as the "dangling else" problem in Pascal and other languages
+designed before people knew any better.  I'm on the record as saying, "Any
+language designer who puts a dangling else problem in their grammar in this day
+and age should be sent back to remedial language design school."  ("This day and
+age" = "any time after 1980 or so".)  So I guess the entire ARG should be sent
+back.  We all should have noticed these problems with "with" proliferation.  :-(
+
+The dangling else problem is usually solved with English words -- an ambiguous
+"else" binds to the nearest preceding "if".  Maybe our problem can be solved
+with words, too.  (I don't care if compiler writers need to do more work.  The
+Ada BNF is already unsuitable for direct use in a compiler.)
+
+Making massive changes to the grammar all over the place seems like asking for
+trouble.
+
+Your init_expression idea might work.
+
+Maybe we need more restrictions on where raise expressions can appear. Raise
+expressions are fairly new, so incompatibilities there are less of a concern
+than incompatibilities in older features.  The main use of raise expressions is
+in conditionals ("X or else raise ...", "(case X is ... others => raise ...)",
+etc).  The kludgy "return raise Program_Error;" is also useful.  The above
+TBD_Error, not so much -- I wouldn't mind disallowing the "with" part there,
+unless parenthesized.  And some of your examples are positively Bairdian in
+their evil cleverness -- "... digits raise ..."!
+
+Maybe words requiring parens on raise expressions with "with" in certain
+contexts is the way to go.  As you say, this is similar to conditional
+expressions.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Saturday, February 14, 2015  11:14 AM
+
+Requiring parantheses has long been the usual way of resolving ambiguities.
+Plus keeping expressions simple for new stuff is probably a good idea anyway.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Saturday, February 14, 2015  10:33 AM
+
+> Raise expressions are fairly new, so incompatibilities there are less
+> of a concern than incompatibilities in older features.
+
+As always, AdaCore can measure the effect of proposed incompatibilities fairly
+accurately, by implementing the proposal and running our regression tests.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Saturday, February 14, 2015  3:56 PM
+
+I would be very surprised if we get any regressions. Very few tests will use
+this feature, and the ambiguity only shows up in fairly bizarre circumstances!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, February 15, 2015  7:57 PM
+
+> > The same problem occurs for an object_declaration:
+> >
+> >     Nasty : Natural := raise TBD_Error with Atomic;
+>
+> This is the same as the "dangling else" problem in Pascal and other
+> languages designed before people knew any better.  I'm on the record
+> as saying, "Any language designer who puts a dangling else problem in
+> their grammar in this day and age should be sent back to remedial
+> language design school."
+> ("This day and age" = "any time after 1980 or so".)  So I guess the
+> entire ARG should be sent back.  We all should have noticed these
+> problems with "with" proliferation.  :-(
+
+It's not surprising that we didn't, given the history.
+
+When the raise expression was originally proposed, it worked like the other
+"expression-statements", requiring at least one set of parens. There's no
+dangling else there.
+
+However, when we discussed it at a meeting, people didn't like having to put
+parens in contexts like:
+    return raise TBD_Error;
+would have been
+    return (raise TBD_Error);
+and
+    (if Blah then raise Mode_Error)
+would have been
+    (if Blah then (raise Mode_Error))
+
+Someone suggested making it a relation, because we didn't want
+     A + raise TBD_Error
+or
+     raise TBD_Error ** 2
+
+but we were OK with
+     Blah or else raise TBD_Error
+
+That "on the fly" syntax design didn't include enough thought (probably NO
+thought) about the optional "with" part. And no one noticed (or at least
+reported) the problems until I decided to upgrade my syntax checker to support
+Ada 2012 (after making an embarrassing "bug" report to AdaCore).
+
+> The dangling else problem is usually solved with English words -- an
+> ambiguous "else" binds to the nearest preceding "if".  Maybe our
+> problem can be solved with words, too.  (I don't care if compiler
+> writers need to do more work.  The Ada BNF is already unsuitable for
+> direct use in a compiler.)
+
+True enough, but those problems are in very limited areas (mostly that there are
+a number of different things with essentially the same syntax:
+indexed_component, function_call, type_conversion, discriminant_constraint;
+treat those all the same and there is no issue; similarly for
+aggregate/parenthesized expression; and there probably are a few other such
+cases). The solution to all of them is to allow too much in the compiler syntax
+and sort it out later. That doesn't work for a dangling else type problem.
+
+I don't mind the use of English instead BNF, but there has to be a reasonable
+BNF equivalent. I would never have agreed to the conditional expression rules if
+they couldn't be easily reproduced syntactically. [As it turns out, they're much
+easier to reproduce in a real grammar than in the Ada BNF, because of the
+previously mentioned fact that many things involved turn out to share syntax.]
+
+...
+> The above TBD_Error, not so
+> much -- I wouldn't mind disallowing the "with" part there, unless
+> parenthesized.
+
+I don't think it would be practical to treat "raise TBD_Error" differently than
+"raise TBD_Error with Something". That would be highly likely to cause conflicts
+in a generated grammar (and the workaround of enforcing with Legality Rules
+doesn't work, because you can't write an unambiguous grammar without the
+parens). And it also would be a pain for users, as adding messages would require
+additional parens around previously OK raises.
+
+...
+> And some of your examples are
+> positively Bairdian in their evil cleverness -- "... digits raise
+> ..."!
+
+They're just the result of figuring out why I was getting errors in our grammar
+generator. One reason why I don't care if you change is that very fact, they're
+pretty much pathological.
+
+> Maybe words requiring parens on raise expressions with "with"
+> in certain contexts is the way to go.  As you say, this is similar to
+> conditional expressions.
+
+I'd be OK with words required parents around all raise expressions in certain
+contexts, but not with trying to treat "with" specially. Especially as we don't
+want to discourage programmers from including messages.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Monday, February 16, 2015  4:56 PM
+
+> However, when we discussed it at a meeting, people didn't like having to put
+>parens in contexts like:
+>    return raise TBD_Error;
+> would have been
+>    return (raise TBD_Error);
+> and
+>    (if Blah then raise Mode_Error)
+> would have been
+>    (if Blah then (raise Mode_Error))
+
+Most of our programmers seem to believe that return expressions have to be in
+parantheses anyway, they wouldn’t be fazed by using them.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Monday, February 16, 2015  7:38 PM
+
+UGH, to me that's nasty C style :-)
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, February 17, 2015  2:53 AM
+
+> Most of our programmers seem to believe that return expressions have
+> to be in parantheses anyway, they wouldn’t be fazed by using them.
+
+And many programmers think parentheses are required for conditions in if
+statements, etc, because they have learned C first.
+
+Clean syntax is an advantage of Ada over C, let's keep it.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, February 17, 2015  9:17 AM
+
+How would you like
+
+
+  checkthis and then raise XYZ
+  checkthis and then raise (XYZ with Bar)
+
+as the syntactic rules for exception expressions, no exceptions to the rules?
+I.e., parenthesize the "aggregate exception" only. It solves the dangling with
+issue and avoids (ugly) surround-it-all-parens. Might even allow(!) it for raise
+statements.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, February 17, 2015  2:37 PM
+
+> I don't mind the use of English instead BNF, but there has to be a
+> reasonable BNF equivalent.
+
+I agree.
+
+> I don't think it would be practical to treat "raise TBD_Error"
+> differently than "raise TBD_Error with Something".
+
+I don't see why.  One nonterminal generates "raise X", the other generates both
+"raise X" and "raise X with Y", and you use the former in places where an
+aspect_clause can follow.
+
+Do others agree with Randy here?  I don't see it.
+
+>... That would be highly likely to cause  conflicts in a generated
+>grammar (and the workaround of enforcing with  Legality Rules doesn't
+>work, because you can't write an unambiguous grammar  without the
+>parens). And it also would be a pain for users, as adding  messages
+>would require additional parens around previously OK raises.
+
+I don't buy that last.  Adding parens is hardly a burden.  I mean, you already
+have to add the message itself, and some quotes.
+
+Anyway, it's fundamentally a writeability over readability argument, which is
+the opposite of what we normally do.
+
+> ...
+> > And some of your examples are
+> > positively Bairdian in their evil cleverness -- "... digits raise
+> > ..."!
+>
+> They're just the result of figuring out why I was getting errors in
+> our grammar generator. One reason why I don't care if you change is
+> that very fact, they're pretty much pathological.
+
+Sure, understood.
+
+> > Maybe words requiring parens on raise expressions with "with"
+> > in certain contexts is the way to go.  As you say, this is similar
+> > to conditional expressions.
+>
+> I'd be OK with words required parents around all raise expressions in
+> certain contexts, but not with trying to treat "with" specially.
+
+I could live with that, but I'd prefer the parens be optional if they're not
+needed to disambiguate the "with".  If that's possible, of course.
+
+And I definitely don't want to require parens in "return raise ..."
+or "Pre => blah or else raise ...".
+
+>...Especially
+> as we don't want to discourage programmers from including messages.
+
+Again, it's hardly a burden.  I mean, the fact that you have to say:
+
+    (A + B) * C
+
+is hardly discouraging people from doing addition.  ;-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, February 17, 2015  2:37 PM
+
+> How would you like
+>
+>   checkthis and then raise XYZ
+>   checkthis and then raise (XYZ with Bar)
+>
+> as the syntactic rules for exception expressions, no exceptions to the
+> rules? I.e., parenthesize the "aggregate exception" only. It solves
+> the dangling with issue and avoids (ugly) surround-it-all-parens.
+
+These things are subjective, I guess, but I find the surround-it-all less ugly
+that the syntax shown above.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, February 17, 2015  3:45 PM
+
+>> I don't think it would be practical to treat "raise TBD_Error"
+>> differently than "raise TBD_Error with Something".
+> I don't see why.  One nonterminal generates "raise X", the other
+> generates both "raise X" and "raise X with Y", and you use the former
+> in places where an aspect_clause can follow.
+>
+> Do others agree with Randy here?  I don't see it.
+
+I agree with Bob. I don't see a problem if adding a message to a raise
+expression triggers a requirement for parens in some cases.
+
+> These things are subjective, I guess, but I find the surround-it-all
+> less ugly that the syntax shown above.
+
+I also agree with this. Given a raise-with-message expression, I think that the
+two reserved words should be enclosed by exactly the same set of paren pairs.
+Something like either
+     (raise E) with Msg
+or
+     raise E (with Msg)
+seems unAda-like to me.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, February 17, 2015  4:02 PM
+
+(arg@ removed -- just chit-chat) [Editor's note: which he then sent to the ARG
+list. Thus it's filed here.]
+
+I don't think "Ada-like" is synonymous with "Good".  ;-)
+
+But never mind that, your comment reminds of something I dislike about AdaCore
+style:  We say "F (X)", but I prefer "F(X)".  The reason is that in "F (X).all"
+or "Arr (X).Component", it looks like the "(X).all" or "(X).Component" is a
+thing.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, February 17, 2015  4:08 PM
+
+> (arg@ removed -- just chit-chat)
+
+Oops.  Sorry for noise.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, February 17, 2015  4:12 PM
+
+> ...
+>> I don't think it would be practical to treat "raise TBD_Error"
+>> differently than "raise TBD_Error with Something".
+>
+> I don't see why.  One nonterminal generates "raise X", the other
+> generates both "raise X" and "raise X with Y", and you use the former
+> in places where an aspect_clause can follow.
+
+This seems reasonable, though I haven't given up on a more general rule that
+eliminates the ambiguity in the syntax, without resorting to English and/or two
+different non-terminals for "raise X" and "raise Y [with message]".
+
+I guess I don't particularly like having to add parentheses in maintenance when
+you are told to go back and make sure that all your "raise"
+statements/expressions include a message.
+
+Similarly I don't like to add parentheses when you decide to go back and add an
+aspect specification.
+
+So I guess I agree with Randy that it is *desirable* that "raise Blah" and
+"Raise Blah with String" be legal in all of the same contexts, though I am not
+hard over on any of this...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 17, 2015  4:29 PM
+
+> > I don't think it would be practical to treat "raise TBD_Error"
+> > differently than "raise TBD_Error with Something".
+>
+> I don't see why.  One nonterminal generates "raise X", the other
+> generates both "raise X" and "raise X with Y", and you use the former
+> in places where an aspect_clause can follow.
+
+Splitting expression types causes LR conflicts in things like aggregates.
+(I've discussed this privately before.) I'd expect this sort of thing to cause
+that sort of problem directly in "initial_expression" (or whatever you call it),
+because you'll have "raise name" in two different branches (derivations) of the
+same expression. One via parenthesized expression and one directly via raise
+expression.
+
+Please try to write such a grammar for "initial_expression". I can't do it.
+
+> Do others agree with Randy here?  I don't see it.
+
+Then try it. Propose something, because it's always possible I'm missing
+something obvious.
+
+> >... That would be highly likely to cause conflicts in a generated
+> >grammar (and the workaround of enforcing with  Legality Rules doesn't
+> >work, because you can't write an unambiguous grammar without the
+> >parens). And it also would be a pain for users, as adding  messages
+> >would require additional parens around previously OK raises.
+>
+> I don't buy that last.  Adding parens is hardly a burden.  I mean, you
+> already have to add the message itself, and some quotes.
+
+And then you recompile. And get a stupid syntax error. If that happens often
+enough (and it often seems to happen to me a lot when debugging something
+painful), I at least start smashing stuff. (Especially when I want to go home,
+but I can't get rid of a stupid bug in something relatively unimportant -- say
+like last night. :-) I grant that my reaction can be extreme, but it's an
+unnecessary frustration for Ada programmers. (Like, say visibility of "=" and
+other Ada annoyances.) I don't see any reason to *add* to the annoyances of Ada.
+
+> Anyway, it's fundamentally a writeability over readability argument,
+> which is the opposite of what we normally do.
+
+True, but if that's the case, we should require virtually all raise expressions
+to be in parens (the exact opposite of what we've done). Because stand-alone
+raise expressions and those starting an expression should always have a left
+paren to differentiate them from the very similar raise statements. (That's what
+we did with the other expressions that are like statements.)
+
+I really think that
+
+     Foo :=
+        raise TBD_Error;
+
+is confusing.
+
+     Foo :=
+        (raise TBD_Error);
+
+is clearly an expression rather than a statement.
+
+I'd rather only allow leaving out the parens in the dependent expressions of
+conditionals (since it is already in parens). (I'm sympathetic to the "or else"
+case, but I don't see any way do that in a BNF, especially if we required the
+entire expression to be in parens to allow it.)
+
+...
+> >...Especially
+> > as we don't want to discourage programmers from including messages.
+>
+> Again, it's hardly a burden.
+
+It's at least one extra build cycle. I find that that is never short enough; no
+matter how fast it is, it still takes too long. :-)
+
+> I mean, the fact that you have to say:
+>
+>     (A + B) * C
+>
+> is hardly discouraging people from doing addition.  ;-)
+
+Not the same at all, IMHO. You have to put parens here to specify an order; you
+don't need them here:
+
+     A + B * C
+
+is legal, but you won't get the right answer. There is no such issue in this
+case, indeed, if thinking of parens in this way, you're much more likely to
+think they're not needed.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 17, 2015  4:36 PM
+
+>> How would you like
+>>
+>>    checkthis and then raise XYZ
+>>    checkthis and then raise (XYZ with Bar)
+>>
+>> as the syntactic rules for exception expressions, no exceptions to
+>> the rules? I.e., parenthesize the "aggregate exception" only. It
+>> solves the dangling with issue and avoids (ugly) surround-it-all-parens.
+>
+> These things are subjective, I guess, but I find the surround-it-all
+> less ugly that the syntax shown above.
+
+I agree with this, especially since we already went the surround it all for case
+and if expressions.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 17, 2015  4:37 PM
+
+...
+> I guess I don't particularly like having to add parentheses in
+> maintenance when you are told to go back and make sure that all your
+> "raise" statements/expressions include a message.
+>
+> Similarly I don't like to add parentheses when you decide to go back
+> and add an aspect specification.
+
+Not to mention that you *won't* add those parens, so you'll get a nagging error
+from your Ada compiler. One of the sort which will not help Ada's reputation for
+annoying people with picky rules.
+
+> So I guess I agree with Randy that it is *desirable* that "raise Blah"
+> and "Raise Blah with String" be legal in all of the same contexts,
+> though I am not hard over on any of this...
+
+I'm glad to hear that I'm not the only one thinking that way. I sometimes worry
+that I'm getting too "out there" on some of these issues...
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 17, 2015  4:39 PM
+
+> Splitting expression types causes LR conflicts in things like aggregates.
+
+I mind about real ambiguities, I do not care two hoots about "LR conflicts", if
+people want to use LR parsing technology, it's their problem, not ours!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, February 17, 2015  4:43 PM
+
+> I guess I don't particularly like having to add parentheses in
+> maintenance when you are told to go back and make sure that all your "raise"
+> statements/expressions include a message.
+
+That's what Randy said, too, and it's what I find puzzling.  You have to add a
+whole bunch of text (with "blah blah blah"), and you object to adding two more
+characters "(" and ")"?!
+
+> Similarly I don't like to add parentheses when you decide to go back
+> and add an aspect specification.
+
+I'm not suggesting anything like that.  I'm suggesting it should be based on the
+FOLLOW set.  That is, if "with" is ALLOWED to follow a raise (syntactically),
+then that raise must be parenthesized if it has a string.
+
+> So I guess I agree with Randy that it is *desirable* that "raise Blah"
+> and "Raise Blah with String" be legal in all of the same contexts, though I am
+> not hard over on any of this...
+
+Agreed ("not hard over").
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 17, 2015  4:58 PM
+
+> I'm not suggesting anything like that.  I'm suggesting it should be
+> based on the FOLLOW set.  That is, if "with" is ALLOWED to follow a
+> raise (syntactically), then that raise must be parenthesized if it has
+> a string.
+
+I agree with this suggestion
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, February 17, 2015  5:16 PM
+
+> > I don't buy that last.  Adding parens is hardly a burden.  I mean,
+> > you already have to add the message itself, and some quotes.
+>
+> And then you recompile. And get a stupid syntax error.
+
+OK, now I see what you're getting at.  Yes, that sort of thing is an annoying
+nuisance.
+
+I'm still not entirely convinced, but at least I see what you mean.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 17, 2015  5:28 PM
+
+> > Splitting expression types causes LR conflicts in things like aggregates.
+>
+> I mind about real ambiguities, I do not care two hoots about "LR
+> conflicts", if people want to use LR parsing technology, it's their
+> problem, not ours!
+
+If Ada can only be parsed by one technology (and not other common technologies),
+that is our problem. We don't want (or shouldn't want) the syntax of the
+language to provide a barrier to the construction and upgrade of tools for Ada
+(especially the Ada 2012 version). We want as few barriers as possible, else the
+current situation of only one Ada 2012 implementation will become permanent.
+(Apparently, AdaCore's technology doesn't care about ambiguities, since it seems
+to work with the flawed Ada 2012 grammar. But that's unlikely to be the case for
+the technology used by others.)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 17, 2015  5:51 PM
+
+> If Ada can only be parsed by one technology (and not other common
+> technologies), that is our problem.
+
+No common language is pure LR, for example, most CERTAINLY C and
+C++ have LR conflicts, and several languages have the dangling else
+problem, with  a simple rule to resolve the ambiguity in one direction. You get
+around these glitches in various ways in an LR parser. To say that "Ada cannot
+be parsed" [by LR parsing technologies] because it has a potential LR conflict
+is bogus nonsense, and we should not let ourselves be over-influenced by this.
+As always in LR parsers you modify the grammar to be LR compatible, and then
+resolve things in the semantic phase, no big deal!
+
+Now if there are two equally non-ugly syntaxes, one of which has the LR problem
+and one does not, then we might take this into account, but it should not be a
+big influence.
+
+And in this case, it seems perfectly easy to rig up the necessary glitch to deal
+with things.
+
+P.S. yes, GNAT is of course much more flexible, and can deal with any syntax
+thrown at it. In this particular case it resolves the ambiguity in a chosen
+direction, and I for one would be quite happy with a resolution that just makes
+this same decision without adding extra junk parens, since in practice it is
+going to be what the programmer wants 100% of the time.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 17, 2015  5:54 PM
+
+Please don't let our decision be influenced by Randy's difficulties in his
+parser!
+
+We should choose a resolution that is best from the point of view of the reader
+and writer of the language. Humans are not LR automatons :-)
+
+Ada is a non-trivial language to compile, dealing with this minor issue in an LR
+parser is hardly significant on the list of difficult things to address in an
+Ada compiler!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 17, 2015  6:52 PM
+
+> We should choose a resolution that is best from the point of view of
+> the reader and writer of the language.
+> Humans are not LR automatons :-)
+
+I agree, but that argues for more parens, not less. Ada's design to date has
+ensured that expressions and complex statements have always been syntactically
+distinct. We seem to have lost that completely with raise expressions, and
+that's where the problem comes from.
+
+Argubly, the only place that parens should be optional is as part of a larger
+already parenthisized expression.
+
+> Ada is a non-trivial language to compile, dealing with this minor
+> issue in an LR parser is hardly significant on the list of difficult
+> things to address in an Ada compiler!
+
+I don't want to adopt a solution that does not work for an LR parser when there
+is one just as good or even better (IMHO) that does work. That's it.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 17, 2015  7:08 PM
+
+> No common language is pure LR, for example, most CERTAINLY C and
+> C++ have LR conflicts, and several languages have the dangling else
+> problem, with  a simple rule to resolve the ambiguity in one
+> direction. You get around these glitches in various ways in an LR
+> parser. To say that "Ada cannot be parsed" [by LR parsing
+> technologies] because it has a potential LR conflict is bogus
+> nonsense, and we should not let ourselves be over-influenced by this.
+> As always in LR parsers you modify the grammar to be LR compatible,
+> and then resolve things in the semantic phase, no big deal!
+
+Of course, IF that's possible. You always allow too much in an LR grammar, and
+figure it out later. But that approach does not work  for the conflicts within
+aggregates and between raise expression and aspect specifications, because
+allowing too much causes more and worse conflicts.
+
+I did not have any problems making a grammar for Ada 2005 conflict-free. The
+fact that I cannot do that for Ada 2012 is problematical.
+
+I'm not going to claim that my problems are particularly important, but I do
+worry that they're indicative of a wider problem.
+
+> Now if there are two equally non-ugly syntaxes, one of which has the
+> LR problem and one does not, then we might take this into account, but
+> it should not be a big influence.
+>
+> And in this case, it seems perfectly easy to rig up the necessary
+> glitch to deal with things.
+
+Maybe for you, but I can't find a way to do it. If you have any references to
+material on that, I'd be happy to see them. (I didn't find anything useful when
+I looked on the net.)
+
+If I can't find a way to make Ada's current grammar work in the Janus/Ada tools,
+then I'll have to abandon them completely. And I've decided that I can't work on
+the ACATS without a non-GNAT tool to compile with, because GNAT is so lax about
+syntax rules that I can't tell the difference between GNAT errors and my own.
+That's wasting everybody's time.
+
+So this may not be an Ada problem, but it definitely matters to my future.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 17, 2015  7:57 PM
+
+> If I can't find a way to make Ada's current grammar work in the
+> Janus/Ada tools, then I'll have to abandon them completely. And I've
+> decided that I can't work on the ACATS without a non-GNAT tool to
+> compile with, because GNAT is so lax about syntax rules that I can't
+> tell the difference between GNAT errors and my own. That's wasting everybody's
+> time.
+
+Claiming that "GNAT is so lax about syntax rules" is absurd, and if indeed
+working on ACATS tests is dependent on you getting your parser to work, then I
+am indeed dubious about the future! I think it is really just a distraction for
+you to be worrying about Janus Ada at this stage.
+
+You should be writing tests to the requirements anyway (the RM), rather than
+being influenced by what one (or for that matter two) compilers do!
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Tuesday, February 17, 2015  8:02 PM
+
+> I agree, but that argues for more parens, not less. Ada's design to
+> date has ensured that expressions and complex statements have always
+> been syntactically distinct. We seem to have lost that completely with
+> raise expressions, and that's where the problem comes from.
+
+This seems entirely excessive rhetoric to me, yes, there are some weird examples
+which create problems. Have you produced a realistic example that causes
+problems? If so, I have not seen one, please repost, all I saw was some really
+bizarre cases, which I agree need addressing, but it would be nice to address
+these
+
+> Argubly, the only place that parens should be optional is as part of a
+> larger already parenthisized expression.
+
+I disagree, we do NOT want to add parens to the common case, at least I don't it
+seems ugly and incompatible at this stage.
+
+> I don't want to adopt a solution that does not work for an LR parser
+> when there is one just as good or even better (IMHO) that does work. That's
+> it.
+
+That's fair, as I said, to choose between equally good solutions on this basis
+is not unreasonable. But any solution will "work" for an LR parser, you just
+have the parser accept a superset, and then disambiguate in the semantic
+analyzer as is always done by all compilers to deal with special cases. C has
+some serious problems that have to be resolve this way, but there are lots of C
+compilers using LR parsers.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 18, 2015  2:29 PM
+
+> > I agree, but that argues for more parens, not less. Ada's design to
+> > date has ensured that expressions and complex statements have always
+> > been syntactically distinct. We seem to have lost that completely
+> > with raise expressions, and that's where the problem comes from.
+>
+> This seems entirely excessive rhetoric to me, yes, there are some
+> weird examples which create problems. Have you produced a realistic
+> example that causes problems? If so, I have not seen one, please
+> repost, all I saw was some really bizarre cases, which I agree need
+> addressing, but it would be nice to address these
+
+The most realistic would be something involving object declarations:
+
+     Register : Integer := raise TBD_Error with Volatile;
+
+or perhaps better:
+
+     Flag : Boolean := Some_Const or else raise TBD_Error with Atomic;
+
+(Note that an if expression here doesn't have a problem because it is already in
+parens.) These are similar to what I've write in Ada 2012 for these cases; the
+only thing that would make them rare in my code is the whole TBD_Error idea
+(which I probably wouldn't use, because I wouldn't write anything until I knew
+what the initialization was).
+
+> > Argubly, the only place that parens should be optional is as part of
+> > a larger already parenthisized expression.
+>
+> I disagree, we do NOT want to add parens to the common case, at least
+> I don't it seems ugly and incompatible at this stage.
+
+I agree its rather late to make such a change; as such, I'm not seriously
+proposing that in general. But note that the only cases involved are not "the
+common case". The common case is inside of an if expression, which already is a
+larger parenthesized expression. So that wouldn't change under any rule that
+anyone has proposed.
+
+> > I don't want to adopt a solution that does not work for an LR parser
+> > when there is one just as good or even better (IMHO) that does work.
+That's it.
+>
+> That's fair, as I said, to choose between equally good solutions on
+> this basis is not unreasonable. But any solution will "work" for an LR
+> parser, you just have the parser accept a superset, and then
+> disambiguate in the semantic analyzer as is always done by all
+> compilers to deal with special cases. C has some serious problems that
+> have to be resolve this way, but there are lots of C compilers using
+> LR parsers.
+
+I'm unconvinced that's it is possible to accept a superset in the general case,
+unless you mean by that to accept pretty much any sequence of tokens that might
+be part of an Ada program and figure it out later. That's because trying to
+accept a superset tends to introduce additional ambiguities.
+
+The clear example of that is the aggregate case. For aggregates, we have to
+accept a combination of all of the possible aggregate types, since there's no
+syntactic way to differentiate them. That gives a grammar for the minimum
+superset of something like:
+
+aggregate ::= ([choice_expression WITH] [choice_list =>] expression {, [choice_list =>] expression})
+choice_list ::= choice_expression {| choice_expression}
+
+[There's some ranges in choice_list as well, but they're not involved with the
+problem so I've left them out to simplify.]
+
+The problem here for LR parsing is that you start out trying to accept either an
+expression or a choice_expression, but you don't know which one you'll need
+until after you've finished parsing the expression and have reached the
+lookahead of |, =>, or ,. That means that you get a conflict in choosing between
+relation and choice relation if you have a lookahead of AND, OR, or XOR (that
+is, in the middle of a boolean operator).
+
+The typical fix is to widen the superset further, to allow expression as all of
+these things (that is, to replace choice_expression with expression in all of
+these places). But then you get a conflict on | between a membership and a
+choice list. (And unlike the above case, this is a real ambiguity that no amount
+of lookahead can fix.) So one is stuck.
+
+The only thing that works (short of abandoning parsing altogether) is to change
+all of the choice_expressions to simple_expressions, and hope no one uses AND,
+OR, or XOR in an aggregate choice (a pretty good bet, IMHO). (I'd have proposed
+that at the language level, but it seems too much of an incompatibility for
+something that's only a problem for a specific technology. Thus I wasn't going
+to bring it up here, but I think that example is necessary for illustration.)
+
+My point here being that it isn't always possible to accept a superset.
+Sometimes you have to accept a subset and hope no one notices. (I had fixed the
+unreported ambiguity in Ada 2005 that way, because any program that had the
+ambiguity was illegal. But adding aspect specs broke that fix by making it
+impossible to tell by lookahead alone whether you are parsing an extension or a
+normal derived type. Luckily, aspect specs also made the ambiguity worse, so
+hopefully we'll fix that [as you say, those are very unlikely cases, so no one
+should notice the change].)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 18, 2015  3:03 PM
+
+> > If I can't find a way to make Ada's current grammar work in the
+> > Janus/Ada tools, then I'll have to abandon them completely. And I've
+> > decided that I can't work on the ACATS without a non-GNAT tool to
+> > compile with, because GNAT is so lax about syntax rules that I can't
+> > tell the difference between GNAT errors and my own. That's
+> wasting everybody's time.
+>
+> Claiming that "GNAT is so lax about syntax rules" is absurd, and if
+> indeed working on ACATS tests is dependent on you getting your parser
+> to work, then I am indeed dubious about the future! I think it is
+> really just a distraction for you to be worrying about Janus Ada at
+> this stage.
+
+I'd be happy to use some other Ada 2012 implementation as a "2nd opinion", but
+I'm not aware of any. (Not to mention that's a problem for Ada itself, not just
+for ACATS work.) Whatever I can do on my own time to fill that need seems
+worthwhile (not to mention that it finds bugs in the standard, like these syntax
+ambiguities, that haven't been previously reported).
+
+> You should be writing tests to the requirements anyway (the RM),
+> rather than being influenced by what one (or for that matter two)
+> compilers do!
+
+Of course. But it's all about avoiding stupid errors in the tests. The typical
+20% incorrect test rate for new tests (that goes back to long before I took
+over, BTW) is way too high for my taste and our budget. Anything I can do to
+reduce that is worthwhile. Plus it helps the implementers by not making them
+figure out all of my mistakes; they can just concentrate on their mistakes.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 18, 2015  4:42 PM
+
+> Of course. But it's all about avoiding stupid errors in the tests. The
+> typical 20% incorrect test rate for new tests (that goes back to long
+> before I took over, BTW) is way too high for my taste and our budget.
+> Anything I can do to reduce that is worthwhile. Plus it helps the
+> implementers by not making them figure out all of my mistakes; they
+> can just concentrate on their mistakes.
+
+Speaking for the (only?) implementors, this is not a big deal, certainly not
+worth spending any significant effort in your parser to prevent.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 18, 2015  4:41 PM
+
+> The most realistic would be something involving object declarations:
+>
+>       Register : Integer := raise TBD_Error with Volatile;
+>
+> or perhaps better:
+>
+>       Flag : Boolean := Some_Const or else raise TBD_Error with
+> Atomic;
+
+Where Volatile and Atomic are static string constants?
+Not what I would call realistic.
+
+To me, what makes sense is if the token after WITH is a valid aspect identifier,
+then that's how it is treated, otherwise it is treated as a string. In practice
+this disambiguation rule, which is easy to implement IMO, will do the right
+thing in all real cases.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, February 18, 2015  4:46 PM
+
+I have to say "uggh" to that one!  Given that the set of aspect identifiers is
+unbounded and implementation defined, this sounds pretty nasty to me.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 18, 2015  5:01 PM
+
+I still think that in practice this will resolve 100% of real life cases in the
+way the programmer expects without ugly extra parens. In the code in our test
+suite it is very rare not to have the thing after the WITH in a raise be a
+string literal or concatenation of string literals.
+
+And you can always add the parens to disambiguate in the ACATS test where this
+will come up (I don't believe it will come up anywhere else but in an ACATS
+test).
+
+I prefer usability over language lawyer purity any day!
+
+I actually  think that the disambiguation rule I propose will end up never being
+used in any real program in any case!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 18, 2015  5:10 PM
+
+> To me, what makes sense is if the token after WITH is a valid aspect
+> identifier, then that's how it is treated, otherwise it is treated as
+> a string. In practice this disambiguation rule, which is easy to
+> implement IMO, will do the right thing in all real cases.
+
+Easy to implement? You're kidding, right?
+
+Aspect specifications are part of declarations, while expressions are something
+separate altogether. The tree nodes in question would be a long ways apart (if
+you even use nodes, which we don't for declarations), and the expression code
+has very little knowledge of the context in which it is used. I don't see any
+sensible way to implement such a rule (unless, of course, you're using a
+hand-written parser and are willing to use semantic information to drive the
+parse).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 18, 2015  6:06 PM
+
+> Easy to implement? You're kidding, right?
+
+Not at all, ten minutes work to do this in the GNAT parser, where we can easily
+look ahead a few tokens to make decisions. Obviously can't answer for other
+parsing technologies which often make simple things complex. But do we really
+want to spend a lot of effort making things easier for some arbitrary existing
+compiler? I think that leads to bad language choices. For example, we restricted
+funargs because Alsys was using displays. Turned out that this Alsys compiler
+never made it to Ada 95, so this was a commpletely useless concession, which
+left a nasty gap in the language.
+
+I believe other concessions were unnecessarily made to accomodate fully
+shareable generics.
+
+Now Tuck's objection to my proposal is different, he doesn't like it as a
+language rule. I disagree, but find the argument legitimate at least!
+
+> Aspect specifications are part of declarations, while expressions are
+> something separate altogether. The tree nodes in question would be a
+> long ways apart (if you even use nodes, which we don't for
+> declarations), and the expression code has very little knowledge of
+> the context in which it is used. I don't see any sensible way to
+> implement such a rule (unless, of course, you're using a hand-written
+> parser and are willing to use semantic information to drive the parse).
+
+As by the way any C compiler does (all C compilers use semantic information to
+disambiguate (t)+a which is a type conversion of +a if t is a type, and an
+addition otherwise. At least all the C compilers I have worked with worked that
+way :-)
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 18, 2015  6:14 PM
+
+> Aspect specifications are part of declarations, while expressions are
+> something separate altogether. The tree nodes in question would be a
+> long ways apart (if you even use nodes, which we don't for
+> declarations), and the expression code has very little knowledge of
+> the context in which it is used. I don't see any sensible way to
+> implement such a rule (unless, of course, you're using a hand-written
+> parser and are willing to use semantic information to drive the parse).
+
+BTW, there is absolutely no need to use semantic information to perform the
+disambiguation I suggested, it's purely lexical, based on the token sequence (I
+am assuming that the parser recognizes aspect identifiers as a special class of
+token). In fact since my proposal only requires very limited bounded lookahead,
+it should be implementable without any kludging with an LR2 or LR3 grammar. I
+understand that people generally prefer to use an SLR parser with necessary
+kludges.
+
+In this case, all you need to do is always parser the WITH X as part of the
+raise expression, and then just have a kludge in the semantic analyzer to
+rewrite this little piece of tree if the X is an aspect identifier. There are
+other equally simple approaches.
+
+I am more interested in hearing other people's language reaction to my
+suggestion than to hear about Randy's problems with the parser in his compiler.
+
+Tuck said UGH! so if that's the consensus obviously it won't fly
+
+Probably the best bet is to say that RAISE X WITH Y expressions must be fully
+parenthesized if they appear in a declaration which allows aspect declarations.
+
+I hope that's enough to avoid the UGH!, and in practice it will almost NEVER be
+necessary to write these parentheses, and the compiler will be able to give a
+good message (by using the disambiguation I proposed if there are no parens for
+the purpose of issuing a useful message).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 18, 2015  6:41 PM
+
+> > Easy to implement? You're kidding, right?
+>
+> Not at all, ten minutes work to do this in the GNAT parser, where we
+> can easily look ahead a few tokens to make decisions.
+> Obviously can't answer for other parsing technologies which often make
+> simple things complex. But do we really want to spend a lot of effort
+> making things easier for some arbitrary existing compiler?
+
+No, we want to make things *simple* to make things easier for all existing
+compilers (and users). Put parens (somewhere) around raise expressions, and
+there never will be issues. No matter what rule we ultimately chose. Everything
+else is just a concession to sloppy grammar.
+
+> I think that leads to bad language choices.
+> For example, we restricted funargs because Alsys was using displays.
+> Turned out that this Alsys compiler never made it to Ada 95, so this
+> was a commpletely useless concession, which left a nasty gap in the
+> language.
+
+Surely not completely useless, as Janus/Ada uses displays, it surely "made it to
+Ada 95", etc.
+
+The "fix" for that hole also was designed so it would work with displays.
+The "gap" was that we didn't want to work hard enough to do it right.
+
+> I believe other concessions were unnecessarily made to accomodate
+> fully shareable generics.
+
+And of course Janus/Ada uses that, too. And it wouldn't make much difference
+unless you're willing to completely abandon the contract model of generics. In
+the absence of that, "assume-the-worst" is pretty much the only way to handle
+generic bodies, and that's 99% of what sharable generics (any sort of sharable
+generic) needs.
+
+> Now Tuck's objection to my proposal is different, he doesn't like it
+> as a language rule. I disagree, but find the argument legitimate at
+> least!
+
+I had the "you can't be serious!" reaction to the entire thing. The "easy
+implementation" remark was the low-hanging fruit, but I object on every level.
+(I had forgotten about the effect of implementation-defined aspects, which makes
+it non-portable in general; thanks to Tucker for pointing that out.)
+
+> > Aspect specifications are part of declarations, while expressions
+> > are something separate altogether. The tree nodes in question would
+> > be a long ways apart (if you even use nodes, which we don't for
+> > declarations), and the expression code has very little knowledge of
+> > the context in which it is used. I don't see any sensible way to
+> > implement such a rule (unless, of course, you're using a
+> > hand-written parser and are willing to use semantic information to drive
+> > the parse).
+>
+> As by the way any C compiler does (all C compilers use semantic
+> information to disambiguate (t)+a which is a type conversion of +a if
+> t is a type, and an addition otherwise.
+> At least all the C compilers I have worked with worked that way :-)
+
+The reason I gravitated to Ada in the first place is that the C syntax is
+garbage. It's not surprising that it's a lot of messy work to implement. Ada has
+never had that property, and I don't think it is a good idea to sink to that
+level.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 18, 2015  6:55 PM
+
+...
+> I am more interested in hearing other people's language reaction to my
+> suggestion than to hear about Randy's problems with the parser in his
+> compiler.
+
+I gave all of the language-level technical arguments long ago, but you've
+ignored or forgotten them.
+
+> Tuck said UGH! so if that's the consensus obviously it won't fly
+>
+> Probably the best bet is to say that RAISE X WITH Y expressions must
+> be fully parenthesized if they appear in a declaration which allows
+> aspect declarations.
+
+We discussed that previously: I don't want raise x and raise x when y to have
+different parenthesization rules, because it will cause lots of annoying syntax
+errors during maintenance.
+
+Simply requiring all (raise x) and (raise x when y) to be parenthesized in
+contexts where an aspect specification (or extension aggregate!) follows them
+was the original proposal, which I made and surely have no problem with.
+
+> I hope that's enough to avoid the UGH!, and in practice it will almost
+> NEVER be necessary to write these parentheses, and the compiler will
+> be able to give a good message (by using the disambiguation I proposed
+> if there are no parens for the purpose of issuing a useful message).
+
+I don't understand why you care so much about these parens. They *only* apply
+when the raise is not otherwise surrounded in parens, and only in a handful of
+contexts (and of those contexts, only object declaration is at all likely). 99%
+of raise expressions are going to be in some conditional expression (where no
+one has ever expected any parens). The only place where stand-alone raises are
+likely to be at all common is in the dummy return statement for a function
+("return raise TBD_Error;") and that's a context that we don't need to change.
+
+The example of
+    Something : Some_Subtype := (raise TBD_Error);
+is probably the most likely context where parens would be required, and it's not
+very likely that you'd know the object and subtype but not know the
+initialization.
+
+If we think that the parens should be required for say + (and we did), I don't
+see much reason to avoid them after :=. Indeed, I think they help readability in
+that case (but that's probably personal preference and not worth standing on).
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 18, 2015  7:21 PM
+
+> No, we want to make things *simple* to make things easier for all
+> existing compilers (and users). Put parens (somewhere) around raise
+> expressions, and there never will be issues. No matter what rule we ultimately
+> chose. Everything else is just a concession to sloppy grammar.
+
+Sloppy grammar /= stuff which Randy has trouble parsing!
+
+Adding junk parens where not needed is C, not Ada style
+
+> Surely not completely useless, as Janus/Ada uses displays, it surely
+> "made it to Ada 95", etc.
+
+True, but I don't think Janus had the weight that Alsys did to negatively
+influence the design. Displays are obviously the wrong choice for Ada at this
+stage IMO.
+
+> The "fix" for that hole also was designed so it would work with displays.
+> The "gap" was that we didn't want to work hard enough to do it right.
+>
+>> I believe other concessions were unnecessarily made to accomodate
+>> fully shareable generics.
+>
+> And of course Janus/Ada uses that, too. And it wouldn't make much
+> difference unless you're willing to completely abandon the contract model
+> of generics. In the absence of that, "assume-the-worst" is pretty much the
+> only way to handle generic bodies, and that's 99% of what sharable generics
+> (any sort of sharable generic) needs.
+
+Yes, but there are some uncomfortable things in the 1%
+
+>> Now Tuck's objection to my proposal is different, he doesn't like it
+>> as a language rule. I disagree, but find the argument legitimate at
+>> least!
+
+
+>> As by the way any C compiler does (all C compilers use semantic
+>> information to disambiguate (t)+a which is a type conversion of +a if
+>> t is a type, and an addition otherwise.
+>> At least all the C compilers I have worked with worked that way :-)
+>
+> The reason I gravitated to Ada in the first place is that the C syntax
+> is garbage. It's not surprising that it's a lot of messy work to
+> implement. Ada has never had that property, and I don't think it is a
+> good idea to sink to that level.
+
+I don't think there is ANY difference in difficulty in building a front end for
+C or Ada, actually I take that back, the grammar of Ada is definitely more
+complex, with a bunch of difficult cases requiring look ahead (in some cases
+unbounded) to get decent error messages.
+
+The parser and lexer are such *trivial* parts of an Ada compiler that focusing
+worry on the difficulty of implementing them seems nonsense to me. Now getting
+good messages is hard, but you will never achieve that with an SLR parser
+anyway.
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Wednesday, February 18, 2015  7:25 PM
+
+> We discussed that previously: I don't want raise x and raise x when y
+> to have different parenthesization rules, because it will cause lots
+> of annoying syntax errors during maintenance.
+
+Nonsense, the cases in which this will arise anyway are rare
+
+> Simply requiring all (raise x) and (raise x when y) to be
+> parenthesized in contexts where an aspect specification (or extension
+> aggregate!) follows them was the original proposal, which I made and
+> surely have no problem with.
+
+I could live with that, though it is annoying, because in practice, we will
+never see raise expressions in these contexts in real programs, only in ACATS
+tests.
+
+> I don't understand why you care so much about these parens. They
+> *only* apply when the raise is not otherwise surrounded in parens, and
+> only in a handful of contexts (and of those contexts, only object
+> declaration is at all likely). 99% of raise expressions are going to
+> be in some conditional expression (where no one has ever expected any
+> parens). The only place where stand-alone raises are likely to be at
+> all common is in the dummy return statement for a function ("return
+> raise TBD_Error;") and that's a context that we don't need to change.
+
+Yes, probably true, that's why I can live with the junk parens in the case
+without the WITH.
+
+> The example of
+>      Something : Some_Subtype := (raise TBD_Error); is probably the
+> most likely context where parens would be required, and it's not very
+> likely that you'd know the object and subtype but not know the
+> initialization.
+
+This is of course a case in which the parens are plain annoying.
+
+Though I can see an argument for having parens everywhere, in analogy to if and
+case. But it's really too late for that.
+
+> If we think that the parens should be required for say + (and we did),
+> I don't see much reason to avoid them after :=. Indeed, I think they
+> help readability in that case (but that's probably personal preference
+> and not worth standing on).
+
+There are people (mostly ex-C programmers) who think it improves readability to
+say
+
+    if (a > b) then
+
+    return (c > 1);
+
+to which I say UGGH!
+
+****************************************************************
