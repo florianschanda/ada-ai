@@ -1,11 +1,25 @@
-!standard 11.3(2.1/4)                                  15-02-25  AI05-0152-1/01
+!standard 3.5.9(5)                                  15-02-26  AI05-0152-1/02
+!standard 3.5.9(18)
+!standard 3.5.9(19)
+!standard 11.3(2/2)
+!standard 11.3(4/3)
+!standard 11.4.1(10.1/3)
+!standard J.3(2)
+!standard J.3(3)
+!standard J.3(4)
+!standard J.3(7)
+!standard J.3(8)
+!standard J.3(9)
+!standard J.3(10)
 !class binding interpretation 15-02-20
+!status Corrigendum 2015 15-02-26
+!status ARG Approved 8-0-2  15-02-26
 !status work item 15-02-20
 !status received 15-02-13
 !priority Medium
 !difficulty Easy
 !qualifier Omission
-!subject Ambiguities in raise expression syntax
+!subject Ambiguities in raise expression and type extension syntax
 !summary
 
 Modify the Ada grammar to eliminate ambiguities.
@@ -126,9 +140,10 @@ Replace 11.3(2.1/4) by:
 
 Add after 11.3(2.1/4):
 
-  If an expression that appears in one of the following contexts includes
-  a raise_expression, that raise_expression shall be surrounded by at least
-  one set of parentheses:
+  If raise_expression appears within the expression of one of the following
+  contexts, the raise_expression shall appear within a pair of parentheses
+  within the expression:
+
     * object_declaration;
     * modular_type_definition;
     * floating_point_definition;
@@ -137,22 +152,53 @@ Add after 11.3(2.1/4):
     * default_expression;
     * ancestor_part.
 
-[Editor's note: "default_expression" is used in component_definition, discriminant_definition, 
-formal_object_definition, and parameter_specification. We don't really need this rule to
-apply to the last, but we'd then have to list the first three in text something like:
-"default_expression when it appears in a component_definition, discriminant_definition, 
-or formal_object_definition;". Seems too messy to me. Should we do that?? - RLB]
-
     AARM Reason: Unlike conditional expressions, this doesn't say "immediately
-    surrounded"; the only requirement is that it is somehow surrounded by
-    parentheses. We need this restriction in order that raise_expressions
-    cannot be syntactically confused with immediately following constructs
-    (such as aspect_specifications).
+    surrounded"; the only requirement is that it is somehow within a pair of
+    parentheses that is part of the expression. We need this restriction in
+    order that raise_expressions cannot be syntactically confused with
+    immediately following constructs (such as aspect_specifications).
+
+    We only need to require that a right parenthesis appear somewhere between
+    the raise_expression and the surrounding context; that's all we need to
+    specify in order to eliminate the ambiguities. Moreover, we don't care at
+    all where the left parenthesis is (so long as it is legal, of course).
+
+    For instance, the following is illegal by this rule:
+         Obj : Boolean := Func_Call or else raise TBD_Error with Atomic;
+    as the "with Atomic" could be part of the raise_expression or part of
+    the object declaration. Both of the following are legal:
+         Obj : Boolean := Func_Call or else (raise TBD_Error) with Atomic;
+         Obj : Boolean := (Func_Call or else raise TBD_Error) with Atomic;
+    and if the "with" belongs to the raise_expression, then both of
+    the following are legal:
+         Obj : Boolean := Func_Call or else (raise TBD_Error with Atomic);
+         Obj : Boolean := (Func_Call or else raise TBD_Error with Atomic);
+
+    This rule only requires parenthesis for raise_expressions that are
+    part of the "top-level" of an expression in one of the named contexts;
+    the raise_expression is either the entire expression, or part of a
+    chain of logical operations. In practice, the raise_expression will
+    almost always be last in interesting top-level expressions; anything
+    that follows it could never be executed, so that should be rare.
+    Other contexts such as conditional
+    expressions, qualified expressions, aggregates, and even function calls,
+    provide the needed parentheses. All of the following are legal, no
+    additional parens are needed:
+         Pre : Boolean  := (if not Is_Valid(Param) then raise Not_Valid_Error);
+         A : A_Tagged   := (Some_Tagged'(raise TBD_Error) with Comp => 'A');
+         B : Some_Array := (1, 2, 3, others => raise No_Valid_Error);
+         C : Natural    := Func (Val => raise TBD_Error);
+
+    Parentheses that are part of the context of the expression don't count.
+    For instance, the parentheses around the raise_expression are required
+    in the following:
+         D : A_Tagged   := ((raise TBD_Error) with Comp => 'A');
+    as ancestor_part is one of the contexts that triggers the rule.
 
     This English-language rule could have been implemented instead by adding 
     nonterminals initial_expression and initial_relation, which are the same
     as choice_expression and choice_relation except for the inclusion of
-    membershup in choice_relation. Then, initial_expresion could be used in
+    membership in initial_relation. Then, initial_expresion could be used in
     place of expression in all of the contexts noted. We did not do that
     because of the large amount of change required, both to the grammar and
     to language rules that refer to the grammar. A complete grammar is given
@@ -189,8 +235,9 @@ Modify the third and fourth sentences of 11.4.1(10.1/4):
   exception_name and a string_expression {or string_simple_expression}, the
   message is the string_expression {or string_simple_expression}. For the
   occurrence raised by a raise_statement or raise_expression with an
-  exception_name but without a string_expression, the message is a string
-  giving implementation-defined information about the exception occurrence. 
+  exception_name but without a string_expression {or string_simple_expression},
+  the message is a string giving implementation-defined information about
+  the exception occurrence. 
 
 Replace J.3(2) by:
 
@@ -218,13 +265,14 @@ type of type String for there to be any possibility of noticing the change.
 In that unlikely case, parens would be needed around the string expression.
 
 For (B), we note that we cannot tolerate any incompatibility with any existing
-expressions, as initialized object declarations are very common. As such,
-we've adopted a change that only requires parenthesizing raise expressions
-in such a context, as that can only affect code that used raise_expressions
-before they were formally defined. We also only require extra parentheses in
-cases where the raise_expression would have no parentheses at all; if it is
-inside of any parenthesized expression, aggregate, parameter list, or the
-like, no additional parentheses are required.
+expressions, as initialized object declarations are very common. Even unusual
+expressions probably have occurred somewhere. As such, we've adopted a change
+that only requires parenthesizing raise expressions in such a context, as that
+can only affect code that used raise_expressions before they were formally
+defined. We also only require extra parentheses in cases where the
+raise_expression would have no parentheses at all; if it is inside of any
+parenthesized expression, aggregate, parameter list, or the like, no additional
+parentheses are required.
 
 For (C), a raise expression cannot be legally given as the ancestor expression
 of an extension aggregate, unless qualified, as it does not determine a unique
@@ -266,14 +314,16 @@ operators of modular types would be allowed. So there is a very unlikely
 incompatibility with this change. For there to be a problem, all of the above
 would need to be true:
    (1) A modular type is declared in the program, with at least one static
-       constant;
+       constant; (possible)
    (2) A digits_constraint would have to be used as a subtype_indication
        (unlikely, most such uses are obsolescent, and the others are for
        the rarely used decimal fixed types);
    (3) The digits value would have to be created from an expression involving
        "and", "or", or "xor" (unlikely, most digits values are literals or
        named numbers).
-And then the digits expression would have to be parenthesized.
+   (4) The digits expression is not parenthesized. (probable)
+In that doubly unlikely case, the digits expression would have to be
+parenthesized.
 
 The case in question would look like:
 
@@ -289,10 +339,12 @@ The subtype would have to be written:
 
    subtype Really is Dec digits (Num and 3); -- OK.
 
+
 Alternatives considered:
 
 We considered using a grammar change rather than an English rule for the
-majority of these cases. That would look like:
+majority of these cases. (This mentioned in the AARM notes for the chosen
+solution.) That would look like:
 
 Add in 4.4:
 
@@ -367,7 +419,10 @@ exist and there doesn't seem to be any reason to break those. In particular,
 the construct "return raise TBD_Error;" (or some other convinient exception)
 is suggested for use when providing a body-to-be-defined later for a function.
 This neatly gets around the requirement for "at least one return statement"
-in a function body.
+in a function body. It's also likely that some preconditions or postconditions
+are defined using "or else" followed by a raise expression. Adopting the
+English-language rule globally would require both of those to be surrounded
+by parentheses.
 
 --
 
@@ -386,8 +441,8 @@ expression precedes some other "with" (an aspect specification or the rest of
 an extension aggregate) seems to have maintenance issues. Again, adding an
 aspect specification during maintenance would trigger an annoying "parens
 required". In both of these cases, it's unlikely that the programmer would
-remember the paren requirement, and such a rule would increase Ada's reputation
-for obscure pickyness.
+remember the parentheses requirement, and such a rule would increase Ada's
+reputation for obscure pickyness.
 
 The wildest of these suggestions was to determine whether a "with" was part of
 a preceding raise_expression or part of an aspect specification by determining
@@ -395,8 +450,8 @@ if the first identifier was a possible aspect_mark. The objection to that is
 that the list of possible aspect_marks is implementation-defined, thus the
 meaning of a legal Ada program could differ between implementations.
 
-For instance, imagine that compiler A has an aspect Exact_Size_Only, and
-compiler B does not. Then
+For instance, imagine that compiler A has a Boolean aspect Exact_Size_Only,
+and compiler B does not. Then
 
    Exact_Size_Only : constant String := "Exact size required!";
 
@@ -415,6 +470,211 @@ when compiled with compiler B.
 While unlikely, this is intolerable; we want implementation-defined stuff to
 possibly change the program from legal to illegal (or vice-versa), not between
 two very different meanings.
+
+!corrigendum 3.5.9(5)
+
+@drepl
+@xcode<@fa<digits_constraint ::=
+    >@ft<@b<digits> @i<static_>>@fa<expression [range_constraint]>>
+@dby
+@xcode<@fa<digits_constraint ::=
+    >@ft<@b<digits> @i<static_>>@fa<simple_expression [range_constraint]>>
+
+!corrigendum 3.5.9(18)
+
+@drepl
+For a @fa<digits_constraint> on a decimal fixed point subtype with a given
+@i<delta>, if it does not have a @fa<range_constraint>, then it specifies
+an implicit range @endash(10**@i<D>@endash1)*@i<delta> .. +(10**@i<D>@endash1)*@i<delta>,
+where @i<D> is the value of the @fa<expression>. A @fa<digits_constraint>
+is @i<compatible> with a decimal fixed point subtype if the value of the
+@fa<expression> is no greater than the @i<digits> of the subtype, and if
+it specifies (explicitly or implicitly) a range that is compatible with
+the subtype. 
+@dby
+For a @fa<digits_constraint> on a decimal fixed point subtype with a given
+@i<delta>, if it does not have a @fa<range_constraint>, then it specifies
+an implicit range @endash(10**@i<D>@endash1)*@i<delta> .. +(10**@i<D>@endash1)*@i<delta>,
+where @i<D> is the value of the @fa<simple_expression>. A
+@fa<digits_constraint> is @i<compatible> with a decimal fixed point subtype
+if the value of the @fa<simple_expression> is no greater than the @i<digits>
+of the subtype, and if it specifies (explicitly or implicitly) a range that
+is compatible with the subtype. 
+
+!corrigendum 3.5.9(19)
+
+@drepl
+The elaboration of a @fa<digits_constraint> consists of the elaboration of
+the @fa<range_constraint>, if any. If a @fa<range_constraint> is given, a
+check is made that the bounds of the range are both in the range
+@endash(10**@i<D>@endash1)*@i<delta> .. +(10**@i<D>@endash1)*@i<delta>, where @i<D> is the
+value of the (static) @fa<expression> given after the reserved word
+@b<digits>. If this check fails, Constraint_Error is raised. 
+@dby
+The elaboration of a @fa<digits_constraint> consists of the elaboration of
+the @fa<range_constraint>, if any. If a @fa<range_constraint> is given, a
+check is made that the bounds of the range are both in the range
+@endash(10**@i<D>@endash1)*@i<delta> .. +(10**@i<D>@endash1)*@i<delta>, where @i<D> is the
+value of the (static) @fa<simple_expression> given after the reserved word
+@b<digits>. If this check fails, Constraint_Error is raised. 
+
+
+!corrigendum 11.3(2/2)
+
+@dinsa
+@xcode<@fa<raise_statement ::= >@ft<@b<raise>@fa<; |>
+       @ft<@b<raise> @i<exception_>>@fa<name [>>@ft<@b<with> @i<string_>>@fa<expression];>>
+@dinss
+@xcode<@fa<raise_expression ::= @ft<@b<raise> @i<exception_>>@fa<name [>>@ft<@b<with> @i<string_>>@fa<simple_expression]>>
+
+If @fa<raise_expression> appears within the @fa<expression> of one of the following
+contexts, the @fa<raise_expression> shall appear within a pair of parentheses
+within the @fa<expression>:
+
+@xbullet<@fa<object_declaration>;>
+@xbullet<@fa<modular_type_definition>;>
+@xbullet<@fa<floating_point_definition>;>
+@xbullet<@fa<ordinary_fixed_point_definition>;>
+@xbullet<@fa<decimal_fixed_point_definition>;>
+@xbullet<@fa<default_expression>;>
+@xbullet<@fa<ancestor_part>.>
+
+!corrigendum 11.3(4/3)
+
+@drepl
+To @i<raise an exception> is to raise a new occurrence of that exception, as
+explained in 11.4. For the execution of a @fa<raise_statement> with an
+@i<exception_>@fa<name>, the named exception is raised. Similarly, for the evaluation
+of a @fa<raise_expression>, the named exception is raised. In both of these cases,
+if a @i<string_>@fa<expression> is present, the @fa<expression> is evaluated and its
+value is associated with the exception occurrence. For the execution of a
+re-raise statement, the exception occurrence that caused transfer of control to
+the innermost enclosing handler is raised again.
+@dby
+To @i<raise an exception> is to raise a new occurrence of that exception, as
+explained in 11.4. For the execution of a @fa<raise_statement> with an
+@i<exception_>@fa<name>, the named exception is raised. Similarly, for the evaluation
+of a @fa<raise_expression>, the named exception is raised. In both of these cases,
+if a @i<string_>@fa<expression> or @i<string_>@fa<simple_expression> is present,
+the expression is evaluated and its value is associated with the exception
+occurrence. For the execution of a re-raise statement, the exception occurrence
+that caused transfer of control to the innermost enclosing handler is raised again.
+
+!corrigendum 11.4.1(10.1/3)
+
+@drepl
+Exception_Message returns the message associated
+with the given Exception_Occurrence. For an occurrence raised by a call to
+Raise_Exception, the message is the Message parameter passed to Raise_Exception.
+For the occurrence raised by a @fa<raise_statement> with an
+@I<exception_>@fa<name> and a @I<string_>@fa<expression>, the message is
+the @i<string_>@fa<expression>. For the occurrence raised by a
+@fa<raise_statement> with
+an @i<exception_>@fa<name> but without a @i<string_>@fa<expression>,
+the message is a string giving implementation-defined information about the
+exception occurrence. For an occurrence originally raised
+in some other manner (including by the failure of a language-defined check),
+the message is an unspecified string. In all cases, Exception_Message returns
+a string with lower bound 1.
+@dby
+Exception_Message returns the message associated
+with the given Exception_Occurrence. For an occurrence raised by a call to
+Raise_Exception, the message is the Message parameter passed to Raise_Exception.
+For the occurrence raised by a @fa<raise_statement> or @fa<raise_expression>
+with an @I<exception_>@fa<name> and a @I<string_>@fa<expression> or
+@I<string_>@fa<simple_expression>, the message is the @I<string_>@fa<expression>
+or @I<string_>@fa<simple_expression>. For the occurrence raised by a
+@fa<raise_statement> or @fa<raise_expression> with an @i<exception_>@fa<name>
+but without a @I<string_>@fa<expression> or @I<string_>@fa<simple_expression>,
+the message is a string giving implementation-defined information about the
+exception occurrence. For an occurrence originally raised
+in some other manner (including by the failure of a language-defined check),
+the message is an unspecified string. In all cases, Exception_Message returns
+a string with lower bound 1.
+
+!corrigendum J.3(2)
+
+@drepl
+@xcode<@fa<delta_constraint ::=
+    >@ft<@b<delta> @i<static_>>@fa<expression [range_constraint]>>
+@dby
+@xcode<@fa<delta_constraint ::=
+    >@ft<@b<delta> @i<static_>>@fa<simple_expression [range_constraint]>>
+
+!corrigendum J.3(3)
+
+@drepl
+The @fa<expression> of a @fa<delta_constraint> is expected to be of any
+real type. 
+@dbyThe @fa<simple_expression> of a @fa<delta_constraint> is expected to be of
+any real type. 
+
+!corrigendum J.3(4)
+
+@drepl
+The @fa<expression> of a @fa<delta_constraint> shall be static.
+@dby
+The @fa<simple_expression> of a @fa<delta_constraint> shall be static.
+
+!corrigendum J.3(7)
+
+@drepl
+A @fa<subtype_indication> with a @fa<subtype_mark> that denotes an ordinary
+fixed point subtype and a @fa<delta_constraint> defines an ordinary fixed
+point subtype with a @i<delta> given by the value of the @fa<expression> of
+the @fa<delta_constraint>. If the @fa<delta_constraint> includes a
+@fa<range_constraint>, then the ordinary fixed point subtype is constrained
+by the @fa<range_constraint>.
+@dby
+A @fa<subtype_indication> with a @fa<subtype_mark> that denotes an ordinary
+fixed point subtype and a @fa<delta_constraint> defines an ordinary fixed
+point subtype with a @i<delta> given by the value of the @fa<simple_expression>
+of the @fa<delta_constraint>. If the @fa<delta_constraint> includes a
+@fa<range_constraint>, then the ordinary fixed point subtype is constrained
+by the @fa<range_constraint>.
+
+!corrigendum J.3(8)
+
+@drepl
+A @fa<subtype_indication> with a @fa<subtype_mark> that denotes a floating
+point subtype and a @fa<digits_constraint> defines a floating point subtype
+with a requested decimal precision (as reflected by its Digits attribute)
+given by the value of the @fa<expression> of the @fa<digits_constraint>.
+If the @fa<digits_constraint> includes a @fa<range_constraint>, then the
+floating point subtype is constrained by the @fa<range_constraint>. 
+@dby
+A @fa<subtype_indication> with a @fa<subtype_mark> that denotes a floating
+point subtype and a @fa<digits_constraint> defines a floating point subtype
+with a requested decimal precision (as reflected by its Digits attribute)
+given by the value of the @fa<simple_expression> of the @fa<digits_constraint>.
+If the @fa<digits_constraint> includes a @fa<range_constraint>, then the
+floating point subtype is constrained by the @fa<range_constraint>. 
+
+!corrigendum J.3(9)
+
+@drepl
+A @fa<delta_constraint> is @i<compatible> with an ordinary fixed point subtype
+if the value of the @fa<expression> is no less than the @i<delta> of the
+subtype, and the @fa<range_constraint>, if any, is compatible with the subtype.
+@dby
+A @fa<delta_constraint> is @i<compatible> with an ordinary fixed point subtype
+if the value of the @fa<simple_expression> is no less than the @i<delta> of the
+subtype, and the @fa<range_constraint>, if any, is compatible with the subtype.
+
+!corrigendum J.3(10)
+
+@drepl
+A @fa<digits_constraint> is @i<compatible> with a floating point subtype if
+the value of the @fa<expression> is no greater than the requested decimal
+precision of the subtype, and the @fa<range_constraint>, if any, is compatible
+with the subtype.
+@dby
+A @fa<digits_constraint> is @i<compatible> with a floating point subtype if
+the value of the @fa<simple_expression> is no greater than the requested decimal
+precision of the subtype, and the @fa<range_constraint>, if any, is compatible
+with the subtype.
+
+
 
 !ASIS
 
