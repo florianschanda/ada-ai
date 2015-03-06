@@ -1,6 +1,9 @@
-!standard 9.5.1(2)                             15-02-20   AI12-0129-1/03
+!standard 9.5.1(2)                             15-03-02   AI12-0129-1/04
 !standard 9.5.1(4)
 !standard 9.5.1(5)
+!standard 9.5.1(7)
+!standard 9.5.3(15)
+!standard 9.5.3(23)
 !class Amendment 14-10-03
 !status work item 14-10-03
 !status received 14-09-09
@@ -12,7 +15,7 @@
 
 A Boolean aspect Exclusive_Functions is added to the language.
 
-!problem 
+!problem
 
 The design of containers assumes that they are not accessed
 concurrently, on the ground that access can be protected with
@@ -43,32 +46,49 @@ protected types and protected/synchronized interfaces from the types that
 are included. Priority allows the former, and excludes the latter by a
 separate Legality Rule.]
 
-    Exclusive_Functions
+    Exclusive_Functions -
       The type of aspect Exclusive_Functions is Boolean.
+      If not specified (including by inheritance), the aspect is False.
 
-      [Redundant: A value of True for this aspect indicates that protected
-      functions behave in the same way as protected procedures with respect
-      to mutual exclusion (see below).]
+      A protected operation is said to be *exclusive* unless it is
+      a protected function and the Exclusive_Functions aspect of the
+      associated protected type is False.
 
-      [Redundant: If not specified (including by inheritance), the aspect
-      is False.]
+      [A value of True for this aspect indicates that
+      protected functions behave in the same way as protected procedures
+      with respect to mutual exclusion and queue servicing (see below).]
 
-[Editor's note: The above sentence is redundant because of AI12-0153-1; if
-that AI is not adopted, then the Redundant marking should be eliminated.]
+Modify 9.5.1(4), first sentence:
 
-Modify 9.5.1(4):
-  
    A new protected action is not started on a protected object while another
    protected action on the same protected object is underway, unless both
-   actions are the result of a call on a protected function {and the
-   Exclusive_Functions aspect of the protected type is False}.
+   actions are the result of a call on a nonexclusive protected function.
 
 Modify 9.5.1(5):
+
    Starting a protected action on a protected object corresponds to acquiring
    the execution resource associated with the protected object, either for
-   concurrent read-only access if the protected action is for a call on a
-   protected function {and the Exclusive_Functions aspect of the
-   protected type is False}, or for exclusive read-write access otherwise;
+   exclusive read-write access if the protected action is for a call on an
+   exclusive protected operation, or for concurrent read-only access otherwise;
+
+Modify 9.5.1(7):
+
+   [After performing an exclusive operation on a protected object, but prior
+   to completing the associated protected action, the entry queues (if any)
+   of the protected object are serviced (see 9.5.3).]
+
+Modify 9.5.3(15):
+    If after performing, as part of a protected action on the associated
+    protected object, an exclusive operation on the object, the entry is
+    checked and found to be open.
+
+Modify 9.5.3(23):
+   When the entry of a protected object is checked to see whether it is open,
+   the implementation need not reevaluate the condition of the corresponding
+   entry_barrier if no variable or attribute referenced by the condition
+   (directly or indirectly) has been altered by the execution (or cancellation)
+   of a call to an exclusive protected operation of the object since the
+   condition was last evaluated.
 
 !discussion
 
@@ -139,19 +159,26 @@ null to minimal.
 
 ---
 
-We've tried to keep wording changes to the minimum, to make it clear that this
-is a very small change (essentially no more than the removal of a permission).
-
-The wording of 9.5.1(7) (and corresponding wording in 9.5.3) is unmodified.
-Protected functions with aspect Exclusive_Functions set are not the same as
-protected procedures with respect to queue servicing because the state of the
-protected object cannot have changed during a call to a protected function.
-
 Locking behavior might be implemented directly in the body of a protected
 type. As such, we don't allow specifying the Exclusive_Functions aspect for
 derived protected types, so that the compiler doesn't need to generate a new
 body with different locking. That seems like an excessive implementation
 burden, especially as the intended usage would never change the aspect.
+
+---
+
+The design principle for protected objects is that barriers do not have to
+notice changes to global data that happen outside of the protected actions
+of the PO; but that barriers do notice changes to (any) data made by the
+protected actions. Thus, it is necessary for protected functions with the
+Exclusive_Functions aspect to evaluate barriers after each call.
+Such a function can safely update global data that
+is under control of the protected object. (It's not safe to do so from a
+regular protected function, as it might be executed concurrently.)
+
+An implementation can use the permission of 9.5.3(23) to avoid such
+re-evaluation of barriers if the barriers do not depend on any global data
+that might be modified by the function (this will often be the case).
 
 !ASIS
 
@@ -224,7 +251,7 @@ From: Jean-Pierre Rosen
 Sent: Tuesday, September 9, 2014  3:05 PM
 
 > To me, this does not seem completely appropriate for an "aspect."
-> This is a significant semantic change and should probably be reflected 
+> This is a significant semantic change and should probably be reflected
 > in a corresponding syntax change for protected functions.
 
 Not such a big change, as it simply forces a semantic that is already allowed.
@@ -263,6 +290,461 @@ Sent: Tuesday, September 9, 2014  9:10 PM
 I presumed we were wanting to be "honest" about the parameter mode for the
 protected object.  I suppose if we are just keeping a constant view, then the
 aspect is adequate.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, March 1, 2015  9:20 AM
+
+Re: Reevaluating barriers after function calls
+
+[Editor's note: This topic was originally raised during the ARG phone meeting of
+February 26th, 2015. See the minutes of that meeting for details.]
+
+(my understanding is that it is only for mutually exclusive functions, otherwise
+it would be way too incompatible)
+
+My view of POs it that they are optimized for the case when the barriers only
+depend on the internal state. The behaviour is well defined when they depend on
+global states, but then "you'd better know what you are doing". For example,
+changing a global variable (from outside a protected action) will not unblock
+waiting tasks until a protected call to a subprogram/entry is executed.
+
+I have an example that does just that, and my PO has a null protected procedure
+which I call to force reevaluation of the barriers.
+
+That's why I'm not in favor of treating exclusive protected functions
+differently. I would hate having this AI rejected as a whole because of that
+feature. Or maybe make a different AI for the reevaluation of barriers?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, March 1, 2015  12:04 PM
+
+Not sure what you are saying here.  We are proposing that exclusive protected
+functions and protected procedures use the same wording as far as barriers.  You
+indicate you are not in favor of treating exclusive functions "differently."
+Differently from what? Protected procedures, or non-exclusive functions?
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, March 1, 2015  12:16 PM
+
+Differently from regular functions, i.e. never evaluate barriers for functions.
+Because the only things a function can change are outside the PO.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, March 1, 2015 12:27 PM
+
+That is irrelevant.  There is *no* permission to avoid re-evaluating barriers
+just because they reference a global variables, if the global variable is
+updated by a protected operation.  The only concern is if the data referenced in
+a barrier is updated by something *other than* a protected operation.  But using
+a global that is only updated by protected operations is perfectly fine.
+
+In fact, you indicate you are using a null protected procedure to ensure
+re-evaluation of the barriers.  That actually does *not* work according to the
+rules of 9.5.3, if the update of the variables referenced in barriers occurred
+outside of any protected action.
+
+So I don't accept your argument...
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, March 1, 2015  3:20 PM
+
+> That is irrelevant.  There is *no* permission to avoid re-evaluating
+> barriers just because they reference a global variables, if the global
+> variable is updated by a protected operation.
+
+? I never said that
+
+> The only concern is if
+> the data referenced in a barrier is updated by something *other than*
+> a protected operation.  But using a global that is only updated by
+> protected operations is perfectly fine.
+
+Sure.
+
+> In fact, you indicate you are using a null protected procedure to
+> ensure re-evaluation of the barriers.  That actually does *not* work
+> according to the rules of 9.5.3, if the update of the variables
+> referenced in barriers occurred outside of any protected action.
+
+In my case, the global was updated outside of a PO, and then the task that
+modified the variable called the null procedure to force reevaluation. Any
+reason why this would not work?
+
+My point is that there are two kinds of users:
+- Those who don't master the fine rules, and POs work perfectly as long as they
+  don't access anything outside
+- Advanced users, and these can resort to forcing reevaluation.
+
+The initial proposal was simply to make POs usable to protect containers.
+Simple, grab the read/write lock instead of the read lock (provided they are
+different). Invisible to most users. Now we turn to changing the fine semantics
+of protected functions, for an assumed used case that nobody asked for.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, March 1, 2015  3:52 PM
+
+> In my case, the global was updated outside of a PO, and then the task
+> that modified the variable called the null procedure to force
+> reevaluation. Any reason why this would not work?
+
+Yes, that null procedure need not cause barrier evaluation:
+
+                         Implementation Permissions ...
+23  When the entry of a protected object is checked to see whether it is open,
+    the implementation need not reevaluate the condition of the corresponding
+    entry_barrier if no variable or attribute referenced by the condition
+    (directly or indirectly) has been altered by the execution (or cancellation)
+    of a protected procedure or entry call on the object since the condition was
+    last evaluated.
+
+23.a        Ramification: Changes to variables referenced by an entry barrier
+            that result from actions outside of a protected procedure or entry
+            call on the protected object need not be "noticed." For example,
+            if a global variable is referenced by an entry barrier, it should
+            not be altered (except as part of a protected action on the
+            object) any time after the barrier is first evaluated. In other
+            words, globals can be used to "parameterize" a protected object,
+            but they cannot reliably be used to control it after the first use
+            of the protected object.
+
+> My point is that there are two kinds of users:
+> - Those who don't master the fine rules, and POs work perfectly as
+> long as they don't access anything outside
+> - Advanced users, and these can resort to forcing reevaluation.
+
+As stated above, that need not work as one might expect.
+
+> The initial proposal was simply to make POs usable to protect
+> containers. Simple, grab the read/write lock instead of the read lock
+> (provided they are different).
+
+That's what I said during the phone meeting.  But others argued (correctly, I
+think) that if we add this new feature, it will be used for other purposes,
+possibly involving barriers.  It (now) seems clear to me that any protected
+operation that modifies variables must cause barrier evaluation for barriers
+that read those variables.  So if we add a new kind of protected operation that
+can do that (like the new kind of protected function being discussed) then it
+must have that property.
+
+Or to look at it another way:  It makes no sense to protect writes (with a
+read/write lock) but then ignore those writes as far as barriers are concerned.
+
+>...Invisible to most users. Now we turn to changing the fine semantics
+>of protected functions, for an assumed used case that nobody asked for.
+
+Well, the only alternative I can think of is to forbid what "nobody asked for"
+(i.e. forbid entries in these new cases).  But that doesn't seem friendly.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, March 1, 2015  3:54 PM
+
+>> That is irrelevant.  There is *no* permission to avoid re-evaluating
+>> barriers just because they reference a global variables, if the
+>> global variable is updated by a protected operation.
+> ? I never said that
+
+But you said that an exclusive function could only update something "outside" of
+the PO. But that makes no difference, so long as nothing else is updating that
+same object.  And note that the object updated might be reachable only via an
+access value that is "inside" the PO, so it can be sure that an update from
+outside won't happen.
+
+>> The only concern is if
+>> the data referenced in a barrier is updated by something *other than*
+>> a protected operation.  But using a global that is only updated by
+>> protected operations is perfectly fine.
+> Sure.
+
+So being "inside" or "outside" is largely irrelevant.  All that matters is
+whether the data is updated inside or outside a protected operation.
+
+>> In fact, you indicate you are using a null protected procedure to
+>> ensure re-evaluation of the barriers.  That actually does *not* work
+>> according to the rules of 9.5.3, if the update of the variables
+>> referenced in barriers occurred outside of any protected action.
+> In my case, the global was updated outside of a PO, and then the task
+> that modified the variable called the null procedure to force
+> reevaluation. Any reason why this would not work?
+
+This does not work.  If you read the permissions in 9.5.3, you will see that
+calling a null protected procedure does not ensure that all entry barriers are
+re-evaluated.  See 9.5.3(23):
+
+   "...  the implementation need not reevaluate the condition of the
+corresponding entry_barrier if no variable or attribute referenced by the
+condition (directly or indirectly) has been altered by the execution (or
+cancellation) of a protected procedure or entry call on the object since the
+condition was last evaluated."
+
+So calling a null protected procedure doesn't meet the requirements for forcing
+re-evaluation.
+
+> My point is that there are two kinds of users:
+> - Those who don't master the fine rules, and POs work perfectly as
+> long as they don't access anything outside
+
+Accessing anything outside is not itself the problem.  The problem is when code
+outside of a protected operation updates something that is referenced in an
+entry barrier.
+
+> - Advanced users, and these can resort to forcing reevaluation.
+
+Not really.  There is no clear way to "force" reevaluation, according to 9.5.3,
+except by updating a variable inside a protected operation that is referenced by
+the entry barrier.
+
+> The initial proposal was simply to make POs usable to protect
+> containers. Simple, grab the read/write lock instead of the read lock
+> (provided they are different). Invisible to most users. Now we turn to
+> changing the fine semantics of protected functions, for an assumed
+> used case that nobody asked for.
+
+I don't agree.  If you specify an exclusive function, we have to presume that
+you are updating a variable while in the function, and it seems perfectly
+possible that that variable is referenced in some entry barrier.  If the
+function does *not* update any variable used in an entry barrier, then the
+implementation need not re-evaluate any barriers, according to 9.5.3(23).  But
+without this proposed change, even if it *does* update such a variable, no
+re-evaluation need occur, which seems very error prone.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, March 2, 2015  5:15 AM
+
+>> In my case, the global was updated outside of a PO, and then the task
+>> that modified the variable called the null procedure to force
+>> reevaluation. Any reason why this would not work?
+>
+> Yes, that null procedure need not cause barrier evaluation: [...]
+
+Yes, I missed that one. Too bad, maybe we need a PO'Reevaluate
+(procedure) attribute.
+
+[...]
+>> The initial proposal was simply to make POs usable to protect
+>> containers. Simple, grab the read/write lock instead of the read lock
+>> (provided they are different).
+>
+> That's what I said during the phone meeting.  But others argued
+> (correctly, I think) that if we add this new feature, it will be used
+> for other purposes, possibly involving barriers.  It (now) seems clear
+> to me that any protected operation that modifies variables must cause
+> barrier evaluation for barriers that read those variables.  So if we
+> add a new kind of protected operation that can do that (like the new
+> kind of protected function being discussed) then it must have that property.
+>
+> Or to look at it another way:  It makes no sense to protect writes
+> (with a read/write lock) but then ignore those writes as far as
+> barriers are concerned.
+
+OK, I understand the point. What worries me is that we are making a completely
+new kind of protected function, with really different rules. It is more than an
+aspect to my taste. Ah, if we had value returning procedures...
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, March 2, 2015  12:39 PM
+
+> Yes, that null procedure need not cause barrier evaluation:
+>
+>                           Implementation Permissions ...
+> 23  When the entry of a protected object is checked to see whether it
+> is open, the implementation need not reevaluate the condition of the
+> corresponding entry_barrier if no variable or attribute referenced by
+> the condition (directly or indirectly) has been altered by the
+> execution (or cancellation) of a protected procedure or entry call on
+> the object since the condition was last evaluated.
+
+I've updated the proposed wording for AI12-0129 to reflect the discussion of the
+last phone meeting - see attached.
+
+This includes updating the permission Bob cited to treat a protected function
+with the new aspect set like a protected procedure.
+
+[This updated wording is in version /04 of the AI. The discussion was updated by
+yours truly based on this e-mail thread - Editor.]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March 2, 2015  1:14 PM
+
+Overall looks good, but it seems odd for the above definition to be buried in
+the definition of the Exclusive_Functions aspect description.  Couldn't we move
+it to shortly before the place it is first used?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March 2, 2015  1:16 PM
+
+Also, it might be easier to understand if it were phrased positively:
+
+   A protected operation is said to be *exclusive* if it is a protected
+   procedure, a protected entry, or a protected function with the
+   Exclusive_Functions aspect True.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, March 2, 2015  1:36 PM
+
+> ... it seems odd for the above definition to be buried in the
+> definition of the Exclusive_Functions aspect description.
+> Couldn't we move it to shortly before the place it is first used?
+
+I disagree, but I don't feel strongly.
+
+> Also, it might be easier to understand if it were phrased positively:
+>
+>   A protected operation is said to be *exclusive* if it is a protected
+>   procedure, a protected entry, or a protected function with the
+>   Exclusive_Functions aspect True.
+
+I disagree strongly, but I could downgrade my objection to weak if you reorder
+things.
+
+An animal is said to be *scary* if it is a lion, a tiger, or a bear having sharp
+teeth.
+
+Is a lion without sharp teeth scary?
+
+Reordering your proposed wording resolves this issue, although I still think the
+list-less (or list of length one, depending on how you view it) version is
+simpler to understand.
+
+Compare
+    A nonnegative integer is said to be *positive* if it is not zero.
+with
+    A nonnegative integer is said to be *positive* if it is 1, or 2, or
+    3, or ...
+
+but I'll concede that a list of length three is not the same as an infinite one.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March 2, 2015  1:47 PM
+
+A bit of a strawman!  I would say expressing things "positively" would have been
+to say:
+
+    A nonnegative integer is said to be *positive* if it is greater than zero.
+
+In any case, I'll sort of accept your point about the possible ambiguity, though
+since the attribute is named "Exclusive_Functions" I think the ambiguity is
+actually pretty unlikely.  It also feels better to me to start with the two
+"unconditional" members of the "exclusive" club, so re-ordering would not
+clarify things overall in my view.
+
+Let's see how others weigh in.  No biggies either way.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 5, 2015  10:36 PM
+
+...
+> I've updated the proposed wording for AI12-0129 to reflect
+> the discussion of the last phone meeting - see attached.
+
+As usual, Steve left the updates to the discussion to your poor editor, who in
+this case needed to justify something that he didn't understand. Luckily, Tucker
+had to explain it to Jean-Pierre, so I was able to steal some of that. Hope I
+got it right:
+
+  The design principle for protected objects is that barriers do not have to
+  notice changes to global data that happen outside of the protected actions
+  of the PO; but that barriers do notice changes to (any) data made by the
+  protected actions. Thus, it is necessary for protected functions with the
+  Exclusive_Functions aspect to evaluate barriers after each call.
+  Such a function can safely update global data that
+  is under control of the protected object. (It's not safe to do so from a
+  regular protected function, as it might be executed concurrently.)
+
+  An implementation can use the permission of 9.5.3(23) to avoid such
+  re-evaluation of barriers if the barriers do not depend on any global data
+  that might be modified by the function (this will often be the case).
+
+
+>> ... it seems odd for the above definition to be buried in the
+>> definition of the Exclusive_Functions aspect description.
+>> Couldn't we move it to shortly before the place it is first used?
+>
+>I disagree, but I don't feel strongly.
+
+I disagree with both of you. :-) I agree with Tucker that it's odd to put the
+definition in the middle of the aspect, but I don't agree with his choice of
+place to put it. Those uses are in Dynamic Semantics, but this is a statically
+determined property, so the definition makes more sense in the Static Semantics
+section. Thus, I'd suggest something like:
+
+
+After 9.5.1(2) (i.e. at the end of the static semantics section) add:
+
+  For a type declared by a protected_type_declaration or for the
+  anonymous type of an object declared by a single_protected_declaration,
+  the following language-defined type-related representation aspect
+  may be specified:
+
+    Exclusive_Functions -
+      The type of aspect Exclusive_Functions is Boolean.
+      If not specified (including by inheritance), the aspect is False.
+
+      [A value of True for this aspect indicates that
+      protected functions behave in the same way as protected procedures
+      with respect to mutual exclusion and queue servicing (see below).]
+
+  A protected operation is said to be *exclusive* unless it is a protected
+  function and the Exclusive_Functions aspect of the associated protected type
+  is False.
+
+The only change here is the placement of the paragraph defining "exclusive" and
+its indentation.
+
+>> Also, it might be easier to understand if it were phrased positively:
+>>
+>>   A protected operation is said to be *exclusive* if it is a protected
+>>   procedure, a protected entry, or a protected function with the
+>>   Exclusive_Functions aspect True.
+>
+>I disagree strongly, but I could downgrade my objection to weak if you reorder
+>things.
+
+I agree with Steve (disagree with Tucker). Not mentioned by Steve is the fact
+that Tucker oversimplified the description of the Exclusive_Functions aspect
+here, as it is an aspect of a protected type, not of a protected function. It
+has to be wording more like Steve's wording:
+
+  A protected operation is said to be *exclusive* if it is a protected
+  procedure, a protected entry, or a protected function and the
+  Exclusive_Functions aspect of the associated protected type is True.
+
+Now, Steve's complaint is a lot more realistic (although the commas help).
+Moreover, Tucker's version has a lot more words, and all other things being
+equal, it's harder to understand by sheer heft. The "unless" potentially
+balances that a bit, but the combination of a bunch of "or"s with an "and" make
+that a wash in my view.
+
+Besides, I find both versions plenty clear; "unless" is only a problem when the
+terms on either side are complex; that's not the case here. So I don't
+understand the objection.
 
 ****************************************************************
 
