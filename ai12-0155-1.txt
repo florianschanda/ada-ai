@@ -1,4 +1,4 @@
-!standard 13.14(3/4)                                   15-02-20  AI05-0155-1/00
+!standard 13.14(3/4)                                   15-03-05  AI05-0155-1/01
 !class binding interpretation 15-02-20
 !status work item 15-02-20
 !status received 15-02-20
@@ -8,7 +8,8 @@
 !subject Freezing of operations of incomplete types with completions deferred to a body
 !summary
 
-** TBD.
+When a profile is frozen at the end of a declarative part or package
+specification, any incomplete types that the profile contains are not frozen.
 
 !question
 
@@ -52,7 +53,7 @@ illegal.] Thus all of the declarations in package Inner are illegal.
 The changes to the usage of incomplete types in Ada 2012 (AI05-0151-1) would
 suggest that these subprograms should be legal. They could be called from a
 child unit without that child having to see the full type for Set, so they
-seem potentially useful. Should such subprograms be allowed? (???.)
+seem potentially useful. Should such subprograms be allowed? (Yes.)
 
 !recommendation
 
@@ -60,11 +61,111 @@ seem potentially useful. Should such subprograms be allowed? (???.)
 
 !wording
 
-** TBD.
+Modify 13.14(3/3) as modified by AI12-0103-1:
 
+The end of a declarative_part, protected_body, or a declaration of a library
+package or generic library package, causes freezing of each entity and profile
+declared within it, except for incomplete types. A proper_body, body_stub, or
+entry_body causes freezing of each entity and profile declared before it within
+the same declarative_part that is not an incomplete type; it only causes
+freezing of an incomplete type if the body is within the immediate scope of the
+incomplete type. {Freezing of a profile in these cases only freezes an incomplete
+subtype of the profile if the corresponding incomplete type would be frozen.}
+
+[RLB Note: I'm not sure we need the exception here; perhaps the simpler
+"Freezing of a profile in these cases only freezes subtypes of the profile that
+are not incomplete." is sufficient. I included the exception for the cases in
+the latter rule where the incomplete type is indeed frozen; however, I think
+that in such cases the incomplete type is frozen itself and thus it doesn't
+matter whether freezing the profile freezes it as well. Steve perhaps can
+create a counter-example where the type isn't frozen but a profile containing
+it is. If not, then it's impossible. ;-)]
+ 
 !discussion
 
-** TBD.
+13.14(3/4) has an explicit “hole” so that incomplete types whose completion is
+given in the body (so-called Taft-Amendment types) do not freeze. Otherwise,
+such incomplete types would be illegal as 13.14(17/3) would be violated when
+they were frozen at the end of the scope.
+
+Ada 2012 added explicit rules allowing operations like the ones in the
+question. It seems bizarre that these operations are always illegal because
+of freezing; it reduces the value of the new rules.
+
+Operations like the ones in the question can be useful to provide operations
+to child units of a subsystem on a Taft-Amendment type without having to make
+the full declaration visible.
+
+Such operations are limited to non-primitive operations as any primitive
+operations of a Taft-Amendment type are illegal by 3.10.1(9.3/2). However, as
+noted in the question, it's easy to declare non-primitive operations by adding
+a nested package; this trick is widely known among expert Ada programmers, so
+it's likely to be used in this case.
+
+----
+
+The reason that we need to freeze incomplete types is discussed in AI05-0017-1.
+In particular, it's necessary to prevent premature dispatching calls for
+ordinary (not Taft-Amendment) incomplete types. (Taft-Amendment incomplete
+types can't have primitive operations, so no dispatching calls can be made
+on an operations of them.)
+
+----
+
+The author created a complete ACATS-style test for an example like the one
+in the question. The test uses the operations in a child package where
+the completion is unknown. (This is usefully possible because the type
+is tagged incomplete, thus calls can be made so long as the object is passed
+intact.)
+
+Compiling this program on GNAT shows that GNAT does not detect the freezing
+violations. However, the child package containing the calls generates a
+lovely internal error message. Because of this, it is not possible to run
+the program.
+
+As such, it seems unlikely that anyone is depending on these operations
+working; neither the RM nor the only known fielded Ada 2012 implementation
+allows them. That's not particularly surprising; the capability was added by
+Ada 2012 and Taft-Amendment types aren't that common, so most likely no one
+has yet run into the intersection of both.
+
+----
+
+** Temporary (?) note **
+
+Interestingly, this fix would not allow the original ACATS test that brought
+up this question. In that test, a generic with a formal tagged incomplete
+type is instantiated, passing the Taft-Amendment type and the operations
+declared in the nested package. This new rule allows the operations to be
+declared without causing freezing problems. However, an instance freezes
+the profiles of formal subprograms except for those with *untagged* formal
+incomplete parameters. (Subprograms with tagged incomplete parameters freeze
+as they can be called within the subprogram, and calling an unfrozen profile
+is bad news.) We did not add any exception for the freezing of such profiles,
+thus 13.14(17/3) would be violated and the instance is illegal.
+
+Interestingly, this seems to show a problem with calling of subprograms
+with parameters of tagged incomplete types. Such calls are explicitly allowed
+by 3.10.1(10/3) [note that it only ban actual parameters of *untagged*
+incomplete views]. Since all calls freeze the profiles of the associated
+subprograms, any call whose parameters are tagged incomplete types
+without a completion will be illegal because of 3.10.1(9.3/2). That's
+intentional for cases like the one in AI12-0017-1. And it doesn't seem to
+be a problem *assuming* that any entity imported via a *with* is already
+frozen (somewhere) - some other unit must have the completion or the partition
+is illegal. (The language rules don't make this clear, probably they ought to.)
+With that assumption, any problematic call would either violate some other
+freezing rule (expression functions) or fail an elaboration check (other
+subprograms). Thus, we don't need to fix the problem, although it means that
+a generic cannot be instantiated in the same scope as these operations.
+(Which is annoying, but not fatal, as the instance could have been in the child
+unit, where no freezing would apply [we assume!].)
+
+Note that this instance caused an internal error in GNAT very similar to the
+one caused by the calls in the ACATS-style test for the example in the
+question.
+
+** End Temporary (?) note **
 
 !corrigendum 13.14(3/4)
 
@@ -77,8 +178,11 @@ No ASIS effect.
 
 !ACATS test
 
-** TBD.
-
+The problem was originally discovered in ACATS test CC51011, so some version
+of that test will test the fix. There also is the proposed test named C3A1005,
+a version of CC51011 without the generic units. If this AI is approved, that
+test can be issued (it tests some moderate priority 3.10.1 objectives that are
+currently on the testing list -- this AI would raise that priority somewhat).
 
 !appendix
 
