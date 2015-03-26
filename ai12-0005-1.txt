@@ -375,6 +375,43 @@ where Foo is given; it should be deleted.
 
 ***************************************************************
 
+!topic        Ada.Direct_IO: Index after Create resp. Open
+!reference  Ada 2012 RM A.8.2(3/2,7)
+!from         Christoph Grein  2014-09-25
+!discussion
+
+Neither Create nor Open specify the value of Index, which will be used for Read
+or Write, see A.8.5(3,6,11), for the very first access with the procedures
+without the Positive_Count parameter (must be 1, of course).
+
+Should this oversight be corrected?
+
+[Editor's note: Most of this thread is filed in AC-00264.]
+
+***************************************************************
+
+From: Egil Harald Hoevik
+Sent: Thursday, October  2, 2014  1:33 AM
+
+I believe that's covered by A.8(3-4)
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October  2, 2014  1:51 PM
+
+> I believe that's covered by A.8(3-4)
+
+Thanks!
+
+A.8(4) says "When a direct file is opened, the current index is set to one."
+Hardly could be any clearer than that. Perhaps it isn't in the best possible
+place, but it certainly is stated normatively.
+
+[Editor's note: I added AARM notes to make this cross-reference more obvious.]
+
+***************************************************************
+
 From: Randy Brukardt
 Sent: Friday, October 10, 2014  8:58 PM
 
@@ -391,7 +428,110 @@ added directly after null_procedure_declaration.
 
 ***************************************************************
 
-Editor's note (February 13, 2015): All of the items above this
+From: Steve Baird
+Sent: Tuesday, March 10, 2015  6:48 PM
+
+There may be no problem here, but the wording seems unclear to me.
+
+If you think it is clear enough, I'll probably shut up (I say "probably" just
+to reserve the right to change my mind).
+
+In 4.1.6, we've got a new note
+    The Constant_Indexing and Variable_Indexing aspects
+    cannot be redefined when inherited for a derived type,
+    but the functions that they denote can be modified by overriding
+    or overloading.
+
+I don't think the 4.1.6 wording makes it sufficiently clear that the set of one
+or more functions denoted by a C_I/V_I aspect is recalculated when we declare
+an extension. For example, if an ancestor type has C_I specified which denotes
+two functions, might a descendant of that type have three C_I functions with
+one inherited, one overriding, and one non-overriding? Presumably yes.
+
+If the descendant type overrides an inherited C_I function of the ancestor
+type, which function body gets executed for an indexing call if the prefix
+is not class-wide? Presumably the overrider's.
+
+How does all this work in a case like
+
+    package Pkg1 is
+      type T1 is tagged null record with Constant_Indexing => Foo;
+      function Foo (X : T1; Y : Integer; Z : Integer := 123) return T1;
+    end Pkg1;
+
+    package Pkg2 is
+       type T2 is new Pkg1.T1 with record F2 : Integer := 0; end record;
+       overriding
+       function Foo (X : T2; Y : Integer; Z : Integer := 456) return T2;
+    end Pkg2;
+
+    Aaa : Pkg.T2;
+    Bbb : Pkg.T2 := Aaa (789);
+
+? Presumably this is legal and the non-dispatching call returns a T2, not a T1
+(and the actual parameter passed in for Z is 456, not 123).
+
+It also seems a little odd that the equivalence rule which defines the dynamic
+semantics of these guys (4.1.6 (17/3)) occurs in a "Name Resolution Rules"
+section.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, March 11, 2015  1:42 PM
+
+> If you think it is clear enough, I'll probably shut up (I say 
+> "probably" just to reserve the right to change my mind).
+
+After sleeping on it, I see that the crux of the matter is the name resolution
+rule
+
+   When a generalized_indexing is interpreted as a constant (or
+   variable) indexing, it is equivalent to a call on a prefixed view of
+   one of the functions named by the Constant_Indexing (or
+   Variable_Indexing) aspect of the type of the
+   indexable_container_object_prefix with the given
+   actual_parameter_part, and with the indexable_container_object_prefix
+   as the prefix of the prefixed view.
+
+and, specifically, the meaning in the case of a derived type which inherits the
+aspect of the phrase
+     "the functions named by the Constant_Indexing (or
+      Variable_Indexing) aspect of the type"
+.
+
+I know what set we want that phrase to denote (it is the set of subprograms
+where the equivalent prefixed call would work as defined in 4.1.3(9.2/3)).
+
+My question is whether the current wording captures that intent.
+
+I think maybe it does and there is no problem, but I raise the question.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, March 11, 2015  2:38 PM
+
+I agree ("maybe it does"). The wording says "named by" and not the more usual
+"denoted by"; this means that it is the name of the function and not the
+declaration that is denoted that matters. Thus one starts with the name each
+time and then must figure out from that what is denoted. Obviously, that might
+be different for a derived type vs. the original type.
+
+What's not 100% clear to me is the implied (re-)resolution. Since one has a
+name by the rule, and one needs a declaration in order to make a call, I don't
+see how else one could arrive at a declaration. But it's not spelled out. Of
+course, that's typical of name resolution rules; the actual name resolution
+tends to be implicit in them.
+
+Thus I conclude that there is no problem (although perhaps adding an additional
+sentence to 4.1.6(17.c/3) would help future readers: "This equivalence is then
+resolved in the normal way; the aspect specifies a name, it does not denote
+declarations.")
+
+***************************************************************
+
+Editor's note (March 25, 2015): All of the items above this
 marker have been included in the working version of the AARM.
 
 ****************************************************************
