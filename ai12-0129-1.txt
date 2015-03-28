@@ -1,10 +1,12 @@
-!standard 9.5.1(2)                             15-03-23   AI12-0129-1/06
+!standard 9.5.1(2)                             15-03-27   AI12-0129-1/07
 !standard 9.5.1(4)
 !standard 9.5.1(5)
 !standard 9.5.1(7)
 !standard 9.5.3(15)
 !standard 9.5.3(23)
-!class Amendment 14-10-03
+!class binding interpretation 15-03-26
+!status Corrigendum 2015 15-03-26
+!status ARG Approved 9-0-2  15-03-26
 !status work item 14-10-03
 !status received 14-09-09
 !priority Medium
@@ -15,17 +17,16 @@
 
 A Boolean aspect Exclusive_Functions is added to the language.
 
-!problem
+!question
 
-The design of containers assumes that they are not accessed
-concurrently, on the ground that access can be protected with
-protected objects if necessary.
+The design of containers assumes that they are not accessed concurrently, on
+the ground that access can be protected with protected objects if necessary.
 
-However, containers provide functions that modify the state of the
-container; it is therefore not possible to access these through
-protected functions, as these can be called concurrently.
+However, containers provide functions that modify the state of the container;
+it is therefore not possible to access these through protected functions, as
+these can be called concurrently. Should there be a way to allow this? (Yes.)
 
-!proposal
+!recommendation
 
 Add a boolean aspect "Exclusive_Functions" for protected types and
 single protected objects to forbid concurrent execution of protected
@@ -54,62 +55,35 @@ separate Legality Rule.]
       protected functions behave in the same way as protected procedures
       with respect to mutual exclusion and queue servicing (see below).]
 
-   A protected operation is *exclusive* unless it is
-   a protected function and the Exclusive_Functions aspect of the
-   associated protected type is False.
+   A protected procedure or entry is an *exclusive* protected operation. A
+   protected function of a protected type *P* is an exclusive protected
+   operation if the Exclusive_Functions aspect of *P* is True.
 
-[Editor's note: Bob Duff suggested replacing the above with:
-   A protected procedure or entry is an *exclusive* protected operation.
-   A protected function is exclusive if the Exclusive_Functions aspect of
-   the {associated} protected type is True.
-I can't decide which I think is better, thus I presented both. I added
-"associated" to Bob's text as marked since it or something is necessary
-to specify what protected type we're talking about. Bob seems to think
-that it is unnecessary, but that's not true; there has to be some
-connection between the function and the type. Perhaps we could avoid
-"associated" by making it ever more explicit:
-   A protected procedure or entry is an *exclusive* protected operation.
-   A protected function of a protected type P is exclusive if the
-   Exclusive_Functions aspect of P is True.
-We could do the same with the original version:
-   A protected operation is *exclusive* unless it is a protected function
-   of a protected type P and the Exclusive_Functions aspect of P is False.
-Or we could use the reference to the function instead:
-   A protected operation is *exclusive* unless it is a protected function
-   F and the Exclusive_Functions aspect of the protected type that contains
-   F is False.
-And with Bob's version:
-   A protected procedure or entry is an *exclusive* protected operation.
-   A protected function F is exclusive if the Exclusive_Functions aspect of
-   the protected type that contains F is True.
-I think I prefer the penultimate version, but none of these seem wonderful
-to me.]
-
-Modify 9.5.1(4), first sentence:
+Replace the first sentence of 9.5.1(4) by:
 
    A new protected action is not started on a protected object while another
    protected action on the same protected object is underway, unless both
    actions are the result of a call on a nonexclusive protected function.
 
-Modify 9.5.1(5):
+Replace 9.5.1(5) by:
 
-   Starting a protected action on a protected object corresponds to acquiring
-   the execution resource associated with the protected object, either for
-   exclusive read-write access if the protected action is for a call on an
-   exclusive protected operation, or for concurrent read-only access otherwise;
+  * Starting a protected action on a protected object corresponds to acquiring
+    the execution resource associated with the protected object, either for
+    exclusive read-write access if the protected action is for a call on an
+    exclusive protected operation, or for concurrent read-only access otherwise;
 
-Modify 9.5.1(7):
+Replace 9.5.1(7) by:
 
-   [After performing an exclusive operation on a protected object, but prior
-   to completing the associated protected action, the entry queues (if any)
-   of the protected object are serviced (see 9.5.3).]
+   Redundant[After performing an exclusive protected operation on a protected
+   object, but prior to completing the associated protected action, the entry
+   queues (if any) of the protected object are serviced (see 9.5.3).]
 
-Modify 9.5.3(15):
-    If after performing, as part of a protected action on the associated
-    protected object, an exclusive operation on the object, the entry is
-    checked and found to be open.
+Replace 9.5.3(15) by:
+  * If after performing, as part of a protected action on the associated
+    protected object, an exclusive protected operation on the object, the
+    entry is checked and found to be open.
 
-Modify 9.5.3(23):
+Replace 9.5.3(23) by:
    When the entry of a protected object is checked to see whether it is open,
    the implementation need not reevaluate the condition of the corresponding
    entry_barrier if no variable or attribute referenced by the condition
@@ -119,7 +93,7 @@ Modify 9.5.3(23):
 
 !discussion
 
-According ARM A(3/2), there is no correctness guarantee on concurrent
+According RM A(3/2), there is no correctness guarantee on concurrent
 calls involving overlapping objects passed by reference. Indeed, most
 implementations of the standard containers break when the same
 container is used concurrently, even when the container is declared
@@ -168,10 +142,9 @@ Moreover, the whole workaround is fragile, since there is no way to
 ensure protected functions won't be carelessly added in the future by
 a programmer not aware of the rationale.
 
-So current version of Ada doesn't seem to adequately allow concurrency
+So the current version of Ada doesn't seem to adequately allow concurrency
 protection for objects whose read-only concurrent access is not safe,
-like standard containers, but it can be the case for user types as
-well.
+like standard containers, but it can be the case for user types as well.
 
 It is much easier and foolproof to have an aspect for protected types, that
 make protected function have concurrency semantics of protected
@@ -197,6 +170,40 @@ We don't want to have to come up with rules for inheritance and generic
 matching for this aspect (if there are multiple progenitors, they could have
 different values for the aspect); especially as the value of the aspect
 for an interface seems minimal (an interface has no bodies of its own).
+
+---
+
+The aspect works on a protected type rather than on individual protected
+operations. This avoids problems caused by internal calls between protected
+functions with different exclusivity. For instance:
+
+   protected type Ugh is
+      function Exists (Key : in Key_Type) return True;
+         with Exclusive_Function; -- Not Ada!!
+      function Element (Key : in Key_Type) return Element_Type;
+      ...
+   end Ugh;
+
+   protected body Ugh is
+      function Element (Key : in Key_Type) return Element_Type is
+      begin
+         if Exists (Key) then
+            ...
+         end if;
+      end Element;
+      ...
+   end Ugh;
+
+In a case like this, the call to Exists would require exclusivity, but the
+outer call to Element would not. Thus, (depending on the implementation) there
+would be a need to acquire the exclusivity lock (or read-write lock) in the
+middle of a protected action, and a need to evaluate barriers at the end of
+the protected action even though it started non-exclusive. Grabbing the lock
+could of course suspend the operation within a protected action, something
+that is not supposed to happen.
+
+We can imagine adding additional rules to avoid problems like this, but that
+clearly is taking something simple and making it more complex.
 
 ---
 
@@ -232,16 +239,124 @@ Note that it has always been the case that a protected function can modify
 global data (this includes objects allocated from a storage pool but only
 accessible from the protected object). Exclusive_Functions makes this a
 safer thing to do (it probably won't work today on an implementation that
-uses a separate read-only lock, although [as with any race condition] it make
-take a long time to fail in practice).
+uses a separate read-only lock, although [as with any race condition] it
+may take a long time to fail in practice).
 
 Thus, this is a useful feature in its own right; it's not exclusively tied to
 use for containers operations. Arguably, a more encompassing feature would be
 better, but it seems unlikely that a complex new feature would be worth the
 extra development time (both for the ARG and for implementers). The proposed
 feature is "good enough" to solve a variety of problems; it's unclear that a
-fancier feature would bring enough additional to be worth the much higher
-costs.
+fancier feature would bring enough additional value to be worth the much
+higher costs.
+
+!example
+
+The example in the discussion could be written:
+
+   protected type Protected_Container 
+      with Exclusive_Functions is
+      procedure Insert (Key : in Key_Type; Element : in Element_Type);
+      function Element (Key : in Key_Type) return Element_Type;
+   private
+      Unsafe_Container : Ordered_Map_Instance.Map;
+   end Protected_Container;
+
+!corrigendum 9.5.1(2)
+
+@dinsa
+Within the body of a protected function (or a function declared immediately
+within a @fa<protected_body>), the current instance of the enclosing protected
+unit is defined to be a constant (that is, its subcomponents may be read but
+not updated). Within the body of a protected procedure (or a procedure declared
+immediately within a @fa<protected_body>), and within an @fa<entry_body>, the
+current instance is defined to be a variable (updating is permitted).
+@dinss
+For a type declared by a @fa<protected_type_declaration> or for the
+anonymous type of an object declared by a @fa<single_protected_declaration>,
+the following language-defined type-related representation aspect
+may be specified:
+
+@xhang<@xterm<Exclusive_Functions>
+The type of aspect Exclusive_Functions is Boolean.
+If not specified (including by inheritance), the aspect is False.>
+
+@xindent<A value of True for this aspect indicates that
+protected functions behave in the same way as protected procedures
+with respect to mutual exclusion and queue servicing (see below).>
+
+A protected procedure or entry is an @i<exclusive> protected operation. A
+protected function of a protected type @i<P> is an exclusive protected
+operation if the Exclusive_Functions aspect of @i<P> is True.
+
+
+!corrigendum 9.5.1(4)
+
+@drepl
+A new protected action is not started on a protected object while another
+protected action on the same protected object is underway, unless both actions
+are the result of a call on a protected function. This rule is expressible in
+terms of the execution resource associated with the protected object: 
+@dby
+A new protected action is not started on a protected object while another
+protected action on the same protected object is underway, unless both actions
+are the result of a call on a nonexclusive protected function. This rule is
+expressible in terms of the execution resource associated with the protected
+object: 
+
+!corrigendum 9.5.1(5)
+
+@drepl
+@xbullet<@i<Starting> a protected action on a protected object corresponds to
+@i<acquiring> the execution resource associated with the protected object, either
+either for concurrent read-only access if the protected action is for a call
+on a protected function, or for exclusive read-write access otherwise;>
+@dby
+@xbullet<@i<Starting> a protected action on a protected object corresponds to
+@i<acquiring> the execution resource associated with the protected object, either
+for exclusive read-write access if the protected action is for a call on an
+exclusive protected operation, or for concurrent read-only access otherwise;>
+
+!corrigendum 9.5.1(7)
+
+@drepl
+After performing an operation on a protected object other than
+a call on a protected function, but prior to completing the associated protected
+action, the entry queues (if any) of the protected object are
+serviced (see 9.5.3).
+@dby
+After performing an exclusive protected operation on a protected object, but
+prior to completing the associated protected action, the entry queues (if any)
+of the protected object are serviced (see 9.5.3).
+
+!corrigendum 9.5.3(15)
+
+@drepl
+@xbullet<If after performing, as part of a protected action on the associated
+protected object, an operation on the object other than a call on a protected
+function, the entry is checked and found to be open.>
+@dby
+@xbullet<If after performing, as part of a protected action on the associated
+protected object, an exclusive protected operation on the object, the entry is
+checked and found to be open.>
+
+!corrigendum 9.5.3(23)
+
+@drepl
+When the entry of a protected object is checked to see whether it is open,
+the implementation need not reevaluate the @fa<condition> of the corresponding
+@fa<entry_barrier> if no variable or attribute referenced by the @fa<condition>
+(directly or indirectly) has been altered by the execution (or cancellation)
+of a protected procedure or entry call on the object since the @fa<condition>
+was last evaluated. 
+@dby
+When the entry of a protected object is checked to see whether it is open,
+the implementation need not reevaluate the @fa<condition> of the corresponding
+@fa<entry_barrier> if no variable or attribute referenced by the @fa<condition>
+(directly or indirectly) has been altered by the execution (or cancellation)
+of a call to an exclusive protected operation of the object since the
+@fa<condition> was last evaluated. 
+
 
 !ASIS
 
