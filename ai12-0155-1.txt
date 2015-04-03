@@ -1,4 +1,4 @@
-!standard 13.14(3/4)                                   15-03-26  AI05-0155-1/03
+!standard 13.14(3/4)                                   15-04-02  AI05-0155-1/04
 !class binding interpretation 15-02-20
 !status work item 15-02-20
 !status received 15-02-20
@@ -61,7 +61,7 @@ seem potentially useful. Should such subprograms be allowed? (Yes.)
 
 !wording
 
-Modify 13.14(3/3) as modified by AI12-0103-1:
+Modify 13.14(3/4):
 
 The end of a declarative_part, protected_body, or a declaration of a library
 package or generic library package, causes freezing of each entity and profile
@@ -71,6 +71,22 @@ the same declarative_part that is not an incomplete type; it only causes
 freezing of an incomplete type if the body is within the immediate scope of the
 incomplete type. {Freezing of a profile in these cases does not freeze an incomplete
 subtype of the profile.}
+
+Modify 13.14(10.2/4):
+
+At the place where a generic_instantiation causes freezing of a callable entity,
+the profile of that entity is frozen unless the formal subprogram corresponding
+to the callable entity has a parameter or result of a formal untagged incomplete
+type; if the callable entity is an expression function, the return expression
+expression of the expression function causes freezing{; if the formal subprogram
+corresponding to the the callable entity has a parameter or result of a formal
+incomplete type, freezing of a profile does not freeze an incomplete
+subtype of the profile}.
+
+AARM Reason: The last part only can apply if the parameter or result is a formal
+tagged incomplete type, as the entire profile is not frozen otherwise. We except
+incomplete types in this case so that calls that would be legal in a non-generic
+context can be used within a generic for a formal tagged incomplete type as well.
 
 !discussion
 
@@ -102,8 +118,14 @@ types can't have primitive operations, so no dispatching calls can be made
 on an operations of them.)
 
 Therefore, we only exclude freezing of incomplete types in contexts where
-no further premature calls can be made (the "global freezing contexts", or
+no further premature calls can be made (the "global freezing contexts"), or
 dispatching calls are impossible for other reasons.
+
+We have to make similar exceptions for generic instantiations, so that one
+can wrap code in a generic without it becoming illegal when instantiated.
+Luckily, normal generic formal subprograms are never dispatching, and
+abstract formal subprograms do not allow an incomplete controlling type.
+Thus, we don't need to freeze incomplete types here.
 
 ----
 
@@ -117,6 +139,72 @@ thus we don't need to specifically include those in profile freezing.
 The wording "subtype of a profile" seems a bit non-specific, but it echos the
 wording of 13.14(14/3) [which is the normal case for freezing a profile]. There
 is no reason for this to be different.
+
+----
+
+Notes on the 13.14(10.2/4) wording:
+
+We don't need to worry about which incomplete types are used in the profile,
+as any that don't correspond to a formal incomplete type will work as a
+similar parameter in a non-generic call. Either that's OK, or any such call
+would necessarily be illegal (if the incomplete type is untagged).
+
+[Note to Tucker: It might be the case that we could simply exclude any
+incomplete types from the profile of the actual, as it seems that any
+incomplete that would be legal would have had to have been declared outside
+of the generic, and that would work normally (whatever normally is). Such a
+case seems rather unlikely outside of ACATS tests and ARG examples, so
+perhaps the simpler wording is better.]
+
+[Note to Tucker II: The example that requires freezing is:
+
+   package Pack is 
+      type T is tagged; 
+      function F return access T'Class; 
+      function G (X : access T) return Integer; 
+      I : Integer := G (F); 
+      type T is tagged null record; 
+   end Pack;
+
+The call on F necessarily would fail an elaboration check (there is no legal
+expression that could be used in an expression function; an allocator would be
+premature and the prefix of 'Access cannot be incomplete). But the compiler
+still would have to generate code for a call without knowing where the tag is.
+
+This quite similar to the case described in the AARM, ending with AARM 13.14(i.u):
+"This is silly. If we're going to require compilers to detect the exception at 
+compile time, we might as well formulate the rule as a legality rule."
+
+However, there might be an alternative. We could adopt a Legality Rule stating
+that a dispatching call on an object of an incomplete type is illegal before
+a completion for an incomplete *type*. (We would not want such a rule to apply
+for an incomplete view, since those never require freezing, and it's not
+possible for any primitives to be imported that way anyway.) We already have a
+rule of that nature for Taft-Amendment types (any operations cannot be
+primitive), so it's not unprecedented.
+
+I don't think that there is a problem for untagged incomplete types (or, for
+that matter with tagged incomplete types that aren't dispatching). Direct uses
+of untagged incomplete types as parameters is illegal. Passing
+access-to-incomplete doesn't seem to cause any real problems (imagine the above
+example without "tagged"); a non-null value would have to have been created
+somewhere where the full definition is available, but if that is done, the
+call using access-to-incomplete doesn't need to look into it.
+
+[Bairdian aside: what happens if the access type has a discriminant constraint?
+Is that allowed? If it is, the check would need to know where the discriminants
+are, and that's not known until freezing. Janus/Ada has lots of bugs because of
+problems like that; I had to simply guess (based on what is known when the
+type is declared) and that got the ACATS to pass. But when I tried to do it
+right (raising an exception if an unfrozen discriminant was accessed), I wasted
+a week and got nowhere near getting anything to work. Took the check back out.
+End aside.]
+
+If we did that, then we could abandon any freezing of incomplete types
+(anywhere). Based on the AARM notes, that was the intended model for Ada 95.
+That probably would be simpler, but of course we'd have to let Steve tell us
+about all of the unlikely things that could happen. And that would be a lot
+more radical.]
 
 ----
 
@@ -137,36 +225,23 @@ allows them. That's not particularly surprising; the capability was added by
 Ada 2012 and Taft-Amendment types aren't that common, so most likely no one
 has yet run into the intersection of both.
 
+[Note to Tucker III: I can certainly live with not changing anything here,
+but then I certainly would want to have ACATS tests that ensure that the
+original example was detected as a freezing error. Else we have an "attractive
+hazard", something that looks like it should work, and might work on some
+compiler, but actually doesn't work. That probably goes for the entire
+instantiation of a generic with an incomplete type, too. (Banning that would
+certainly make Ed happier. I don't quite understand why that is so hard to
+implement, but of course things that should be easy can turn out hard in an
+existing implementation not prepared to handle it. Probably the hardest thing
+to make work in Janus/Ada would be "in out" parameters in functions, because
+the entire back-end assumes that a function does not need modify parameters
+after a call. That would be a very tough assumption to root out of the
+optimizer in particular.]
+
 ----
 
 ** Temporary (?) note **
-
-Interestingly, this fix would not allow the original ACATS test that brought
-up this question. In that test, a generic with a formal tagged incomplete
-type is instantiated, passing the Taft-Amendment type and the operations
-declared in the nested package. This new rule allows the operations to be
-declared without causing freezing problems. However, an instance freezes
-the profiles of formal subprograms except for those with *untagged* formal
-incomplete parameters. (Subprograms with tagged incomplete parameters freeze
-as they can be called within the subprogram, and calling an unfrozen profile
-is bad news.) We did not add any exception for the freezing of such profiles,
-thus 13.14(17/3) would be violated and the instance is illegal.
-
-We could have added another exception to 13.14(10.2/3) to allow that program.
-Something like: "Freezing a profile in this case only freezes types that
-are not tagged incomplete." Argubly, that should also be done, as it's somewhat
-odd to allow calls to subprograms but not to allow the same subprogram to be
-used as a formal parameter.
-
-We didn't add such a rule as almost all *useful* calls to subprograms with
-incomplete parameters have to occur in some other compilation unit (typically,
-a child unit). Moreover, all such local calls already are freezing violations.
-[Calls of subprograms with parameters of tagged incomplete types are explicitly
-allowed by 3.10.1(10/3) (note that it only ban actual parameters of *untagged*
-incomplete views). Since all calls freeze the profiles of the associated
-subprograms, any (local) call whose parameters are tagged incomplete types
-without a completion will be illegal because of 3.10.1(9.3/2). That's
-intentional for cases like the one in AI12-0017-1.]
 
 Calls in other units are OK, *assuming* that any entity imported via a *with*
 (or from a parent, which is another form of semantic dependence; those should
@@ -182,9 +257,7 @@ in the same scope as these operations. (Which is annoying, but not fatal, as
 the instance could have been in the child unit, where no freezing would
 apply [we assume!].)
 
-Note that this instance caused an internal error in GNAT very similar to the
-one caused by the calls in the ACATS-style test for the example in the
-question.
+It's not clear to me whether we should attempt to fix this problem.
 
 ** End Temporary (?) note **
 
