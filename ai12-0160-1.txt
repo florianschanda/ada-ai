@@ -1,0 +1,199 @@
+!standard 4.1.6(6/4)                                   15-04-01  AI05-0160-1/01
+!standard 4.1.6(9/4)
+!standard 3.6(22.2/3)
+!class binding interpretation 15-04-01
+!status work item 15-04-01
+!status received 15-03-30
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Adding an indexing aspect to an indexable container type
+!summary
+
+The use of Constant_Indexing and Variable_Indexing aspects has to be the same
+for all descendants of an indexable container type.
+
+!question
+
+AI12-0138-1 creates rules to prevent changing the values of certain aspects
+for a descendant of a type, in order that the meaning does not change.
+
+However, it doesn't take into account that some aspects have interrelated
+semantics. In particular, the meaning of Variable_Indexing depends in part on
+whether Constant_Indexing is specified. (The same is true for
+Constant_Indexing.)
+
+Consider:
+
+   package Pkg1 is
+      type Root is tagged private
+         with Variable_Indexing => A;
+      function A (Obj : aliased in out Root; I : in Natural) ...
+      ...
+   end Pkg1;
+
+   with Pkg1;
+   package Pkg2 is
+      type Leaf is new Pkg1.Root with private
+         with Constant_Indexing => B;
+      function A (Obj : aliased in out Leaf; I : in Natural)  ...
+      function B (Obj : in Leaf; I : in Natural) ...
+   end Pkg2;
+
+The declaration of Leaf is legal. Root does not have a Constant_Indexing
+function, so none of the nonoverridable rules are violated. But look what
+happens when we expand uses:
+
+   Obj1 : constant Leaf := ...;
+
+   Obj1(1)  expands to B(Obj1, 1)
+but
+   Root'Class(Obj1)(1) expands to A(Root'Class(Obj1), 1) since Root has no
+Constant_Indexing; in that case, the Variable_Indexing is used.
+
+This is a variation of the problems that the nonoverridable rules were
+intended to prevent; we don't want Obj(...) to meaning something different
+in a dispatching context than it does in a statically bound context. If this
+is not fixed, then a Pre'Class could evaluate to a different value than the
+same expression explicitly evaluated at a call-site.
+
+Should this be fixed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Replace the deleted 4.1.6(6/4) with:
+
+  If an ancestor of a type T is an indexable container type, then any explicit
+  specification of the Constant_Indexing or Variable_Indexing aspects shall be
+  confirming; that is, the specified NAME shall match the inherited aspect
+  (see 13.1.1).
+
+  AARM Ramification: If no aspect is specified for an ancestor indexable
+  container type (necessarily the other aspect is specified in that case, else
+  the type isn't indexable), then that aspect cannot be specified for a derived
+  type.
+
+Replace the deleted 4.1.6(9/4) with a singular version:
+
+  In addition to the places where Legality Rules normally apply (see 12.3), this
+  rule also applies in the private part of an instance of a generic unit.
+
+!discussion
+
+The Pre'Class example mentioned in the question occurs because the expression
+of a generalized indexing is resolved when the expression is defined. That
+means that if Root in the example above has the following procedure declaration:
+
+    procedure Proc (Obj : in Root; ...)
+       with Pre'Class => ... Obj(1) ...;
+
+Obj(1) will be expanded to A(Obj, 1) when Proc is frozen. This would be
+necessary without the proposed rule as B might have different parameters;
+consider what would happen if the second parameter of B had type Float.
+
+Now consider a call to Proc where the programmer tests the precondition
+explicitly (Obj1 as defined above to have type Leaf):
+
+    if ... Obj1(1) ... then
+        Proc (Obj1, ...);
+    end if;
+
+Obj1(1) in the if statement will evaluate B(Obj1, 1), while Obj1(1) in the
+Pre'Class will evaluate A(Obj1, 1). This would be a surprise. Indeed, the
+extensive revisions of AI12-0113-1 were designed to prevent this from happening
+for Pre'Class; it would be annoying to leave it in some cases.
+
+----
+
+This additional rule is sufficient to catch any problems when combined with
+the nonoverriding rules. In particular, there cannot be any problem with
+inherited aspects. The new rule means that all ancestors of a type either
+have a consistent set of aspects, or no aspects at all. If we have the case
+of a partial view derived from one ancestor A and a full view derived from
+another ancestor B, then either the indexing aspects of the two ancestors
+are the same (in which case there is no problem), or A has no indexing aspects
+at all (in which case the nonoverriding rules will prevent any problems).
+This latter case is equivalent to the partial view not having an ancestor
+at all, which also is covered by the nonoverriding rules.
+
+----
+
+This rule is incompatible with the original Ada 2012 definition, as well as
+the Corrigendum definition, but only in the case that someone tried to add
+additional indexing on a derived type. This ought to be rare as it violates the
+spirit (but not the letter) of the existing prohibitions.
+
+!corrigendum 4.1.6(6/4)
+
+!corrigendum 4.1.6(9/4)
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS B-Test should be constructed to test this rule.
+
+!appendix
+
+Part of private mail of March 30, 2015 (from Randy Brukardt)
+
+The new rules for "nonoverridable aspects" don't consider interactions between
+the aspects. That almost always works. Default_Iterator and Iterator_Element
+both have to given for the type to be usable in an iterator.
+Implicit_Dereference doesn't have a "mate".
+
+But Constant_Indexing and Variable_Indexing have related semantics, in that one
+can stand in for the other.
+
+Consider the following:
+
+   package Pkg1 is
+      type Root is tagged private
+         with Variable_Indexing => A;
+      function A (Obj : aliased in out Root; I : in Natural) ...
+      ...
+   end Pkg1;
+
+   with Pkg1;
+   package Pkg2 is
+      type Leaf is new Pkg1.Root with private
+         with Constant_Indexing => B;
+      function A (Obj : aliased in out Leaf; I : in Natural)  ...
+      function B (Obj : in Leaf; I : in Natural) ...
+   end Pkg2;
+
+So far as I can tell, the declaration of Leaf is legal. Root does not have a
+Constant_Indexing function, so none of the nonoverridable rules are violated.
+But look what happens when we expand uses:
+
+   Obj1 : constant Leaf := ...;
+
+   Obj1(1)  expands to B(Obj1, 1)
+but
+   Root'Class(Obj1)(1) expands to A(Root'Class(Obj1), 1) since Root has no
+   Constant_Indexing; in that case, the Variable_Indexing is used.
+
+[I'm presuming that the "Otherwise" in 16/3 is intended to cover the case where
+no Constant_Indexing is defined; otherwise there would be no wording defining
+that case at all, which would make no sense. And the intent was that only
+Variable_Indexing would be needed if the performance costs are not an issue.]
+
+This is almost the identical problem that we're trying to avoid by making the
+aspect nonoverridable in the first place. (Imagine that the Constant_Indexing on
+Leaf was a Variable_Indexing, and we were allowing such things. Then the same A
+vs. B would happen.)
+
+So it seems that some rule is missing here.
+
+Note that the reverse can also happen (if Root has Constant_Indexing and Leaf
+has Variable_Indexing, it would be variable contexts that changed meaning; a few
+of those would be legal either way, like object renaming).
+
+****************************************************************
+
