@@ -1,0 +1,302 @@
+!standard 12.6(8.5/2)                                    15-06-16  AI05-0165-1/01
+!class binding interpretation 15-06-16
+!status work item 15-06-16
+!status received 15-05-18
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Operations of class-wide types and formal abstract subprograms
+!summary
+
+The actual operation for a formal abstract subprogram can be the implicit
+operation created for T'Class.
+
+!question
+
+AI05-0131-1 is intended to allow the same set of implicitly defined "primitive"
+operations for class-wide types, whether they're imported via implicit
+inheritance (using primitives of a formal derived type) or via explicit
+specification (using formal subprograms).
+
+However, the AARM notes 12.6(8.e-m/2) make it clear that this is not the
+case for formal abstract subprograms.
+
+8.e/2
+Ramification: This means that the actual is either a primitive operation of the
+controlling type, or an abstract formal subprogram. Also note that this prevents
+the controlling type from being class-wide (with one exception explained below),
+as only specific types have primitive operations (and a formal subprogram
+eventually has to have an actual that is a primitive of some type).
+This could happen in a case like:
+8.f/2
+generic
+   type T(<>) is tagged private;
+   with procedure Foo (Obj : in T) is abstract;
+package P ...
+8.g/2
+package New_P is new P (Something'Class, Some_Proc);
+8.h/2
+The instantiation here is always illegal, because Some_Proc could never be a
+primitive operation of Something'Class (there are no such operations).
+That's good, because we want calls to Foo always to be dispatching calls.
+
+8.i/2
+Since it is possible for a formal tagged type to be instantiated with a
+class-wide type, it is possible for the (real) controlling type to be class-wide
+in one unusual case:
+8.j/2
+generic
+   type NT(<>) is new T with private;
+   -- Presume that T has the following primitive operation:
+   -- with procedure Bar (Obj : in T);
+package Gr ...
+8.k/2
+package body Gr is
+   package New_P2 is new P (NT, Foo => Bar);
+end Gr;
+8.l/2
+package New_Gr is new Gr (Something'Class);
+8.m/2
+The instantiation of New_P2 is legal, since Bar is a dispatching operation of
+the actual type of the controlling type of the abstract formal subprogram Foo.
+This is not a problem, since the rules given in 12.5.1 explain how this routine
+dispatches even though its parameter is class-wide.
+
+New_P (direct explicit import) is illegal (even if Some_Proc is a primitive of
+type Something and an implicit routine is created), while New_P2 (explicitly
+using an implicit import) is legal.
+
+This seems wrong: why should we allow implicit import (with all of the compiler
+complication associated) without allowing the matching explicit import? Should
+this be changed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 12.6(8.5/3) by:
+
+The actual subprogram for a formal_abstract_subprogram_declaration shall be a
+dispatching operation of the controlling type or of the actual type
+corresponding to the controlling type {or, if the actual type corresponding
+to the controlling type is a class-wide type T'Class, an implicitly declared
+subprogram corresponding to a primitive operation of type T (see Static Semantics
+below)}.
+
+Replace 12.6(8.e/2) by:
+
+Ramification: This means that the actual is either a primitive operation of the
+controlling type, an abstract formal subprogram, or the implicitly available
+primitive operation for a class-wide type.
+
+An explicit class-wide operation cannot be used for the actual of an formal
+abstract subprogram. Such an operation is never primitive (only specific
+types have primitive subprograms).
+
+This could happen in a case like:
+
+Replace 12.6(8.h/2) by:
+If Some_Proc is an explicit class-wide operation, the instantiation here is
+illegal, because Some_Proc is not a primitive operation of Something'Class
+(there are no such operations).
+
+However, if Some_Proc is a primitive operation of type Something, then the
+instantiation is legal; the actual is the implicitly generated subprogram
+described in Static Semantics below. This is not a problem, since the rules
+given in 12.5.1 explain how this routine dispatches even though its parameter
+is class-wide.
+
+Replace 12.6(8.i/2) by:
+We allow this special case because it is possible for a class-wide operation
+to be primitive inside of an instance, and the contract model does not allow
+us to make such cases illegal. As such, it seems inconsistent to not allow
+the same in explicit instantiations.
+
+Specifically, since it is possible for a formal tagged type to be instantiated
+with a class-wide type, it is possible for the (real) controlling type to
+be class-wide in the following unusual case:
+
+Replace 12.6(8.m/2) by:
+The instantiation of New_P2 is legal, since Bar is a dispatching operation of
+the actual type of the controlling type of the abstract formal subprogram Foo.
+Again, the rules given in 12.5.1 explain how this routine dispatches.
+
+!discussion
+
+This is a rather unimportant case. It can't come up for the motivating case for
+formal abstract subprograms -- Generic_Dispatching_Consturctor -- because the
+implicit declarations are not constructed for functions that only have
+controlling results.
+
+Still, consistency suggests that both cases should work the same. It's silly
+to prohibit New_P when a similar example can be constructed.
+
+Note that we cannot make New_P2 or New_Gr illegal without breaking the contract
+model (New_P2 is in a body, and the problem comes about because of the instance
+New_Gr; other instances could quite clearly be legal and useful.) Thus the
+only alternative to make this consistent is to allow it in the explicit case.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test is needed to check this possibility.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Monday, May 18, 2015 11:50 PM
+
+I'm not sure that we considered the interaction (if any) between AI05-0131-1 and
+formal abstract subprograms.
+
+AI05-0131-1 added matching rules so that formal subprograms could resolve the
+same implicit subprograms as exist for primitives of a formal type.
+Specifically, 12.6(9.1-9.2/3):
+
+If a subtype_mark in the profile of the formal_subprogram_declaration denotes a
+formal private or formal derived type and the actual type for this formal type
+is a class-wide type T'Class, then for the purposes of resolving the
+corresponding actual subprogram at the point of the instantiation, certain
+implicit declarations may be available as possible resolutions as follows:
+
+  For each primitive subprogram of T that is directly visible at the point of
+  the instantiation, and that has at least one controlling formal parameter, a
+  corresponding implicitly declared subprogram with the same defining name, and
+  having the same profile as the primitive subprogram except that T is
+  systematically replaced by T'Class in the types of its profile, is potentially
+  use-visible. The body of such a subprogram is as defined in 12.5.1 for
+  primitive subprograms of a formal type when the actual type is class-wide.
+
+As written, this clearly applies to formal_abstract_subprogram_declarations,
+as those are one of the two kinds of formal subprograms.
+
+Now consider 12.6(8.5/2) and its lengthy Ramification (with some annotation on
+the annotations by me):
+
+The actual subprogram for a formal_abstract_subprogram_declaration shall be a
+dispatching operation of the controlling type or of the actual type
+corresponding to the controlling type.
+
+8.e/2
+Ramification: This means that the actual is either a primitive operation of the
+controlling type, or an abstract formal subprogram. Also note that this prevents
+the controlling type from being class-wide (with one exception explained below),
+as only specific types have primitive operations (and a formal subprogram
+eventually has to have an actual that is a primitive of some type).
+
+[Randy: This is clearly true. The implicit subprograms described above and in
+12.5.1 for primitives are never described as "primitive".]
+
+This could happen in a case like:
+8.f/2
+generic
+   type T(<>) is tagged private;
+   with procedure Foo (Obj : in T) is abstract;
+package P ...
+8.g/2
+package New_P is new P (Something'Class, Some_Proc);
+8.h/2
+The instantiation here is always illegal, because Some_Proc could never be a
+primitive operation of Something'Class (there are no such operations).
+
+[Randy: Still true.]
+
+That's good, because we want calls to Foo always to be dispatching calls.
+
+[Randy: Not as obvious, see below.]
+
+8.i/2
+Since it is possible for a formal tagged type to be instantiated with a
+class-wide type, it is possible for the (real) controlling type to be class-wide
+in one unusual case:
+8.j/2
+generic
+   type NT(<>) is new T with private;
+   -- Presume that T has the following primitive operation:
+   -- with procedure Bar (Obj : in T);
+package Gr ...
+8.k/2
+package body Gr is
+   package New_P2 is new P (NT, Foo => Bar); end Gr;
+8.l/2
+package New_Gr is new Gr (Something'Class);
+8.m/2
+The instantiation of New_P2 is legal, since Bar is a dispatching operation of
+the actual type of the controlling type of the abstract formal subprogram Foo.
+This is not a problem, since the rules given in 12.5.1 explain how this routine
+dispatches even though its parameter is class-wide.
+
+[Randy: Now we've stepped in it. See below.]
+
+---- End of AARM quote.
+
+According the AARM, it's OK to use a primitive of formal type that turns out to
+be implicitly generated. So why are we preventing using an *explicit* reference
+to an implicitly subprogram the same way? That was indeed the problem that we
+were trying to fix with AI05-0131-1, but it seems that we left a corner of it.
+
+That is, it seems that New_P (AARM 8.g/2) should be legal if New_P2 (AARM 8.l/2)
+is legal when used in instance New_Gr. Note that we cannot make New_P2 or New_Gr
+illegal without breaking the contract model (New_P2 is in a body, and the
+problem comes about because of the instance New_Gr; other instances could quite
+clearly be legal and useful.)
+
+OTOH, this issue is so minor that we could (should?) put it on the "things we're
+not going to fix" list (or, I suppose, ignore it completely). The issue does not
+come up for the motivating use for formal abstract subprograms (generic
+dispatching constructor), as functions without controlling parameters are not
+included in the implicitly constructed subprograms. And it's unclear whether
+anyone would expect the instantiation to work, especially as any call requires
+the controlling operands to be dynamically tagged.
+
+As has happened frequently recently, this has come up because I'm writing a test
+to check that illegal instantiations are detected (that seems important for
+instances of Generic_Dispatching_Constructor at a minimum). But how should I
+test T'Class instances:
+
+(1) Test it exactly as written in the RM. (That is, include a New_P test case
+    which is marked illegal.)
+
+(2) Put in a commented out test case like New_P, marked "pending ARG
+    resolution". Possibly include a New_P-like example envolving a
+    parameterless-function (which would be illegal under any interpretation).
+
+(3) Ignore the class-wide cases altogether.
+
+I don't like (3) as that would leave a permanent hole in testing for instances
+of Generic_Dispatching_Constructor. It's easy to imagine someone using a
+class-wide type by mistake or misunderstanding. That leaves (1) or (2); and that
+choice comes down determined where this is (A) So insufficiently important that
+we wouldn't ever plan to fix it [which leans toward (1)]; (B) Insufficiently
+important to fix, but we'll put it on the list of things we're not going to fix
+the wording for [which leans toward (2) - would not want the ACATS insisting on
+semantics that we think is wrong]; or (C) fix when we get a round tuit [which
+requires (2)].
+
+P.S. GNAT seems to only implement 12.6(9.1-2/3) for operators, so it just
+reports a profile mismatch. It does, however, think that class-wide types have
+primitive operations. :-)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, May 26, 2015  3:43 PM
+
+I would vote for (2), that is put a commented-out test that does a New_P-style
+instantiation, and explain it is illegal in Ada2012, but might become legal in
+some future version of the standard.  This would also give the GNAT folks a
+chance to ponder the difficulty of supporting it relative to the expected
+benefit.  They might find that it is *easier* to support it than to flag it as
+illegal, if they are going to support the New_P2-style instantiation.  Or they
+might decide it would add significantly to the complexity.
+
+In either case, I would put the New_P2-style of instantiation in a separate
+test, rather than making it an integral part of the one-and-only-test for 'Class
+actuals.
+
+****************************************************************
