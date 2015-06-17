@@ -1,0 +1,363 @@
+!standard 7.3.2(9/4)                              15-06-17    AI12-0167-1/01
+!class ramification 15-06-17
+!status work item 15-06-17
+!status received 15-05-29
+!priority Low
+!difficulty Medium
+!subject Type_Invariants and tagged-type View Conversions
+!summary
+
+Modifying a component of type T of some other class-wide type which happens
+inside an abstraction for type T does not cause an invariant check.
+
+!question
+
+Consider the following example:
+
+   procedure Type_Invariant_Breaker is
+
+      type Root is tagged null record;
+
+      package Pkg is
+         type Has_Invariant is private;
+
+         procedure Oops (X : in out Root'Class);
+         procedure Rely_On_Incoming_Invariant (Y : Has_Invariant);
+      private
+         type Has_Invariant is record Lo, Hi : Integer := 0; end record
+          with Type_Invariant => (Has_Invariant.Lo <= Has_Invariant.Hi);
+      end Pkg;
+
+      type Ext is new Root with record Field : Pkg.Has_Invariant; end record;
+
+      package body Pkg is
+         procedure Break_It (Xx : out Has_Invariant) is
+         begin
+           Xx := (Lo => 1, Hi => 0);
+         end;
+
+         procedure Oops (X : in out Root'Class) is
+         begin
+           if X in Ext'Class then
+              Break_It (Ext (X).Field);  ------ <<<<< danger, Will Robinson
+           end if;
+         end;
+
+         procedure Rely_On_Incoming_Invariant (Y : Has_Invariant) is
+         begin
+           pragma Assert (Y.Lo <= Y.Hi);
+         end;
+      end Pkg;
+
+      Ext_Var : Ext;
+   begin
+      Pkg.Oops (Ext_Var);
+      Pkg.Rely_On_Incoming_Invariant (Ext_Var.Field);
+   end;
+
+At the danger spot, we are changing Field using a local procedure which is
+allowed to violate the Type_Invariant that applies to its type, Has_Invariant.
+Unfortunately Field is a component of a class-wide object, and this will violate
+the general principal that components of a class-wide object should satisfy
+their invariants (as implied by 7.3.2(20.1/4)).
+
+Do we need an additional type invariant check to close this hole? (No.)
+
+!response
+
+We know that type invariants have holes. AARM 7.3.2(24.a/3) discusses the
+known holes. The principles are that holes should be unlikely, and that
+holes cannot be caused by a client of the type with the invariant without
+cooperation of the package author.
+
+This hole clearly meets both criteria. It seems impossible to cause this
+problem without having two intertwined type hierarchies. As such, it won't
+occur very often since designers are trying to reduce, not increase, coupling.
+
+Second, this can only happen when there is a conversion toward the leaves of
+a derivation tree. To be safe, such a conversion has to be protected with
+an explicit check of some type (or subclass). These also are discouraged
+in OOP code because they don't extend well (especially checks of a specific
+type).
+
+Third, this check would be inside the body of the abstraction. Experience
+writing ACATS tests for type invariants shows that such checks surprise
+users (even experienced Ada users) because they violate the model of type
+invariant checking (that invariants are only checked when entering and leaving
+the abstraction, not inside). Existing checks that occur inside the package
+(such as the default initialization check) trip users, even those that think
+they know better (like the author of this AI).
+
+The first two factors require help from the author of the abstraction with the
+type T having a type invariant. There has to be some subprogram that copies a
+broken value of type T into a component of some other type which does not
+visibly have a component of type T (if it is known to have a component of type
+T, then an invariant check would be performed on the object at the package
+boundary -- recall that the invariant check rules are on "parts of T"). This
+is unlikely and avoidable. (If all abstractions are private types, this
+problem can't happen, for instance.)
+
+The third factor suggests that closing the hole would be as surprising as
+leaving it. Consider the following modification of the example:
+
+           if X in Ext'Class then
+              Set_Lo (Ext (X).Field, 1);
+              Set_Hi (Ext (X).Field, 1);
+           end if;
+
+Where the operations do the obvious thing. In this case, fixing the hole would
+also cause reasonable code to raise an invariant failure (the invariant would
+fail after the call to Set_Lo, but it is OK after the call to Set_Hi). It
+appears that the fix would cause more trouble than it would catch.
+
+For all these reasons, we do not change the rules.
+
+!wording
+
+None suggested.
+
+[Editor's note: We could consider adding a user note and/or extending the
+existing AARM Ramification. I didn't try.]
+
+!discussion
+
+(See Response.)
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test could be created to check this, but we don't really care if an
+implementation makes an unrequired check in such a case.
+
+!appendix
+
+From: Tucker Taft
+Sent: Friday, May 29, 2015  12:13 PM
+
+Internal discussions at AdaCore about how to enforce statically the various
+Type_Invariant rules led us to some questions about class-wide types and view
+conversions.  Some of this might apply to Dynamic_Predicates applied to tagged
+types as well.
+
+Here is Steve's example of the problem:
+
+procedure Type_Invariant_Breaker is
+
+   type Root is tagged null record;
+
+    package Pkg is
+       type Has_Invariant is private;
+
+       procedure Oops (X : in out Root'Class);
+       procedure Rely_On_Incoming_Invariant (Y : Has_Invariant);
+    private
+       type Has_Invariant is record Lo, Hi : Integer := 0; end record
+	with Type_Invariant => (Has_Invariant.Lo <= Has_Invariant.Hi);
+    end Pkg;
+
+    type Ext is new Root with record Field : Pkg.Has_Invariant; end record;
+
+    package body Pkg is
+       procedure Break_It (Xx : out Has_Invariant) is
+       begin
+	 Xx := (Lo => 1, Hi => 0);
+       end;
+
+       procedure Oops (X : in out Root'Class) is
+       begin
+	 if X in Ext'Class then
+	    Break_It (Ext (X).Field);  ------ <<<<< danger, Will Robinson
+	 end if;
+       end;
+
+       procedure Rely_On_Incoming_Invariant (Y : Has_Invariant) is
+       begin
+	 pragma Assert (Y.Lo <= Y.Hi);
+       end;
+    end Pkg;
+
+    Ext_Var : Ext;
+begin
+    Pkg.Oops (Ext_Var);
+    Pkg.Rely_On_Incoming_Invariant (Ext_Var.Field);
+end;
+
+-------
+
+At the danger spot, we are changing Field using a local procedure which is
+allowed to violate the Type_Invariant that applies to its type, Has_Invariant.
+Unfortunately Field is a component of a class-wide object, and this will violate
+the general principal that components of a class-wide object should satisfy
+their invariants (as implied by 7.3.2(20.1/4)).  For SPARK we are considering
+various rules.  In some sense the view conversion that converts X : Root'Class
+to an object of type Ext, after the update to Field, undergoes an implicit
+reverse view conversion.  If that reverse "view conversion" had the same checks
+as an explicit forward conversion, that would catch the problem. However, the
+conversion could have been written:
+
+     Ext'Class(X).Field
+
+in which case there is no specific-to-class-wide conversion to trigger 20.1/4.
+So probably a more general rule is needed that disallows updating part of a
+class-wide object in a way that violates any invariants.  Alternatively, this
+would just be considered a "hole" in Type_Invariants, not caught until some
+later point (if ever).
+
+It would seem that a Dynamic_Predicate also should be checked after updating a
+field via a view conversion, but we don't generally worry about predicates after
+component updates, so perhaps that is beside the point...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May 29, 2015  7:57 PM
+...
+> So probably a more general rule is needed that disallows updating part
+> of a class-wide object in a way that violates any invariants.
+> Alternatively, this would just be considered a "hole" in
+> Type_Invariants, not caught until some later point (if ever).
+
+I think it has to be a hole. I can't imagine what "updates in a way that
+violates any invariants" means in terms of a real, enforcable language rule --
+it would have to embody the entirety of the existing invariant rules. And we
+have plenty of holes.
+
+Besides, this sort of structure is quite dubious for a class-wide type. Not only
+are you writing code that depends on a particular tag (always a bit dubious in
+itself), but you're also doing so in the body of the type of the component. It
+seems very strange to have an operation of Root'Class in this package that
+defines a particular unrelated OOP -- seems like a nasty coupling. Usually
+class-wide operations belong with the declaration of Root or in a separate
+package. So this structure is completely avoidable, certainly it wouldn't exist
+in "good" OOP code (because that never tests for specific tags, which might
+break if a new extension is defined).
+
+The big difference between the holes that we've plugged and the ones that we
+haven't is that the ones we've left are (1) unlikely and (2) completely
+avoidable by the author of the package. That is, if a hole can be caused by a
+client without help from the package author, then we plug it. Otherwise, (and
+especially if it requires Bairdian hoops), if the package author can avoid it
+simply by ensuring that it doesn't unnecessarily couple operations and it
+doesn't visibly export components, then it's hard to worry about it.
+
+(A rule that avoids all holes for type invariants is the ensure that no parts of
+any composite object envolved are visibly exported [from any package]. [Well,
+you also need to avoid exporting access-to-subprograms of operations in a
+package that has type invariants; that's sort of covered by the first rule.]
+This example violates that because the parts of Ext are visibly exported.
+
+> It would seem that a Dynamic_Predicate also should be checked after
+> updating a field via a view conversion, but we don't generally worry
+> about predicates after component updates, so perhaps that is beside
+> the point...
+
+Definitely. I can't imagine why this case would be more important than any other
+assignment to a component.
+
+Anyway, I don't think it is worth trying to fix this one. Type invariants aren't
+useful enough (they're surely a distant 4th in the existing kinds of contract
+assertions) to bust our brains over this Bairdian hole. (Besides, didn't I raise
+something like this when we originally talked about what became 7.3.2(20.1/3)? I
+couldn't quite write the example, but it seemed obvious that it existed.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, May 29, 2015  8:58 PM
+
+> ...
+>> So probably a more general rule is needed that disallows updating
+>> part of a class-wide object in a way that violates any invariants.
+>> Alternatively, this would just be considered a "hole" in
+>> Type_Invariants, not caught until some later point (if ever).
+>
+> I think it has to be a hole. I can't imagine what "updates in a way
+> that violates any invariants" means in terms of a real, enforcable
+> language rule
+> -- it would have to embody the entirety of the existing invariant
+> rules. And we have plenty of holes. ...
+
+It might be roughly:
+
+    Within the immediate scope of a type T to which a Type_Invariant applies,
+    any update to an object of type T that is a part of a class-wide object is
+    immediately followed by a check that the object still satisfies its
+    Type_Invariant.
+
+I agree it is not clear it is worth closing this hole.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May 29, 2015  9:23 PM
+
+Wouldn't that have nasty distributed overhead? As proposed here, it could happen
+on any assignment of a class-wide object:
+
+    procedure Foo (A : in out Something'Class; B : Something'Class) is
+    begin
+       if Glarch(A) then
+          A := B; -- (1)
+       end if;
+    end Foo;
+
+(1) might be an update of an object of type T that is part of A, if some
+extension of Something has a component of type T. And that could be true for any
+class-wide type (in the absence of bind-time analysis) occuring anywhere in the
+immediate scope of T (which includes children, doesn't it?). For a
+dyed-in-the-wool OOP programmer, that could be a lot.
+
+Probably you don't really mean *any* update, because an assignment like (1)
+isn't going to cause trouble (the T within B has to be OK, or have been checked
+via this rule). But I don't know how to narrow that down without likely missing
+cases.
+
+> I agree it is not clear it is worth closing this hole.
+
+Doing nothing (other than an AARM note??) is clearly the easier solution, both
+on us and on implementers. I think I'm in favor of that, 'cause I don't see this
+biting many people (and we already tolerate holes in the Type_Invariant
+checking).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, May 30, 2015  6:59 AM
+
+> (1) might be an update of an object of type T that is part of A, if
+> some extension of Something has a component of type T. And that could
+> be true for any class-wide type (in the absence of bind-time analysis)
+> occuring anywhere in the immediate scope of T (which includes
+> children, doesn't it?). For a dyed-in-the-wool OOP programmer, that could be a lot.
+
+Right, the wording would have to make it clear that it is only if the object
+visibly has a part of type T, and that part is being updated.
+
+> Probably you don't really mean *any* update, because an assignment
+> like (1) isn't going to cause trouble (the T within B has to be OK, or
+> have been checked via this rule). But I don't know how to narrow that
+> down without likely missing cases.
+
+See above.  No need to worry about class-wide assignments per-se, since we are
+presuming that all parts of a class-wide object already satisfy their
+invariants.  So we probably want to say an update *other than* by an assignment
+to a class-wide object.
+
+>> I agree it is not clear it is worth closing this hole.
+>
+> Doing nothing (other than an AARM note??) is clearly the easier
+> solution, both on us and on implementers. I think I'm in favor of
+> that, 'cause I don't see this biting many people (and we already
+> tolerate holes in the Type_Invariant checking).
+
+We try to minimize the holes, of course, but I agree that if the wording or the
+implementation is too nasty, then we should ignore it (SPARK folks don't really
+have that option, but they are talking about static analysis, not run-time
+overhead).
+
+****************************************************************
+
+
