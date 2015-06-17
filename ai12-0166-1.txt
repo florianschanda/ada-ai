@@ -1,0 +1,468 @@
+!standard 6.1.1(34/3)                                     15-06-17  AI05-0166-1/01
+!standard 9.5(3/3)
+!standard 9.5(7.1/3)
+!class binding interpretation 15-06-17
+!status work item 15-06-17
+!status received 15-05-21
+!priority Medium
+!difficulty Easy
+!qualifier Omission
+!subject External calls to protected functions that appear to be internal calls
+!summary
+
+An internal call is not allowed in a precondition expression or as a default parameter.
+
+The protected action of a call on a protected entry or operation starts after the
+evaluation of any preconditions.
+
+!question
+
+Textually within the spec for a protected type Ppp which declares a protected
+function Fff, a call to Fff is an internal call by 9.5(3/3). The same is also
+true for a call to Ppp.Fff by 4.1.3(4).
+
+This seems problematic in two cases:
+
+     1) In a precondition for a protected operation -
+
+        The RM says it is unspecified whether precondition evaluation
+        takes place before or after starting the protected action.
+        If it occurs before, then we have an internal call occurring
+        before any protected action has begun, which could allow unsafe
+        concurrent access.
+        [There is no problem with postconditions; with postconditions,
+        it is an external call that would be problematic.]
+
+     2) In the default expression for a parameter of a protected
+        operation -
+
+        It's quite clear that in a call to a protected operation,
+        parameter evaluation precedes starting the protected action.
+        So in this case, it is guaranteed that the internal call
+        will take place before starting the protected action (which
+        is bad).
+
+Should some fix be made? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 6.1.1(34/3):
+
+The precondition checks are performed in an arbitrary order, and if any of
+the class-wide precondition expressions evaluate to True, it is not specified
+whether the other class-wide precondition expressions are evaluated. The
+precondition checks and any check for elaboration of the subprogram body are
+performed in an arbitrary order. [It is not specified whether in]{In} a call
+on a protected operation, the checks are performed before [or after]
+starting the protected action. For an entry call, the checks are performed
+prior to checking whether the entry is open.
+
+[Editor's note: This is not required to fix the actual problem, but there
+seems to be no advantage to the variability, either for an implementation
+or for a user. More in the !discussion below.]
+
+Add after 9.5(7.1/3):
+
+A call on an protected function that occurs within a precondition
+expression (see 6.1.1) or a default_expression of a parameter_specification
+for an protected entry or protected operation shall not be an internal call.
+
+AARM Reason: These calls will be made before the start of the protected
+action, and thus would not be subject to the expected mutual exclusion.
+As such, they would be an automatic race condition (the state of the called
+object could change before the start of the protected action for the call
+on the protected entry or subprogram.
+
+[Editor's note: The limitation to entry or protected operation is needed to
+allow internal calls on subprograms that are declared inside of a protected
+operation. That case is rather unlikely, so we could ignore it, but then
+we'd have a language wart in the other direction (something that is illegal
+for no reason and probably is checked inconsistently). This would look
+something like:
+
+     protected body Prot3 is
+        function Fff return Boolean is
+        begin
+           return True;
+        end Fff;
+        entry Eee when True is
+           function GGG (A : Boolean := FFF) return Boolean is
+           begin
+              return A and Something;
+           end;
+        begin
+           if GGG then
+              null;
+           end if;
+        end Eee;
+     end Prot3;
+
+Second Editor's note: We have to say "default_expression of a
+parameter_specification" as the syntax default_expression is used for
+discriminants, components, and formal objects, and we don't want this
+rule to apply to any of those.
+
+End Editor's notes.]
+
+AARM To Be Honest: 6.1.1 actually defines "specific precondition expression"
+and "class-wide precondition expression". This rule is intended to apply to
+both. [Remember, a protected type that implements an interface is considered
+tagged, so a class-wide precondition would be legal on a protected operation.]
+
+!discussion
+
+We could have put new Legality Rules in 6.1 and 6.1.1 instead; we didn't do
+that because there would then be two rules, and those rules would have a
+bunch of forward references to "internal call", "protected operation", and
+so on.
+
+---
+
+The change to 6.1.1(34/3) is not required, but there seems to be no good
+reason to leave it unspecified. If we had required the protected action
+to start first, then internal calls could have been allowed, but such calls
+would almost always represent a race condition (as the state of the protected
+object state could change arbitrarily before the start of the protected
+action). With the current rule, users cannot use such calls reliably (they
+might work on some implementation, but not on another). Since there seems to
+be no benefit for the variability, we eliminate it.
+
+---
+
+An example of the first problem would be:
+
+   procedure Prob1 is
+     protected type Prot1 is
+        function Fff return Boolean;
+        entry Eee with Pre => FFF; -- Illegal by new rule.
+     private
+     end Prot1;
+
+     protected body Prot1 is
+        function Fff return Boolean is
+        begin
+           return True;
+        end Fff;
+        entry Eee when True is
+        begin
+           null;
+        end Eee;
+     end Prot1;
+
+     Obj : Prot1;
+  begin
+    Obj.Eee; -- Would make an internal call before the start of the
+             -- protected action.
+  end Prob1;
+
+An example of the second problem would be:
+
+   procedure Prob2 is
+     protected type Prot2 is
+        function Fff return Boolean;
+        entry Eee (A : in Boolean := Fff); -- Illegal by new rule.
+     private
+     end Prot2;
+
+     protected body Prot2 is
+        function Fff return Boolean is
+        begin
+           return True;
+        end Fff;
+        entry Eee (A : in Boolean := Fff) when True is
+        begin
+           null;
+        end Eee;
+     end Prot2;
+
+     Obj : Prot2;
+  begin
+    Obj.Eee; -- Would make an internal call before the start of the
+             -- protected action.
+  end Prob2;
+
+This second problem was tested on several Ada compilers (since this is just
+Ada 95 code), and all of the tested compilers had some sort of internal error
+caused by making an internal call outside of a protected object. That suggests
+that this is not a very important capability, and making it illegal would be
+an improvement over the current practical situation.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS B-Test should be created to check the new rule.
+
+!appendix
+
+From: Steve Baird
+Sent: Thursday, May 21, 2015  6:59 PM
+
+Textually within the spec for a protected type Ppp which declares a protected
+function Fff, a call to Fff is an internal call. The same is also true for a
+call to Ppp.Fff by 4.1.3(4).
+
+This seems problematic in two cases (thanks to Randy for pointing out the second
+one; thanks also to Tuck for help in clarifying the current situation):
+
+     1) In a precondition for a protected operation -
+
+        The RM says it is unspecified whether precondition evaluation
+        takes place before or after starting the protected action.
+        If it occurs before, then we have an internal call occurring
+        before any protected action has begun, which could allow unsafe
+        concurrent access.
+        [There is no problem with postconditions; with postconditions,
+        it is an external call that would be problematic.]
+
+     2) In the default expression for a parameter of a protected
+        operation -
+
+        It's quite clear that in a call to a protected operation,
+        parameter evaluation precedes starting the protected action.
+        So in this case, it is guaranteed that the internal call
+        will take place before starting the protected action (which
+        is bad).
+
+To illustrate the problem, Randy wrote the following example:
+
+   procedure Baird is
+     protected type Prot2 is
+        function Fff return Boolean;
+        entry Eee (A : in Boolean := Fff);
+     private
+     end Prot2;
+
+     protected body Prot2 is
+        function Fff return Boolean is
+        begin
+           return True;
+        end Fff;
+        entry Eee (A : in Boolean := Fff) when True is
+        begin
+           null;
+        end Eee;
+     end Prot2;
+
+     Obj : Prot2;
+  begin
+    Obj.Eee;
+  end Baird;
+
+Do folks agree that there is a problem here? A problem that warrants fixing?
+
+If so, then I think we want to consider tweaking the definition of
+internal/external call so that in the cases we are discussing which are
+currently classified as internal calls
+    1) A call in a default parameter expression is an external call; and
+    2) A call in a postcondition expression remains (as it is today)
+       an internal call; and
+    3) A call in a precondition expression is either internal or
+       external depending on the implementation's choice about when
+       to start the protected action.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, May 21, 2015  9:46 PM
+
+> ... Do folks agree that there is a problem here? A problem that
+> warrants fixing?
+
+Yes.
+
+>
+> If so, then I think we want to consider tweaking the definition of
+> internal/external call so that in the cases we are discussing which
+> are currently classified as internal calls
+>     1) A call in a default parameter expression is an external call; and
+>     2) A call in a postcondition expression remains (as it is today)
+>        an internal call; and
+>     3) A call in a precondition expression is either internal or
+>        external depending on the implementation's choice about when
+>        to start the protected action.
+
+I believe we should consider changing the rule, and specifying that
+preconditions are always evaluated before the protected action begins.  The
+current flexibility does not seem to be helping the user nor particularly
+helping the implementor.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May 26, 2015  3:18 PM
+
+...
+> Do folks agree that there is a problem here? A problem that warrants
+> fixing?
+
+Yes. At least, the case here should be illegal (every compiler I tried it on had
+some form of error, many internal). That follows because the definition of
+internal/external call is syntactic.
+
+> If so, then I think we want to consider tweaking the definition of
+> internal/external call so that in the cases we are discussing which
+> are currently classified as internal calls
+>     1) A call in a default parameter expression is an external call;
+> and
+>     2) A call in a postcondition expression remains (as it is today)
+>        an internal call; and
+>     3) A call in a precondition expression is either internal or
+>        external depending on the implementation's choice about when
+>        to start the protected action.
+
+This is *not* a "tweak". As I mentioned above, the definition of internal vs.
+external call is purely syntactic (direct_name or expanded_name is internal, all
+else is external). Changing that to a semantic definition is a huge change,
+particularly for educational reasons (you would invalidate all existing books).
+
+I think that a direct_name should always remain as an internal call, and thus
+using a direct_name in these places should simply be illegal. We could "tweak"
+(to use your term) the definition of what is an expanded_name in order to allow
+them in these locations to be treated as an external call (that *looks* like an
+external call, with the current instance being used, which is what we want --
+indeed, I thought that is what it meant until Steve pointed out otherwise).
+
+Finally, I agree with Tucker; this problem shows that having the start of the
+protected action associated with a precondition to be implementation-defined
+clearly leads to madness. People who write preconditions need to know whether
+the calls are internal or external (internal is easier to deal with, because it
+means that the precondition will hold after the call, since no one can interrupt
+it). We need to choose one and live with it rather than being wishy-washy. (I'd
+lean toward making it part of the protected action, because it's easier to
+reason about; but a choice is more important than the exact choice.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, May 26, 2015  3:59 PM
+
+> ... Finally, I agree with Tucker; this problem shows that having the
+> start of the protected action associated with a precondition to be
+> implementation-defined clearly leads to madness. People who write
+> preconditions need to know whether the calls are internal or external
+> (internal is easier to deal with, because it means that the
+> precondition will hold after the call, since no one can interrupt it).
+> We need to choose one and live with it rather than being wishy-washy.
+> (I'd lean toward making it part of the protected action, because it's
+> easier to reason about; but a choice is more important than the exact
+> choice.)
+
+It is a mistake in my view to refer to the internal state of the protected
+object in a precondition, since that is inevitably a race condition.  If you
+really care about the state, you should turn the precondition into an entry
+barrier and make the protected operation into an entry.  We already specify that
+for entry calls, the preconditions are evaluated before putting the caller on
+the queue, so they really should be preconditions on the *parameter* values, not
+on the internal state of the object.  I think making these into internal calls
+would just lull users into thinking that there is no race condition, when in
+fact any precondition that depends on the internal state is certainly "racey."
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Tuesday, May 26, 2015  4:18 PM
+
+I fully agree with Tuck on this one.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May 26, 2015  4:51 PM
+
+...
+> It is a mistake in my view to refer to the internal state of the
+> protected object in a precondition, since that is inevitably a race
+> condition.
+
+OK, but then why allow any calls into the object at all? That is a race
+condition for external calls, too, along with the possibility that the state
+(and thus the result) has changed between the evaluation of the precondition and
+the execution of the body.
+
+Ergo, any calls into the current instance are illegal (they're internal calls by
+the current definition, and we wouldn't therefore have to change that.
+
+> If you really care about the
+> state, you should turn the precondition into an entry barrier and make
+> the protected operation into an entry.  We already specify that for
+> entry calls, the preconditions are evaluated before putting the caller
+> on the queue, so they really should be preconditions on the
+> *parameter* values, not on the internal state of the object.  I think
+> making these into internal calls would just lull users into thinking
+> that there is no race condition, when in fact any precondition that
+> depends on the internal state is certainly "racey."
+
+Fair enough. I'm most interested in getting rid of the silly
+implementation-dependency here. And, as previously noted, I'm strongly opposed
+to ever having any direct_names represent external calls; no one will have a
+clue as to what's going on for such cases. If such calls are most likely going
+to represent a race condition anyway, why allow them at all in preconditions
+(with *any* semantics)?
+
+The default parameter case I came up with clearly is never used by anyone (since
+I have yet to find a compiler that can successfully compile and execute it). So
+we surely don't have to allow it, either. That would completely eliminate the
+problem, in the easiest way possible. Let's not bend our brains to rewrite much
+of 9.5 (about half) to deal with these apparently junk cases.
+
+ ***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, May 26, 2015  8:34 PM
+
+> ... That would
+> completely eliminate the problem, in the easiest way possible. Let's
+> not bend our brains to rewrite much of 9.5 (about half) to deal with
+> these apparently junk cases.
+
+Excellent suggestion.  Disallow calls on protected functions of the associated
+protected object (i.e. those that would be interpreted syntactically as
+"internal calls") in preconditions and default expressions.   Nice clean
+solution.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, May 27, 2015  3:39 AM
+
+> I think making these into internal calls would just lull users into
+> thinking that there is no race condition, when in fact any
+> precondition that depends on the internal state is certainly "racey."
+
+Not sure about that.
+
+A PO may have an Initialize procedure and an Is_Initialized function, and you
+have to call Initialize before anything else, but once initialized it stays so.
+No race condition, and it looks to me like a reasonable use case.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, May 27, 2015  6:55 AM
+
+Enforcing that would be difficult, since the state could change at any moment.
+Better would be to make the protected object self-initializing, and avoid the
+initial race condition.
+
+The suggestion to disallow "self" calls in Preconditions and default expressions
+seems simplest and safest.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Sunday, June  7, 2015  10:39 AM
+
+If we go this route, we might as well get rid of the implementation-dependency
+of when preconditions on protected operations are evaluated. The ability to
+include calls like JPR's Is_Initialized as internal(!) calls after the lock has
+been obtained, was the only(?) reason why the implementation-dependency was
+introduced in the first place. At least, that is my recollection.
+
+****************************************************************
