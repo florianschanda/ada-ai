@@ -1,4 +1,4 @@
-!standard C.6(15)                                   14-10-06    AI12-0128-1/02
+!standard C.6(15)                                   15-06-03    AI12-0128-1/03
 !standard C.6(20)
 !standard C.6(22/2)
 !class Amendment 14-10-03
@@ -31,6 +31,20 @@ The language should be defined so this doesn't happen.
 !proposal
 
 (See Wording.)
+
+[Editor's note: In March 2015, GNAT Implemented an aspect Volatile_Full_Access
+to deal with this problem. Unfortunately, I've been unable to find anything
+explaining how this relates to Volatile (the description is that it works
+"just like Volatile", but that's nonsense, as Volatile is recursive and that
+invokes C.6(22/2) on components, which clearly must NOT apply to components of
+Volatile_Full_Access objects, else the access necessarily would be less than
+full. The other problem is precisely what is being accessed "fully" in the
+case of subtypes with this aspect (presuming that it really is "just like
+Volatile", it can be specified on types and subtypes as well as on objects).
+
+Thus, I didn't try to write up this proposal, as I fear that it would end up
+quite different than what AdaCore actually implemented. (Maybe that's
+necessary.)]
 
 !wording
 
@@ -84,6 +98,16 @@ AARM Reason: Inside the generic, the restrictions on access would not be known
 and thus enforced. If passed as an actual to a generic *in* parameter, a copy
 would be made. Similarly, the designated type for an access type would not
 enforce the restrictions on access to an exact size object.
+
+Add after C.6(20.a):
+
+AARM To Be Honest:
+    For an volatile-but-not-atomic object, multiple (divisible) operations may
+    be needed to implement a single read or write in the program. That might
+    include one or more reads in the case of writing some by not all bits of
+    a machine scalar. On the other hand, for an atomic object, all operations
+    have to be indivisible, so the operations should do exactly what is
+    specified in the code.
 
 !discussion
 
@@ -214,6 +238,10 @@ C.6(20) [there would be no read in the source]. I don't see any rules
 allowing compilers to reject such component accesses or to reject volatile
 objects with such components, so does that mean C.6(20) is baloney?
 Or do we have a hole? Or what?
+
+We've suggested the minimum solution to this problem (adding a To Be Honest
+note), but it not clear that's a good solution to the problem.
+
 
 !example
 
@@ -1834,5 +1862,115 @@ peripherals.
 
 These code generators would have to be more restricted if they would follow
 C.6(20) with all its consequences...
+
+****************************************************************
+
+From: Robert Dewar
+Sent: Saturday, March 21, 2015  8:57 AM
+
+We have had continued problems with people trying to use pragma Atomic for 
+mapping memory-mapped variables. There are two problems
+
+a) Atomic does not guarantee that read/write references use a single
+  instruction to access *ALL* the bits of the object, as is often expected
+  and required. It is allowable (and most certainly GNAT takes advantage of
+  this) to access e.g. a single field in an atomic record with a byte load
+  instruction even if the record is a word.
+
+b) The atomic synchronization semantics are inappropriate in this case.
+
+We just implemented pragma/aspect Volatile_Full_Access which is just like
+Volatile except that it guarantees that every read/write access to an object
+with this aspect reads or writes all the bits in a single instruction.
+
+I suspect this new aspect is really what 99% of programmers trying to do
+memory mapped I/O really want, and may be worth considering for addition to
+the language.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, March 21, 2015  8:29 PM
+
+> We have had continued problems with people trying to use pragma Atomic 
+> for mapping memory-mapped variables.
+
+This problem was reported to Ada-Comment last July. AI12-0128-1 was created to
+(potentially) address it.
+
+> There are two problems
+> 
+> a) Atomic does not guarantee that read/write references use a single 
+> instruction to access *ALL* the bits of the object, as is often 
+> expected and required. It is allowable (and most certainly GNAT takes 
+> advantage of this) to access e.g. a single field in an atomic record 
+> with a byte load instruction even if the record is a word.
+
+It's more than "allowed". It's strongly recommended, because the components
+of a volatile object are also volatile, and thus the Implementation Advice
+C.6(22/2) applies to it:
+
+A load or store of a volatile object whose size is a multiple of
+System.Storage_Unit and whose alignment is nonzero, should be implemented by
+accessing exactly the bits of the object and no others. 
+
+This is advice in name only; the only reason we didn't make it a requirement
+was that we couldn't find any way to say that normatively.
+
+In this case, we want to turn this off for components.
+
+> b) The atomic synchronization semantics are inappropriate in this case.
+
+Right. That I wasn't able to convince the person who reported it, so I didn't
+make much effort to bring this AI to the attention of the full ARG.
+
+> We just implemented pragma/aspect Volatile_Full_Access which is just 
+> like Volatile except that it guarantees that every read/write access 
+> to an object with this aspect reads or writes all the bits in a single 
+> instruction.
+
+On what does it work? Only on an object, or anywhere that Volatile can be used?
+The latter seems to be problematical, since the definition of volatile is
+recursive.
+
+I had suggested an aspect specific to volatile objects (in addition, as opposed
+to making another kind of volatile). Of course, I don't think anyone else ever
+commented on that. Either way works.
+
+> I suspect this new aspect is really what 99% of programmers trying to 
+> do memory mapped I/O really want, and may be worth considering for 
+> addition to the language.
+
+Something certainly should be added to the language. Your suggestion is probably
+better than mine (which was aimed at not making compiler writers do much work),
+if we can figure out some way to turn off C.6(20) and C.6(22/2) for the
+components of such an object.
+
+In the case of C.6(20):
+
+The external effect of a program (see 1.1.3) is defined to include each read
+and update of a volatile or atomic object. The implementation shall not
+generate any memory reads or updates of atomic or volatile objects other than
+those specified by the program. 
+
+This doesn't make any sense for volatile bit-mapped components, whether or not
+exact size is being required. In such a case, a read is necessary before a
+write in order to figure out the bits not being changes, but that violates a
+strict reading of the wording.
+
+One could argue that the Dewar rule applies here (a read before a write is the
+only sensible way to implement such a thing, thus it must be allowed), but we
+clearly don't want to allow that for atomic objects, for the reason discussed
+in AARM C.6(20.a) -- "active" memory. So we ought to have at a minimum a To Be
+Honest note on the lines of:
+
+    For an volatile-but-not-atomic object, multiple (divisible) operations may
+    be needed to implement a single read or write in the program. That might
+    include one or more reads in the case of writing some by not all bits of
+    a machine scalar. OTOH, for an atomic object, all operations have to be
+    indivisible, so the operations should do exactly what is specified in the
+    code.
+
+Going to be fun. ;-)
 
 ****************************************************************

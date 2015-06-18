@@ -2262,3 +2262,57 @@ packages, so best would be if some pragmas could be devised that makes the
 relevant check more general.
 
 ***************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May 26, 2015  3:55 PM
+
+> The discussion section of this AI shows an example of tampering with 
+> elements that the tampering checks detect, basically involving 
+> obtaining a reference to an element of a vector, and then using that 
+> reference to call a procedure which appends an item to container, 
+> which could cause the array to be increased in size, leaving the 
+> original reference pointing to garbage.
+> 
+> I'm wondering if it would be possible to catch this sort of error at 
+> compile time rather than at run time.
+
+I keep thinking about this, and wanted to write something up so I can stop
+thinking about it and do something actually on my work list.
+
+The answer to Brad's question is yes, and in fact the main thing we need is
+the proposal for the Global aspect. But the result would be wildly incompatible
+(because of course no existing subprogram has a global aspect).
+
+Specifically, tampering with elements effectively is the same as saying that
+the container cannot be written (other than by the reference itself, of
+course). So, when tampering with elements is prohibited, any attempt to write
+the container other than by the reference could be an error. (We'd probably
+want to somehow define an aspect to mean this, so the rules aren't completely
+aribtrary.)
+
+That's easy for direct uses (as when the result of Reference is renamed), but
+it's messier when calls are involved (the most important such case being when
+the result of Reference is passed as a parameter). Here the (proposed) Global
+aspect is a huge help: the rule could be that the call is illegal if the
+subprogram's Global aspect allows writing of the container. Since the vast
+majority of calls would not even know about the container in question, most
+calls would work fine.
+
+The problem here being that the default meaning if there is no Global aspect is
+"writes all", which clearly would have to be illegal. We could mitigate that
+somewhat by making the error suppressible (assuming that idea gets implemented),
+but it still would be too incompatible (in my view, anyway) to use it
+unconditionally on the existing containers. Thus, the idea would be best used
+on new containers (specifically the task-safe ones designed for use in parallel
+loops and the like).
+
+Tucker had noted that the "of" form of iterator is a combination of an iterator
+and a reference, so the same compile-time tampering check would be OK there as
+well (the reference needs the strong check in any case, and it's stronger than
+the check for the iterator). However, it would be way too fierce for tampering
+with cursors situations for regular iterators (it would prevent modifying the
+element in an iterator, which of course would be nonsense). So it would seem
+that would need to remain a run-time check. That's probably OK, the number of
+iterators in a program is far less than the number of calls to Reference.
+
+***************************************************************

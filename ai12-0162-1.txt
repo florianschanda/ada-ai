@@ -1,0 +1,200 @@
+!standard B.3.3(25/2)                                    15-06-04  AI05-0162-1/01
+!class binding interpretation 15-06-04
+!status work item 15-06-04
+!status received 15-04-28
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Memberships and Unchecked_Unions
+!summary
+
+Program_Error is raised if any individual membership test fails the rule of
+B.3.3(25/2).
+
+!question
+
+B.3.3(25/2) says:
+"Evaluation of a membership test if the subtype_mark denotes a constrained
+unchecked union subtype and the expression lacks inferable discriminants."
+
+But Ada 2012 changed memberships to test a membership choice list. There is no
+"THE" subtype_mark, there could be several. And of course there are potentially
+several expressions involved as well; we added a prefix "tested_" to clarify
+that in the membership wording (and it has become a simple_expression to boot).
+
+Should this be reworded? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify B.3.3(25/2):
+
+Evaluation of a membership test if {a membership_choice}[the] subtype_mark
+denotes a constrained unchecked union subtype and the
+{tested_simple_expression}[expression] lacks inferable discriminants.
+
+!discussion
+
+This wording will cause the membership
+   Non_Inferable_Expr in Con_UU | Uncon_UU
+to raise Program_Error rather than evaluating to True. We could have
+required that all of the subtypes fail this check before we raise
+Program_Error, but this would mean that we'd be allowing an individual
+membership test whose result is undefined, and allowing that because
+these results are ORed (any ORed with True is True). That seems unusual and
+unnecessary as such an expression makes little sense to begin with (why write
+a membership which is always True? And if so, why combine it with one that
+requires an actual test?). It's important that these things are well-defined,
+but how they're defined isn't that important.
+
+It was suggested that we could make this rule about an individual membership
+test (by inserting "individual" in front of "membership test"), but it still
+would be weird to talk about "the subtype_mark" (since the test might be
+against an expression instead). So the amount of wording change seems about
+the same.
+
+Note that the choice_expression case is covered by B.3.3(23/2) if necessary,
+as evaluating that choice is defined to be an evaluation of primitive equality
+for a record type; if there is no user-defined equality, then B.3.3(23/2)
+applies. (If there is a user-defined equality, then B.3.3(23/2) does not apply
+and the call is made; the implementation of the user-defined equality either
+works around the problem or triggers one of these rules itself.)
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test could check that this rule is properly implemented, but as
+interesting cases are rather pathological, and simple cases are already tested
+by test CXB3021, additional tests are very low priority.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Monday, April 20, 2015  11:32 PM
+
+I'm working though the objectives for Unchecked_Unions so that I can issue a
+bunch of tests submitted by AdaCore years ago. Of course, this means reading
+the rules carefully for the first time in forever.
+
+B.3.3(25/2) says:
+"Evaluation of a membership test if the subtype_mark denotes a constrained
+unchecked union subtype and the expression lacks inferable discriminants."
+
+But Ada 2012 changed memberships to test a membership choice list. There is no
+"THE" subtype_mark, there could be several. And of course there are potentially
+several expressions involved as well; we added a prefix "tested_" to clarify
+that in the membership wording (and it has become a simple_expression to boot).
+
+This should say something like
+"Evaluation of a membership test if a membership_choice subtype_mark denotes a
+constrained unchecked union subtype and the tested_simple_expression lacks
+inferable discriminants."
+
+P.S. I'd love to find a volunteer to write a usage-oriented C-Test for
+Unchecked_Unions. (Hint, Hint.) That needs to pass an object of such a type to
+some C-code (probably emulating some C API) and receive some answer back that
+depends on the union. I think I'd spend longer trying to write the C code for
+that than would be healthy. :-) (I can do the Ada part if necessary, it's the
+C part I need help with.) The submitted tests mostly try corner cases and
+Legality Rules; definitely needed but the primary use should be tested, too.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, April 21, 2015  7:21 AM
+
+Im willing to write the c test. It might be a few weeks before I'd get around
+to it though.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, April 21, 2015  8:44 AM
+
+...
+> B.3.3(25/2) says:
+> "Evaluation of a membership test if the subtype_mark denotes a 
+> constrained unchecked union subtype and the expression lacks inferable discriminants."
+>
+> But Ada 2012 changed memberships to test a membership choice list. 
+> There is no "THE" subtype_mark, there could be several. And of course 
+> there are potentially several expressions involved as well; we added a 
+> prefix "tested_" to clarify that in the membership wording (and it has 
+> become a simple_expression to boot).
+
+Good catch.
+
+> This should say something like
+> "Evaluation of a membership test if a membership_choice subtype_mark 
+> denotes a constrained unchecked union subtype and the 
+> tested_simple_expression lacks inferable discriminants."
+
+We could say that it returns True if any of the subtype_marks are
+unconstrained, but I suppose it is a bit weird to have undefined values
+connected with an "or else" with True.  If we decide to return True if any
+of the choices are unconstrained, then we should say "every membership_choice
+subtype_mark" instead of "a membership_choice subtype_mark".  I could go either
+way on this...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, April 21, 2015  2:52 PM
+
+I thought about that, which was the main reason that this has to be an AI for 
+discussion. We need to decide what happens with:
+
+    Expr in Con_UU | Uncon_UU
+
+but that case is pretty pathological (the membership is always True, so why
+write it at all, and if you do, why include the constrained one?), so I don't
+know if it really matters what we decide (just that we decide something). The
+main need for rewording is so that
+
+    Expr in Con1_UU | Con2_UU
+
+is well-defined. But even there, it seems likely that most would do the right
+thing.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, April 21, 2015  3:03 PM
+
+> ... The main need for rewording is so that
+>
+>      Expr in Con1_UU | Con2_UU
+>
+> is well-defined. But even there, it seems likely that most would do 
+> the right thing.
+
+I agree with you, this is all pathological, so your original suggestion seems
+simpler, and avoids having to talk about "undefined or else True."
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, April 24, 2015  7:00 AM
+
+> This should say something like
+> "Evaluation of a membership test if a membership_choice subtype_mark 
+> denotes a constrained unchecked union subtype and the 
+> tested_simple_expression lacks inferable discriminants."
+
+Do we really need a change? B.3.3(25/2) defines an individual membership test 
+(admitedly, the word "individual" is in extremly fine print), and then 27.1/3
+applies:
+
+For the evaluation of a membership test using in whose membership_choice_list
+has more than one membership_choice, the simple_expression of the membership test
+is evaluated first and the result of the operation is equivalent to that of a
+sequence consisting of an individual membership test on each membership_choice
+combined with the short-circuit control form or else.
+
+****************************************************************

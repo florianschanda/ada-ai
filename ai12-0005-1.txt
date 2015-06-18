@@ -531,7 +531,224 @@ declarations.")
 
 ***************************************************************
 
-Editor's note (March 25, 2015): All of the items above this
+Editor's note (April 2, 2015): All of the items above this
+marker are included in the Corrigendum version of the AARM.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, April 26, 2015  5:54 PM
+
+There is some lack of clarity in the RM relating to the use of a subtype with a
+Static_Predicate that is declared in the scope of an "Ignore" Assertion_Policy.
+For example, in AARM 5.4(13, 13.a) it says the following:
+
+   13 Otherwise (the value is not covered by any discrete_choice_list,
+      perhaps due to being outside the base range), Constraint_Error is raised.
+
+   13.a  Ramification: In this case, the value is outside the base range of its
+         type, or is an invalid representation.
+
+13.a is not correct in the presence of subtype predicates.  An object can have
+a "valid representation" and still have a value that does not satisfy its
+Static_Predicate, and hence not be covered by any choice list.  This is easy to
+accomplish if "pragma Assertion_Policy(Static_Predicate => Ignore)" applies
+when the subtype is declared.  Hence 13.a should be refined to include the
+case of a value that does not satisfy a Static_Predicate.
+
+It should also be clarified that X'Valid being False does *not* mean that X has
+an invalid representation.  If X is in the appropriate range, but does not
+satisfy the predicates of its nominal subtype, then X'Valid will return False,
+but X is still "valid."  This is confusing, and probably deserves a "user note"
+somewhere.
+
+More generally it might be appropriate to augment the AARM implementation notes
+that say what happens with subtypes with Static_Predicates that are being
+ignored.  In particular, it should be clarified that, given an object X of such
+a subtype S, Constraint_Error is a possible outcome in "case" statements with X
+as the case expression (the situation described in 5.4(13,13.a) above),
+membership test "X in S" might return False, X'Valid might return False, etc.
+Be that as it may, this is *not* erroneous execution.  The results are totally
+predictable, repeatable, and portable (and potentially confusing ;-).
+
+***************************************************************
+
+From: Robert Dewar
+Sent: Sunday, April 26, 2015  7:05 PM
+
+the case statement should definitely raise CE in my view (P.S. that is the
+current treatment in GNAT).
+
+***************************************************************
+
+From: Jeff Cousins
+Sent: Monday, April 27, 2015  4:14 AM
+
+5.4 13.a needs updating, but it's pretty clear from 5.4 13, 3.8.1 10.1/3,
+11.4.2 10/3 and 4.9 26/3 that there should be a Constraint_Error.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, April 27, 2015  10:36 AM
+
+...
+> 13.a is not correct in the presence of subtype predicates.  
+> An object can have a "valid representation" and still have a value 
+> that does not satisfy its Static_Predicate, and hence not be covered 
+> by any choice list.  This is easy to accomplish if "pragma 
+> Assertion_Policy(Static_Predicate => Ignore)" applies when the subtype 
+> is declared.  Hence 13.a should be refined to include the case of a 
+> value that does not satisfy a Static_Predicate.
+
+This just looks like a case where the editor (me) and the AI author (Bob)
+failed to notice that AARM note needs updating. Hardly a big deal.
+ 
+> It should also be clarified that X'Valid being False does
+> *not* mean that X has an invalid representation.  If X is in the 
+> appropriate range, but does not satisfy the predicates of its nominal 
+> subtype, then X'Valid will return False, but X is still "valid."  This 
+> is confusing, and probably deserves a "user note" somewhere.
+
+In hindsight, this probably was a mistake; we should have left 'Valid to
+validity and let people that wanted to get the predicates involved to use
+memberships. But it is what it is; it's water over the bridge or under the dam
+now. :-)
+
+Perhaps a note is worthy. Are you drafting one?? (Or do I have to do
+*everything*? :-)
+
+> More generally it might be appropriate to augment the AARM 
+> implementation notes that say what happens with subtypes with 
+> Static_Predicates that are being ignored.  In particular, it should be 
+> clarified that, given an object X of such a subtype S, 
+> Constraint_Error is a possible outcome in "case"
+> statements with X as the case expression (the situation described in 
+> 5.4(13,13.a) above), membership test "X in S"
+> might return False, X'Valid might return False, etc.  Be that as it 
+> may, this is *not* erroneous execution.  The results are totally 
+> predictable, repeatable, and portable (and potentially confusing ;-).
+
+That seems unnecessary. This happened to be the absolute top priority on my
+testing list (it has been for quite a while); that's partly because I had
+sorted all of the items with the same priority in clause order, and something
+in 3.2 doesn't have much chance of anything with the highest priority to occur
+in front of it.
+
+Anyway, I wrote those tests (two) tonight, so the ACATS now checks that
+memberships, 'Valid, and for loops use the predicates even if disabled (and
+that the checks are not actually made in subtype conversion contexts). So it's
+hardly likely that any implementor will not be aware of those effects.
+
+I just added an objective for 5.4(13) to check the Constraint_Error case (it
+was previously marked as untestable, but clearly this case is testable).
+Since it would be based on the test I wrote tonight, it probably will get
+written in the coming weeks, so that shouldn't surprise anyone, either.
+(Especially after we fix the AARM note.)
+
+***************************************************************
+
+From: Bob Duff
+Sent: Friday, May 15, 2015  5:50 AM
+
+> This just looks like a case where the editor (me) and the AI author 
+> (Bob) failed to notice that AARM note needs updating. Hardly a big deal.
+
+I admit that when I wrote that AI, I wasn't thinking about Assertion_Policy.
+So I'm not surprised there are bugs related to that.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 18, 2015  8:25 PM
+
+AARM 3.9(18.c/2), referring to Generic_Dispatching_Constructor, says:
+
+Note that any tagged type will match T (see 12.5.1). 
+
+T is declared:
+   type T (<>) is abstract tagged limited private;
+
+The issue here is that while the note for formally correct, it fails to note
+that some instances would be illegal anyway.
+
+Specifically, if the tagged type A is a tagged incomplete view (from an
+incomplete type, formal incomplete type, or limited with), using it as the
+actual in an instance of Generic_Dispatching_Constructor is illegal by rule
+(an actual type for a formal private type is not one of the places listed
+where the name of an incomplete view is allowed).
+
+Similarly, if the tagged type A is a tagged partial view before its completion
+(from a private type or private extension), using it as the actual in an
+instance of Generic_Dispatching_Constructor is illegal because the type will
+be frozen by the instantiation, but that would violate 13.14(17) [or, if you
+prefer, 7.3(5), or even 3.11.1(8) -- this rule is repeated three times in the
+RM!].
+
+Thus I suggest a simple rewrite of the AARM annotation:
+
+Note that {almost} any tagged type {can be used in an instance of
+Generic_Dispatching_Constructor}[will match T (see 12.5.1)]. {Using a tagged
+incomplete view or a tagged partial view before the completion of the type in
+such an instance would be illegal; all other tagged types can be used in an
+instance of Generic_Dispatching_Constructor.}
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, May 18, 2015  10:05 PM
+
+That's fine with me, though I don't think it is necessary.  Incomplete types
+are just that, incomplete, and are not really "types" in the normal sense.
+Also, freezing is almost always treated as an orthogonal issue.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 18, 2015  11:05 PM
+
+Sure, if you're in language lawyer mode. (Although an incomplete type is
+surely a (view of a) type; thinking it's not "really a type" caused all manner
+of RM holes -- let's not go back there!) But I definitely don't like saying
+"all" or "any" when we really mean "most". We have a strict no lying rule for
+the AARM.
+
+I realize that strictly speaking, the note *isn't* lying (the matching works,
+other rules fail). But that seems like hair-splitting; only a language lawyer
+will care precisely why something fails. Besides, I believe I wrote that note
+(I wrote most of the Generic_Dispatching_Constructor proposals), and I think
+I meant that you can instantiate the generic with any tagged type (assuming
+you have an appropriate constructor function) -- which definitely is not true.
+
+I did think about just sticking "complete" into the sentence (or maybe
+channelling the old commercials with "virtually spotless" dishes and saying
+"virtually all" :-), but I thought a more complete explanation would be more
+useful. The private type case is not that obvious and bites people all the
+time (that's why we've spent so much effort on work-arounds and alternative
+rules), best to not sweep it under the rug as "just freezing, we don't need to
+talk about that".
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, May 19, 2015  7:05 AM
+
+> ... But I definitely don't like
+> saying "all" or "any" when we really mean "most". We have a strict no 
+> lying rule for the AARM. ...
+
+Fair enough.  Go for it.
+
+***************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, May 27, 2015  6:33 AM
+
+Randy's words seem an improvement.
+
+***************************************************************
+
+Editor's note (May 31, 2015): All of the items above this
 marker have been included in the working version of the AARM.
 
 ****************************************************************
