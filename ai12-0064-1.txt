@@ -1,4 +1,4 @@
-!standard 9.5.1(18)                                14-10-14    AI12-0064-1/03
+!standard 9.5.1(18)                                15-06-17    AI12-0064-1/04
 !class Amendment 13-04-22
 !status work item 13-04-22
 !status received 13-04-22
@@ -12,62 +12,66 @@ Aspect Nonblocking is added.
 !problem
 
 During a protected action, it is a bounded error to invoke an operation that
-is potentially blocking. There is currently no mechanism (other than a comment)
-to specify that a given subprogram is intended to be safely callable during a
-protected action (i.e., that the subprogram will not invoke an operation that
-is potentially blocking). This seems like a useful part of a subprogram's
-"contract" that should be (optionally) specifiable at the point of a
-subprogram's declaration.
+is potentially blocking. There is currently no mechanism (other than a
+comment) to specify that a given subprogram is intended to be safely callable
+during a protected action (i.e., that the subprogram will not invoke an
+operation that is potentially blocking). This seems like a useful part of a
+subprogram's "contract" that should be (optionally) specifiable at the point
+of a subprogram's declaration.
 
 !proposal
 
-Add an aspect Nonblocking (or the converse, Potentially_Blocking?)
-
 Add at the end of 9.5.1 (as continuation of bounded error section?)
 
-  For a callable entity, a generic subprogram, a package, or a generic 
-  package, the following language-defined representation aspect may be
-  specified:
- 
-      The type of aspect Nonblocking is Boolean. When aspect Nonblocking
-      is True for an entity, the entity is said to be nonblocking. If
-      directly specified, the aspect_definition shall be a static
-      expression. This aspect is inherited by overridings of
-      dispatching subprograms; if not specified, the aspect is
-      determined by the setting for the innermost package or generic
-      package.  If not specified for a library package or generic
-      library package, the default is False.
+   For a callable entity, a generic subprogram, a package, a generic
+   package, or a protected unit, the following language-defined
+   representation aspect may be specified:
 
-      When a callable entity is nonblocking, a call to the
-      entity is considered to be within a protected operation for
-      purposes of the check described above that is associated
-      with invoking an operation that is potentially blocking
-      (including interactions with pragma Detect_Blocking (see H.5)).
-      In addition, a call to an entity that is not a nonblocking
-      entity is considered potentially blocking for the purposes of the
-      check.
+   Nonblocking
 
-        AARM Ramification: This implies, if Detect_Blocking is set, that
-        calling a potentially blocking operation from the body of Nonblocking
-        subprogram raises Program_Error. That includes calling any
-        non-nonblocking subprograms.
+       The type of aspect Nonblocking is Boolean. When aspect Nonblocking
+       is False for a callable entity, the entity might contain a
+       potentially blocking operation. If the aspect is True for a
+       callable entity, the entity is said to be *nonblocking*. If
+       directly specified, the aspect_definition shall be a static
+       expression. This aspect is inherited by overridings of dispatching
+       subprograms; if not specified, the aspect is determined by the
+       setting for the innermost package, generic package, or protected
+       unit. If not specified for a library package or generic library
+       package, the default is False.
 
-        AARM Implementation Note: We make calling non-nonblocking subprograms
-        from the body of a nonblocking subprogram a bounded error so that
-        the check can be made statically in the case that pragma Detect_Blocking
-        is in force. We certainly do not want distributed overhead in the
-        case where pragma Detect_Blocking is in force, a nonblocking subprogram
-        that is called from outside of a protected action then calls a normal
-        subprogram that uses a potentially blocking operation (this case would
-        require an extra TCB flag or the like to be reliably detected, which
-        is required in the presence of the pragma).
+       A nonblocking callable entity shall not contain a call on a
+       callable entity for which the Nonblocking aspect is False, nor
+       shall it contain any of the following:
 
-      A subprogram shall be nonblocking if it overrides a dispatching
-      nonblocking procedure. In addition to the places where Legality
-      Rules normally apply (see 12.3), this rule applies also in the
-      private part of an instance of a generic unit.
+         * a select_statement;
+         * an accept_statement;
+         * an entry_call_statement;
+         * a delay_statement;
+         * an abort_statement;
+         * task creation or activation.
+
+       A subprogram shall be nonblocking if it overrides a dispatching
+       nonblocking procedure. In addition to the places where Legality
+       Rules normally apply (see 12.3), this rule applies also in the
+       private part of an instance of a generic unit.
+
+         AARM Ramification: specifying Nonblocking is False imposes
+         no requirements.  Specifying Nonblocking is True imposes
+         additional compile-time checks to prevent blocking, but does not
+         prevent deadlock.  pragma Detect_Blocking can be used to ensure
+         that Program_Error is raised in a deadlock situation.
 
 !discussion
+
+We considered changing from aspect Nonblocking to Potentially_Blocking, as that
+matches RM terminology better, but we ultimately concluded that would be a
+mistake. Furthermore, "nonblocking" is used in 9.5.1, albeit somewhat
+informally. Were we to switch to Potentially_Blocking, the default would be
+True rather than False, which is unlike other Boolean aspects. Furthermore, with
+Potentially_Blocking => True, we wouldn't *require* that it be potentially
+blocking, merely allow it. Perhaps Allow_Blocking would be better, but that
+doesn't match RM terminology at all, and still has the "wrong" default.
 
 We've modeled this aspect after No_Return, which has a similar purpose
 and presumably has already worked out the needed rules.
@@ -84,17 +88,23 @@ is just a bounded error and the "mistake" can be ignored with the usual
 consequences.)
 
 We have provided package-level defaults, given that many packages will
-have all of their subprograms non-blocking.  We might want to make the
+have all of their subprograms non-blocking. We might want to make the
 default for a Pure package to be nonblocking, as that is almost always
 the case, since blocking typically implies the use of some kind of
-global lock.
+global lock. However, that would create incompatibilities, so we leave
+it to the programmer to specify Nonblocking if desired on a Pure package.
 
-"Nonblocking" is shorter than "Potentially_Blocking" but the latter
-matches the RM terminology better, so might be preferred (with corresponding
-complementary semantics!).
+Similarly we might specify that protected subprograms are by default
+Nonblocking=>True. However that would be incompatible, as they could not call
+subprograms with a default Nonblocking aspect value of False. It might be
+possible to specify Nonblocking=>True as the default for protected subprograms
+in a future version of the standard (and clearly an implementation could at
+least provide a warning when a call is made to a subprogram with Nonblocking of
+False). We allow specifying Nonblocking on a protected unit to provide a
+default for all of the enclosed protected subprograms.
 
 It will be necessary to sprinkle appropriate annotations throughout the
-language-defined packages to match the current blocking vs. 
+language-defined packages to match the current blocking vs.
 potentially-blocking categorizations.
 
 !example
@@ -174,5 +184,89 @@ Here is a very modest update to AI-0064 on the Nonblocking aspect (or
 Potentially_Blocking if you prefer).  I hadn't realized it was on my list of
 homework until today...
 [Editor's note: This is version /03 of the AI.]
+
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, June 17, 2015  6:46 AM
+
+After going back and forth a couple of times, I settled on Nonblocking rather
+than Potentially_Blocking for the name of the aspect.  See the !discussion for
+an explanation. [This is version /04 of the AI - Editor.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 18, 2015  12:10 AM
+
+Mostly looks good. A couple of comments:
+
+...
+
+> !proposal
+>
+> Add an aspect Nonblocking
+>
+> Add at the end of 9.5.1 (as continuation of bounded error section?)
+>
+>    For a callable entity, a generic subprogram, a package, a generic
+>    package, or a protected unit, the following language-defined
+>    representation aspect may be specified:
+>
+>        The type of aspect Nonblocking is Boolean. When aspect Nonblocking
+...
+
+Something wrong here, as there is no aspect name given. Based on the rest of the
+text, "Nonblocking" needs to be inserted under the colon. I'll fix this in the
+posted version.
+
+-------
+
+There doesn't seem to be an optional way to specify nonblocking for a formal
+subprogram. I think that will be necessary if we want to require nonblocking on
+container operations (for instance, in a future parallel container).
+
+In particular, if we have an ordered map:
+
+    generic
+       type Key_Type is private;
+       type Element_Type is private;
+       with function "<" (Left, Right : Key_Type) return Boolean is <>;
+       with function "=" (Left, Right : Element_Type) return Boolean is <>;
+    package Ada.Containers.Nonblocking_Ordered_Maps is
+       ...
+       function Find (Container : Map; Key : Key_Type) return Cursor
+          with Nonblocking;
+       ...
+
+The calls to "<" in Find would be illegal, as the function doesn't have
+Nonblocking = True. One could imagine somehow deferring this check until the
+instantiation, but of course Legality Rules aren't enforced in the body of an
+instance. And I'm sure we don't want a runtime check here.
+
+If one put the Nonblocking on the package as a whole, then the problem becomes
+that we don't have any rule that would prevent instantiation with a function "<"
+that isn't nonblocking. Again, the Legality Rule that would fail is in the body
+of the generic, so it isn't rechecked (in that case, the body of Find would
+compile successfully, but the promise would be violated).
+
+What we want, I think, is two things: (1) the ability to specify the aspect on
+the formal subprogram (its weird to only allow inheriting it, and if you wanted
+two subprograms to have different setting you'd be out of luck); and (2)
+matching rules for actuals of formal subprograms when Nonblocking = True (either
+explicitly, or inherited from an outer package). [Specifically, it's an error if
+the actual function has Nonblocking = False when the formal subprogram has
+Nonblocking = True. Otherwise, it's OK.]
+
+We don't have any aspects that can be specified on generic formals today, but
+we've always planned that some would appear eventually. The main thing that each
+one needs is a matching rule; this one seems simple.
+
+No_Return doesn't have any such thing, because it doesn't really come up for
+that. So I'm not surprised that it is missing.
+
+(I'm dubious about not having a mechanism for access-to-subprogram as well, but
+since I don't have a use case for that, I won't push there.)
 
 ****************************************************************
