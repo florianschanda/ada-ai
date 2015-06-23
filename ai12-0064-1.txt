@@ -270,3 +270,193 @@ that. So I'm not surprised that it is missing.
 since I don't have a use case for that, I won't push there.)
 
 ****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June 18, 2015  6:19 AM
+
+> Something wrong here, as there is no aspect name given. Based on the
+> rest of the text, "Nonblocking" needs to be inserted under the colon.
+> I'll fix this in the posted version.
+
+Good point.  Thanks for the quick fix.
+
+> ... What we want, I think, is two things: (1) the ability to specify
+> the aspect on the formal subprogram (its weird to only allow
+> inheriting it, and if you wanted two subprograms to have different
+> setting you'd be out of luck); and
+> (2) matching rules for actuals of formal subprograms when Nonblocking
+> = True (either explicitly, or inherited from an outer package).
+> [Specifically, it's an error if the actual function has Nonblocking =
+> False when the formal subprogram has Nonblocking = True. Otherwise,
+> it's OK.]
+
+Agreed.
+
+> ... (I'm dubious about not having a mechanism for access-to-subprogram
+> as well, but since I don't have a use case for that, I won't push
+> there.)
+
+We will probably want something on access-to-subprogram as well.  The matching
+rules are analogous to that for formal subprograms.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, June 18, 2015  12:14 PM
+
+> Specifying Nonblocking is True imposes
+>         additional compile-time checks to prevent blocking, but does not
+>         prevent deadlock.
+
+I am curious about the rationale of this statement. At first glance, the rules
+now seem to ensure that there cannot a nested potentially-blocking call. So, how
+could a deadlock (in the usual sense of deadly embrace) ever arise?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June 18, 2015  2:07 PM
+
+On a multiprocessor, I think this would do it:
+
+     protected A is
+        procedure Hello with Nonblocking;
+     end A;
+
+     protected B is
+        procedure Goodbye with Nonblocking;
+     end B;
+
+     protected body A is
+        procedure Hello is
+        begin
+           B.Goodbye;
+        end Hello;
+     end A;
+
+     protected body B is
+        procedure Goodbye is
+        begin
+           A.Hello;
+        end Goodbye;
+     end B;
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, June 18, 2015  2:52 PM
+
+>     protected A is
+>        procedure Hello with Nonblocking;
+>     end A;
+
+Why would you put a Nonblocking aspect on a protected procedure? It has to be
+non-blocking anyway. The aspect shouldn't even be allowed on protected
+operations.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June 18, 2015  3:08 PM
+
+The Nonblocking aspect provides *compile-time* enforcement of checks against use
+of potentially blocking operations.  So the "with Nonblocking" on a protected
+procedure causes these checks to be performed at compile-time, which in turn
+requires that any non-protected subprogram it calls to be similarly marked
+Nonblocking.  So the aspect does have a significance for protected operations,
+as it says they may call only subprograms with Nonblocking => True.  The AI
+allows the aspect to be specified on the protected unit as a whole, or on an
+enclosing package, to set an appropriate default, so you don't have to specify
+it individually on each operation.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, June 18, 2015  3:23 PM
+
+So it's really "with nonblocking_check". Nonblocking means that the procedure is
+nonblocking, while here it means that the protected procedure does not call any
+potentially blocking operation. Well, we can discuss whether it is important to
+discuss ;-) at the meeting.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, June 18, 2015  8:51 PM
+
+So, if one expanded the rule that the Nonblocking entity may not
+   - call a potentially blocking operation (such as any protected op)
+   - call any entity that is not nonblocking we would get the desired
+     deadlock-freeness, and we could compile-time check it. (??)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 18, 2015  10:28 PM
+
+> So, if one expanded the rule that the Nonblocking entity may not
+>    - call a potentially blocking operation (such as any protected op)
+
+Only protected entry calls and external calls *on the same object* are
+potentially blocking. The vast majority of protected subprogram calls are *not*
+potentially blocking. I don't see the point of rejecting all of them just
+because there might be one that is "potentially blocking". (And you can't tell
+statically if or if not a particular call is going to be "potentially
+blocking".) Note that this particular case is *not* blocking (protected
+subprograms never block), it's a bounded error (and it really should have been
+an unconditional Program_Error).
+
+Besides, the effect of such a rule would be to totally prohibit any use of
+protected objects in a nonblocking operation. You don't need "nonblocking" to do
+that (I'm sure AdaControl can ban any declaration of a protected object), and
+making such a restriction would prevent the vast majority of shared data
+structures from a nonblocking subprogram. That would throw out the baby with the
+bathwater.
+
+>    - call any entity that is not nonblocking we would get the desired
+> deadlock-freeness, and we could compile-time check it. (??)
+
+Finally, I don't see why you care about this obscure corner case. Approximately
+0.0% of all deadlocks that happen in practice occur because of nested protected
+actions. That's because most task runtimes detect that bounded error and raise
+Program_Error (which prevents such a deadlock from happening) - at least in the
+case when it actually happens - and a user can use pragma Detect_Blocking for
+any runtime that doesn't.
+
+Real deadlocks come from operations that by their nature are blocking, or from
+task operations (that happens to us a lot in Claw). Nonblocking isn't going to
+be of any help for that. The fact that there are a few unlikely cases which
+should raise Program_Error (but might not in some brain-damaged system) doesn't
+have any effect on the real causes of deadlocks.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, June 19, 2015  1:35AM
+
+> So, if one expanded the rule that the Nonblocking entity may not
+>     - call a potentially blocking operation (such as any protected op)
+
+As Randy points out, the only time a protected subprogram call is considered
+"potentially blocking" by is when it will result in deadlock (see 9.5.1(15)).
+It was really a misnomer to include this in the set of potentially blocking
+operations, but as the AARM says in 9.5.1(15.a): "This is really a deadlock call
+rather than a blocking call, but we include it here for simplicity."  In
+retrospect, probably should have been a separate rule.  In any case, 9.5.1(15)
+is not easily detectable statically (it requires looking at the global call
+graph, and considering the possible value of access-to-protected-objects, etc.).
+So this AI drops this kind of deadlock detection from the semantics of the
+Nonblocking aspect, as it is not practical for the average Ada compiler to
+perform.
+
+>     - call any entity that is not nonblocking we would get the desired
+> deadlock-freeness, and we could compile-time check it. (??)
+
+No, as explained above.  Also Randy points out that there are two kinds of
+deadlock, one involves a cyclic locking situation, which is relatively rare, and
+is something that a static analysis tool could pretty easily detect (given a
+global call graph).  The other relates to tasks waiting on entries for a
+particular state to occur, and that particular state never occurring.  That
+requires solving the halting problem to be completely precise... ;-)
+
+****************************************************************

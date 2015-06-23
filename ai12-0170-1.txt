@@ -401,3 +401,97 @@ same problem. Preferably by adjusting the root rule and not by hacking around
 with special cases (because we'll never remember all of them).
 
 ****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, June 17, 2015  12:15 AM
+
+Steve wrote: 
+
+> In some internal discussions at AdaCore, we've been looking 
+> at this example:
+> 
+>   package Pkg is
+>     type Ifc is interface;
+> 
+>     function F1 (X : Ifc) return Boolean is abstract;
+> 
+>     function F2 (Y : Ifc) return Boolean is abstract
+>       with Pre'Class => F1 (Y);
+>   end;
+> 
+> and the question is whether the call to F1 violates the rule 
+> against non-dispatching calls to abstract subprograms.
+
+In writing this up, I find that there doesn't seem to be any sensible way to
+allow this case without opening the door to calling abstract functions (I've
+got several examples in the AI). I also find that the default parameter case
+that Tucker brought up (which has existed since Ada 95) is uniformly
+rejected by Ada 95 compilers -- probably it's required by an ACATS test. Do
+we really find this so important to cause implementors to do a lot of work??
+
+...
+> Tuck also suggested that an another case where we might 
+> consider the status of the usual "no non-dispatching calls to 
+> abstract subprograms" rule is a default expression for a 
+> controlling formal parameter of an abstract subprogram, as in
+> 
+>    package Pkg2 is
+>     type T is interface;
+> 
+>     function Empty return T is abstract;
+>     procedure Init(X : out T; Value : T := Empty) is abstract;
+>    end;
+> 
+> . Is the call to Empty currently legal? Do we want it to be legal?
+
+The answer is clearly No, and every compiler I tried this on agrees.
+(Replace type T with "type T is abstract tagged null record;" and there a
+lot of compilers to try.)
+
+We probably don't want it to be legal unless we can figure out a way to
+prevent the many cases where an abstract subprogram could be called. Even
+for the above:
+    Init (T(Some_Obj_of_NT));
+would make a statically bound call to the abstract function. How do we avoid
+that??
+
+Similarly, assume that 3.9.3(7) is repealed for Pre'Class of abstract
+subprograms, then consider:
+
+  package Pkg4 is
+    type Ifc is interface;
+
+    function Empty return IFc is abstract;
+    function Length (Value : IFc) return Integer is abstract;
+
+    function F3 (Y : Ifc) return Boolean is abstract
+      with Pre'Class => Length(Empty) /= 0;
+
+  end Pkg4;
+
+  if F3 (Ifc'Class(Some_Obj)) then
+
+The call to F3 here would call the abstract Empty and Length, because the tag
+indeterminant call to Empty would use the tag of its specific type (as there
+is no other controlling tag to use). That we cannot allow!
+
+Rechecking legality (of defaults and of pre/post) on all calls is not
+appealing. And I don't see any simple rules that would really help.
+
+Besides, the workaround is easy (if annoying):
+
+  package Pkg5 is
+    type Ifc is interface;
+
+    function F1 (X : Ifc) return Boolean is abstract;
+
+    function F2 (Y : Ifc) return Boolean is abstract
+      with Pre'Class => F1 (Ifc'Class(Y));
+  end Pkg5;
+
+This is surely legal, as the call to F1 is now always dispatching.
+
+Anyway, we have to have some fun AI for this meeting. :-)
+
+****************************************************************
+
