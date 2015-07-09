@@ -1,7 +1,8 @@
-!standard 6.1.1(34/3)                                     15-06-17  AI05-0166-1/01
+!standard 6.1.1(34/3)                                     15-07-08  AI05-0166-1/02
 !standard 9.5(3/3)
 !standard 9.5(7.1/3)
 !class binding interpretation 15-06-17
+!status ARG Approved 8-0-1  15-06-26
 !status work item 15-06-17
 !status received 15-05-21
 !priority Medium
@@ -58,8 +59,8 @@ whether the other class-wide precondition expressions are evaluated. The
 precondition checks and any check for elaboration of the subprogram body are
 performed in an arbitrary order. [It is not specified whether in]{In} a call
 on a protected operation, the checks are performed before [or after]
-starting the protected action. For an entry call, the checks are performed
-prior to checking whether the entry is open.
+starting the protected action.[ For an entry call, the checks are performed
+prior to checking whether the entry is open.]
 
 [Editor's note: This is not required to fix the actual problem, but there
 seems to be no advantage to the variability, either for an implementation
@@ -67,46 +68,20 @@ or for a user. More in the !discussion below.]
 
 Add after 9.5(7.1/3):
 
-A call on an protected function that occurs within a precondition
-expression (see 6.1.1) or a default_expression of a parameter_specification
-for an protected entry or protected operation shall not be an internal call.
+An internal call on a protected function shall not occur within a precondition
+expression (see 6.1.1) of a protected operation nor within a default_expression
+of a parameter_specification of a protected operation.
 
 AARM Reason: These calls will be made before the start of the protected
 action, and thus would not be subject to the expected mutual exclusion.
 As such, they would be an automatic race condition (the state of the called
 object could change before the start of the protected action for the call
-on the protected entry or subprogram.
+on the protected entry or subprogram).
 
-[Editor's note: The limitation to entry or protected operation is needed to
-allow internal calls on subprograms that are declared inside of a protected
-operation. That case is rather unlikely, so we could ignore it, but then
-we'd have a language wart in the other direction (something that is illegal
-for no reason and probably is checked inconsistently). This would look
-something like:
-
-     protected body Prot3 is
-        function Fff return Boolean is
-        begin
-           return True;
-        end Fff;
-        entry Eee when True is
-           function GGG (A : Boolean := FFF) return Boolean is
-           begin
-              return A and Something;
-           end;
-        begin
-           if GGG then
-              null;
-           end if;
-        end Eee;
-     end Prot3;
-
-Second Editor's note: We have to say "default_expression of a
-parameter_specification" as the syntax default_expression is used for
-discriminants, components, and formal objects, and we don't want this
-rule to apply to any of those.
-
-End Editor's notes.]
+[Editor's note: We have to say "default_expression of a
+parameter_specification" as the syntax default_expression is also used
+for discriminants, components, and formal objects, and we don't want this
+rule to apply to any of those.]
 
 AARM To Be Honest: 6.1.1 actually defines "specific precondition expression"
 and "class-wide precondition expression". This rule is intended to apply to
@@ -129,9 +104,34 @@ would almost always represent a race condition (as the state of the protected
 object state could change arbitrarily before the start of the protected
 action). With the current rule, users cannot use such calls reliably (they
 might work on some implementation, but not on another). Since there seems to
-be no benefit for the variability, we eliminate it.
+be no benefit from the variability, we eliminate it.
 
 ---
+
+The new rule following 9.5(7.1/3) is limited to applying to a protected
+operation. This is needed to allow internal calls in preconditions and defaults
+for subprograms that are declared inside of a protected operation. That case
+is rather unlikely, but we don't want to make things illegal for no reason.
+An example of such a usage is:
+
+     protected body Prot3 is
+        function Fff return Boolean is
+        begin
+           return True;
+        end Fff;
+        entry Eee when True is
+           function GGG (A : Boolean := FFF) return Boolean is -- OK.
+           begin
+              return A and Something;
+           end;
+        begin
+           if GGG then
+              null;
+           end if;
+        end Eee;
+     end Prot3;
+
+!examples
 
 An example of the first problem would be:
 
@@ -387,7 +387,7 @@ condition for external calls, too, along with the possibility that the state
 the execution of the body.
 
 Ergo, any calls into the current instance are illegal (they're internal calls by
-the current definition, and we wouldn't therefore have to change that.
+the current definition, and we wouldn't therefore have to change that).
 
 > If you really care about the
 > state, you should turn the precondition into an entry barrier and make
