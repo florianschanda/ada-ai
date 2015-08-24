@@ -1,4 +1,4 @@
-!standard 4.9(6)                                  13-06-09    AI12-0075-1/01
+!standard 4.9(6)                                  15-08-20    AI12-0075-1/03
 !standard 4.9(18)
 !class Amendment 13-06-09
 !status work item 13-06-09
@@ -22,42 +22,203 @@ can get quite large.
 
 !wording
 
-** TBD.
+Add just before the definition of "static function" (i.e., just
+before 4.9(18)):
+
+  A "potentially static expression" is defined in the same way as a
+  static expression except that
+     - a name denoting a formal parameter of an expression function
+       is a potentially static expression; and
+
+     - each use of "static expression" in
+       the definition of "static expression" is replaced with
+       a corresponding use of "potentially static expression"
+       in the definition of "potentially static expression".
+
+  AARM Discussion: These uses occur in the definition of "static expression"
+  in the cases of function calls, type conversions,
+  qualified expressions, membership tests, short circuit control forms,
+  conditional expressions, and parenthesized expressions.
+
+  A "static expression function" is defined to be an expression function
+    - whose expression is a potentially static expression; and
+    - which contains no calls to itself; and
+    - each of whose parameters (if any) is of mode IN and is of a
+      static subtype; and
+    - whose result subtype is a static subtype; and
+    - to which no precondition or postcondition expression applies.
+
+  AARM Discussion:
+  In the case of an expression_function_declaration which is the
+  completion of an earlier subprogram_declaration, the function is an
+  expression function if and only if the completion is visible.
+  This implies that it is possible for a (view of a) function to be a
+  static expression function if and only if its completion is visible.
+  This is similar to the way that the completion of a deferred constant
+  may be a static constant.
+
+  [An inherited function is never a static expression function. This follows
+  from the fact that an inherited function is never an expression function.]
+
+Add to the definition of static function (i.e. as another list item
+at the end of the 4.9 (19-22) list):
+
+  - a static expression function
+
+Add at the and of the 4.9 "Legality Rules" section:
+
+  AARM Discussion: 
+  The preceding "statically unevaluated" rule allows
+       X : constant := (if True then 37 else (1 / 0))
+  but does not allow
+       function If_Then_Else (Flag : Boolean; X, Y : Integer) is
+          (if Flag then X else Y);
+       X : constant := If_Then_Else (True, 37, 1 / 0);
+  because evaluation of a function call includes evaluation of
+  all of its actual parameters.
 
 !discussion
 
-The easy part of this definition is to allow expression functions to be
-static functions (in the sense of 4.9(6)) in specific instances. The minimum
-requirement is that the expression would be static if the parameters
-are assumed to be static.
+1) It has been suggested that a new aspect, perhaps named Static_Function
+(or perhaps just Static), should be introduced and that a function is not
+a static function unless its Static_Function aspect is specified to be True.
 
-However, a number of other issues were identified that would need to be
-addressed:
+This proposal has its advantages and disadvantages, but one strong
+argument seems to be the existing treatment of static constants.
+This question was already settled (for static constants) back in Ada83 and
+static expression functions should be treated consistently with static
+constants.
 
-* The fact that a subprogram is an expression function would have to be
-  visible; that would prevent completions that are expression functions from
-  participating. Perhaps an aspect Static_Possible could be defined for
-  specifications, that would require the body to be a potentially static
-  expression function.
+This leads to the conclusion that the proposed new aspect is a bad idea.
 
-* Recursion would have to be eliminated somehow.
+On the other hand, there is the question of compatibility.
+The following example is currently legal:
+   procedure Foo is
+      function Inc (X : integer) return Integer is (X + 1);
+      subtype S is Integer range 0 .. Inc (3);
+      X : S := ... ;
+   begin
+      case X is
+         when  0 .. 33 => ...;
+         when  44 .. 55 => ...;
+         when others => ... ;
+      end case;
+   end; 
 
-* "Potentially static" wouldn't include any functions with parameters of
-  types that aren't static.
+The proposal given above would cause this example to become
+illegal (because the subtype S would become a static subtype).
+This incompatibility would only affect code which uses expression
+functions; expression functions were first introduced in Ada 2012.
 
-* The subtypes of the formal parameters have to be checked; probably this
-  would take the form of implicit qualified expressions on the parameters.
+[Editor's note: There are many other ways to cause this incompatibility.
+For instance, consider the following
 
-* It would be best to say that functions with "in out" or "out" parameters
-  aren't "potentially static".
+    procedure Bar is
+       NUM_ITEMS : constant := 0;
+       Count : constant Natural := 12;
+       function Average (Count : in Natural) return Natural is (Count / NUM_ITEMS);
 
-* Do formal parameters that don't participate in the expression affect
-  whether or not a function is "potentially static"?
+    begin
+       if NUM_ITEMS > 0 then
+           Put_Line ("Average =" & Natural'Image(Average(Count))); -- (!!)
+       end if;
+    end Bar;
 
-* Do the "statically unevaluated" rules have any effect on "potentially
-  static"? If not, there wouldn't be a complete equivalence between
-  a call and the associated expression. (That's probably OK, as it is true
-  for non-static calls as well.)
+The proposal given above would make the call to Average illegal (because it
+divides by zero), even though it could never be executed. Obviously, the
+non-static version is not a problem (I just said it won't be executed :-).
+
+And of course one can construct similar examples using any of the 4.9(33-36)
+rules - out of base type values (also plausible in conditional code, or even
+precision for decimal types.
+
+While expression functions were only introduced in Ada 2012, they are widely
+used because of their convinience, and it will be six years after their
+introduction before this change is adopted. We need to be very careful not
+to introduce incompatibilties for a nice-to-have feature. End Editor's Note.]
+
+
+If it is decided that a new aspect is needed, then the following
+changes to the preceding proposal would be needed:
+
+   - The new aspect is a Boolean aspect which can only be specified
+     as part of an Expression_Function declaration with the usual
+     "must be static Boolean value" rule. The aspect is not inherited
+     by derived subprograms and defaults to False.
+
+   - The following clause in the definition of static expression function:
+       "whose expression is a potentially static expression; and"
+     would be replaced with
+       "whose Static_Function aspect is True; and" .
+
+   - A new legality rule stating that if an expression
+     function's Static_Function aspect is True, then the function's
+     expression shall be a potentially static expression.
+
+Interactions between this new aspect and inherited subprograms
+might get messy. The usual "characteristics" problems having to
+do with "what was known at the point of derivation vs. what is
+known now" would need to be resolved.
+
+2) Do we need to say anything about type invariants? No,
+because if a function has a parameter (or result) of a private type,
+then it's not a static function.
+
+3) We could allow a static expression function to have
+an applicable pre/post-condition as long as the condition is a
+potentially static expression. This does seem worth the added
+complexity - pre/post conditions for expression functions are
+of very limited value in any case.
+
+4) We've got the 3.8 rule
+  
+    If the discriminant is used to define the constraint of a component, the
+    bounds of an entry family, or the constraint of the parent subtype in a
+    derived_type_definition, then its name shall appear alone as a direct_name
+    (not as part of a larger expression or expanded name).
+
+It might seem tempting to allow (in a component constraint) the case of a
+call to a static function such that all parameters (including, of course,
+defaulted parameters) are either static expressions or names denoting
+discriminants. This would allow, for example, an
+index constraint value of D + 1, where D is a discriminant.
+
+This would introduce some implementation problems.
+
+One property we need for discriminant-dependent component constraint
+expressions is reproducibility - given the same discriminant values
+we must always get the same result. This relaxation of the current rules
+would meet that requirement, but that's not enough.
+
+We also need, given a set of discriminant subtypes, to be able
+to easily calculate the minumum and maximum values that an
+expression might yield (e.g., we need to know how much storage is
+needed when we declare an unconstrained object of a type which has
+an array component with a discriminant-dependent index constraint).
+
+Given something like
+
+    subtype Index is Integer range 0 .. <some non-static expression>;
+    type Rec (Length : Index := 0) is record
+      F : String (1 .. Length);
+    end record;
+    X : Rec;
+
+it is easy to compute (at runtime) the amount of storage required for X.
+If we replace "1 .. Length" in the above example with
+"1 .. Some_Static_Expr_Func (Length)", then this becomes more
+complicated because a static expression function need not be
+monotonic.
+
+Thus, this proposal would lead to implementation problems.
+
+4) There has been some discussion on ada-comment about somehow
+allowing comes calls to System.Storage_Elements.To_Address to
+be considered "static" in some sense in order to allow an
+address aspect specification in a preelaborated package.
+
+That seems like a separate issue that should be dealt with in
+a separate AI.
 
 !example
 
