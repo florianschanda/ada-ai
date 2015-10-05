@@ -1,0 +1,471 @@
+!standard 13.14(3/4)                                   15-10-05  AI05-0171-1/00
+!class binding interpretation 15-10-05
+!status work item 15-10-05
+!status received 15-07-10
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Ambiguity in Synchronous_Task_Control semantics
+!summary
+
+** TBD.
+
+!question
+
+The following example manages to have two tasks call Suspend_Until_True when
+the state is certain to be "True."
+
+The RM does *not* require that Suspend_Until_True is atomic with respect to
+itself, whereas it does require that for Set_True and Set_False. And the usage
+scenario that was envisioned when suspension objects were designed was that only
+a single task would ever call Suspend_Until_True.
+
+Is this example reasonable? (Editor: No.)
+
+Should we tighten up the semantics of suspension objects? (Editor: Probably,
+but that will eliminate any need for them.)
+
+with Ada.Synchronous_Task_Control;
+use Ada.Synchronous_Task_Control;
+with Ada.text_IO; use Ada.text_IO;
+procedure ATC is
+   thesem: Suspension_Object;
+   task type subworker is end subworker;
+
+   task body subworker is
+   begin
+     for I in 1..1000 loop
+        -- seize
+        Suspend_Until_True(thesem);
+
+        Put_line("Sub:" & Integer'Image(I));
+
+        -- release
+        Set_True(thesem);
+     end loop;
+   end subworker;
+
+   type Wref is access subworker;
+   WW: Wref;
+
+begin
+   Set_True(thesem);
+
+   WW := new subworker;
+   for I in 1..1000 loop
+      -- seize
+      Suspend_Until_True(thesem);
+
+      Put_line("Sub:" & Integer'Image(I));
+
+      -- release
+      Set_True(thesem);
+   end loop;
+
+end ATC;
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+Following is the editor's ramblings on this topic.
+
+(1) The technique shown in the example will work only for exactly two
+tasks. But exactly two of anything happens very, very rarely in practice --
+after all, the fundemental rule of programming language design is that a
+language feature should be usable zero, one, or many times. Something that
+is usable exactly twice violates that.
+
+(2) With the introduction of the Max_Entry_Queue_Length aspect (see
+AI12-0164-1), it is trivial to declare a protected object without a queue.
+One hopes that implementations will take advantage of this aspect to create
+lightweight POs when Max_Entry_Queue_Length is set to 1 (after all, this is
+the primary purpose of the aspect). If this happens, it will be possible
+to declare a suspension object directly with Ada code, and get the same sort
+of lightweight performance. As such, there will be no good reason for a
+separate definition of suspension objects: they will be equivalent to
+
+    protected type SO with Max_Entry_Queue_Length => 1 is
+        procedure Set_True;
+        procedure Set_False;
+        function Current_State return Boolean;
+        entry Suspend_Until_True;
+    private
+        State : Boolean := False;
+    end SO;
+
+    protected body SO is
+        procedure Set_True is
+        begin
+           State := True;
+        end Set_True;
+
+        procedure Set_False is
+        begin
+           State := False;
+        end Set_False;
+
+        function Current_State return Boolean is
+	begin
+	   return State;
+	end Current_State;
+
+        entry Suspend_Until_True when State is
+	begin
+	    null;
+	end Suspend_Until_True;
+    end SO;
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Tucker Taft
+Sent: Friday, July 10, 2015  10:06 AM
+
+AdaCore received the comment shown below from a "GAP" (GNAT Academic Program)
+user.  This results in deadlock in at least some GNAT implementations, even
+though as written it satisfies the requirements that no two tasks are suspended
+at the same time.  The problem seems to be that two tasks are concurrently
+calling "Suspend_Until_True."
+
+The RM does *not* require that Suspend_Until_True is atomic with respect to
+itself, whereas it does require that for Set_True and Set_False.  And the usage
+scenario that was envisioned when suspension objects were designed was that only
+a single task would ever call Suspend_Until_True, whereas this example has two
+tasks calling Suspend_Until_True, though only when the state is certain to be
+"True."
+
+It seems we should clarify the semantics in this case, and either declare it a
+bounded error for multiple tasks to call Suspend_Until_True concurrently, or
+specify that this scenario should be supported.  I would hope we do *not* choose
+to make it erroneous.
+
+----  Comment from GAP user:
+
+It seems to me that package Synchronous_Task_Control should allow to build
+simple semaphores like in following example:
+
+with Ada.Synchronous_Task_Control;
+use Ada.Synchronous_Task_Control;
+with Ada.text_IO; use Ada.text_IO;
+procedure ATC is
+   thesem: Suspension_Object;
+   task type subworker is end subworker;
+
+   task body subworker is
+   begin
+     for I in 1..1000 loop
+        -- seize
+        Suspend_Until_True(thesem);
+
+        Put_line("Sub:" & Integer'Image(I));
+
+        -- release
+        Set_True(thesem);
+     end loop;
+   end subworker;
+
+   type Wref is access subworker;
+   WW: Wref;
+
+begin
+   Set_True(thesem);
+
+   WW := new subworker;
+   for I in 1..1000 loop
+      -- seize
+      Suspend_Until_True(thesem);
+
+      Put_line("Sub:" & Integer'Image(I));
+
+      -- release
+      Set_True(thesem);
+   end loop;
+
+end ATC;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, July 10, 2015  4:31 PM
+
+D.10(10) says that "Program_Error is raised upon calling Suspend_Until_True if
+another task is already waiting on that suspension object." So if multiple tasks
+are calling Suspend_Until_True, one of them is going to fail (have Program_Error
+raised) in the general case.
+
+If two tasks happen to call Suspend_Until_True simulateously, it's not clear
+what will happen, but that's obviously not something that a programmer can
+control, so one has to assume that Program_Error is likely to be raised in that
+case.
+
+It would be safe for multiple tasks to call Suspend_Until_True if they somehow
+know the value is already True, but what would the point of that be? You might
+as well write "null;" in that case.
+
+The OP's program seems to be in this category. It depends on a very precisely
+controlled sequence of operations that would be very hard to generate in
+practice (that is, with external inputs varying the timing of the worker tasks).
+As such, I don't think it is a realistic use of the feature.
+
+So, I suppose that it would make some sense to say that it is a Bounded_Error if
+two tasks call Suspend_Until_True simulateously, in case someone is trying to be
+overly clever. I don't think it makes sense to make implementers work hard in
+this case, since it appears to be a nonsense situation, and the extra locking
+needed to make this work would (potentially) defeat the purpose of a suspension
+object being as light-weight as possible.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, July 10, 2015  9:32 PM
+
+> ...
+> It would be safe for multiple tasks to call Suspend_Until_True if they
+> somehow know the value is already True, but what would the point of that be?
+> You might as well write "null;" in that case.
+
+The customer's code was using the suspension object as a simple semaphore where
+you know there are exactly two tasks contending for the resource.  That doesn't
+seem so unreasonable.  The intent was that from the Suspend_Until_True until the
+following Set_True the task had exclusive access to some resource.  It seems
+reasonable, given the semantics of suspension objects, to imagine this will work
+presuming only two tasks are contending for the resource.
+
+> The OP's program seems to be in this category. It depends on a very
+> precisely controlled sequence of operations that would be very hard to
+> generate in practice (that is, with external inputs varying the timing
+> of the worker tasks). As such, I don't think it is a realistic use of
+> the feature.
+
+I don't agree.  Once you understand the customer's intent, it seems reasonable.
+
+> So, I suppose that it would make some sense to say that it is a
+> Bounded_Error if two tasks call Suspend_Until_True simulateously, in
+> case someone is trying to be overly clever. I don't think it makes
+> sense to make implementers work hard in this case, since it appears to
+> be a nonsense situation, and the extra locking needed to make this
+> work would
+> (potentially) defeat the purpose of a suspension object being as
+> light-weight as possible.
+
+I agree we should probably declare this to be a bounded error, though I am not
+completely sure.  I am a little unclear why GNAT has the problem it does with
+this code.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Saturday, July 11, 2015  10:21 AM
+
+> It seems we should clarify the semantics in this case, and either
+> declare it a bounded error for multiple tasks to call
+> Suspend_Until_True concurrently, or specify that this scenario should
+> be supported.  I would hope we do *not* choose to make it erroneous.
+
+What bounds on the bounded error, though?
+  Program_Error and null semantics are o.k., but undetected deadlock seems
+  decidedly unfriendly.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, July 12, 2015  1:15 AM
+
+I don't see any ambiguity here. Moreover, I don't know what "simultaneously"
+means...
+
+The only possible interpretation is: one of the tasks passes, and the other one
+gets blocked.
+
+The fact that the RM does not explicitely say that it's atomic does not imply
+that it is allowed to behave differently from what is specified. This would
+require an implementation permission.
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Sunday, July 12, 2015  9:53 AM
+
+Argh.
+How an implementation could get the two tasks in the example to end up behind a
+SO set to False is difficult for me to fathom. If preemption kicks in at the
+wrong time (or parallel access on a multicore processor) and the
+Suspend_Until_True operation is not atomic (which it is not required to be) it
+is more likely that the two tasks pass than that they don't. D.10(10) does not
+seem to apply to that case, because it talks about "waiting", which technically
+is not what happens in the above situation. In fact, D.10(10) suggests very
+vigorously that SO are for suspending one task at a time (obviously because SO
+involve no queuing), whose request for raising Program_Error would arguably be
+made easier if Suspend_Until_True were required to be an atomic operation, in
+D.10(7/2).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, July 12, 2015  3:30 PM
+
+Sounds like we should tighten up the semantics here!
+
+I'm not convinced implementations need all the flexibility that might be implied
+by the lack of atomicity of Suspend_Until_True with itself.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Sunday, July 12, 2015  8:44 PM
+
+I agree completely with Jean Pierre here. In fact, the RM (D.10) says "The
+operations Set_True and Set_False are atomic with respect to each other and with
+respect to Suspend_Until_True”. This means that a call on Suspend_Until_True is
+single-threaded with respect to the setting of the suspension variable to True
+or False. The fact that an implementation does not do this is a knock on the
+implementation, not the RM.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, July 12, 2015  9:05 PM
+
+The problem is not a race between Set_True/Set_False and Suspend_Until_True.
+The problem is a "race" between two different tasks both calling
+Suspend_Until_True at the same moment, when the state is know to be True.  The
+manual doesn't seem to require that to work, but I am coming to the conclusion
+that it probably should.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, July 12, 2015  10:38 PM
+
+> I'm not convinced implementations need all the flexibility that might
+> be implied by the lack of atomicity of Suspend_Until_True with itself.
+
+Maybe not. But then a suspension object has precisely the same semantics as a
+protected object (using the new aspect to eliminate the queue):
+
+    protected type SO with Max_Entry_Queue_Length => 1 is
+        procedure Set_True;
+        procedure Set_False;
+        function Current_State return Boolean;
+        entry Suspend_Until_True;
+    private
+        State : Boolean := False;
+    end SO;
+
+The body of Suspend_Until_True has a barrier of "State", of course.
+
+If this is what a suspension object does, then why do we need it at all? Anyone
+can write the above (or something more appropriate for their usage). My
+understanding was always that a suspension object was more lightweight than a
+protected object; thus it needs less specified semantics so that an
+implementation can implement it as cheaply as possible.
+
+So, if we're requiring the above (to be implemented without a queue, no big deal
+for compilers if it is declared that way), then we should simply say that and
+essentially stick Suspension_Objects into Annex J as old, unnecessary junk.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, July 13, 2015  8:06 AM
+
+...
+> If this is what a suspension object does, then why do we need it at all?
+
+Because it can be a far simpler implementation, and because it would be horribly
+upward incompatible to drop the now.
+
+> Anyone can write the above (or something more appropriate for their usage).
+> My understanding was always that a suspension object was more
+> lightweight than a protected object; thus it needs less specified
+> semantics so that an implementation can implement it as cheaply as possible.
+
+Correct.  The question is whether this particular semantic "liberalization"
+actually simplifies the implementation.  I am having trouble understanding how
+it helps implementations.
+
+> So, if we're requiring the above (to be implemented without a queue,
+> no big deal for compilers if it is declared that way), then we should
+> simply say that and essentially stick Suspension_Objects into Annex J
+> as old, unnecessary junk.
+
+Let's not go overboard. ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, July 12, 2015  1:33 PM
+
+> > If this is what a suspension object does, then why do we need it at all?
+>
+> Because it can be a far simpler implementation, and because it would
+> be horribly upward incompatible to drop the now.
+
+You're not supposed to answer rhetorical questions. :-)
+
+But since you did:
+
+I strongly disagree about the "far simpler implementation". There is no reason
+for an Ada compiler to use only a single implementation for all protected
+objects. No one does that for arrays, or aggregates, or function returns. So why
+would one pessimize the protected object implementation?
+
+In this case, we have a protected object with a queue length of one, and a
+single component that could be atomic. There is obviously a very simple
+implementation for such an object.
+
+And, of course, we never actually delete anything, we just stick it into Annex J
+and forget about it. That's what we should do with Suspension objects. And
+replace them by an Implementation Requirement to use a simple implementation for
+protected objects that have a single atomic component and a maximum queue length
+of one. (And probably an example of the protected object I suggested previously,
+so the replacement is obvious.) Indeed, I'd go so far as to junk the current
+description of suspension objects and just describe them in terms of the
+equivalent protected object (that would answer all questions).
+
+> > Anyone can write the above (or something more appropriate for their usage).
+> > My understanding was always that a suspension object was more
+> > lightweight than a protected object; thus it needs less specified
+> > semantics so that an implementation can implement it as cheaply as possible.
+>
+> Correct.  The question is whether this particular semantic
+> "liberalization" actually simplifies the implementation.  I am having
+> trouble understanding how it helps implementations.
+
+You could be right about that. But in that case, we no longer need it at all
+(presuming that Max_Entry_Queue_Length gets implemented), because it would be
+relatively easy for a compiler to implement all protected objects of that form
+with the "much simpler implementation". (You would need an atomic object and a
+task ptr for each such object -- for either possible description.) And a
+compiler writer (and the programmer as well) is much better off with the effort
+spent on that rather than spending any time on a custom implementation of
+suspension objects.
+
+> > So, if we're requiring the above (to be implemented without a queue,
+> > no big deal for compilers if it is declared that way), then we
+> > should simply say that and essentially stick Suspension_Objects into
+> > Annex J as old, unnecessary junk.
+>
+> Let's not go overboard. ;-)
+
+It's not overboard, IMHO. (I recall Geert telling us that GNAT does
+optimizations like this for protected objects, and that was without the queue
+aspect that makes them trivial.) There would be a lot more value in implementers
+improving the implementation of protected objects than in any special case
+gizmo. I recall someone telling us that Ada was about a building block approach.
+So lets put any effort into the building blocks, not the gizmos.
+
+****************************************************************
