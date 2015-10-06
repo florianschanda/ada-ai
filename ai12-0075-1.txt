@@ -1,4 +1,4 @@
-!standard 4.9(6)                                  15-08-20    AI12-0075-1/03
+!standard 4.9(6)                                  15-08-25    AI12-0075-1/03
 !standard 4.9(18)
 !class Amendment 13-06-09
 !status work item 13-06-09
@@ -57,8 +57,15 @@ before 4.9(18)):
   This is similar to the way that the completion of a deferred constant
   may be a static constant.
 
-  [An inherited function is never a static expression function. This follows
-  from the fact that an inherited function is never an expression function.]
+  In addition, an inherited function is defined to be a static expression
+  function if the corresponding primitive function of the parent or
+  progenitor type is a static expression function (as viewed at the
+  point of the declaration of the inherited function).
+
+  AARM Discussion:
+  Unlike non-inherited subprograms, all views of a given inherited subprogram
+  always agree with respect to whether the given subprogram is a
+  static expression function.
 
 Add to the definition of static function (i.e. as another list item
 at the end of the 4.9 (19-22) list):
@@ -81,7 +88,8 @@ Add at the and of the 4.9 "Legality Rules" section:
 
 1) It has been suggested that a new aspect, perhaps named Static_Function
 (or perhaps just Static), should be introduced and that a function is not
-a static function unless its Static_Function aspect is specified to be True.
+a static function unless its Static_Function aspect is specified to be True
+(even if it meets all of the other requirements).
 
 This proposal has its advantages and disadvantages, but one strong
 argument seems to be the existing treatment of static constants.
@@ -93,6 +101,7 @@ This leads to the conclusion that the proposed new aspect is a bad idea.
 
 On the other hand, there is the question of compatibility.
 The following example is currently legal:
+
    procedure Foo is
       function Inc (X : integer) return Integer is (X + 1);
       subtype S is Integer range 0 .. Inc (3);
@@ -107,8 +116,13 @@ The following example is currently legal:
 
 The proposal given above would cause this example to become
 illegal (because the subtype S would become a static subtype).
+The Static_Function (or just Static) aspect would eliminate this
+incompatibility.
+
 This incompatibility would only affect code which uses expression
-functions; expression functions were first introduced in Ada 2012.
+functions. Expression functions were first introduced in Ada 2012,
+so the importance of this compatibility issue is less clear than
+if pre-Ada-2012 code could be affected.
 
 [Editor's note: There are many other ways to cause this incompatibility.
 For instance, consider the following
@@ -143,34 +157,67 @@ changes to the preceding proposal would be needed:
 
    - The new aspect is a Boolean aspect which can only be specified
      as part of an Expression_Function declaration with the usual
-     "must be static Boolean value" rule. The aspect is not inherited
-     by derived subprograms and defaults to False.
+     "must be static Boolean value" rule. Inheritance rules for the
+     aspect would be needed.
+
+   - A new legality rule stating that if an expression
+     function's Static_Function aspect is True, then the function's
+     expression shall be a potentially static expression.
 
    - The following clause in the definition of static expression function:
        "whose expression is a potentially static expression; and"
      would be replaced with
        "whose Static_Function aspect is True; and" .
 
-   - A new legality rule stating that if an expression
-     function's Static_Function aspect is True, then the function's
-     expression shall be a potentially static expression.
+2) It would be simpler to say that an inherited subprogram is never
+a static expression function.
 
-Interactions between this new aspect and inherited subprograms
-might get messy. The usual "characteristics" problems having to
-do with "what was known at the point of derivation vs. what is
-known now" would need to be resolved.
+However, it seems nice to allow things like
 
-2) Do we need to say anything about type invariants? No,
+  declare
+    package Pkg1 is
+       type T1 is range 1 .. 10;
+       function Wrapping_Inc (X : T1) is
+         (if X = T1'Last then T1'First else T1'Succ (X));
+    end Pkg1;
+
+    package Pkg2 is
+       type T2 is new Pkg1.T1;
+    end Pkg2;
+
+    Named_Number : constant := Pkg2.Wrapping_Inc (3);
+  begin ... end;
+
+by defining the inherited function Pkg2.Wrapping_Inc to
+be a static expression function.
+
+It seems clear that we want to avoid a "characteristics"-like
+situation where a change in the status of the parent type's
+operator causes a change in the status of the inherited operator.
+That's the reason for the "as viewed at the point of ..." wording.
+
+It's not clear whether an inherited function is ever an expression
+function; we might want to consider clarifying that point if we want to
+avoid the situation of a "static expression function" which is not an
+"expression function". [This question might also need to be resolved
+for reasons having nothing to do with this AI because of the special
+treatment of expression functions in the freezing rules.]
+
+3) Do we need to say anything about type invariants? No,
 because if a function has a parameter (or result) of a private type,
-then it's not a static function.
+then it's not a static function. But what if it is completed as
+a static expression function after the private type is completed?
+Maybe we need a rule saying that if a type invariant applies to
+a function than the function is not a static expression function
+(like the rule already given for predicates).
 
-3) We could allow a static expression function to have
+4) We could allow a static expression function to have
 an applicable pre/post-condition as long as the condition is a
-potentially static expression. This does seem worth the added
-complexity - pre/post conditions for expression functions are
-of very limited value in any case.
+potentially static expression. Pre/post conditions for one-part
+(i.e., no forward declaration) expression functions are of very limited
+value, but supporting PPCs might make more sense for two-part functions.
 
-4) We've got the 3.8 rule
+5) We've got the 3.8 rule
   
     If the discriminant is used to define the constraint of a component, the
     bounds of an entry family, or the constraint of the parent subtype in a
@@ -212,13 +259,38 @@ monotonic.
 
 Thus, this proposal would lead to implementation problems.
 
-4) There has been some discussion on ada-comment about somehow
+6) Because an expression function can be a completion, one might
+think that a rule is needed to prevent indirect recursion in a
+static expression function. However, no special rule is needed.
+Given
+
+    function F1 (X : Natural);
+    function F2 (X : Natural) is
+      (if X = 0 then 0 else 1 + F1 (X / 2));
+    function F1 (X : Natural) is (F2 (X));
+
+neither of the two functions are static expression functions.
+This is because, as viewed from the point where F2 calls F1,
+F1 is not an expression function.
+
+7) There has been some discussion on ada-comment about somehow
 allowing comes calls to System.Storage_Elements.To_Address to
 be considered "static" in some sense in order to allow an
 address aspect specification in a preelaborated package.
 
 That seems like a separate issue that should be dealt with in
 a separate AI.
+
+Ditto for things like allowing Some_Private_Type'Size to be static
+in some cases so that it can be used in a representation clause
+for an enclosing composite type.
+
+This AI is only about allowing expression functions to be called
+in static expressions.
+
+[Editor's note: I feel this is a mistake, as we're piling up special
+gizmos without integrating them. See AI12-017x-1 for a possible way
+to solve all of these problems with one integrated solution.]
 
 !example
 
@@ -402,5 +474,24 @@ is not a static expression!
 The proper approach would be to make the restrictions as tight as possible,
 rather than getting into the tempting mode of making them as universal as
 possible.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, August 25, 2015  4:06 PM
+
+Here is a first cut at an AI allowing calls to expression functions to occur
+in static expressions. This is part of my Madrid homework. [This was version
+/04 of the AI - Editor.]
+
+Many thanks to Randy for his helpful comments (but please do not take this to
+mean that Randy agrees with anything in this proposal).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, September 14, 2015  3:52 PM
+
+Looks good.  I agree we probably don't want an attribute.
 
 ****************************************************************
