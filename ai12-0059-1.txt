@@ -1,4 +1,4 @@
-!standard 13.03 (58)                              15-10-02    AI12-0059-1/04
+!standard 13.03 (58)                              15-10-05    AI12-0059-1/05
 !class Amendment 13-01-30
 !status work item 13-01-30
 !status received 12-09-21
@@ -37,7 +37,7 @@ in general is *not* the size of an object of the type. Thus, specifying the
 size of a (sub)type causes a number of unusual effects (such as the size
 being forgotten for some derivations).
 
-The rules for (Sub)type'Size mean that it specifies the minimum size of a
+The rules for (sub)type'Size mean that it specifies the minimum size of a
 packed component. That's a pretty useless thing to specify (why would you want
 to specify that a subtype *cannot* be packed?)
 
@@ -65,35 +65,47 @@ called Object_Size.
 will be placed in the Standard. As such, it does not mention aspect
 specifications, it only talks about the attribute. This is intended.]
 
-Add Object_Size to 13.3(9/1):
+Modify 13.3(9/1):
 The following representation attributes are defined: Address, Alignment,
-Size, Object_Size, Storage_Size, and Component_Size.
+Size, {Object_Size, }Storage_Size, and Component_Size.
 
 Insert the following after 13.3(58):
 
 For every subtype S:
 
-S'Object_Size	If S is definite, is zero or denotes the
-size (in bits) that the implementation would choose for a stand-alone
-aliased object of subtype S. If S is inherently limited or indefinite, the
-meaning is implementation-defined. The value of this attribute is of the
-type universal_integer. The Object_Size of a subtype is zero or is at
-least as large as the Size of the subtype. Object_Size may be specified via
-an attribute_definition_clause; the expression of such a clause shall be static
-and its value nonnegative. If Object_Size is nonzero, all aliased objects
-with nominal subtype S shall have the size S'Object_Size. Redundant[If
-Object_Size is zero, there is no requirement on the size of aliased objects;
-in particular, different objects may have different sizes.]
+S'Object_Size	If S is definite, denotes the size (in bits) of a component
+or stand-alone aliased object of subtype S, in the absence of a
+aspect_specification or representation item that specifies the size of 
+the component or object. If S is indefinite, the meaning is
+implementation-defined. The value of this attribute is of the
+type universal_integer. If not specified otherwise, the Object_Size of a
+subtype is at least as large as the Size of the subtype. Object_Size may be
+specified via an attribute_definition_clause; the expression of such a clause
+shall be static and its value nonnegative. All aliased objects with nominal
+subtype S have the size S'Object_Size. If S1 and S2 are two subtypes that
+statically match, then S1'Object_Size equals S2'Object_Size.
 
    AARM Ramification:
-   We allow the specification of Object_Size for any subtype. An implementation
-   can, of course, put restrictions on which subtypes allow specification of
-   Object_Size (as with any representation attribute).
+   We allow the specification of Object_Size for any subtype (*not* just first
+   subtypes, as with other aspects). An implementation can, of course, put
+   restrictions on which subtypes allow specification of Object_Size (as
+   with any representation attribute).
 
-   AARM Discussion:
-   We allow the size of zero so that implementations can be free to use
-   whatever techniques it wants for allocating objects. That's especially true
-   when following the Implementation Advice below.
+   AARM Reason: The static matching rule is necessary so that the addition of
+   Object_Size does not cause incompatibilities in existing Ada code that does
+   not use Object_Size. Note that this rule applies even to the
+   implementation-defined value of Object_Size when it is not specified. That's
+   needed because Object_Size is never inherited for a subtype, it is
+   independently determined for every subtype.
+
+   AARM Discussion: We need this rule even though static matching explicitly
+   excludes confirming values of Object_Size. That's because a general access
+   type can designate any aliased object whose subtype statically matches the
+   the designated subtype. Since the Object_Size of a subtype determines the
+   number of bits allocated for an aliased object of the subtype, if we
+   allowed different Object_Sizes for statically matching subtypes, we'd be
+   allowing the access type to designate objects with differing numbers of
+   bits. That isn't going to work.
 
 [Editor's note: The Pittsburgh meeting asked that this be changed to "aliased
 variable", because "one can imagine constants taking advantage of discriminants
@@ -104,23 +116,20 @@ determine what to do when reading the object, especially when copying the
 entire object. (Reading bits not part of the object is not acceptable.)
 All aliased objects have to have the same representation, constant or not.]
 
-Implementation Requirements
-
-If S1 and S2 are two subtypes that statically match, then S1'Object_Size shall
-be the same as S2'Object_Size.
-
-    AARM Reason: This is necessary so that the addition of Object_Size does
-    not cause incompatibilities in existing Ada code that does not use
-    Object_Size. Note that this rule applies even to the implementation-defined
-    value of Object_Size when it is not specified. That's needed because
-    Object_Size is never inherited for a subtype, it is independently
-    determined for every subtype.
+[2nd Editor's note: 13.1(7/2) allows padding bits to be part of the Size of
+composite objects (including aliased composite objects). A compiler could
+have implicitly added padding bits to such an object and reported the Size with
+those bits. In order to implement Object_Size, such a compiler ought to
+change the reported Size for objects to not include the padding bits if the
+Oject_Size does not include them (it does NOT have to change anything about
+the allocation, since unused bits are always allowed). If the size of the
+object is explicitly specified, no change is needed.]
 
 Implementation Advice
 
 If S is a definite first subtype and S'Object_Size is not specified,
-S'Object_Size should be either zero or the smallest multiple of the storage
-element size larger than S'Size which is consistent with the alignment of S.
+S'Object_Size should be the smallest multiple of the storage
+element size larger than S'Size that is consistent with the alignment of S.
 
 AARM Note
     Reason: Many implementations "round up" allocations to the nearest multiple
@@ -139,11 +148,19 @@ AARM Note
     We purposely used the vague phrase "consistent with the alignment of S" so
     that implementations that do not round up allocations (just using padding
     to provide alignment) are not required to do any rounding up.
+End AARM Note.
 
-If X denotes an object (including components) of subtype S, X'Size should
+[Editor's note: This advice is just that; it can make sense to do something
+different. For instance, it probably makes sense for T'Object_Size =
+T'Base'Object_Size for a first subtype, even if T'Size is a smaller multiple
+of the storage element. type Byte is range 0 .. 255; is an example (Byte'Size = 8,
+but Byte'Base'Size is at least 9; Byte'Base'Object_Size would be 16 on most
+machines, and it would make sense for a compiler to use that for Byte'Object_Size.]
+
+If X denotes an object (including a component) of subtype S, X'Size should
 equal S'Object_Size, unless:
-    S'Object_Size has the value zero; or
     X'Size is specified; or
+    X is a nonaliased stand-alone object; or
     The size of X is determined by a component_clause or Component_Size clause; or
     Pragma Pack applies to the type containing component X.
 
@@ -152,61 +169,69 @@ layout of components.
 
 The recommended level of support for the Object_Size attribute of subtypes is:
 
-    If S is a static signed integer subtype, the implementation should support
-    specifying S'Object_Size to be the size of any signed integer
-    base type provided by the implementation that is at least as large
-    as S'Size.
+ * If S is a static signed integer subtype, the implementation should support
+   the specification of S'Object_Size to match the size of any signed integer
+   base subtype provided by the implementation that is no smaller than S'Size.
+   Corresponding support is expected for modular integer subtypes,
+   fixed point subtypes, and enumeration subtypes.
 
-    If S is a static modular subtype, the implementation should support
-    specifying S'Object_Size to be the size of any modular
-    base type provided by the implementation that is at least as large
-    as S'Size.
+  AARM Ramification: The intent is that a compiler needs support only those
+  Object_Sizes that it might select for an integer type declaration.
 
-    If S is a static enumeration subtype, the implementation should support
-    specifying S'Object_Size to be the size of any modular
-    base type provided by the implementation that is at least as large
-    as S'Size.
+ * If S is an array or record subtype with static constraints and S is not
+   a first subtype of a derived untagged by-reference type, the implementation
+   should support the specification of S'Object_Size to be any multiple of the
+   storage element size that is consistent with the alignment of S, that is
+   no smaller than S'Size, and that is no larger than that of the largest
+   composite subtype supported by the implementation.
 
-    If S is a static fixed point subtype, the implementation should support
-    specifying S'Object_Size to be the size of any signed integer
-    base type provided by the implementation that is at least as large
-    as S'Size.
+  AARM Discussion: Any extra bits required this way will be trailing padding bits.
+  Unlike elementary objects, padding bits can be considered part of composite
+  objects.
 
-    If S is a floating point, access, or composite subtype, the implementation
-    need allow only the specification of S'Object_Size to be the same as what
-    the implementation would choose by default.
+ * If S is some other subtype, only confirming specifications of Object_Size
+   need be supported.
 
 Change 13.3(50) to:
 
-If the Object_Size of a subtype is zero and the Size of the subtype allows
-for efficient independent addressability (see 9.10) on the target architecture,
-then the Size of the following objects of the subtype should equal the Size of
-the subtype:
+If the Size of a subtype is nonconfirming and allows for efficient independent
+addressability (see 9.10) on the target architecture, then the Object_Size of
+the subtype should have the same value in the absence of an explicit
+specification of a different value.
 
-    AARM Ramification: If Object_Size is nonzero, this rule does not apply;
-    the rules for Object_Size apply instead.
+[Note on version /5: I have "is nonconfirming" here because we usually don't
+require confirming aspects to have any non-default effect. Without the
+"nonconfirming", this would have the effect of forcing a nonconfirming
+value of Object_Size for some subtypes. Both authors agree on this point.]
 
-    AARM Reason: We need to specify what happens if both Object_Size and Size
-    are specified incompatibly; we give priority to Object_Size.
+Delete 13.3(51-52).
 
-[Editor's note: This rule as written eliminates these guarantees for a
-compiler that choses a nonzero Object_Size by default, replacing them by
-the guarantees for Object_Size. That should not cause a problem if the
-default chosen Object_Size is the same as S'Size when S'Size is specified
-and allows efficient independent addressability. But it's not 100% certain
-that that can always be done and still meet the Implementation Requirement.]
+[Editor's Note: This IA is effectively moved to the IA for the meaning of
+Object_Size.]
+
+    AARM Reason: We talk about the explicit specification of Object_Size so that
+    we have specified what happens if both Object_Size and Size
+    are specified incompatibly; we give priority to Object_Size. Note that the
+    value of Size no longer has any effect on the Size of objects; what
+    happens instead is that the value of Size can have an effect on the
+    value of Object_Size in the absence of a specification for Object_Size.
+
+[Editor's note: Since all of this is Implementation Advice, compilers can
+ignore all of it anyway. For instance, we believe that GNAT currently ignores
+13.3(50-2) for non-first subtypes. Thus it's pointless to obsess about getting
+it perfect for every possible implementation.]
 
 Modify the first sentence of 4.9.1(2/3) to:
 
 A subtype statically matches another subtype of the same type if they have
 statically matching constraints, all predicate specifications that apply to
 them come from the same declarations, {their Object_Sizes (see 13.3) are the
-same if either is nonconforming,} and, for access subtypes, either both or
+same if either is nonconfirming,} and, for access subtypes, either both or
 neither exclude null. 
 
     AARM Ramification: If one of the subtypes is not yet frozen, an
     implementation may have to repeat the check when the subtypes are both
-    frozen. This can only make to previously statically matching subtype fail
+    frozen. This can only make a previously statically matching subtype fail
     to match; it cannot make a match legal.
 
     AARM Discussion: We exclude the case where both Object_Sizes are
@@ -238,25 +263,10 @@ constraining for components of packed arrays and records. Other representation
 items ('Component_Size, component_clauses) override Size for components. And
 the only requirement on normal objects is that they be the same size or larger.
 
-Object_Size lets us specify the size of a component or stand-alone object when
-there is no representation clauses given for the object: meaning no Pack, no
-Component_Size, and no record representation clause for a component, and no
-Size representation clause for a stand-alone object.
-
-We allow the specification of Object_Size to have the value zero. This value
-means that Object_Size imposes no requirements on the sizes of objects. This
-value allows an implementation to avoid the requirements of Object_Size unless
-someone specifies Object_Size to have a nonzero value. We're not requiring
-that the value be zero unless specified as some implementations may prefer
-to always provide (and follow) a value for Object_Size.
-
-We do this to work around the rules for confirming aspects. Specifically, we
-don't want implementations to be required to allocate all components of a
-subtype the same way unless a specification for the attribute (or aspect)
-Object_Size is given. After all, if the user doesn't care about the size of
-the components, the compiler should be free to do anything it wants. OTOH,
-if the user *does* care, then the wishes need to be respected (in the absence
-of other representation items).
+Object_Size lets us specify the size of a component or stand-alone aliased
+object when there is no representation clauses given for the object: meaning
+no Pack, no Component_Size, and no record representation clause for a
+component, and no Size representation clause for a stand-alone aliased object.
 
 The recommended level of support for integer and fixed point subtypes is
 defined to only require object sizes matching the native integer sizes of
@@ -271,7 +281,7 @@ definition might force them to change the value Object_Size for some types,
 which we'd like to avoid.)
 
 One problem with Size is that it is possible to define subtypes that have a
-larger size value than their base type.
+larger size value than their base subtype.
 
     type T is range 0..255;
     for T'Size use 8; -- Confirming in Ada 95, allowed in Ada 83.
@@ -281,13 +291,11 @@ The point here is that S'Size has to be larger than T'Size; it cannot be
 required to be the same.
 
 This also can occur for Object_Size. It is not as likely as with Size
-(An implementation could always define Object_Size to be zero in the
-absense of a specification, and even if it uses a value, Object_Size has
-only a weakly suggested value, so it is likely that T'Object_Size =
-T'Base'Object_Size in the absense of a specification for
+(Object_Size has only a weakly suggested value, so it is likely that
+T'Object_Size = T'Base'Object_Size in the absense of a specification for
 T'Object_Size). Moreover, this behavior is not really a problem. There is no
 problem with using a different Object_Size for an "expanding" subtype,
-as it cannot statically match the base type.
+as it cannot statically match the base subtype.
 
 ============================
 
@@ -299,16 +307,12 @@ An alternative (if 'Object_Size would become too incompatible with the existing
 implementation) would be to extend 'Component_Size to scalar types, with
 the meaning that is specifies the size to be used for components in the
 absence of representation clauses. Note that the size of stand-alone objects
-is rarely relevant; the size of a subtype is usually an issue to when
+is rarely relevant; the size of a subtype is usually an issue when
 it is used in components in a number of composite types (and giving
 representation clauses on all of them is painful). Doing so would eliminate
 the need to provide subtype specifiability for the aspect, and would ensure
 that there would be no conflicts with existing implementations. (They are not
 allowed to use a language-defined attribute in a different way.)
-
-We still would need to support a value of zero, to specify when the Object_Size
-value can be ignored. That's necessary as we still have to work around the rules
-for confirming aspects here.
 
 !example
 
@@ -451,14 +455,14 @@ implementation dependent.
 'Size has always been unintuitive.  That's unfortunate, but it's not fixable
 now.
 
->...It's already difficult enough trying to convince people about  using
+>...It's already difficult enough trying to convince people about using
 >Ada, but little details like this just looks bad ("What? Type'Size is
 >different than Object'Size?
 
 That's necessarily true, given that different objects of a type can have
 different sizes.
 
->...But wait! Object'Size is different if I have it  aliased or
+>...But wait! Object'Size is different if I have it aliased or
 >non-aliased?
 
 That shouldn't be surprising.  Aliased objects have to be allocated at an
@@ -466,7 +470,7 @@ addressable and properly-aligned location, or else 'Access wouldn't work.
 Non-aliased objects can be allocated anywhere the compiler likes, and that's
 important for efficiency.
 
->...Why do I have to make something aliased to take a  pointer to it?
+>...Why do I have to make something aliased to take a pointer to it?
 >And why is Ada better than C again?
 
 Ada is better than C because you have to make something aliased to take a
@@ -480,8 +484,8 @@ Pack wouldn't work very well without having "aliased" in the language.
 > the issue with portability involving how many storage elements is used
 >just  to store a numeric value. Thankfully, the ARG came in to clear
 >things up so  that Ada code can be more portable. I realize a lot of
->people don't need to  write code with such low level details, but in
->the industry I'm in that is  what we deal with a lot, so it matters to people like me.
+>people don't need to write code with such low level details, but in
+>the industry I'm in that is what we deal with a lot, so it matters to people like me.
 
 ARG is all in favor of portability, but ARG is also constrained by
 compatibility, and anyway, I don't see how answering Adam's original question in
