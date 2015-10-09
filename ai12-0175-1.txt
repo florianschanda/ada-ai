@@ -1,0 +1,237 @@
+!standard 10.2.1(7)                                  15-10-08  AI05-0175-1/00
+!standard 13.7.1(10/3)
+!class Amendment 15-10-08
+!status work item 15-10-08
+!status received 15-07-14
+!priority Low
+!difficulty Medium
+!subject Preelaborable packages with address clauses
+!summary
+
+** TBD.
+
+!problem
+
+It's not possible to portably write a Pure or Preelaborated package that
+contains an object mapped to a static address. That's because the only way
+to create such an address is to call System.Storage_Elements.To_Address.
+That function is not a static function.
+
+However, 10.2.1(5) & (7) say:
+
+  An elaborable construct is preelaborable unless its elaboration performs
+  any of the following actions: 
+     ...
+     * A call to a subprogram other than a static function.
+
+Elaborating an address clause calls that function, and thus a package
+containing such an address clause cannot be Pure or Preelaborated.
+
+Some implementations have ways around this problem (an implementation that
+did not follow the Implementation Advice 13.7(37) probably allows directly
+using a literal or aggregate of literals to specify a value of System.Address),
+but a portable solution is needed.
+
+This is important as it is common to access memory-mapped hardware registers
+in embedded programs. It is also common in such programs to use preelaborated
+packages to reduce start-up overhead. The inability to do both is a silly and
+annoying limitation.
+
+!proposal
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+** TBD.
+
+!ASIS
+
+No ASIS effect. (I believe that staticness is not an ASIS property.)
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the new capabilities are supported.
+
+
+!appendix
+
+From: Simon Wright
+Sent: Tuesday, July 14, 2015  9:33 AM
+
+For bare-metal programming on microcontrollers, such as the Arduino Due or
+the STM32F4 range, one has to directly address the hardware registers. 
+For example,
+
+package Registers.ATSAM3X8.PMC is
+
+   type PMC_T is record
+      SCER  : aliased Interfaces.Unsigned_32;
+      —  etc
+   end record with Convention => Ada, Volatile;
+
+   for PMC_T use record
+      SCER  at 16#0000# range 0 .. 31;
+      —  etc
+   end record;
+
+   PMC : PMC_T
+     with
+       Import,
+       Convention => Ada,
+       Address => System.Storage_Elements.To_Address (16#400E0600#);
+
+end Registers.ATSAM3X8.PMC;
+
+It would be good to be able to mark this package as preelaborable, but this is
+illegal because of the call to System.Storage_Elements.To_Address. 
+To quote Mark Lorenzen on c.l.a, "the current restriction prevents many
+low-level I/O packages from having preelaborable elaboration, which
+transitively prevents a whole I/O library from having preelaborable elaboration.”
+
+Philosophically, I don’t see why it shouldn’t be Pure. OK, it elaborates a
+variable declaration, but not one that actually _does_ anything!
+
+****************************************************************
+
+From: Matthias Richter
+Sent: Tuesday, July 14, 2015  12:36 PM
+
+GNAT has the implementation-defined attribute System'To_Address which is
+identical to System.Storage_Elements.To_Address except that it is static.
+
+See GNAT RM, chapter 4.59 and 9.15 for explanations.
+
+A non-implementation-defined solution would be preferable...
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, July 14, 2015  1:26 PM
+
+...
+> It would be good to be able to mark this package as preelaborable, but 
+> this is illegal because of the call to System.Storage_Elements.To_Address.
+> To quote Mark Lorenzen on c.l.a, "the current restriction prevents 
+> many low-level I/O packages from having preelaborable elaboration, 
+> which transitively prevents a whole I/O library from having 
+> preelaborable elaboration.”
+
+As of Ada 2005, the System.Storage_Elements package is marked Pure, and all
+Pure packages are also Preelaborate'd.
+
+> Philosophically, I don’t see why it shouldn’t be Pure. OK, it 
+> elaborates a variable declaration, but not one that actually _does_ anything!
+
+The above could have a pragma Preelaborate (or "with Preelaborate" if you
+prefer), so long as you are using an Ada 2005 compiler or beyond.  Note that
+even in Ada 95, package System was *allowed* to be marked Pure, but not
+required to be.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 14, 2015  2:16 PM
+
+> The above could have a pragma Preelaborate (or "with Preelaborate" if 
+> you prefer), so long as you are using an Ada
+> 2005 compiler or beyond.  Note that even in Ada 95, package System was 
+> *allowed* to be marked Pure, but not required to be.
+
+Now, you made the same mistake as I did when this originally came up on
+comp.lang.ada. I direct your attention to 10.2.1(5) & (7):
+
+  An elaborable construct is preelaborable unless its elaboration performs
+  any of the following actions: 
+     ...
+     * A call to a subprogram other than a static function.
+
+System.Storage_Elements.To_Address is not a static function (currently, no
+explicitly declared function can be static), and the elaboration of PMC (and its
+address clause, no matter what the syntax) evaluates that function.
+Ergo, the package cannot be preelaborated.
+
+There is no workaround (within the language at least), as there is no way to
+declare a static constant of type Address. (Janus/Ada doesn't have this
+problem, as we never followed the advice to make System.Address private. But
+telling everyone to ignore that advice doesn't seem like much of a solution,
+and the result still wouldn't be portable [in Janus/Ada, System.Address is a
+record]).
+
+However, we do have an aspect (as yet unnamed) on the table to allow the
+declaration of static functions in very limited circumstances. Perhaps we
+ought to consider extending that idea to private types in order that we
+could mark To_Address as potentially static. Or something -- this unintended
+restriction surely is silly and aggrevating.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, July 14, 2015  2:22 PM
+
+...
+> Philosophically, I don't see why it shouldn't be Pure. OK, it 
+> elaborates a variable declaration, but not one that actually _does_ 
+> anything!
+
+If it isn't really a variable, then it could be declared a constant and be 
+pure (presuming the other bug is fixed). But pure packages do not allow any
+variable state (that's mostly an issue for the Annex E uses of Pure - the idea
+is that pure packages can be duplicated in each partition, which doesn't work
+if any variables are involved). If you ever write to the variable, then it cannot
+be in a pure package.
+
+Seriously, Pure packages are a mistake, there is almost nothing that can be
+Pure in Ada. (I've never successfully made any package of mine Pure in my years
+of programming.) There are a lot of individual functions that are Pure, but
+it's very rare that you have an entire ADT that can be marked Pure (and even if
+you can do that, you can't debug the result). As such, I mainly care about
+preelaborated packages (as that is a realistic goal). Arguably, everything
+should be preelaborated unless declared otherwise, but this is another place
+where the default is wrong because of history.
+
+****************************************************************
+
+From: Simon Wright
+Sent: Tuesday, July 14, 2015  2:14 PM
+
+...
+> The above could have a pragma Preelaborate (or "with Preelaborate" if you
+> prefer), so long as you are using an Ada 2005 compiler or beyond.  Note that
+> even in Ada 95, package System was *allowed* to be marked Pure, but not
+> required to be.
+
+In GNAT GPL 2015 (and for some time now) both System and
+System.Storage_Elements are marked Pure, and in addition To_Address has a
+pragma Pure_Function applied to it to avoid precisely this problem (according
+to the comments). The pragma appears to be inoperative, because the compiler
+says
+
+    16.   PMC : PMC_T
+    17.     with
+    18.       Import,
+    19.       Convention => Ada,
+    20.       Address => System.Storage_Elements.To_Address (16#400E0600#);
+                                                |
+        >>> non-static call not allowed in preelaborated unit
+
+(the pipe symbol is indicating To_Address)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, July 14, 2015  2:39 PM
+
+A static function and a pure function are two different things.  A static
+function has compile-time-known semantics.  "Purity" relates to the absence
+of side effects.
+
+And thanks Randy for clarifying the question.  I took the question to be one
+about the pre-elaborability of System.Storage_Units, but as you point out, the
+problem is the fact that To_Address is not a static function.
+
+****************************************************************
