@@ -48,68 +48,83 @@ necessary.)]
 
 !wording
 
-Add after C.6(8.1/4): [Static Semantics]
+Append to the list of C.6 aspects:
 
-For a volatile object, the following representation aspect can be specified:
+   Whole_Object_Reference - The type of aspect Whole_Object_Reference
+   is Boolean.
 
-Exact_Size_Only
-   The type of aspect Exact_Size_Only is Boolean. An object with aspect
-   Exact_Size_Only having the value True is called an *exact size object*.
-   For an exact size object, all loads and stores of the object shall be
-   implemented by accessing exactly the bits of the object and no others.
+Append after C.6(8.3):
+  A "whole object reference" type is one for which the aspect
+  Whole_Object_Reference is true. A "whole object reference" object
+  (including a component) is one for which the Whole_Object_Reference
+  aspect is true, or an object of a whole object reference type.
 
-   When this aspect is directly
-   specified, the aspect_definition shall be a static expression. If not
-   specified, this aspect is False.
+Move Static Semantics section (which is currently empty) ahead of
+Legality rules section. In the Static Semantics section add:
 
-AARM Ramification: This aspect makes the Implementation Advice a requirement
-on the specified object (which will have no effect on most implementations,
-which are following the advice anyway). Note that this wording does NOT say
-"as a whole"; this rule applies to ALL accesses of the object and accesses
-which may require some other implementation are illegal (see below).
+  All reads of or writes to any part of a "whole object reference" object shall
+  be implemented by reading or writing the entire object.
+  Notwithstanding any rule to the contrary, no subcomponents of a
+  "whole object reference" object are independently addressable.
 
-Add after C.6(13.2/3): [Legality Rules]
+  Implementation Note:
 
-It is illegal to specify aspect Exact_Size_Only to have the value True for
-an object if the implementation cannot support the exact access required
-by the aspect.
+  For example, if a 32-bit record object has 4 components, each occupying
+  one byte, then an assignment to one of those components might normally be
+  implemented on some target machines via some sort of store_byte instruction;
+  the "whole object reference" aspect indicates that instead a 32-bit
+  read-modify-write must be performed. That read-modify-write need not
+  be atomic, although the read and the write must each separately be
+  atomic if the object is atomic. This aspect is intended for use in
+  supporting memory-mapped devices on some targets.
 
-AARM Discussion: On most implementations, this will mean that the size of
-the object will have to be a multiple of the storage unit size.
+  As another example, consider a "whole object reference" object having
+  two or more nonoverlapping volatile subcomponents. A read of or write to any
+  part of the object will read, write, or possibly both read and write
+  the entire object, notwithstanding the other rules given in this section
+  about accessing volatile objects. This is similar to other target-dependent
+  cases where reading or writing one component necessarily involves reading
+  and/or writing neighboring storage and that neighboring storage
+  happens to overlap a volatile object.
 
-The name of an exact size object shall not be used as the prefix of a slice,
-indexed_component, or selected_component.
+Modify the last sentence of C.6(13.2):
+   Corresponding rules apply to volatile objects and types
+   {, and to whole object reference objects and types }.
 
-AARM Reason: Such a component access will necessarily be volatile, and
-almost always would require access in a different (smaller) size than
-the object as a whole. To make the implementation easier, we disallow
-all component access to such objects.
+Append at the end of the legality rules section (after C/6(13.2)):
 
-An exact size object shall not have a part which is a discriminated record.
+   The Whole_Object_Reference aspect shall not be specified for an
+   elementary entity.
+   If a subcomponent of a "whole object reference" object is passed as
+   the actual parameter in a call then the formal parameter shall
+   allow pass by copy (and, at run-time, the parameter shall be
+   passed by copy).
+   No subcomponent of a "whole object reference" object shall
+   used as an actual for a generic formal of mode in out.
+   No part of a "whole object reference" entity shall have
+   components which are specified to be independently addressable.
+   No part of a "whole object reference" entity shall be
+   aliased, limited, tagged, discriminated, or private, or
+   subject to a dynamic index constraint.
 
-AARM Reason: A discriminant check would be an implicit component access
-just like the ones banned by the previous rule.
+AARM note:
+   We want to ensure that no view of any part of a whole object reference
+   object can ever be aliased. We also want to eliminate any issues
+   associated with implicit reading of discriminants.
 
-An exact size object shall not be the actual to a generic *in out* parameter.
-An exact size object shall not be the prefix for the Access
-or Unchecked_Access attribute.
+Discussion:
+   Just as atomic implies volatile, should "whole object" imply
+   volatile? Should it imply atomic? If the latter, then the "if the
+   object is atomic" wording above needs to be changed.
 
-AARM Reason: Inside the generic, the restrictions on access would not be known
-and thus enforced. If passed as an actual to a generic *in* parameter, a copy
-would be made. Similarly, the designated type for an access type would not
-enforce the restrictions on access to an exact size object.
 
-Add after C.6(20.a):
 
-AARM To Be Honest:
-    For an volatile-but-not-atomic object, multiple (divisible) operations may
-    be needed to implement a single read or write in the program. That might
-    include one or more reads in the case of writing some by not all bits of
-    a machine scalar. On the other hand, for an atomic object, all operations
-    have to be indivisible, so the operations should do exactly what is
-    specified in the code.
 
 !discussion
+
+[Editor's note: The discussion below is based on the proposal of version
+/03 of this AI. Version /04 didn't update it, so it doesn't exactly
+match the proposal.]
 
 The problem isn't really C.6(15). C.6(8/3) says that the subcomponents of
 a volatile object are also volatile. (Recall that atomic objects are also
@@ -1868,7 +1883,7 @@ C.6(20) with all its consequences...
 From: Robert Dewar
 Sent: Saturday, March 21, 2015  8:57 AM
 
-We have had continued problems with people trying to use pragma Atomic for 
+We have had continued problems with people trying to use pragma Atomic for
 mapping memory-mapped variables. There are two problems
 
 a) Atomic does not guarantee that read/write references use a single
@@ -1892,18 +1907,18 @@ the language.
 From: Randy Brukardt
 Sent: Saturday, March 21, 2015  8:29 PM
 
-> We have had continued problems with people trying to use pragma Atomic 
+> We have had continued problems with people trying to use pragma Atomic
 > for mapping memory-mapped variables.
 
 This problem was reported to Ada-Comment last July. AI12-0128-1 was created to
 (potentially) address it.
 
 > There are two problems
-> 
-> a) Atomic does not guarantee that read/write references use a single 
-> instruction to access *ALL* the bits of the object, as is often 
-> expected and required. It is allowable (and most certainly GNAT takes 
-> advantage of this) to access e.g. a single field in an atomic record 
+>
+> a) Atomic does not guarantee that read/write references use a single
+> instruction to access *ALL* the bits of the object, as is often
+> expected and required. It is allowable (and most certainly GNAT takes
+> advantage of this) to access e.g. a single field in an atomic record
 > with a byte load instruction even if the record is a word.
 
 It's more than "allowed". It's strongly recommended, because the components
@@ -1912,7 +1927,7 @@ C.6(22/2) applies to it:
 
 A load or store of a volatile object whose size is a multiple of
 System.Storage_Unit and whose alignment is nonzero, should be implemented by
-accessing exactly the bits of the object and no others. 
+accessing exactly the bits of the object and no others.
 
 This is advice in name only; the only reason we didn't make it a requirement
 was that we couldn't find any way to say that normatively.
@@ -1924,9 +1939,9 @@ In this case, we want to turn this off for components.
 Right. That I wasn't able to convince the person who reported it, so I didn't
 make much effort to bring this AI to the attention of the full ARG.
 
-> We just implemented pragma/aspect Volatile_Full_Access which is just 
-> like Volatile except that it guarantees that every read/write access 
-> to an object with this aspect reads or writes all the bits in a single 
+> We just implemented pragma/aspect Volatile_Full_Access which is just
+> like Volatile except that it guarantees that every read/write access
+> to an object with this aspect reads or writes all the bits in a single
 > instruction.
 
 On what does it work? Only on an object, or anywhere that Volatile can be used?
@@ -1937,8 +1952,8 @@ I had suggested an aspect specific to volatile objects (in addition, as opposed
 to making another kind of volatile). Of course, I don't think anyone else ever
 commented on that. Either way works.
 
-> I suspect this new aspect is really what 99% of programmers trying to 
-> do memory mapped I/O really want, and may be worth considering for 
+> I suspect this new aspect is really what 99% of programmers trying to
+> do memory mapped I/O really want, and may be worth considering for
 > addition to the language.
 
 Something certainly should be added to the language. Your suggestion is probably
@@ -1951,7 +1966,7 @@ In the case of C.6(20):
 The external effect of a program (see 1.1.3) is defined to include each read
 and update of a volatile or atomic object. The implementation shall not
 generate any memory reads or updates of atomic or volatile objects other than
-those specified by the program. 
+those specified by the program.
 
 This doesn't make any sense for volatile bit-mapped components, whether or not
 exact size is being required. In such a case, a read is necessary before a
@@ -1972,5 +1987,93 @@ Honest note on the lines of:
     code.
 
 Going to be fun. ;-)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, October 9, 2015  5:56 PM
+
+This AI was part of my Madrid homework. [This is version /04 of the AI.]
+This is a preliminary attempt so that we have something concrete to discuss and
+(most likely) modify. See also the GNAT-defined Volatile_Full_Access pragma and
+aspect.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October 9, 2015  7:00 PM
+
+Steve and I had an extensive private e-mail correspondence on this topic. Here
+are some thoughts from the correspondence not covered in the AI:
+
+(1) Since the problem is accessing hardware registers, it seems strange to
+separate the solution from Volatile. In all real uses, Volatile would be
+required as well as Whole_Object_Reference. (Why would anyone care how memory is
+read or written when the compiler can arbitrarly change it anyway??) And in that
+case, the requirements of Whole_Object_Reference would conflict with the
+requirements on a Volatile object (since components of a volatile object are
+also Volatile). In particular, the read-modify-write cycle violates C.6(20), and
+size violates IA C.6(22/2). That suggests an integrated solution (like Robert's
+last aspect, Volatile_Full_Access) might work better.
+
+(2) C.6(20) is broken for non-aligned or not multiple of storage-element sizes
+components, regardless of this new AI. Steve views that as an issue for a
+different AI, but I disagree. We surely want C.6(20) to apply to objects that
+have are both Whole_Object_Reference and Volatile, but the read before a write
+appears to be banned by the text. Since we have to fix it here in order to
+actually solve the problem, we should fix here for all cases (especially as they
+are all related to memory-mapped register access).
+
+I made a stab updating the C.6(20) wording:
+
+The external effect of a program (see 1.1.3) is defined to include each read and
+update of a volatile or atomic object. The implementation shall not generate any
+memory reads or updates of atomic or volatile objects {whose size is a multiple
+of the size of a machine scalar and is aligned properly for that machine scalar}
+other than those specified by the program. {A similar rule applies for reads or
+writes of an entire Whole_Object_Reference object.} {For other volatile objects,
+an update specified by the program may generate a read before an update, but no
+other updates or reads shall be generated other than those specified by the
+program.}
+
+AARM Ramification: "Specified by the program" includes reads or updates
+implicitly specified by the program. For instance, the default initialization of
+an object without an explicit initialization is considered specified by the
+program. Similarly, reads and updates caused by the (implicit) finalization of
+an object are considered specified by the program.
+
+I'm not sure this covers everything needed. (Note that there is a Bairdian note
+applied to the end, as Steve wondered about volatile controlled types, and that
+led me to wonder about implicit reads and writes in general. They certainly
+ought to be mentioned, if the types involved aren't restricted.)
+
+Steve noted that we could restrict what types are allowed to be Volatile, but
+that isn't the model that was used for Ada 95 and Ada 2012, so such a
+restriction would be incompatible with existing practice.
+
+[Note: I used "machine scalar" rather than "storage element" to account for
+machines on which the storage element is not directly addressable. The U2200 I
+worked on in the late 1990s was like that; while it had byte pointers (for the C
+compiler), they didn't translate into usual machine instructions - they
+implicitly used a read/modify/write set of instructions, as the actual
+addressable unit was a 36-bit word.]
+
+(3) One could argue that C.6(20) is not broken because the Dewar rule says that
+read-before-write is implied in the source code for components that aren't
+directly modifiable by hardware instructions. In that case, there is no problem
+at all, as the only other issue is C.6(22/2), and as Implementation Advice,
+implementations can ignore it when it causes issues. I reject this line of
+thinking both because the IA C.6(22/2) really was intended as a requirement (but
+we thought it was too undefined to write that way) and because it is too
+misleading to programmers to have the text of the Standard say something other
+than the actual rules.
+
+(4) It's unclear to me as to whether a Whole_Object_Reference object should be
+allowed to be Atomic. As Steve notes in his write-up, the read-modify-write
+cycle would not be atomic as a whole, just the read and the write. That's
+misleading to a programmer, which probably would expect an indivisible update.
+Making the whole cycle indivisible would almost certainly require expensive
+locking (especially on a multicore machine). But perhaps it is OK to leave this
+to the individual implementations??
 
 ****************************************************************
