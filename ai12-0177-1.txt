@@ -1,0 +1,243 @@
+!standard 13.1.1(11/3)                                 15-10-08  AI05-0177-1/00
+!class binding interpretation 15-10-08
+!status work item 15-10-08
+!status received 15-09-29
+!priority Low
+!difficulty Hard
+!qualifier Omission
+!subject A name resolution oddity
+!summary
+
+** TBD
+
+!question
+
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+** TBD.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+** TBD.
+
+!appendix
+
+From: Steve Baird
+Sent: Tuesday, September 29, 2015  7:17 PM
+
+Consider
+
+   declare
+     package Pkg1 is
+        type T1 is range 1 .. 10;
+        function F return T1 is (1);
+     end Pkg1;
+
+     package Pkg2 is
+       type T2 is new Pkg1.T1;
+       function Foo return T2 is (F)
+         with Post => (Foo'Result = F);
+       function F return T2 is (2);
+     end Pkg2;
+    begin ... end;
+
+where the postcondition check fails because the first use of F resolves to a
+function which returns the value 1 while the second use of F (the one in the
+postcondition) resolves to a function which returns the value 2.
+
+Is the problem which this illustrates an unimportant pathology, or a language
+design issue which warrants fixing?
+
+For example, we could add a rule something like
+
+    A usage name in an aspect_definition shall not denote a
+    overridable declaration which overrides another declaration
+    which is directly visible at the point of the associated
+    declaration [of the aspect_definition].
+
+It's not clear that this is exactly what we would want, but it is at least
+suggestive of the sort of change we might consider.
+
+Alternatively, we could take no action.
+
+I'm raising this question on behalf of the SPARK Language Design Group; the
+SPARK LDG discussed this issue and concluded that this is really a question
+about Ada rather than about SPARK.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September 29, 2015  9:50 PM
+
+> For example, we could add a rule something like
+>
+>     A usage name in an aspect_definition shall not denote a
+>     overridable declaration which overrides another declaration
+>     which is directly visible at the point of the associated
+>     declaration [of the aspect_definition].
+
+or perhaps:
+
+       A usage name in an aspect_definition shall not denote a
+       declaration which hides a declaration that is denoted
+       by that same name at the point of the associated
+       declaration [of the aspect_definition].
+
+> It's not clear that this is exactly what we would want, but it is at
+> least suggestive of the sort of change we might consider.
+
+The basic idea is that you can postpone name resolution until the end of the
+immediately enclosing declaration list, but if the name means something at the
+point of the aspect specification, it should mean the same thing at the point of
+resolution (and at the freezing point).
+
+> Alternatively, we could take no action.
+
+To me it is pretty important that if a name means something at the point of the
+aspect specification, then it should mean the same thing where it is resolved.
+The point of allowing forward reference was not to create confusion, but rather
+to allow cyclic dependences in pre/postconditions.
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Wednesday, September 30, 2015  9:58 AM
+
+Aspect specifications are already subject to two name resolutions, one at the
+freeze point and one at the end of the declarative part, to verify that the
+meaning has not changed in the meantime.  You want to add a third conditional
+one, in case there is something visible somewhere in the expression?  Most of
+the time the expression contains forward references which is why nothing is
+resolved at the point of the declaration.  I would say this is a pathology best
+left for after-dinner erudite discussions.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, September 30, 2015  4:29 PM
+
+I tend to agree. I've had to do major surgery on Janus/Ada to handle this
+delayed resolution as it is. I don't see any sensible way to implement a rule
+depending on visibility before resolution, because failures would have to not be
+an error. Very strange sort of code; it would have to be totally custom for this
+check (it would also have to save whatever it figured out in some way that would
+normally be ignored).
+
+Formally, in Steve's example:
+
+> > On 9/29/15 8:15 PM, Steve Baird wrote:
+> >> Consider
+> >>
+> >>  declare
+> >>    package Pkg1 is
+> >>       type T1 is range 1 .. 10;
+> >>       function F return T1 is (1);
+> >>    end Pkg1;
+> >>
+> >>    package Pkg2 is
+> >>      type T2 is new Pkg1.T1;
+> >>      function Foo return T2 is (F)
+> >>        with Post => (Foo'Result = F);
+> >>      function F return T2 is (2);
+> >>    end Pkg2;
+> >>   begin ... end;
+
+As far as I can tell, F (which is primitive for the type) always means the one
+that returns (2), as the overridding body is always the one called (even thru
+the inherited name).
+
+If that's not true (I didn't try to look it up), then this case is clearly a
+pathology even without the postcondition (the result is nonsense, any reader
+would expect the result to be based on the local F, not something declared far
+away). Indeed, it's inheritance for non-tagged types that represents the
+pathology -- every time it happens to me it causes a bug.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, September 30, 2015  7:55 PM
+
+> As far as I can tell, F (which is primitive for the type) always means
+> the one that returns (2), as the overridding body is always the one
+> called (even thru the inherited name).
+
+That is only true for tagged types, alas.
+
+>
+> If that's not true (I didn't try to look it up),
+
+and it isn't ...
+
+> ... then this case is clearly a
+> pathology even without the postcondition (the result is nonsense, any
+> reader would expect the result to be based on the local F, not
+> something declared far away). Indeed, it's inheritance for non-tagged
+> types that represents the pathology -- every time it happens to me it causes
+> a bug.
+
+I would agree this case is a pathology.  The more likely case in my view is
+where you have a local object that hides a more global object.  I suppose we can
+leave this to compiler warnings, if this becomes a case that actually comes up
+for some number of Ada users.
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Wednesday, September 30, 2015  8:05 PM
+
+>> As far as I can tell, F (which is primitive for the type) always
+>> means the one that returns (2), as the overridding body is always the
+>> one called (even thru the inherited name).
+>
+> That is only true for tagged types, alas.
+
+Why is that?  The freeze point for T2 is somewhere ahead, at which point F is
+the overriding one, regardless of taggedness, no? Certainly the aspect is not
+analyzed earlier.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, September 30, 2015  9:09 PM
+
+Right.  I interpreted Randy's comment to refer to the "F" used in the expression
+function definition.  That one is resolved immediately to refer to the
+implicitly declared, inherited "F."  If T1 and T2 were tagged, that wouldn't
+affect which body of "F" would be called, presuming it is eventually overridden.
+But since T1 and T2 are untagged, the F to which the name resolves is the one
+whose body is called, i.e. the "inherited" body.
+
+See AARM 6.4(10.e/2):
+
+   "{AI95-00348-01} Normally, the subprogram_body that is executed by the above
+    rule is the one for the subprogram being called. For an enumeration literal,
+    implicitly declared (but noninherited) subprogram, null procedure, or an
+    attribute that is a subprogram, an implicit body is assumed. For a
+    dispatching call, 3.9.2, “Dispatching Operations of Tagged Types” defines
+    which subprogram_body is executed."
+
+And RM 3.9.2(14) says:
+
+   "For the execution of a call on a dispatching operation of a type T, the
+    controlling tag value determines which subprogram body is executed. ..."
+
+--
+
+Note that 6.4(10.e/2) actually is a bit misleading.  It isn't just dispatching
+calls, it is the rules for all calls on dispatching operations that are defined
+in 3.9.2
+
+****************************************************************
