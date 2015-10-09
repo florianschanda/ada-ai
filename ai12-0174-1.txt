@@ -1,0 +1,280 @@
+!standard B.3.3(9/3)                                    15-10-08  AI05-0174-1/01
+!class binding interpretation 15-10-08
+!status work item 15-10-08
+!status received 15-09-06
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Aggregates of Unchecked_Unions using named notation
+!summary
+
+Aggregates using named notation are allowed for unchecked union types.
+
+!question
+
+Consider:
+
+   type Data_Kind is (C_int, C_char, C_void_pointer);
+   type C_Variant (Format : Data_Kind := C_int) is
+      record
+         case Format is
+            when C_int =>
+               int_Val : C.int;
+            when C_char =>
+               char_Val : C.char;
+            when C_void_pointer =>
+               pointer_Val : System.Address;
+         end case;
+      end record with Unchecked_Union, Convention => C;
+
+   Int1 : C_Variant := (Format => C_int, int_Val => 12); -- ???
+   Int2 : C_Variant := (C_int, 12); -- OK.
+
+It appears that the first aggregate is illegal, as the name Format denotes
+the discriminant of the Unchecked_Union. This clearly violates B.3.3(9/3):
+
+  Any name that denotes a discriminant of an object of an unchecked union
+  type shall occur within the declarative region of the type, and shall
+  not occur within a record_representation_clause.
+
+The aggregate is clearly not within the declarative region of the type.
+
+On the other hand, the second aggregate does not violate any rules, so it is
+allowed. Since most style guides prefer named notation for record aggregates,
+this forces the use of the not preferred style. Should named notation be
+allowed here? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify B.3.3(9/3):
+
+Any name that denotes a discriminant of an object of an unchecked union type
+shall occur within the declarative region of the type{ or within the selector_name
+of an aggregate}, and shall not occur within a record_representation_clause.
+
+!discussion
+
+It's clearly silly to only allow positional notation for an aggregate of an
+unchecked union type; it's a clear omission.
+
+
+Alternatively, it could have been that someone used a hair-splitting approach to
+the meaning of B.3.3(9/3). The argument goes that a selector_name denotes a
+component of a type, not of an object, so B.3.3(9/3) does not apply (it only
+seems to apply to components of objects). But that's a shaky argument; 4.3.3(9)
+just says that the selector_name must denote a needed component -- what that's
+a component of (the type or the anonynous aggregate object) is left to the
+imagination. And in any case it's better to be crystal-clear rather than to
+depend on hair-splitting to define the meaning of any RM prose.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test should check that named notation is allowed in aggregates.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Sunday, September 6, 2015  9:25 PM
+
+Brad is working on a runnable test for Unchecked_Unions. I had remarked that
+aggregates appeared illegal for Unchecked_Unions, but Brad reports that GNAT
+accepts them (I didn't check this myself).
+
+Specifically, if you have
+
+     type Data_Kind is (C_int, C_char, C_void_pointer);
+     type C_Variant (Format : Data_Kind := C_int) is
+        record
+           case Format is
+              when C_int =>
+                 int_Val : C.int;
+              when C_char =>
+                 char_Val : C.char;
+              when C_void_pointer =>
+                 pointer_Val : System.Address;
+           end case;
+        end record with Unchecked_Union, Convention => C;
+
+     Int : C_Variant := (Format => C_int, int_Val => 12); -- ???
+
+I believe that the aggregate is illegal, as the name Format denotes the
+discriminant of the Unchecked_Union. This clearly (??) violates B.3.3(9/3):
+
+Any name that denotes a discriminant of an object of an unchecked union type
+shall occur within the declarative region of the type, and shall not occur
+within a record_representation_clause.
+
+as an aggregate isn't part of the declaration region for anything. (At least
+so far as I can tell from 8.1 -- this isn't the clearest wording ever.)
+
+Brad points out that such a use of a discriminant is harmless (it has to be
+static [or, with the new AI, identify a single variant]), and doesn't need to
+be actually stored. So it seems that this should be allowed.
+
+In an attempt to figure out what should be said, I ended up completely in the
+weeds: I can't figure out why any component name is directly visible in an
+aggregate. There doesn't seem to be any special rules for that case, and we
+know that a component is not normally directly visible.
+
+So I'll let someone else that understands the visibility model better explain.
+
+In any case, should aggregates be allowed (as GNAT apparently does) for
+Unchecked_Unions? 
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, September 7, 2015  12:20 AM
+
+> Brad points out that such a use of a discriminant is harmless (it has 
+> to be static [or, with the new AI, identify a single variant]), and 
+> doesn't need to be actually stored. So it seems that this should be allowed.
+> 
+[...]
+> In any case, should aggregates be allowed (as GNAT apparently does) 
+> for Unchecked_Unions?
+ 
+I'd say yes. This is the only case where a discriminant check is possible for
+unchecked unions, I see no benefit in forcing users to individual assignments
+to components.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, September 7, 2015  6:37 AM
+
+The discriminants are needed in any case to know which variant is being
+created, it would be bizarre if positional notation were legal but component
+association were not.  Concerning visibility, the grammar speaks about
+selector_names, not names, so they are available in the aggregate without
+any particular visibility rule.  If the legality of these aggregates cannot
+be deduced from the RM there is a hole.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, September 7, 2015  7:43 AM
+
+> I believe that the aggregate is illegal, as the name Format denotes 
+> the discriminant of the Unchecked_Union. This clearly (??) violates
+> B.3.3(9/3):
+
+Yes.  But that just says that named notation is illegal, and as Ed pointed
+out, it would be absurd for positional notation to be legal, but named
+notation to be illegal.  Therefore, this is clearly a mistake in the RM.
+
+> Any name that denotes a discriminant of an object of an unchecked 
+> union type shall occur within the declarative region of the type, and 
+> shall not occur within a record_representation_clause.
+> 
+> as an aggregate isn't part of the declaration region for anything. (At 
+> least so far as I can tell from 8.1 -- this isn't the clearest wording 
+> ever.)
+
+I'm not sure what's unclear.  But anyway every piece of program text,
+including every aggregate, is part of some declarative region(s).  It's part
+of the declarative region of Standard, if nothing else.  But this aggregate is
+not part of the declarative region of the type, so the RM appears to say it's
+illegal.
+
+> In an attempt to figure out what should be said, I ended up completely 
+> in the weeds: I can't figure out why any component name is directly 
+> visible in an aggregate. There doesn't seem to be any special rules 
+> for that case, and we know that a component is not normally directly visible.
+
+It's not directly visible, but it's visible.  The relevant rule is 8.3(3).
+(Ada 83 called it "visible by selection", but Tucker changed that to "visible".
+I have mixed feelings about that change; sometimes I think it's confusing.)
+
+> So I'll let someone else that understands the visibility model better 
+> explain.
+> 
+> In any case, should aggregates be allowed (as GNAT apparently does) 
+> for Unchecked_Unions?
+
+Yes, they should be legal.  I guess B.3.3(9/3) should have, "or shall be a
+component_selector_name of an aggregate".
+
+How can it be used "within the declarative region of the type"?
+The main use is as the discriminant_direct_name of a variant_part.
+I suppose we could list all such uses, adding the missing
+"component_selector_name of an aggregate" one.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, September 7, 2015  8:30 AM
+
+...
+> In any case, should aggregates be allowed (as GNAT apparently does) 
+> for Unchecked_Unions?
+
+Yes.  B.3.3(9/3) should be adjusted to permit use of a selector_name
+denoting a discriminant in a component_choice_list.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 8, 2015  7:53 PM
+
+A belated answer: 
+
+> > I believe that the aggregate is illegal, as the name Format denotes 
+> > the discriminant of the Unchecked_Union. This clearly (??) violates 
+> > B.3.3(9/3):
+> 
+> Yes.  But that just says that named notation is illegal, and as Ed 
+> pointed out, it would be absurd for positional notation to be legal, 
+> but named notation to be illegal.  Therefore, this is clearly a 
+> mistake in the RM.
+
+I totally forgot about positional notation for records. If I had thought of
+it I would have told Brad to use it in his test (no need to tread on thin ice
+for that test) and I would have written the question as if it was a clear bug.
+
+I suspect I didn't think about it as our style guide totally bans the use of
+positional notation in record aggregates. As such, I'd only think to use it in
+an ACATS for an objective that specifically required testing them.
+
+[Aside: The style guide is probably a bit too fierce; it really ought to allow
+positional notation only if there are a small number of record components of
+all different types. (Otherwise, it's too easy to write the components in the
+wrong order.) But it's a lot easier both mentally and tools-wise to enforce a
+complete prohibition. We had briefly tried allowing any record with a small
+number of components, but there were far too many errors in dealing with Claw
+Points and Sizes:
+
+    Bad_Win_Size : Claw.Size := (10, 20); -- Who knows what this means??
+    Good_Win_Size : Claw.Size := (Width => 20, Height => 10);
+
+I couldn't even tell you whether these two sizes are the same or different,
+without going to the Claw source code or documentation to look up the
+declaration of Size. That's silly, thus the ban.]
+
+...
+> > In an attempt to figure out what should be said, I ended up 
+> > completely in the weeds: I can't figure out why any component name 
+> > is directly visible in an aggregate. There doesn't seem to be any 
+> > special rules for that case, and we know that a component is not 
+> > normally
+> directly visible.
+> 
+> It's not directly visible, but it's visible.  The relevant rule is 
+> 8.3(3).  (Ada 83 called it "visible by selection", but Tucker changed 
+> that to "visible".  I have mixed feelings about that change; sometimes 
+> I think it's confusing.)
+
+I think Ed answered the real problem: it is a "selector_name", not a "name".
+And nothing that I can find really says what visibility is needed for
+components in selector_names, but if we apply the Dewar rule (they have to
+work in "obvious" contexts) it's pretty clear that "visible" is enough.
+
+****************************************************************
