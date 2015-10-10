@@ -1,14 +1,14 @@
-!standard 5.2.1(0)                                 15-10-08  AI12-0125-2/01
+!standard 5.2.1(0)                                 15-10-09  AI12-0125-2/02
 !class Amendment 15-10-08
 !status work item 15-10-08
 !status received 15-09-22
 !priority Low
-!difficulty Easy
-!subject Add +=, -=, *=, ...
+!difficulty Medium
+!subject Add :+, :-, :*, :/, ...
 
 !summary
 
-Define +=, -=, *=, ... in terms of "+" operator, "-" operator, etc.
+Define :+, :-, ... in terms of "+" operator, "-" operator, etc.
 
 !problem
 
@@ -25,7 +25,7 @@ mismatching array indices.
 
 !proposal
 
-We propose to define new *update* operations, "+=", "-=", "*=", "and=", "or=",
+We propose to define new *update* operations, ":+", ":-", ":*", ":and", ":or",
 etc. as short hands for assigning a new value of the left hand side to
 be the corresponding operator applied between itself and the right hand
 side.
@@ -36,15 +36,14 @@ operator, whenever such an operator is defined and directly visible, and
 has a result type that is the same as that of its left-hand operand.
 
 We could envision a separate AI that would allow such operations to be
-declared explicitly to override the default implementation, perhaps
-using a declaration such as:
+defined using an "Update_Operation" aspect on the associated operator
+declaration, such as:
 
-   procedure "+="(Left : in out T; Right : T);
+   procedure Add_To(Left : in out T; Right : T);
    
-The operation "/=" represents somewhat of a challenge.  We would propose
-to allow it, being disambiguated by its use in an assignment context
-versus in an expression context.
-
+   function "+"(Left, Right : T) return T
+     with Update_Operation => Add_To;
+   
 !wording
 
 Add a new subclause:
@@ -52,34 +51,42 @@ Add a new subclause:
         5.2.1 Update Operations
 
         An update_statement assigns a value to a variable computed by
-        applying a binary operator combining its old value and the value
-        of an expression.  This *underlying* binary operator is the
+        invoking a binary operator that combines its old value and the value
+        of an expression. This *underlying* binary operator is the
         operator identified by the lexical element formed by omitting
-        the trailing '=' from the update_operation lexical element.
+        the leading ':' from the update_operation lexical element.
 
            update_statement ::=
              /variable_/name update_operation expression;
-           update_operation ::= += | -= | *= | /= | **= | &= |
-                                mod= | rem= | and= | or= | xor=
+           update_operation ::= :+ | :- | :* | :/ | :** | :& |
+                                :mod | :rem | :and | :or | :xor
                         
           Name Resolution Rules
 
-        An update_statement is equivalent to a local renaming of the
-        /variable_/name to a unique temporary name, followed by an
-        assignment_statement with the /variable_/name being this
-        temporary name, and with the expression being a call on a
+        The /variable_/name of an update_statement is expected
+        to be of any type. An update_statement is equivalent to a 
+        local object renaming that declares a unique temporary name
+        of the same type as the /variable_/name, to be a renaming of
+        the /variable_/name; this is followed by an
+        assignment_statement with its /variable_/name being this
+        temporary name, and with its expression being a call on a
         function denoted by the underlying operator symbol, with the
         first operand being the temporary name and the second operand
         being the expression of the update_statement.
+
+Specify that the /variable_/name is a complete context,
+by adding after 8.5(8):   
+
+    * The /variable_/name of an update_statement.
 
 NOTE: Some change will also be needed in 2.2 Lexical Elements, ... if we
 decide to proceed further with this AI.
 
 !examples
   
-X += 1;  --  Equivalent to X := X + 1;
+X :+ 1;  --  A short hand for X := X + 1;
 
-A(I) *= 2;  --  Equivalent to:
+A(I) :* 2;  --  Equivalent to:
 --  declare
 --     Temp : <type of A(I)> renames A(I);
 --  begin
@@ -88,16 +95,25 @@ A(I) *= 2;  --  Equivalent to:
 
 !discussion
 
-The update_statement is defined strictly by equivalence to a local
-rename followed by an assignment statement with the right-hand side
-being a call on a function denoted by an operator symbol.  All
-visibility and name resolution rules should follow from that.  This is
-analogous to RM 6.6(2), which through equivalence determines all the
-rules of visibility and name resolution for operators.
+The update_statement is defined by equivalence to a local rename
+followed by an assignment statement with the right-hand side being a
+call on a function denoted by an operator symbol. We also specify that
+the /variable_/name is a complete context, allowing its type to be
+resolved before doing the expansion. The visibility, name resolution,
+and legality rules follow from these definitions. This is analogous to
+RM 6.6(2), which through equivalence determines all the rules of
+visibility and name resolution for operators.
 
 As indicated in the proposal, we can envision a separate AI which
-permits explicit declaration of update operations such as "+=", but that
-seems of lower priority.
+permits explicit definition of the Update_Operation to use for a 
+given operator.  We considered allowing explicit declarations of ":+"
+procedures, but that seemed too foreign a concept to most reviewers,
+so we would suggest this separate AI might use an Update_Operation
+aspect of an operator.
+
+We originally considered using the C-like syntax of "+=", "-=", ...,
+but the ambiguity associated with "/=" and the lack of a ":" in the
+syntax meant the proposal was not acceptable to various reviewers.
 
 We have chosen to defer proposing wording changes to "2.2 Lexical
 Elements, ..." as these seem less critical to the evaluation of this
@@ -500,5 +516,1576 @@ Incidently: "/=" is an argument for me why these operators should include the
 ":". I.e., "/:=", not "/=". Or else I really do not know whether "/=" stands
 for not equal or for "divide this value by ..." and PLEASE, do not rely on
 overload resolution to find out the answer!
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, September 24, 2015  11:01 AM
+
+Agreed, although I don't find "+:=" and the like very pleasant to the eye.
+Hmmm... what about ":+=", ":/=" ... (I don't mind them looking like
+smileys)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, September 24, 2015  10:07 AM
+
+> Incidently: "/=" is an argument for me why these operators should 
+> include the ":". I.e., "/:=", not "/=". Or else I really do not know 
+> whether "/=" stands for not equal or for "divide this value by ..." 
+> and PLEASE, do not rely on overload resolution to find out the answer!
+
+It isn't overload resolution.  It is the parser.  There is never any ambiguity
+to resolve in the semantic phase.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, September 24, 2015  11:01 AM
+
+so  you are arguing that the same token "/=" stands for two entirely different
+concepts in the following two lines?
+
+x /= 7;
+
+and
+
+if x /= 7 then y /= x; else y /= 42; end if;
+
+??
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, September 24, 2015  11:09 AM
+
+> It isn't overload resolution.  It is the parser.  There is never any 
+> ambiguity to resolve in the semantic phase.
+Yes, for a compiler; but for a human being...
+
+Assuming you have:
+function "/"(Left : integer; right : boolean) return integer;
+the following would be legal:
+
+I /= X /= 3;
+
+I think that's what Erhardt doesn't want. Certainly, that's what I don't want!
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, September 24, 2015  11:19 AM
+
+> I think you underestimate the difficulty of encouraging programmers 
+> who are potential new users, to adopt Ada, presuming they are familiar 
+> with other languages.  This sort of tedium turns them off.
+
+Do you remember the making of Ada 2005? "It is annoying to have to declare 
+all those access types, while in other languages you just stick a "*" in
+front of anything and you're done. Let's allow anonymous access types
+everywhere"
+
+Which lead to a terrible mess that we regret now...
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, September 24, 2015  11:52 AM
+
+I agree with JP. Indeed anonymous access types were a terrible disaster. I
+down played them when rewriting my book. I wish I had removed all mention of
+them.
+
+Please be careful not to screw this language up any more.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, September 24, 2015  11:49 AM
+
+Interestingly, it was one John Barnes who wrote the AI on allowing 
+stand-alone objects of an anonymous access type.  I believe this was
+one of the rare AIs that I did not favor. ;-)
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, September 24, 2015   1:52 PM
+
+It was such a mess that John Barnes thought it would straightent it out.
+The mess came much earlier!  Water under the bridge. The bridge of sighs
+perchance.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, September 24, 2015  11:52 AM
+
+> Agreed, although I don't find "+:=" and the like very pleasant to the 
+> eye. Hmmm... what about ":+=", ":/=" ... (I don't mind them looking 
+> like
+> smileys)
+
+Another alternative would be to eliminate the '=' completely:
+
+   X :+ 5;
+   X :/ 2;
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Thursday, September 24, 2015  12:22 PM
+
+...
+> I /= X /= 3;
+> 
+> I think that's what Erhardt doesn't want. Certainly, that's what I 
+> don't want!
+
+Strongly agree. The colon should remain to indicate that this is an assignment.
+It’s not the parsing issue, which remains trivial, it’s the looks of it.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, September 24, 2015  2:11 PM
+
+> The symbol "<=" is used more generally than that within a partial 
+> ordering.  Here is Wikipedia's entry on "partial order":
+> 
+> A (non-strict) partial order[2] is a binary relation "<=" over a set P 
+> which is reflexive, antisymmetric, and transitive, i.e., which satisfies for
+> all a, b, and c in P:
+> 
+> a <= a (reflexivity);
+> if a <= b and b <= a then a = b (antisymmetry); if a <= b and b <= c 
+> then a <= c (transitivity).
+> In other words, a partial order is an antisymmetric preorder.
+> 
+> ... Standard examples of posets arising in mathematics include:
+> 
+> ...
+> The set of subsets of a given set (its power set) ordered by inclusion 
+> (see the figure on top-right). Similarly, the set of sequences ordered 
+> by subsequence, and the set of strings ordered by substring. ...
+
+I think that's when one is studying partial orders.  A maths paper about
+partial orders might use "<=" as a generic[*] operator that stands for any
+operator with the relevant properties (which could indeed be "is subset").
+But a maths paper about sets will use the rounded "subset" operator that I
+don't know how to type, not "<=" (which I also don't know how to type).
+And until Ada allows overloading of unicode operators, I think the set
+function should be called Is_Subset.
+
+[*] I don't mean generic in the Ada sense.
+
+But anyway, I suggest we all stop talking about user-defined "+=", because
+otherwise we'll convince people like John that the whole thing is a
+complicated mess.  Let's focus on the important point, which is that:
+
+    My_Array(X).Comp.Blah := My_Array(X).Comp.Blah + 1;
+
+is unreadable because one must carefully compare the two names to see if they
+are identical.
+
+We need to decide whether it's += or +:= or :+ or :+= or something else.
+I suppose I could live with any of those, but I agree with those who don't like
+the conflict with "/="; therefore "+=" is my least favorite.
+
+I suggest we discuss user-defined "+=" only after ARG passes the language-defined
+"+=" idea.  I'll argue against the user-defined one at that time.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, September 24, 2015  6:07 PM
+
+> I suggest we discuss user-defined "+=" only after ARG passes the 
+> language-defined "+=" idea.  I'll argue against the user-defined one 
+> at that time.
+
+.. and I'll join you enthusiastically. 
+
+****************************************************************
+
+From: John Barnes
+Sent: Friday, September 25, 2015  1:10 AM
+
+If we just need a shrthand for a long LHS why not a symbol meaning just that
+
+How about
+
+replacing
+
+longname := longname + 1;
+
+by
+
+longname  := [] + 1;
+
+So [] just mean the aforementioned LHS.
+
+No new operations requiared.
+
+Must dash for a plane.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, September 25, 2015  7:31 AM
+
+> longname  := [] + 1;
+
+> So [] just mean the aforementioned LHS.
+
+I was about to propose something similar, but being persona non grata on the
+ARG list I can’t simply hit Reply.
+ 
+It has always irritated me about the C family of languages that it’s
+
+longname += 1;
+
+whereas to keep the same order of operators as in
+
+longname = longname + 1;
+
+it should be
+
+longname =+ 1;
+
+
+So that led me to
+
+longname :=+ 1;
+
+Then I thought, why not allow optional whitespace between the := and the +,
+so that either nothing or whitespace between the := and the + meant assume
+the LHS.
+
+But then I thought that the programmer could have accidentally cut a variable
+between the := and the +, so to guard against that something short and snappy
+should go between the := and the +, say
+
+longname := <> + 1; 
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, September 25, 2015  8:03 AM
+
+I suggested something like that a long time ago.  I don't particularly like
+the "[]" notation, but I don't remember what I suggested.
+People didn't like the idea, as I recall.
+
+It has the advantage of generality:
+
+    x := f([]);
+    y := g([], 123);
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, September 25, 2015  8:31 AM
+
+Perhaps it would help if the symbol used is "<<" as it "points" to the lhs
+variable that is being substituted.
+
+eg.
+
+longname := << + 1;
+
+x := f(<<);
+y := g(<<, 123);
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, September 25, 2015  8:49 AM
+
+...
+> So [] just mean the aforementioned LHS.
+
+It would seem odd to use the '[' and ']' characters only for this one feature.
+Jeff suggested using "<>" which seems a ready-made symbol that tends to mean
+"fill in the blank with the obvious thing" which seems just about right.
+
+As Bob pointed out, this would generalize nicely for things like "Max":
+
+    Max_Of_Arr := Integer'Max(<>, A(I));
+
+Using "<<" for this as Brad suggested seems to be almost thumbing our nose at
+the many languages that use this symbol to mean "left shift."
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Friday, September 25, 2015  8:50 AM
+
+Much prefer <>  which is an existing token that denotes elsewhere some obvious
+default for a value.
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Friday, September 25, 2015  8:56 AM
+
+I like Jeff's proposal, and the reasoning behind it.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, September 25, 2015  9:21 AM
+
+I can re-do the AI to use "<>" if that would be useful.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, September 25, 2015  11:34 AM
+
+Don't forget to handle the case where the RHS contains an
+already-legal-by-today's-rules use of <>.
+
+Presumably we don't want
+    X := F (T'(A => 123, B => <>));
+to become ambiguous or change meaning.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, September 25, 2015  11:47 AM
+
+Good point!
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Friday, September 25, 2015  12:47 PM
+
+This is starting to seem like deja vu all over again...
+
+I made a proposal for this approach back in 2009 that became AI05-0187.
+
+That resulted in a very lengthy discussion of this as well as the "op="
+and the 'Inc/'Dec alternatives.  It's funny how much discussion can be
+generated for "simple" features (as Robert was fond of pointing out).
+
+There wasn't a clear consensus resulting from that discussion, and the
+result was dropping it for Ada 2012, but I guess that led to being later
+resurrected as AI12-0125-1 (and 0125-2).  It may be instructive (as well as
+entertaining) for people to review the 0187 discussion, if you have that sort
+of time on your hands. :-)  FWIW, at the time there seemed to be somewhat
+more support for the "op=" (or "op:=") than the more general token-based form.
+
+And Tuck wrote:
+
+> It would seem odd to use the '[' and ']' characters only for this one 
+> feature.  Jeff suggested using "<>" which seems a ready-made symbol 
+> that tends to mean "fill in the blank with the obvious thing" which seems
+> just about right.
+> 
+> As Bob pointed out, this would generalize nicely for things like "Max":
+> 
+>     Max_Of_Arr := Integer'Max(<>, A(I));
+> 
+> Using "<<" for this as Brad suggested seems to be almost thumbing our 
+> nose at the many languages that use this symbol to mean "left shift."
+
+My strawman suggestion in AI05-0187 was to use <<>> rather than <>, one reason
+being the conflict with <> in aggregates (as Steve pointed out today).  If we
+were to go this direction, I think it helps to have a token that reasonably
+obtrusive.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, September 25, 2015  1:08 PM
+
+...
+> > Presumably we don't want
+> >     X := F (T'(A => 123, B => <>));
+> > to become ambiguous or change meaning.
+> 
+> Good point!
+
+Yes.  It makes me like Brad's suggestion of << , or Gary's suggestion of <<>>.
+
+****************************************************************
+
+From: Arnaud Charlet
+Sent: Saturday, September 26, 2015  4:06 AM
+
+> If we just need a shrthand for a long LHS why not a symbol meaning 
+> just that How about replacing
+> 
+> longname := longname + 1;
+> 
+> by
+> 
+> longname  := [] + 1;
+> 
+> So [] just mean the aforementioned LHS.
+> 
+> No new operations requiared.
+
+Well, I'm afraid the above generalization will:
+- introduce much more complexity for everyone (implementers, writers,
+  readers, reviewers, QA people, ...), for a feature that nobody has asked for
+- it's much less readable IMO to have:
+
+  Long_LHS := Long_Expression + <<>> + Another_Long_Expr ...;
+
+  where it's actually very easy to miss what's going on, as opposed to
+  the much simpler and clear to all:
+
+  Long_LHS += Long_Expression + Another_Long_Expr;
+
+If we really allow this new <> or <<>> symbol, we are really letting best be 
+the ennemy of good IMO :-(
+
+I'd rather not change anything in the language than introduce this new much
+more complex concept.
+
+For instance having:
+
+   Some_LHS := Complex_Expression (Something).Component (<>) +
+                    Another_Complex_Expr * ...
+
+makes it very easy to miss the implicit reference to the LHS, and <> in this
+context doesn't mean at all "replace by the obvious thing", since there is
+*no* obvious replacement in such complex context.
+
+Since we're talking about a shorthand and making it easy for people to read and
+write, the similarly with other languages *is* important at this stage since:
+- it makes adoption of the language and training easier
+- it makes reading from non Ada experts easier. Think about code reviewers,
+  QA people, certification experts who may not be Ada experts, but simply
+  know enough about many languages. Do you really think these people will
+  find the <> or <<>> notation obvious compared to the += notation? I
+  certainly don't and know that the opposite will be true.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, September 30, 2015  4:50 PM
+
+...
+> This is starting to seem like deja vu all over again...
+
+Starting?? :-)
+ 
+> I made a proposal for this approach back in 2009 that became 
+> AI05-0187.
+
+Yes. Thanks for telling everyone that we've already done this.
+ 
+> That resulted in a very lengthy discussion of this as well as the "op="
+> and the 'Inc/'Dec alternatives.  It's funny how much discussion can be 
+> generated for "simple" features (as Robert was fond of pointing out).
+
+Yes. Lots of issues were pointed out that never came up here. In particular,
+Dan Eilers (I think) pointed out a serious resolution issue with the "op="
+alternative. I don't know if Tucker addressed that, but it better be
+addressed or that alternative is a non-starter.
+
+> There wasn't a clear consensus resulting from that discussion, and the 
+> result was dropping it for Ada 2012, but I guess that led to being 
+> later resurrected as AI12-0125-1 (and 0125-2).  It may be instructive 
+> (as well as
+> entertaining) for people to review the 0187 discussion, if you have 
+> that sort of time on your hands. :-)  FWIW, at the time there seemed 
+> to be somewhat more support for the "op="
+> (or "op:=") than the more general token-based form.
+
+The reason that I proposed the 'Inc/'Dec (or 'Succ/'Pred) alternative this
+time is that it is clear to me that a more general mechanism will not get
+enough traction to pass. The attribute does not require new syntax (or
+lexing!), and it cleanly solves the common problem of <long> := <long> + 1;
+without trying to be all things to all people. And it *looks* like Ada
+(indeed, as I've previously pointed out, this is what I thought 'Succ and
+'Pred were for initially; they're rather useless outside of generics in
+their current form, and Modula had built-in Inc and Dec procedures for this
+purpose.)
+
+> And Tuck wrote:
+> 
+> > It would seem odd to use the '[' and ']' characters only for this one
+> > feature.  Jeff suggested using "<>" which seems a ready-made symbol 
+> > that tends to mean "fill in the blank with the obvious thing" which
+> > seems just about right.
+> > 
+> > As Bob pointed out, this would generalize nicely for things like "Max":
+> > 
+> >     Max_Of_Arr := Integer'Max(<>, A(I));
+> > 
+> > Using "<<" for this as Brad suggested seems to be almost thumbing our
+> > nose at the many languages that use this symbol to mean "left shift."
+> 
+> My strawman suggestion in AI05-0187 was to use <<>> rather than <>, 
+> one reason being the conflict with <> in aggregates (as Steve pointed 
+> out today).  If we were to go this direction, I think it helps to have 
+> a token that reasonably obtrusive.
+
+Agreed.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, September 30, 2015  4:58 PM
+
+> > Seems like a good idea.  But shouldn't it be "+:=", etc?
+> 
+> That's what some preferred the last time this was discussed (Robert 
+> definitely felt that way, see AI05-0187).  I tend to agree.
+
+It has to be "+:=" or something like that. "=" is equality, not assignment,
+and I don't think there is much need for a combined plus and equality ;-).
+
+I came to Ada in the first place because it comes closest of any practical
+language to getting the syntax right. I will not allow the syntax (and meaning)
+to be destroyed by adding operators that don't make any sense in existing Ada.
+Meaning I would fight "+=" (as opposed to "+:=") at every level -- you'd have
+to fire me as editor to put that into the language -- I will NOT do that.
+
+[I probably would have made that point in Madrid if I wasn't nearly passed out
+during the Sunday morning discussions. Still not quite sure what happened
+there.]
+
+P.S. I feel the about the same way about shifting "operators", BTW. Probably
+not quite to the point of quitting, but very, very negative.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, September 30, 2015  5:25 PM
+
+> Well, I'm afraid the above generalization will:
+> - introduce much more complexity for everyone (implementers, writers,
+>   readers, reviewers, QA people, ...), for a feature that nobody has 
+> asked for
+
+Huh? The problem of long-LHSes has been one that people have been asking for
+a solution to for decades. And this particular solution was suggested the last
+time we considered the long-LHS problem. Perhaps no AdaCore customers have
+asked for this feature, but surely it has been asked for (long ago) on
+comp.lang.ada and most likely other forums.
+
+...
+> I'd rather not change anything in the language than introduce this new 
+> much more complex concept.
+
+Again, this is why I suggested adding 'Succ and 'Pred procedures (or 'Inc/'Dec
+if you prefer) and leaving all of these wars alone.
+
+My ranking of the proposals:
+
+    1) <<>> (but argubly too complex)
+    2) 'Inc/'Dec attributes
+    ...
+    32768) +:= operators
+    ...
+    googleplex) += operators
+
+> For instance having:
+> 
+>    Some_LHS := Complex_Expression (Something).Component (<>)
+> + Another_Complex_Expr * ...
+> 
+> makes it very easy to miss the implicit reference to the LHS, and <> 
+> in this context doesn't mean at all "replace by the obvious thing", 
+> since there is *no* obvious replacement in such complex context.
+
+<> is not a serious syntax suggestion, it has too many conflicts.
+
+    Some_LHS := Complex_Expression (Something).Component (<<>>) +
+        Another_Complex_Expr * ...
+
+is the serious proposal. (Or [], but that brings back in the need for new 
+lexical tokens.)
+
+On top of which, I think that semantically this would be a rename. That is,
+if <<>> appears in the expression, then the expression really is:
+
+   declare
+       <anon> : <LHS_Type> renames Some_LHS;
+   begin
+       <anon> := ... <anon> ...;
+   end;
+ 
+This implies that the legality rules for renames are enforced on the LHS in
+such a case (as well as not allowing <<>> in expressions that aren't the RHS
+of an assignment). I think that would eliminate most if not all of the
+anomolies that could otherwise occur, and would give a clear meaning in all
+cases.
+
+(Aside: I wonder if that isn't necessary for +:= as well; else it would be
+possible to assign into a non-existent component.)
+
+> Since we're talking about a shorthand and making it easy for people to 
+> read and write, the similarly with other languages
+> *is* important at this stage
+
+If that's *really* true, then the Ada I care about is already dead. (And we
+should make no change here.) I came to Ada because it has the most perfect
+syntax of the widely available languages; it does not have a garbage syntax
+of most other languages. I do not want to adopt garbage syntax ideas from other
+languages (especially from the C family of crappy syntaxes).
+
+After all, virtually every idea we've adopted from the C family has been
+misguided or worse (think anonymous access types). The fact that everyone else
+is doing stupid things is not a very good reason for us to start doing the
+same stupid things.
+
+If we really wanted to be more like other languages, we should allow replacing
+<something> End pairs with {}. (That's a joke, not a serious suggestion!!!)
+
+> since:
+> - it makes adoption of the language and training easier
+> - it makes reading from non Ada experts easier. Think about code reviewers,
+>   QA people, certification experts who may not be Ada experts, but simply
+>   know enough about many languages. Do you really think these people will
+>   find the <> or <<>> notation obvious compared to the += notation? I
+>   certainly don't and know that the opposite will be true.
+
+This is a strawman, since there is no realistic chance that either <<>> or
++= will be adopted (I don't think the membership of the ARG has changed
+enough since AI05-0187 for a consensus to be reached).
+
+The only realistic idea was the attributes that Tucker originally proposed
+during the discussion of AI05-0187 and never were given a fair hearing at that
+time. They don't require any new syntax or (worse) lexical changes, they fit in
+cleanly to the existing Ada model, and they don't get into anything that ought
+to be controversial. I realize that they're a second choice for many, but even
+if a future consensus does develop on some more advanced feature, they will not
+look out of place. That's surely not true for "+="!!
+
+Anyway, I proposed those attributes because they were the only realistic change
+that might get made to ease the long LHS problem. I definitely did NOT intend
+for that proposal to be a reason to rehash all of the tired arguments about more
+complex features that we will never adopt.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, September 30, 2015  5:38 PM
+
+> > I like Jeff's proposal, and the reasoning behind it. ...
+> 
+> I can re-do the AI to use "<>" if that would be useful.
+
+I for one would like to see it, but as a separate alternative. We can then get a
+3-3-3-1 vote on which alternative they prefer. ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, September 30, 2015  5:50 PM
+
+> Then I thought, why not allow optional whitespace between the := and the +,
+> so that either nothing or whitespace between the := and the + meant assume
+> the LHS.
+
+> But then I thought that the programmer could have accidentally cut a variable
+> between the := and the +, so to guard against that something short and snappy
+> should go between the := and the +, say
+
+> longname := <> + 1; 
+
+So we've gone from a "shorthand" to a "longhand"?? :-)
+ 
+Your analysis is correct, of course. But I wouldn't go so far as to allow
+whitespace, as that's the thing that triggers the cut-and-paste issues. It also
+would be ambiguous:
+ 
+    longname := +1;
+could be
+    longname := (+1);
+or
+    longname :=+ (1);
+ 
+Since "longname := +1" is currently legal Ada, you'd be introducing a
+compatibility problem where none of the other proposals have one. That seems
+like a non-starter to me.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, September 30, 2015  9:51 PM
+
+> ... In particular,
+> Dan Eilers (I think) pointed out a serious resolution issue with the "op="
+> alternative. I don't know if Tucker addressed that, but it better be 
+> addressed or that alternative is a non-starter.
+
+Looking back at this Ada 2005 AI, it appears only you and Dan considered this 
+a serious resolution issue.  I don't want to re-hash Dan's particular concern,
+but I believe the AI I wrote implied that the type of the LHS must be
+unambiguously resolvable (and clearly the AI should be more explicit about it),
+since it started off with an object renaming where "Type-of-LHS" was part of
+the expansion.
+
+For what it is worth, the straw poll seemed to favor the use of some variant
+of op= over <<>> or 'inc/'dec.
+
+By our recent discussions I have been convinced, by the annoying "/="
+situation, that "op=" won't fly.
+
+I think I will send in an updated AI proposing the syntax ":+", ":-", ":*",
+":/" ... just to have something new to talk about in Vermont... ;-)  These
+appeal to me because they are very "different" looking symbols from any
+existing Ada ones, and they sort of make sense because ":=" is making the LHS
+and the RHS equal, while the others are updating the LHS as indicated.
+
+Feel free to flame now, or hold your flames until the revised AI shows up...
+
+****************************************************************
+
+From: Randy Brukardy
+Sent: Thursday, October 1, 2015  12:00 AM
+
+> > ... In particular,
+> > Dan Eilers (I think) pointed out a serious resolution issue with the "op="
+> > alternative. I don't know if Tucker addressed that, but it better be 
+> > addressed or that alternative is a non-starter.
+> 
+> Looking back at this Ada 2005 AI, it appears only you and Dan 
+> considered this a serious resolution issue.  I don't want to re-hash 
+> Dan's particular concern, but I believe the AI I wrote implied that 
+> the type of the LHS must be unambiguously resolvable (and clearly the 
+> AI should be more explicit about it), since it started off with an 
+> object renaming where "Type-of-LHS" was part of the expansion.
+
+Since that's not the way Ada resolution typically works, and it's different
+than the way resolution works for ":=", it had better be clear in the AI how
+it works. It's probably not a big deal, but it does mean that not all
+expressions <Something> := <Something> + 1; can be written as <Something>
++:= 1; -- most likely the AI ought to mention that as well. (The same is
+true for <<>> or even 'Inc, so it's not an advantage or disadvantage between
+those, it just needs to be called out since it is not obvious.)
+
+> For what it is worth, the straw poll seemed to favor the use of some 
+> variant of op= over <<>> or 'inc/'dec.
+
+I think we'll have straw poll problems with this AI, as I wouldn't expect
+anyone to think 'inc/'dec is their first choice (it not mine). But if they
+can't have their first choice, I think many will prefer 'inc/'dec to an
+overly complicated (or obnoxous) alternative. Thus the typical way we conduct
+straw polls won't work (we'd throw out the simple compromise solution first,
+then leaving us with two alternatives that most likely cannot get consensus;
+that's precisely what happened with AI05-0187).
+
+I remain convinced that neither "+:=" nor "<<>>" could get consensus, and thus
+'Inc/'Dec is the only option that has a realistic chance of ever appearing
+in the language.
+
+> By our recent discussions I have been convinced, by the annoying "/=" 
+> situation, that "op=" won't fly.
+> 
+> I think I will send in an updated AI proposing the syntax ":+", ":-", 
+> ":*", ":/" ... just to have something new to talk about in Vermont... 
+> ;-)  These appeal to me because they are very "different" looking 
+> symbols from any existing Ada ones, and they sort of make sense 
+> because ":=" is making the LHS and the RHS equal, while the others are 
+> updating the LHS as indicated.
+> 
+> Feel free to flame now, or hold your flames until the revised AI shows 
+> up...
+
+I don't want to rehash what already has been said on this topic, I doubt it
+would change anyone's mind. But updating the AI to properly deal with the
+resolution and legality rules would seem to be valuable (if only to show how
+complex this "simple" solution is :-).
+
+BTW, if you are using a renames equivalence, then you have to enforce at least
+8.5.1(5/3) [it doesn't make sense to allow implicitly renaming something that
+you can't explicitly rename] {I don't think the other legality rules are
+relevant}.
+
+I thought that might be a problem for <<>> (which would certainly has to be a
+renames equivalence), and surely the same applies to +:= (or whatever) if
+you're using a similar equivalence.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 1, 2015  11:54 AM
+
+Here is a revision, using ":+", ":-", ... instead of "+=", "-=", ...
+It also incorporates the specification that the LHS of an update_statement is
+a complete context, so it is possible to fill in the type in the expansion of
+the update_statement into an object_renaming followed by an assignment,
+without any fancy overload resolution. [This is version /02 of the AI -
+Editor.]
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, October 1, 2015  12:31 PM
+
+> An update_statement is equivalent to a
+>          local object renaming that declares a unique temporary name
+>          of the same type as the /variable_/name, to be a renaming of
+>          the /variable_/name;
+
+A very minor point crossed my mind; I'm not claiming this is a big deal, just
+a detail that needs to be dealt with correctly.
+
+We might need a To Be Honest note stating that this equivalence isn't
+guaranteed to be quite right with respect to the ordering of some events.
+
+Consider
+
+   My_Array (Func_1.Integer_Field) :+ Func_2.Integer_Field;
+
+vs
+
+   declare
+      Ren : Element_Type renames
+        My_Array (Func_1.Integer_Field);
+   begin
+      Ren := Ren + Func_2.Integer_Field;
+   end;
+
+Suppose further that the result types of the two functions require
+finalization.
+
+Consider the allowed orderings of the following 4 events
+    the call to Func_1
+    the finalization of the result of calling Func_1
+    the call to Func_2
+    the finalization of the result of calling Func_2 for each of the two
+                                                 formulations.
+
+In the first case, absent any special rules to the contrary, I'd say that the
+allowed orderings are
+
+     call the two functions in either order; then
+     finalize the two function results in either order
+
+In the second case, there is only one allowed ordering
+
+     call func_1
+     finalize func_1 result
+     call func_2
+     finalize func__2 result
+
+Note that the one-and-only allowed ordering for the second case is not one of
+the allowed orderings for the first case.
+
+We'd probably want to include an implementation permission allowing the
+ordering of the second formulation in the case of the first formulation because
+we want to allow (but not, of course, require) implementations to implement
+this via a source-to-source transformation.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 1, 2015  12:50 PM
+
+Do we need to allow any flexibility here?  Why not simply expect that the
+evaluations happen in the ordering determined by the stated equivalence:
+
+    call func1, finalize func1, call func2, finalize func2.
+
+There seems no implementation hardship in following this order.
+
+With user-defined iterators, we have a precedent in Ada 2012 for a relatively
+complex expansion from the original syntax to the expanded semantics.  As of
+yet I don't see a need in these kinds of "syntactic sugaring"s to allow too
+much flexibility.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 1, 2015  12:53 PM
+
+> Note that the one-and-only allowed ordering for the second case is not 
+> one of the allowed orderings for the first case.
+
+What are the first and second cases to which you refer?
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, October 1, 2015  12:58 PM
+
+> Consider
+>
+>   My_Array (Func_1.Integer_Field) :+ Func_2.Integer_Field;
+>
+> vs
+>
+>   declare
+>      Ren : Element_Type renames
+>        My_Array (Func_1.Integer_Field);
+>   begin
+>      Ren := Ren + Func_2.Integer_Field;
+>   end;
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, October 1, 2015  1:05 PM
+
+> Do we need to allow any flexibility here?  Why not simply expect that 
+> the evaluations happen in the ordering determined by the stated
+> equivalence:
+>
+>     call func1, finalize func1, call func2, finalize func2.
+>
+> There seems no implementation hardship in following this order.
+
+I agree, that would work.
+
+I think that when defining an equivalence that introduces a new master, it is
+important to state that this equivalence overrides the usual 7.6.1 rules.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 1, 2015  2:03 P
+
+> > Note that the one-and-only allowed ordering for the second case is 
+> > not one of the allowed orderings for the first case.
+> 
+> What are the first and second cases to which you refer?
+
+Steve is confused. There is no "first" case, because :+ means exactly the
+renames expansion, nothing more and nothing less. He was fantisizing about
+a :+ which was a true operation of some sort, but Tucker is not proposing
+that (for various good reasons, including the fact that some updates would
+not be resolvable).
+
+> With user-defined iterators, we have a precedent in Ada 2012 for a relatively
+> complex expansion from the original syntax to the expanded semantics. As of
+> yet I don't see a need in these kinds of "syntactic sugaring"s to 
+> allow too much flexibility.
+
+'Old is also an example of a complex expansion.
+
+But in both of those cases, the Legality Rules are explicitly given for the
+new construct (we don't assume that they pass through). One has to do that
+here, too. In particular, if the renames would be illegal, the update construct
+should not be allowed.
+
+A specific example of that:
+
+    type Mutable (D : Boolean := True) is record
+       case D is
+          when True =>
+              I : Integer;
+          when False =>
+              F : Float;
+       end case;
+    end record;
+
+    Obj : Mutable;
+
+    ...
+
+    Obj.I :+ 1; -- Has to be illegal.
+
+as the expansion:
+
+    declare
+       <anon> : Integer renames Obj.I;
+    begin
+       <anon> := <anon> + 1;
+    end;
+
+is illegal (the renames is illegal as it is renaming a discriminant-dependent
+component).
+
+The case where this matters is somewhat pathological, but it exists:
+
+    function Fooey return Integer is
+       Temp : Integer := Obj.I;
+    begin
+       Obj := (D => False, F => Float(Temp));
+       return Temp;
+    end Fooey;
+
+    Obj.I :+ Fooey; -- !!
+
+In this case, the updated component no longer exists when it is written.
+That can't be good.
+
+Anyway, my point is that we need at least a statement that the update operation
+is illegal if the expanded renames would be illegal (there is a similar
+statement in 5.5.2(6.2/4)), or you could simply copy 8.5.1(5/3) to apply to
+update operations (none of the other legality rules would apply, I think, as
+we know the type is the right one). Either would be fine, neither is not.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, October 1, 2015  2:52 PM
+
+...
+> as the expansion:
+>
+>      declare
+>         <anon> : Integer renames Obj.I;
+>      begin
+>         <anon> := <anon> + 1;
+>      end;
+>
+> is illegal (the renames is illegal as it is renaming a 
+> discriminant-dependent component).
+
+If we wanted to allow this case, we could define the expansion not in terms
+of a rename but rather in terms of a call to an implicitly declared "update"
+subprogram.
+
+That is,
+
+    A :+ B;
+
+is equivalent to
+
+   declare
+      procedure Update (Target : in out T; Addend : T) is
+      begin
+         Target := Target + Addend;
+      end;
+   begin
+      Update (Target => A, Addend => B);
+   end;
+
+This would allow the common cases, but the Fooey pathogy would become
+erroneous instead of illegal (by 3.7.2(4)).
+
+The parameter subtypes would have to be unconstrained, predicateless, and
+whatever else it takes to ensure that parameter passing doesn't introduce
+any unwanted checks.
+
+The subprogram would be anonymous, not named Update.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 1, 2015  3:10 PM
+
+I find this an attractive alternative.  Renaming is a bit of a kludge, and as
+we see has its own issues with components of discriminated records.  I would
+think the first parameter subtype would be exactly the nominal subtype of the
+LHS, no more, no less, and the second parameter subtype would similarly come
+from the nominal subtype of the RHS.  I am sure Steve will enlighten me if
+these don't work ...
+
+For what it is worth, it also naturally explains how an Update_Operation aspect
+on an operator could work.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, October 1, 2015  3:42 PM
+
+> I would think the first parameter subtype would be exactly the nominal 
+> subtype of the LHS, no more, no less, and the second parameter subtype 
+> would similarly come from the nominal subtype of the RHS.  I am sure 
+> Steve will enlighten me if these don't work ...
+
+It doesn't make much difference, but why wouldn't you want to use the same
+parameter subtype that is already used for other predefined operators (e.g.,
+"+")?
+
+With the Update procedure formulation, we get an extra subtype conversion at
+the start of the call.
+
+It's like we are transforming
+    X := X + Y;
+into
+    X := S1'(S1'(X) + S2'(Y));
+and we want to choose S1 and S2 to minimize the impact of this.
+
+The unconstrained basetype seems like the obvious choice, but I think the
+nominal subtypes would also work.
+
+The only thing that comes to mind is badly behaved predicates, but I can
+already anticipate the response of "so don't do that".
+
+As long as we are only working with scalars, we don't have to worry about
+anonymous types. I also don't see any problems if the nominal subtype is
+anonymous, as in
+
+    type Vec is array (Boolean) of Integer range 1 .. N;
+    X : Vec := ... ;
+  begin
+    X (True) :+ 1;
+
+but, again, the basetype seems slightly simpler.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 1, 2015  3:46 PM
+
+>     Obj.I :+ Fooey; -- !!
+
+Why do you say that HAS to be illegal?  It could be erroneous.
+
+I believe this:
+
+    Obj.I := Obj.I + Fooey; -- !!
+
+is erroneous.  I hate erroneousness, but it's not like this is a new case, and
+it's pretty obscure.
+
+Why don't we define the semantics the way a normal user would think about it,
+instead of dragging in renamings and nested anonymous procedures and all the
+usual RM-ese?
+
+    An update_statement of the form "name :+ expression;" is equivalent
+    to the assignment_statement "name := name + expression;",
+    except that the name is evaluated only once.  Other update
+    operators have corresponding semantics.
+
+With "name" and "expression" in italics.
+I know it sounds kind of informal, but could it be misunderstood?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 1, 2015  4:09 PM
+
+> >     Obj.I :+ Fooey; -- !!
+> 
+> Why do you say that HAS to be illegal?  It could be erroneous.
+
+It has to be illegal given the renames formulation, as the renames is
+illegal. I didn't think about any other formulation.
+ 
+> I believe this:
+> 
+>     Obj.I := Obj.I + Fooey; -- !!
+> 
+> is erroneous.  I hate erroneousness, but it's not like this is a new 
+> case, and it's pretty obscure.
+> 
+> Why don't we define the semantics the way a normal user would think 
+> about it, instead of dragging in renamings and nested anonymous 
+> procedures and all the usual RM-ese?
+> 
+>     An update_statement of the form "name :+ expression;" is equivalent
+>     to the assignment_statement "name := name + expression;",
+>     except that the name is evaluated only once.  Other update
+>     operators have corresponding semantics.
+> 
+> With "name" and "expression" in italics.
+> I know it sounds kind of informal, but could it be misunderstood?
+
+This the ARG, so we can find dozens of ways. ;-)
+
+Seriously, given that the expressions potentially include controlled parts,
+anonymous types (and allocators!), and other such nonsense, I think a
+concrete definition is best. Otherwise, we'll be making an ARG full employment
+act answering questions about all of the weird cases raised. We went through
+that with 'Old, where the informal definition just wasn't specific enough. I'd
+expect the same here (the level is similar).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 1, 2015  4:03 PM
+
+> > The parameter subtypes would have to be unconstrained, 
+> > predicateless, and whatever else it takes to ensure that parameter 
+> > passing doesn't introduce any unwanted checks.
+> >
+> > The subprogram would be anonymous, not named Update.
+> 
+> I find this an attractive alternative.  Renaming is a bit of a kludge, 
+> and as we see has its own issues with components of discriminated 
+> records.  I would think the first parameter subtype would be exactly 
+> the nominal subtype of the LHS, no more, no less, and the second 
+> parameter subtype would similarly come from the nominal subtype of the 
+> RHS.  I am sure Steve will enlighten me if these don't work ...
+
+That would at least canonically add some checks because of the parameter
+passing (for instance, if the nominal subtype had a predicate). That could
+cause Constraint_Error to be raised in cases where it wouldn't be for the
+"long-hand" form. Not sure if that's a problem (most such cases - at least
+the ones I can think of - involve invalid values).
+
+In addition, I don't think that the nominal subtype of the RHS is right.
+It's the nominal subtype of the "Right" parameter of the operator, not the
+RHS expression, that would need to be used. The difference is apparent in
+something like:
+
+    type First_is_10 is array (Positive range <>) of Character
+       with Dynamic_Predicate => Exactly_4'First = 10;
+
+    Obj : First_is_10 := (10 => 'A');
+
+    Obj :& "AA"; -- (1)
+
+[Yes, I realize this will always raise Constraint_Error because we can't change
+the length of Obj. There's probably a better example but I don't want to waste
+time finding it right now.]
+
+Anyway, the nominal subtype of "AA" is going to be "First_is_10", and the lower
+bound of "AA" is going to be 1, so the predicate would fail. OTOH, the nominal
+subtype of the "&" operator is the italized T (which has no bounds or
+predicates), and that's what we'd want the subtype of the virtual subprogram
+to be.
+
+BTW, in the case of <<>>, I think it is better for it to be illegal than to be
+erroneous, as <<>> can be used anywhere and thus the pathology is more likely
+(maybe it isn't a pathology in that case?). Perhaps one could make an exception
+for the case when no functions appear in the expression (there would be no
+problem in that case) [clearly the same would work for :+].
+ 
+> For what it is worth, it also naturally explains how an 
+> Update_Operation aspect on an operator could work.
+
+Ugh. Let me try not to gag. (BTW, I'd put that part in the !discussion of the
+AI, rather than the !proposal, as it's not really part of the proposal and has
+the potential to cause people to vote against the proposal specifically because
+of that idea.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 1, 2015  4:05 PM
+
+>> I would think the first parameter subtype would be exactly the 
+>> nominal subtype of the LHS, no more, no less, and the second 
+>> parameter subtype would similarly come from the nominal subtype of 
+>> the RHS.  I am sure Steve will enlighten me if these don't work ...
+>
+> It doesn't make much difference, but why wouldn't you want to use the 
+> same parameter subtype that is already used for other predefined 
+> operators (e.g., "+")?
+
+Perhaps because the operator you are calling might not be predefined.
+
+> With the Update procedure formulation, we get an extra subtype 
+> conversion at the start of the call.
+>
+> It's like we are transforming
+>     X := X + Y;
+> into
+>     X := S1'(S1'(X) + S2'(Y));
+> and we want to choose S1 and S2 to minimize the impact of this.
+>
+> The unconstrained basetype seems like the obvious choice, but I think 
+> the nominal subtypes would also work. ...
+
+The notion of "basetype" is only defined for scalar types.  The notion of an
+"unconstrained" type can be tricky in the presence of type extensions where
+the parent subtype is constrained.
+
+We have made an effort to provide nominal subtypes for every expression, I
+believe, so the nominal subtype would seem to work uniformly.
+
+I suppose once we go to the idea of an implicitly declared local Update
+procedure, it would seem natural to go to an implicitly declared Update
+procedure at the point of each operator declaration.  E.g.:
+
+     function "*"(Left : T; Right : T2) return T;
+
+would implicitly declare
+
+     procedure "*"'Update_Operation(Left : in out T; Right : T2);
+
+with the obvious body.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 1, 2015  4:10 PM
+
+...
+> As long as we are only working with scalars,
+
+Tucker's proposal includes :&, and I'd be pretty surprised to find out that
+arrays are now scalar. ;-)
+
+On top of which, this works with user-defined operators, and they could be
+of any types. (I have a universal math package that uses controlled tagged
+types. That should map here, too.)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, October 1, 2015  4:15 PM
+
+>> It doesn't make much difference, but why wouldn't you want to use the 
+>> same parameter subtype that is already used for other predefined 
+>> operators (e.g., "+")?
+>
+> Perhaps because the operator you are calling might not be predefined.
+
+You haven't convinced me, but it is a minor point in any case.
+
+If we settled the question via a coin flip, that would be fine with me.
+Since either choice is fine with me and you have a strong preference for one
+over the other, then that's good enough for me.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 1, 2015  4:21 PM
+
+... 
+> I suppose once we go to the idea of an implicitly declared local 
+> Update procedure, it would seem natural to go to an implicitly 
+> declared Update procedure at the point of each operator declaration.  
+> E.g.:
+> 
+>      function "*"(Left : T; Right : T2) return T;
+> 
+> would implicitly declare
+> 
+>      procedure "*"'Update_Operation(Left : in out T; Right : T2);
+>
+> with the obvious body.
+
+Danger, Will Robinson. It would seem possible for the "Update_Operation" to
+end up with differing visibility than the associated operator, especially in
+a generic specification. (Renames to/from operators would also would be
+interesting.) [We had/have lots of trouble with that for "/=".]
+
+    generic
+       type T1 is (<>);
+       type T2 is (<>);
+    package G is
+       function "*"(Left, Right : T1) return T2;
+       -- No ":*" defined here (The types of Left and the result are different).
+    end G;
+
+    package I is new G (Integer, Integer); -- ":*" defined or not?? Explain your answer. :-)
+
+This also makes it inevitable that these would allow redefinition. I can
+(barely) stomach the idea of these at all, redefinition is going miles too far.
+(Especially as we don't allow redefinition of ":=", why is it suddenly OK if
+an operator is involved??? We'd have to allow redefinition of ":=" as well,
+else the model would be nonsense to most programmers.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 1, 2015  4:57 PM
+
+> ...
+>> I suppose once we go to the idea of an implicitly declared local 
+>> Update procedure, it would seem natural to go to an implicitly 
+>> declared Update procedure at the point of each operator declaration.  
+>> E.g.:
+>>
+>>       function "*"(Left : T; Right : T2) return T;
+>>
+>> would implicitly declare
+
+I should have said "implicitly define"
+
+>>
+>>       procedure "*"'Update_Operation(Left : in out T; Right : T2);
+>>
+>> with the obvious body.
+>
+> Danger, Will Robinson. It would seem possible for the 
+> "Update_Operation" to end up with differing visibility than the 
+> associated operator, especially in a generic specification. (Renames 
+> to/from operators would also would be
+> interesting.) [We had/have lots of trouble with that for "/=".] ...
+
+Sorry, I probably shouldn't have said it was implicitly "declared."  I really
+meant it was implicitly *defined*.  I used the Attribute_Reference syntax to
+indicate there was no "visibility" required.  Merely that once you have
+identified the "*" operator, you call the associated implicitly *defined*
+update operation.
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
+
+****************************************************************
+
+From: John Barnes
+Sent: Thursday, October 1, 2015  1:10 AM
 
 ****************************************************************
