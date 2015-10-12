@@ -172,3 +172,303 @@ meeting. To find the initial e-mail discussion, check that AI.
 
 ****************************************************************
 
+From: Steve Baird
+Sent: Tuesday, October 6, 2015  1:22 AM
+
+My Madrid homework includes taking a look at AI12-0156 (Use subtype_indication
+in generalized iterators).
+
+1) Did the group really agree (intent only) that we want to change
+    the syntax for 5.5.2(3) so that
+        [: subtype_indication]
+    is replaced with
+      [: [subtype_indication | access_definition]]
+    in order to allow something like
+
+        type Vec is array (1..10) of access Integer;
+        X : Vec;
+      begin
+        for Ref : access Integer of X loop
+           Ref.all := Ref.all + 1;
+        end loop;
+      end;
+    ?
+
+    That seems like more trouble than it is worth, especially
+    in the access to subprogram case; consider named notation calls.
+
+        type Vec2 is array (1..10) of
+          access procedure (Aaa, Bbb : Integer);
+        X2 : Vec2;
+      begin
+        for Ref2 : access procedure (Bbb, Aaa : Integer) of X2 loop
+          Ref2.all (Aaa => 123, Bbb => 456); -- meaning?
+        end loop;
+      end;
+    These new types/subtypes were supposed to completely redundant.
+
+    I think the simplest solution would be to leave the syntax as it is.
+    If you have an array whose element type is anonymous, then you
+    just can't use the new syntax to redundantly (re-)specify
+    the type/subtype and that's just tough.
+
+    What do others think?
+
+2) 5.5.2(8.a/4) states (as a ramification):
+      The loop parameter of a generalized iterator has the same
+      accessibility as the loop statement. This means that the loop
+      parameter object is finalized when the loop statement is left. (It
+      also may be finalized as part of assigning a new value to the loop
+      parameter.) For array component iterators and container element
+      iterators, the loop parameter directly denotes an element of the
+      array or container and has the accessibility of the associated
+      array or container.
+
+    AFAIK, this is fine for generalized iterators and for array
+    component iterators (although if we make the syntax change
+    discussed in question #1 above, then we'd probably have to
+    update 3.10.2(11.1/2) to treat the new kind of anonymous access
+    type like an anonymous access type occurring in a rename
+    declaration which renames a component of the array).
+
+    For container element iterators, this rule about the
+    accessibility of a loop parameter seems wrong.
+
+    Even in the case where the loop parameter is a variable (as opposed
+    to a constant) there is no reason to assume that the loop parameter
+    "directly denotes an element of the ... container" and therefore
+    has the same accessibility level as the container. This is even
+    more obvious in the constant case.
+
+    For example, suppose you have a map container and you provide
+    a variable indexing function which takes an aliased in out
+    parameter as well as a key; if the key is special in some way,
+    then the function ignores the corresponding map element and
+    instead returns a reference-type result which
+    designates the parameter.
+    If the container is declared in a more global scope than the
+    actual parameter of the call, this could lead to a dangling
+    reference.
+
+    5.5.2(13/3) states
+      Otherwise, the sequence_of_statements is executed with the loop
+      parameter denoting an indexing (see 4.1.6) into the iterable
+      container object for the loop.
+
+    An indexing is defined to be equivalent to a function call.
+
+    So what is the accessibility level of this function call and,
+    equivalently, when is the function result object finalized?
+    It seems clear that we want the loop parameter for single loop
+    iteration to be finalized at the end of that loop iteration.
+    We don't want calls from multiple iterations to accumulate,
+    unfinalized until the entire loop statement completes.
+    That would require significant implementation
+    effort in order to accomplish something that nobody wants.
+    That's also, I believe, what a strict reading of the current
+    wording of the RM requires.
+
+    Unfortunately, a single iteration of a loop isn't a master at all,
+    so it certainly can't be the master of the function call.
+
+    I think we need to clarify the equivalence for a container
+    element iterator loop to include a block statement which encloses
+    the loop body; the loop parameter is declared by an appropriate
+    renaming declaration which occurs in the (otherwise empty)
+    declarative part of the block statement. The block statement
+    then acts as the desired master.
+
+    This seems simpler than adding a new kind of master to the list
+    given in 7.6.1(3/2).
+
+    Does this seem like the right approach for defining the accessibility
+    level of the loop parameter of a container element iterator loop?
+
+    Does this question belong in AI12-0156, in a separate AI, or in the
+    Steve-was-just-confused-again file?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 6, 2015  11:56 AM
+
+...
+> 1) Did the group really agree (intent only) that we want to change
+>     the syntax for 5.5.2(3) so that
+>         [: subtype_indication]
+>     is replaced with
+>       [: [subtype_indication | access_definition]]
+
+We discussed it, and you indicated possible issues with accessibility, so we
+sent you off to study it. We certainly didn't make a decision either way; as
+it's much harder to put something in where there is no wording than to take
+out something we decide not to do, it needs to be written up as if it is in.
+That's how we can judge if the complexity is excessive.
+
+...
+>     That seems like more trouble than it is worth, especially
+>     in the access to subprogram case; consider named notation calls.
+> 
+>         type Vec2 is array (1..10) of
+>           access procedure (Aaa, Bbb : Integer);
+>         X2 : Vec2;
+>       begin
+>         for Ref2 : access procedure (Bbb, Aaa : Integer) of X2 loop
+>           Ref2.all (Aaa => 123, Bbb => 456); -- meaning?
+
+Doesn't this already happen for renames? What does it do to prevent this
+problem (or did you just discover another bug)???
+
+I.e.
+
+       Ref2 : access procedure (Bbb, Aaa : Integer) of X2 renames X2(1);
+
+       Ref2.all (Aaa => 123, Bbb => 456); -- meaning?
+
+In any case, I don't see anything new here.
+
+> 2) 5.5.2(8.a/4) states (as a ramification):
+...
+>     For container element iterators, this rule about the
+>     accessibility of a loop parameter seems wrong.
+> 
+>     Even in the case where the loop parameter is a variable (as opposed
+>     to a constant) there is no reason to assume that the loop parameter
+>     "directly denotes an element of the ... container" and therefore
+>     has the same accessibility level as the container. This is even
+>     more obvious in the constant case.
+
+Correct.
+
+...
+>     An indexing is defined to be equivalent to a function call.
+
+Right. A container element iterator parameter is a renaming of the result of
+that function call. (That's the only model that makes sense.)
+ 
+>     So what is the accessibility level of this function call and,
+>     equivalently, when is the function result object finalized?
+>     It seems clear that we want the loop parameter for single loop
+>     iteration to be finalized at the end of that loop iteration.
+>     We don't want calls from multiple iterations to accumulate,
+>     unfinalized until the entire loop statement completes.
+>     That would require significant implementation
+>     effort in order to accomplish something that nobody wants.
+>     That's also, I believe, what a strict reading of the current
+>     wording of the RM requires.
+> 
+>     Unfortunately, a single iteration of a loop isn't a master at all,
+>     so it certainly can't be the master of the function call.
+> 
+>     I think we need to clarify the equivalence for a container
+>     element iterator loop to include a block statement which encloses
+>     the loop body; the loop parameter is declared by an appropriate
+>     renaming declaration which occurs in the (otherwise empty)
+>     declarative part of the block statement. The block statement
+>     then acts as the desired master.
+> 
+>     This seems simpler than adding a new kind of master to the list
+>     given in 7.6.1(3/2).
+
+I don't think it's "simpler", given there the "equivalence" is given in English
+and is *very* vague. Indeed, I'm not sure there is any reason to even state
+this normatively -- what else could it be? The only alternative is that the
+loop keeps every indexing to the end of the loop body, and that violates the
+Dewar rule.
+
+So I think that the "solution" is just to enhance the AARM note, and leave the
+normative wording alone.
+
+Otherwise, I think you need to update the normative wording for all three cases
+(I don't see why one of them should be more special than the others, and it's
+already non-obvious that the other cases are not per-iteration.) We resisted
+that because no one really wants to hair up the description just for an
+accessibility rule that no one will ever care about.
+
+>     Does this question belong in AI12-0156, in a separate AI, or in the
+>     Steve-was-just-confused-again file?
+
+Well, I think most of us would like to put all accessibility-related questions
+into AI12-9999999999999-1 that will never actually appear on the agenda. :-)
+But given that it's related to the anonymous access part of the proposal (even
+if that gets dropped), I'd just stick it into AI12-0156-1.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 6, 2015  12:08 PM
+
+> Doesn't this already happen for renames?
+> i.e.
+>
+>         Ref2 : access procedure (Bbb, Aaa : Integer) of X2 renames 
+> X2(1);
+>
+>         Ref2.all (Aaa => 123, Bbb => 456); -- meaning?
+
+I was wondering about that very point earlier today.
+
+What is the correct output for this example?
+
+  with Text_IO;
+  procedure Aatsor is
+    -- anonymous access to subprogram object renaming
+
+    procedure Foo (X, Y : Integer) is
+       use Text_IO;
+    begin
+       Put_Line ("X =" & Integer'Image (X));
+       Put_Line ("Y =" & Integer'Image (Y));
+    end;
+
+    Ref : access procedure (Aaa, Bbb : Integer := 111);
+
+    Renamed_Ref : access procedure (Bbb, Aaa : Integer := 222)
+     renames Ref;
+  begin
+    Ref := Foo'Access;
+    Renamed_Ref.all (Aaa => 333);
+  end;
+
+[Editor's note: The remainder of the thread on this topic is in the Appendix
+of AI12-0066-1.]
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 6, 2015  5:03 PM
+
+>  .., it needs to be written up as if it is in.
+> That's how we can judge if the complexity is excessive.
+
+I think the new wording would consist of
+
+   a) The syntax change
+
+   b) The accessibility level definition rule mentioned
+      earlier (treat it like an anonymous access type of
+      an object renaming).
+
+   b) Yet another copy of the name resolution rules given
+      in 8.5.1(3/2) and 12.4(5/2). Perhaps introduce some
+      new term to reduce the duplication.
+
+I think the complexity is excessive for the small benefit of allowing the 
+": access procedure" in
+
+     for X : access procedure of
+       My_Array_With_An_Anonymous_Element_Type loop
+
+but that's just my opinion.
+
+> But at this point, I don't think it's worth fixing.
+
+Hard to argue with that. I got to looking at this issue because I was asked
+to look at anonymous access types in array component iterator loops and it
+seemed that those are similar to anonymous access types in object renamings.
+
+As noted above, I'm in favor of not making any changes to allow the array
+loop case. If we do that, then it would be fine with me to just let sleeping
+dogs lie.
+
+****************************************************************
