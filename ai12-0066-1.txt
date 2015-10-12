@@ -1,4 +1,5 @@
 !standard 4.4(7/3)                                 13-12-18  AI05-0066-1/01
+!standard 8.5.1(6)
 !standard A.10.8(8)
 !standard A.10.9(13)
 !class confirmation 13-05-17
@@ -31,6 +32,35 @@ without a point." Read literally, that means reading has to stop after reading
 the "2", as the entire value does not match the syntax of a numeric literal.
 That requires effectively infinite lookahead. The ACATS requires reading the
 entire string. Is this intended? (No.)
+
+(4) Consider:
+
+  with Text_IO;
+  procedure Aatsor is
+    -- anonymous access to subprogram object renaming
+
+    procedure Foo (X, Y : Integer) is
+       use Text_IO;
+    begin
+       Put_Line ("X =" & Integer'Image (X));
+       Put_Line ("Y =" & Integer'Image (Y));
+    end;
+
+    Ref : access procedure (Aaa, Bbb : Integer := 111);
+
+    Renamed_Ref : access procedure (Bbb, Aaa : Integer := 222)
+     renames Ref;
+  begin
+    Ref := Foo'Access;
+    Renamed_Ref.all (Aaa => 333);
+  end;
+
+The correct answer, according to 8.5.1(6), is 
+  X = 333<NL>Y = 111<NL>
+
+But this doesn't make sense for the corresponding generic case (a formal in out
+parameter), as how could the body know what the parameters and defaults of the
+actual are? Something is wrong here.
 
 !response
 
@@ -101,6 +131,49 @@ we believe that there is no real issue with the wording. Fixing it just would
 just make the wording more complex and introduce more opportunities for problems.
 
 A.10.9(13) raises similar issues for real literals.
+
+(4) The problematic generic case is:
+
+   declare
+    generic
+       Formal_Obj : in out
+         access procedure (Aaa, Bbb : Integer := 111);
+    procedure G;
+    procedure G is
+    begin
+       Formal_Obj.all (Aaa => 333);
+    end;
+
+    Actual_Obj : access procedure (Bbb, Aaa : Integer := 222);
+
+    procedure Iii is new G (Formal_Obj => Actual_Obj);
+
+    procedure P (X, Y : Integer) is
+      use Text_Io;
+    begin
+       Put_Line ("X =" & X'img);
+       Put_Line ("Y =" & Y'img);
+    end;
+   begin
+     Actual_Obj := P'access;
+     Iii;
+  end;
+
+We'd destroy the generic contract model if the body of the generic had to
+somehow know the parameter names and defaults of the actual. (That would be
+especially problematic if the actual had different names for the parameters.
+
+So, we need to either (1) require full conformance when renaming or
+instantiating objects with access-to-subprogram types, or (2) adopt a rule
+like 8.5.4(7) for object renamings and formal in out parameters.
+
+(1) is easy but potentially incompatible; (2) is likely to be a significant
+amount of work. But the problematic case is rarely likely to happen in
+practice (generic formal in out parameters are rarely used; anonymous
+access-to-subprogram types are rarely used outside of parameters, that
+means that using them together is rare squared). Indeed, this is so unlikely
+that we don't think it is worth fixing; the disruption to compilers outweighs
+any likely benefit to users.
 
 !appendix
 
@@ -464,3 +537,418 @@ Actually we do "pathology" :-) but you can't use that here.
 
 ****************************************************************
 
+From: Steve Baird
+Sent: Tuesday, October 6, 2015  12:08 PM
+
+[Editor's note: This thread is split from a thread that starts in AI12-0156-1;
+see the !appendix of that AI for details.]
+
+> Doesn't this already happen for renames?
+> i.e.
+>
+>         Ref2 : access procedure (Bbb, Aaa : Integer) of X2 renames 
+> X2(1);
+>
+>         Ref2.all (Aaa => 123, Bbb => 456); -- meaning?
+
+I was wondering about that very point earlier today.
+
+What is the correct output for this example?
+
+  with Text_IO;
+  procedure Aatsor is
+    -- anonymous access to subprogram object renaming
+
+    procedure Foo (X, Y : Integer) is
+       use Text_IO;
+    begin
+       Put_Line ("X =" & Integer'Image (X));
+       Put_Line ("Y =" & Integer'Image (Y));
+    end;
+
+    Ref : access procedure (Aaa, Bbb : Integer := 111);
+
+    Renamed_Ref : access procedure (Bbb, Aaa : Integer := 222)
+     renames Ref;
+  begin
+    Ref := Foo'Access;
+    Renamed_Ref.all (Aaa => 333);
+  end;
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 6, 2015  3:07 PM
+
+...
+> What is the correct output for this example?
+
+Is this a trick question?   To me the answer is
+clearly "X = 222<NL>Y = 333<NL>."
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 6, 2015  3:27 PM
+
+> Is this a trick question?
+
+When you see "baird" on the From: line, that might be a good guess.
+
+> ...To me the answer is clearly "X = 222<NL>Y = 333<NL>."
+
+But see 8.5.1(6) and 8.5.1(3).  GNAT prints:
+
+  X = 333
+  Y = 111
+
+which seems correct.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Tuesday, October 6, 2015  3:41 PM
+
+Correct or not, this has the feel of discriminant constraints on class-wide
+types :-)!  The declaration provides some constants to be used later, but
+there is currently no mechanism to preserve those default bindings.  Tuck
+seems to say that it is OBVIOUS that the new defaults are used.  Consensus?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 6, 2015  4:11 PM
+
+>
+> When you see "baird" on the From: line, that might be a good guess.
+
+Gary clued me in on this.  It is an object renaming, not a subprogram renaming,
+so according to 8.5.1, the subtype used is completely irrelevant, even if it
+happens to introduce different formal parameter names or defaults.  So I agree
+that GNAT is doing the right thing here given the current language definition.
+
+I suppose it might be nice to give a warning when either parameter names or
+defaults don't agree, but that would be helpful for about 0.000001% of our
+users.  I think we can safely wait until a well-endowed customer bumps into
+this and sends a nasty ticket...
+
+>> ...To me the answer is clearly "X = 222<NL>Y = 333<NL>."
+>
+> But see 8.5.1(6) and 8.5.1(3).  GNAT prints:
+>
+>    X = 333
+>    Y = 111
+>
+> which seems correct.
+
+I agree.  So "never mind" on my prior answer.  The correct answer is "clearly"
+"X =  333<NL>Y = 111<NL>". ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 6, 2015  4:27 PM
+
+> Correct or not, this has the feel of discriminant constraints on 
+> class-wide types :-)!  The declaration provides some constants to be 
+> used later, but there is currently no mechanism to preserve those 
+> default bindings.  Tuck seems to say that it is OBVIOUS that the new 
+> defaults are used.  Consensus?
+
+Consensus?? I have several different answers myself. ;-) There are probably
+more answers than ARG members.
+
+Tucker is clearly thinking of the subprogram renames case here. 8.5.4(7) says
+clearly that such a renames takes the parameter defaults from the renaming
+profile (not the original one).
+
+But this is an object declaration and an access type, not a subprogram
+renaming declaration.
+
+So I can see an argument that it ought to work like a subprogram renames.
+
+I can also see an argument that the parameter names and defaults are ignored
+in such a case. However, that would cause trouble for parameter passing (using
+the declarations of Steve's program):
+
+   procedure Foo (P : access procedure (Bbb, Aaa : Integer := 222) is
+   begin
+       P (Aaa => 333);
+   end Foo;
+
+   Foo (Ref);
+
+Inside the subprogram, we don't know the parameter names and defaults of the
+original subprogram, so we had better use the new ones.
+
+Thus, I conclude that a renames ought to do so as well (to be consistent with
+everything else).
+
+So I guess I'm now down to one answer, and Bob and GNAT are wrong.
+
+P.S. I don't think it makes sense to use this example for or against
+AI12-0156-1 adding anonymous types, since it already occurs for renames and
+generic in out parameters (as someone sent me in private mail). Nothing new
+here.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Tuesday, October 6, 2015  4:30 PM
+
+> So I guess I'm now down to one answer, and Bob and GNAT are wrong.
+
+Gary, Tuck and 8.5.1 (6/2) are of the opposite opinion, so back to two.  I’d go
+with the RM ...
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 6, 2015  4:30 PM
+
+> Tuck seems to say that it is OBVIOUS that the new defaults are used.
+
+Tuck now says otherwise, but when I refer to "Tuck's interpretation" below,
+I'm talking about Tuck #1.
+
+As usual, there are two separate questions: "What does the RM say?" and "What
+should the RM say?" (Some might also include "Why would anyone care?").
+
+I'll ignore the first question for now and just note that I think Tuck's
+interpretation works better with the use of compiler-generated renames to
+generate actual-to-formal bindings for the expansion of an instance of a
+generic.
+
+Consider that perhaps-somewhat-neglected-but-nonetheless-beloved-by-all
+construct, the generic in-out mode formal object of an anonymous
+access-to-subprogram type:
+
+   declare
+    generic
+       Formal_Obj : in out
+         access procedure (Aaa, Bbb : Integer := 111);
+    procedure G;
+    procedure G is
+    begin
+       Formal_Obj.all (Aaa => 333);
+    end;
+
+    Actual_Obj : access procedure (Bbb, Aaa : Integer := 222);
+
+    procedure Iii is new G (Formal_Obj => Actual_Obj);
+
+    procedure P (X, Y : Integer) is
+      use Text_Io;
+    begin
+       Put_Line ("X =" & X'img);
+       Put_Line ("Y =" & Y'img);
+    end;
+   begin
+     Actual_Obj := P'access;
+     Iii;
+  end;
+
+It is not strictly a requirement, but it would certainly be nice if a
+compiler could implement this by introducing a renaming declaration
+
+    Formal_Obj : access procedure (Aaa, Bbb : Integer := 111)
+      renames Actual_Obj;
+
+and then replicating the body of the generic with the uses of the formal
+object redirected to refer to the conjured-up renaming.
+I think that Tuck's interpretation is needed if we want this implementation
+approach to work.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 6, 2015  4:32 PM
+
+> > When you see "baird" on the From: line, that might be a good guess.
+> 
+> Gary clued me in on this.  It is an object renaming, not a subprogram 
+> renaming, so according to 8.5.1, the subtype used is completely 
+> irrelevant, even if it happens to introduce different formal parameter 
+> names or defaults.  So I agree that GNAT is doing the right thing here 
+> given the current language definition.
+
+Cool. I just convinced myself that it was not. (Although that probably is a 
+language definition problem.)
+
+> I suppose it might be nice to give a warning when either parameter 
+> names or defaults don't agree, but that would be helpful for about 
+> 0.000001% of our users.  I think we can safely wait until a 
+> well-endowed customer bumps into this and sends a nasty ticket...
+
+It would make more sense to declare it illegal since it would affect
+0.000001% of users and it's better than renamings don't lie. Especially
+if we can't agree what it should do...
+
+> >
+> >> ...To me the answer is clearly "X = 222<NL>Y = 333<NL>."
+> >
+> > But see 8.5.1(6) and 8.5.1(3).  GNAT prints:
+> >
+> >    X = 333
+> >    Y = 111
+> >
+> > which seems correct.
+> 
+> I agree.  So "never mind" on my prior answer.  The correct answer is 
+> "clearly" "X = 333<NL>Y = 111<NL>". ;-)
+
+I think you're right as the language is defined. But that's horribly
+misleading, given that all other uses (subprogram renames, parameter passing,
+etc.) work the other way. We could easily require full conformance here and
+get rid of this complaint (that would be incompatible, but mostly it would
+catch bugs, it's hard to imagine anyone intending to do this).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 6, 2015  4:37 PM
+
+...
+> I think you're right as the language is defined. But that's horribly 
+> misleading, given that all other uses (subprogram renames, parameter 
+> passing, etc.) work the other way. We could easily require full 
+> conformance here and get rid of this complaint (that would be 
+> incompatible, but mostly it would catch bugs, it's hard to imagine 
+> anyone intending to do this).
+
+It's interesting that static matching of access subtypes only requires subtype
+conformance of the profiles, since that would seem to allow this problem in
+other contexts (specifically with generics). Requiring full conformance would
+eliminate the problem.
+
+Moral: you're nuts to use anonymous access types (outside of the hack
+supporting passing nested subprograms, which one can't avoid).
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, October 6, 2015  4:41 PM
+
+I've still to digest all this, but traditionally I've always pushed for full
+conformance, as I've known programmers get confused without it.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, October 6, 2015  4:46 PM
+
+> "Why would anyone care?").
+
+That's my view.
+
+If we had known about this in the first place, we would probably have made
+8.5.1(3) require something stronger than type conformance, as suggested by
+Randy in another message.
+
+But at this point, I don't think it's worth fixing.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 6, 2015  5:02 PM
+
+Of course, the fix is to change a single word in the RM: "subtype" => "full"
+in 8.5.1(4.3/2). So the risk is small. Of course, that only makes the
+risk/reward ratio undefined (very small/very small = could be anything because
+of rounding errors).
+
+I was thinking of suggesting to put this thread into the AI of things that we
+aren't going to fix. It's clear that there is something fishy here (since it's
+inconsistent with all other parts of the language), but it's probably not
+going to come up often enough to bother fixing. (But now we might have to
+argue about whether this is a bug or a feature... ;-)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 6, 2015  5:03 PM
+
+> But at this point, I don't think it's worth fixing.
+
+Hard to argue with that. I got to looking at this issue because I was asked to
+look at anonymous access types in array component iterator loops and it seemed
+that those are similar to anonymous access types in object renamings.
+
+As noted above, I'm in favor of not making any changes to allow the array loop
+case. If we do that, then it would be fine with me to just let sleeping dogs
+lie.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 6, 2015  9:05 PM
+
+> It is not strictly a requirement, but it would certainly be nice if a 
+> compiler could implement this by introducing a renaming declaration
+>
+>     Formal_Obj : access procedure (Aaa, Bbb : Integer := 111)
+>       renames Actual_Obj;
+>
+> and then replicating the body of the generic with the uses of the 
+> formal object redirected to refer to the conjured-up renaming.
+> I think that Tuck's interpretation is needed if we want this 
+> implementation approach to work.
+
+Agreed.  This convinces me that the "right" answer for the reference manual
+is to use the new parameter names/defaults.  There clearly is no other
+possibility within a generic, and we don't want to require full conformance
+on actual/formal object matching in this case, as that would interfere with
+"genericity" for no good reason.
+
+But I also agree that this whole topic probably deserves to be buried until
+some real user bumps into the problem (and it must be someone who is no
+relation of Steve Baird, I should probably add ;-).
+
+I don't think shifting from subtype to full conformance would be a good idea
+for generics, and the correspondence between object renaming and formal
+in out objects is a part of the language model worth preserving, I believe
+(AARM 12.4(1.b)).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 12, 2015  4:37 PM
+
+...
+> Agreed.  This convinces me that the "right" answer for the reference 
+> manual is to use the new parameter names/defaults.
+> There clearly is no other possibility within a generic, and we don't 
+> want to require full conformance on actual/formal object matching in 
+> this case, as that would interfere with "genericity" for no good 
+> reason.
+> 
+> But I also agree that this whole topic probably deserves to be buried 
+> until some real user bumps into the problem (and it must be someone 
+> who is no relation of Steve Baird, I should probably add ;-).
+
+That's what I've done with it, putting it into AI12-0066-1, the AI of issues
+for which the fix is as likely to cause problems as the bug.
+
+> I don't think shifting from subtype to full conformance would be a 
+> good idea for generics, and the correspondence between object renaming 
+> and formal in out objects is a part of the language model worth 
+> preserving, I believe (AARM 12.4(1.b)).
+
+I don't agree, as we're talking about formal in out parameters with anonymous
+access-to-subprogram types. Neither of those features is used very often, and
+the confusion possible from allowing them to be different far outweighs any
+advantage simply because they're used so infrequently that no one is likely
+to be aware of the special rules.
+
+You'd be right if you were talking about subprogram renaming or formal
+subprograms, but we're not talking about those: we're talking about a pair of
+features that most programmers will never use by themselves, much less
+together. It's hard to justify making compilers do any more work than simply
+rejecting them if too weird. (And as always, rejecting them would allow
+switching to the more liberal rule in the future -- the other way around is
+never possible.)
+
+But of course the odds are no one will ever care no matter what choice we made,
+so just sticking it where the sun doesn't shine is as good as anything. :-)
+
+****************************************************************
