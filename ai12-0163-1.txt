@@ -1,4 +1,4 @@
-!standard D.4(7/2)                                  15-06-04  AI05-0163-1/01
+!standard D.4(7/2)                                  15-10-10  AI05-0163-1/02
 !standard D.4(12)
 !standard D.4(13)
 !standard D.4(14)
@@ -10,7 +10,7 @@
 !subject Deterministic queue servicing for FIFO_Queueing
 !summary
 
-** TBD
+A new queuing policy, Ordered_FIFO_Queuing is defined.
 
 !problem
 
@@ -26,24 +26,48 @@ to analyze.
 
 A configuration pragma to select deterministic queue selection is desired.
 
-[Editor's note: The above is a guess. The original request was essentially
-"because someone at IRTAW asked for it". We probably need more than that. :-)]
-
 !proposal
 
-Add a new queuing policy Deterministic_FIFO_Queuing. The rules for this policy
-are the same as those for FIFO_Queuing (as described in 9.5.3 and 9.7.1) except
-that D.4(12-14) apply when multiple open calls are available [but without the
-parts about priorities; all calls are treated the same].
+Add a new queuing policy Ordered_FIFO_Queuing. The rules for this policy are
+the same as those for FIFO_Queuing (as described in 9.5.3 and 9.7.1) except
+that when multiple queues are eligible for selection, the selected entry
+chosen is the one that was queued first, that is, the selection is FIFO
+across all queues to the same PO or selective_accept, instead of just within
+a single queue.
 
 !wording
 
-** TBD.
+Modify D.4(7/2)
+   [Two]{Three} queuing policies, FIFO_Queuing{, Ordered_FIFO_Queuing,} and
+   Priority_Queuing, are language defined. If no Queuing_Policy pragma applies
+   to any of the program units comprising the partition, the queuing policy
+   for that partition is FIFO_Queuing. The rules for this policy are specified
+   in 9.5.3 and 9.7.1.
+
+Append after D.4(7/2)
+
+The Ordered_FIFO_Queuing policy is defined as follows:
+
+Calls are selected on a given entry queue in order of arrival.
+
+When more than one condition of an entry_barrier of a protected object becomes
+True, and more than one of the respective queues is nonempty, the call with the
+earliest arrival time is selected. If more than one such call has the same
+arrival time, the call that is queued on the entry whose declaration is first
+in textual order in the protected_definition is selected. For members of the
+same entry family, the one with the lower family index is selected.
+
+If the expiration time of two or more open delay_alternatives is the same and
+no other accept_alternatives are open, the sequence_of_statements of the
+delay_alternative that is first in textual order in the selective_accept is executed.
+
+When more than one alternative of a selective_accept is open and has queued calls,
+an alternative whose queue has the call with the earliest arrival time at its
+head is selected. If two or more open alternatives have queued calls with the
+same arrival time, then a call on the entry in the accept_alternative that is
+first in textual order in the selective_accept is selected.
 
 !discussion
-
-It's the author's understanding that this is part of a forthcoming proposal for
-a "super-Ravenscar" (Condorscar?? :-)
 
 Changing the default behavior of FIFO_Queuing is not a good idea. Queue
 selection has been non-deterministic since Ada 83, and there have been many
@@ -56,37 +80,34 @@ pragma Queuing_Policy. That the requested semantics are appropriate for a queuin
 policy is easily seen in that Priority_Queuing has exactly these semantics when
 all calls have the same priority.
 
-So it's clear (at least to this author) that this is actually a request for a
-new queuing policy that combines parts of the two existing policies. It would be
-madness to create a new configuration pragma with the same sort of effect as an
+So it's clear that this is actually a request for a new queuing policy that
+combines parts of the two existing policies. It would be madness to create a
+new configuration pragma with the same sort of effect as an
 existing one.
 
-The name of the policy could be different to highlight different effects of the
-policy. One correspondent suggested (tongue-in-cheek, perhaps)
-Deterministic_but_Unfair_Textual_Order_FIFO_Queuing.
+The name Ordered_FIFO_Queuing was chosen, to reflect that the FIFO ordering
+applies not only within a single queue, but across all the queues of a 
+protected object or selective_accept. The FIFO ordering provided by this
+queuing policy provides stronger guarantees for FIFO ordering than the default
+FIFO_Queuing policy which only defines the ordering within a single entry queue.
 
-<RANT name="Randy Brukardt">
-The e-mail thread seems to suggest a mass amnesia when it comes to queuing
-policy. People who should know better suggest that we need a configuration
-pragma for this (Queuing_Policy is a configuration pragma!) that allows
-implementation-defined policies (it does!) and that unrecognized/unimplemented
-policies rejected (that's the case for Queuing_Policy!). Although I repeatedly
-said that Ada already has what's needed and that no new pragma is needed,
-absolutely no one acknowledged that fact, but rather went on spouting things
-that are already handled by Ada. Do we HAVE to reinvent the wheel here?? It's
-one thing for IRTAW members to do that (their reason to exist is to reinvent
-wheels hopefully slightly better than the old wheel), but the ARG ought to
-know better. Grumble, grump.
-</RANT>
+One possible implementation for this policy would be to assign a sequence number
+to each queued entry call, where the sequence number is incremented globally
+across all queues associated with the protected object or selective_accept.
+
+We considered just applying textual order for the case when multiple queues
+are selectable, but this can lead to unfair queue servicing, since the 
+queues in earlier textual order can end up starving the later ones. Applying
+arrival time first as the selector, provided fairness, as the likelyhood of
+multiple calls being queued at exactly the same time is much less likely.
 
 !ASIS
 
-?? Dunno how the tasking policies are handled in ASIS.
+No ASIS effect.
 
 !ACATS test
 
 An ACATS C-Test is needed to check that the new policy is supported.
-
 
 !appendix
 
