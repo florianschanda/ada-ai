@@ -1,4 +1,4 @@
-!standard A.16(3/2)                             15-10-10    AI12-0009-1/02
+!standard A.16(3/2)                             15-10-11    AI12-0009-1/03
 !standard A.16(36.1/3)
 !standard A.16(98/2)
 !standard A.16(112.1/3)
@@ -35,7 +35,7 @@ iterators for these subprograms, so that users can write a loop.
 Modify A.16(3/2)
 "with Ada.IO_Exceptions;
  with Ada.Calendar;
-{private with Ada.Iterator_Interfaces;}
+{with Ada.Iterator_Interfaces;}
  package Ada.Directories is"
 
 Append after A.16(36/3) the following
@@ -44,7 +44,7 @@ Append after A.16(36/3) the following
 
    type Directory_Listing is tagged limited private
       with Constant_Indexing => Current_Entry,
-           Default_Iterator => Identity,
+           Default_Iterator => Iterate,
            Iterator_Element => Directory_Entry_Type;
 
    function Entries
@@ -52,6 +52,24 @@ Append after A.16(36/3) the following
       Pattern   : in String;
       Filter    : in Filter_Type := (others => True))
        return Directory_Listing;
+
+   type Entry_Presence is new Boolean;
+
+   function Has_Element
+     (EP : in Entry_Presence) return Boolean is (Boolean (EP));
+
+   package Directory_Iterators is
+      new Ada.Iterator_Interfaces (Entry_Presence, Has_Element);
+
+   function Iterate
+     (Listing : in Directory_Listing)
+      return Directory_Iterators.Forward_Iterator'Class;
+
+   function Current_Entry
+     (Entries : in Directory_Listing; EP : in Entry_Presence)
+      return Directory_Entry_Type
+     with Pre => Has_Element (EP);
+
 
 Modify A.16(98/2)
    The type Directory_Entry_Type represents a single item in a directory. These
@@ -66,7 +84,7 @@ Append after A.16(112/3)
 
    type Directory_Listing is tagged limited private
       with Constant_Indexing => Current_Entry,
-           Default_Iterator => Identity,
+           Default_Iterator => Iterate,
            Iterator_Element => Directory_Entry_Type;
 
    The type Directory_Listing contains the state of a directory search.
@@ -97,6 +115,30 @@ Append after A.16(112/3)
    absence of Name_Error). When Start_Search propagates Name_Error or Use_Error,
    the return object will have no entries available.
 
+   function Iterate
+     (Listing : Directory_Listing)
+      return Directory_Iterators.Forward_Iterator'Class;
+      Iterate returns a forward iterator object (see 5.5.1) that will generate a
+      value for a loop parameter (see 5.5.2) designating each directory entry in Listing, 
+      starting with the first directory entry and moving the cursor as per the
+      Next function. The iterator object needs finalization.
+
+   function Current_Entry
+     (Entries : Directory_Listing; EP : Entry_Presence)
+      return Directory_Entry_Type
+     with Pre => Has_Element (EP);
+
+    If Entries is a default-initialized object or if EP is true and the current
+    state of Entries has no entries available or is not involved
+    in generalized loop iteration, then Program_Error is propagated.
+    Otherwise, Current_Entry returns the Directory_Entry associated with
+    the current state of the generalized iterator or container element iterator.
+    It is implementation-defined as to whether the results returned by this
+    subprogram are altered if the contents of the directory are altered during
+    the current iteration of the loop (for example, by another program). The 
+    exception Use_Error is propagated if the external environment does not
+    support continued searching of the directory represented by Entries.
+
 Modify A.16(125/3)
    Start_Search{,} [and ]Search{, and Entries} should raise Name_Error if
    Pattern is malformed, but not if it could represent a file in the directory
@@ -108,7 +150,7 @@ Modify A.16(125.a/3)
     patterns.
 
 Modify A.17(3/2)
-"{private with Ada.Iterator_Interfaces;}
+"{with Ada.Iterator_Interfaces;}
  package Ada.Environment_Variables is
    pragma Preelaborate(Environment_Variables);"
 
@@ -118,11 +160,28 @@ Append after A.17(8/3) the following
 
    type Environment_Variable_Listing is tagged limited private
       with Constant_Indexing => Current_Entry,
-           Default_Iterator => Identity,
+           Default_Iterator => Iterate,
            Iterator_Element => Name_Value_Pair_Type;
 
    function All_Variables
        return Environment_Variable_Listing;
+
+   type Variable_Presence is new Boolean;
+
+   function Has_Element
+     (VP : in Variable_Presence) return Boolean is (Boolean (VP));
+
+   package Environment_Variable_Iterators is
+      new Ada.Iterator_Interfaces (Variable_Presence, Has_Element);
+
+   function Iterate
+     (Listing : in Environment_Variable_Listing)
+      return Environment_Variable_Iterators.Forward_Iterator'Class;
+
+   function Current_Variable
+     (Variables : in Environment_Variable_Listing; VP : in Variable_Presence)
+      return Name_Value_Pair
+     with Pre => Has_Element (VP);
 
    -- Operations on Name_Value_Pairs
 
@@ -144,7 +203,7 @@ Append after A.17(24/2)
 
    type Environment_Variable_Listing is tagged limited private
       with Constant_Indexing => Current_Variable,
-           Default_Iterator => Identity,
+           Default_Iterator => Iterate,
            Iterator_Element => Name_Value_Pair_Type;
 
    If the external execution environment supports environment variables, then
@@ -167,6 +226,25 @@ Append after A.17(24/2)
    iterator as the loop iterator and a loop cursor designating each environment
    variable of the execution environment. Otherwise, Program_Error is
    propagated.
+
+   function Iterate
+     (Variables : Environment_Variable_Listing)
+      return Environment_Variable_Iterators.Forward_Iterator'Class;
+ 
+   Iterate returns a forward iterator object (see 5.5.1) that will generate a
+   value for a loop parameter (see 5.5.2) designating each environment variable
+   in Variables, starting with the first environment variable and moving the
+   cursor as per the Next function. The iterator object needs finalization.
+
+   function Current_Variable
+     (Variables : Environment_Variable_Listing; VP : Variable_Presence)
+      return Name_Value_Pair
+     with Pre => Has_Element (VP);
+
+   If VP is true and the current state of Variables is not involved
+   in generalized loop iteration, then Program_Error is propagated.
+   Otherwise, Current_Variable returns the Name_Value_Pair associated with
+   the current state of the generalized iterator or container element iterator.
 
    function Name (Name_Value_Pair : in Name_Value_Pair_Type) return String;
 
@@ -246,10 +324,28 @@ was viewed as being a bit of a trick. It would be ideal if a solution could
 be found that was less "tricky". Also, having to expose a public type with an
 access discriminant was seen as being undesirable.
 
-The second approach eliminated these concerns, because the iterator type
-can be moved to the private part of the package, exposing a simpler interface
-in the public part of the package, and there is no need to involve access
-discriminants or the Implicit_Dererence aspect.
+The second approach eliminated these concerns, because there is no need to
+involve access discriminants or the Implicit_Dererence aspect. In addition,
+the second approach is more flexible because it allows the user to write
+both forms of loops. The second form of the loop above could be written as;
+
+   declare
+      Listing : Ada.Directories.Directory_Listing :=
+        Ada.Directories.Entries ("/etc", "*.txt");
+   begin
+      for Dir_Entry in Listing.Iterate loop
+         Put_Line
+           (Directories.Simple_Name 
+              (Directories.Current_Entry (Entries => Listing,
+                                          EP      => Dir_Entry)));
+      end loop;
+   end;
+
+It was also considered whether the container and the iterator type should
+be the same type. This seemed more confusing and would have required exposing
+more of the iterator interface in the public part of the package. It also 
+would have been less clear whether one could restart an iteration on the
+same container object a second time.
 
 It was considered whether reverse iteration through the containers should
 be supported. Since the existing iteration support for Ada.Directories did
@@ -1180,6 +1276,54 @@ This would hopefully would mean that less semantics and wording for such a
 function would be needed in the RM. I think this helps also to separate the real
 public interface from the bits and pieces that are not intended to be called by
 user.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, October 11, 2015  3:09 PM
+
+Here is an updated version to replace what I submitted yesterday. [This is
+version /03 of the AI - Editor.]
+
+This version eliminates the "bug" where I was assuming I could defer the
+Contant_Indexing function and Default_Iterator functions to the private part
+of the packages.
+
+This version pulls the necessary declarations from the private part back into
+the public part. I have tested this implementation for the Ada.Directories
+package, and have a working implementation.
+
+I also renamed Identity to Iterate, as Identity is no longer true and Iterate
+is more consistent with the naming we use on other existing containers.
+
+For now, disregard my comment in my previous email about providing a
+User_Callable aspect. I don't think it is warranted here.
+
+I think we want to expose Iterate and Current_Entry as user callable. 
+This allows one to write both forms of generalized iterator loops. 
+(Using "in" or "of" in the loop iterator_specification)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 12, 2015  3:43 PM
+
+> Here is an updated version to replace what I submitted yesterday.
+> This version eliminates the "bug" where I was assuming I could defer 
+> the Contant_Indexing function and Default_Iterator functions to the 
+> private part of the packages.
+
+I corrected a couple of typos in this as I was posting it. Specifically,
+
+...
+> I also renamed Identity to Iterate, as Identity is no longer true and 
+> Iterate is more consistent with the naming we use on other existing 
+> containers.
+
+The Default_Iterator aspect was still set to Identity in A.16(36/3). You
+certainly meant that to be Iterate as well.
+
+Also, !question should be !problem in an !Amendment class AI.
 
 ****************************************************************
 
