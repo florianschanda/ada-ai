@@ -1,43 +1,84 @@
-!standard A(3/4)                             14-10-13   AI12-0139-1/00
+!standard A(3/4)                             15-10-12   AI12-0139-1/01
 !standard A.18(5)
 !class Amendment 14-10-13
 !status work item 14-10-13
 !status received 14-10-03
 !priority Low
-!difficulty Easy
-!subject Containers and multitasking
+!difficulty Hard
+!subject Thread-safe Ada libraries
 
 !summary
 
-** TBD.
+Add variants of the standard libraries that are thread-safe.
 
 !problem
 
-With the advent of parallel operations (see AI12-0119-1), programs
-are going to be using data structures from multiple tasks much
-more often. The Ada containers design does not require an implementation
-that allow multiple tasks to use the same container. Such a container
-ought to be available.
+With the advent of multi-core computers, concurrency in the software
+becomes the normal case, not the specialized application. Yet, presently, the
+Ada standard libraries are not required to be thread-safe. They should be.
 
 !proposal
 
-Unknown. It's not clear whether the existing containers could work for
-parallel operations, as the fact that the container being read is
-implicit (in the cursor for most operations) means that almost all container
-operations appear to access global memory. That will often violate the rules
-of parallel operations, and greatly limit what can be done without turning
-off checking.
+We propose to add a variant of the Ada Standard library that is required to be
+thread-safe.
 
-Additionally, it's unclear whether any sort of safe container could have
-sufficient performance, and it's definitely unclear whether we want unsafe
-containers in the language definition.
+We define the package Ada.Protected as a new root for a duplicate of the entire
+Ada library and postulate thread-safeness for the entire content of the package,
+including its child units.
 
 !wording
 
-** TBD.
+Add as A (2.1):
+
+In addition, the package Ada.Protected is predefined. It contains duplicates of
+all child units of the package Ada listed above. Syntax and Semantics of all
+declarations and specifications are identical, except for the different root of
+the unit hierarchy.
+
+In addition to the semantics of package Ada and its child units, the effects of
+concurrent invocations of all subprograms, protected operations, and primitive
+operations defined within the child units of Ada.Protected shall be the same as
+the effects of some {arbitrary] sequence of the same invocations.
+
+Add as A (3.2):   -- Note to ARG: this is within Implementation Requirements
+
+Within Ada.Protected and its child units, implementations shall ensure the
+implied atomicity of operations on global ressources and the visibility of
+changes across the boundaries of concurrent units as implied by atomic changes
+to shared ressources.
 
 !discussion
 
+To mandate that the existing library shall be thread-safe is considered to be
+too much of a performance burden, particulary for applications that include no
+concurrency. Hence a thread-safe duplicate of the library is proposed.
+
+Switching between thread-safe and thread-unsafe versions is done by altering the
+package prefixes. With good "use"-clauses, the change can be confined to the
+"with/use"-clauses only.
+
+The protected notion extends across child units and it does so intentionally,
+since there are child units in the Ada library whose semantics interact via
+shared ressources. The thread-safeness therefore needs to extend across child
+units.
+
+It is also intentional, that the types defined in the child units of package Ada
+are incompatible with types defined in child units of package Ada.Protected. No
+mixing with all the ensueing semantic complications.
+
+-----
+Note to ARG: The proposal extends to the entire library; a more modest
+alternative is to apply the change only to package Containers to cover only
+containers. I advise against it, since it would be hard to extend compatibly
+later on. Also I do not see why the rest of the library should not also work
+correctly for concurrent calls.
+End of Note.
+------
+
+
+!examples
+
+Any existing code calling library operations.
 
 !ASIS
 
@@ -1112,5 +1153,41 @@ increase the performance.)
 A container without either checks or locks does not belong in the standard,
 IMHO. (There are lots of private containers out there, and these might be best
 as one of those.)
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 12, 2015  6:06 PM
+
+> My homework AI on thread-safe libraries.....
+
+Interesting. It doesn't seem to go far enough, IMHO, as there doesn't seem to
+be any indication of what ought to work and what can deadlock.
+
+For instance, consider the call-back version of the iterators in the various
+Ada.Containers. Is it required that one can make a call back into the container
+from the call-back? If not, these protected libraries aren't going to be very
+useful (most useful code will deadlock), and if so, the wording better make it
+clear what's expected. Especially as clearly one can construct programs that
+will deadlock in the face of an locking scheme that one could imagine using for
+the containers (especially easy if we allow the tampering check to be
+suppressed for performance reasons).
+
+Similarly, can one modify individual components of a container in parallel, or
+not? Explain your answer. ;-)
+
+"Within Ada.Protected and its child units, implementations shall ensure the
+implied atomicity of operations on global ressources and the visibility of
+changes across the boundaries of concurrent units as implied by atomic
+changes to shared ressources."
+
+What's "implied atomicity" mean?? I don't think there is anything "implied"
+here. I think it would be much better if this was written as a real requirement
+in Ada terms (I realize that's much harder, but that's the point).
+
+Basically, I think this would be a full employment act for the ARG, because it
+would take years to "interpret" the meaning of this on each and every
+language-defined library (at least the non-pure ones). I doubt that there are
+many where it would be obvious.
 
 ***************************************************************
