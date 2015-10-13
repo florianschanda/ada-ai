@@ -1,4 +1,4 @@
-!standard 3.5(31/2)                                     15-06-18    AI12-0125-1/03
+!standard 3.5(31/2)                                     15-10-03    AI12-0125-1/05
 !class Amendment 14-08-11
 !status work item 14-08-11
 !status received 14-08-08
@@ -35,41 +35,59 @@ as well.
 
 !wording
 
-Add somewhere in 3.5: (Note that the attribute list doesn't appear to be in any
-obvious order, so perhaps these are best added at the tail end.)
+[Editor's question: Should these be restricted to discrete types only (and
+placed in 3.5.5 as a result)?? X'Inc(2) does *not* add 2 to a fixed point
+value X, and that would likely be confusing.]
+
+Add after 3.5(55/3):
+
+[Editor's note: The attribute list of 3.5 doesn't appear to be in any
+obvious order, so these are added at the tail end.]
+
+S'Inc    S'Inc denotes a procedure with the following specification: 
+
+    procedure S'Inc (*Arg* : in out S'Base; *Count* : in *universal_integer* := 1);
+
+        The procedure updates Arg with the result of applying S'Succ to *Arg*
+        *Count* times. If *Count* is non-positive, S'Inc has no effect on *Arg*.
+
+S'Dec    S'Dec denotes a procedure with the following specification: 
+
+    procedure S'Dec (*Arg* : in out S'Base; *Count* : in *universal_integer* := 1);
+
+        The procedure updates Arg with the result of applying S'Pred to *Arg*
+        *Count* times. If *Count* is non-positive, S'Inc has no effect on *Arg*.
+
+AARM Ramification: The expression given for *Arg* in uses of the S'Inc and S'Dec
+attributes has to be a variable as the requirements for an "in out" parameter are
+enforced on it. Additionally, as a by-copy parameter, the expression given for *Arg*
+is evaluated once, read once, and written once (this latter matters if *Arg* is
+volatile). The equivalent code written explicitly (unless renames and temporaries
+are used) evaluates the expression multiple times, which could produce different
+results if it involves a function. This also reduces the chance of accidentally writing
+X differently in the two uses in X := S'Succ(X); which can happen if X is
+lengthy or complex.
+
+Add after 3.5(55.4/4):
 
 For a prefix X that denotes a variable of a scalar type: 
-X'Inc   Denotes a parameterless procedure that updates X with the result of
-        S'Succ(X), where S is the nominal subtype of X.
 
-X'Inc(N)   Denotes a parameterless procedure that updates X with the result of
-           S'Succ(X) repeated N times, where S is the nominal subtype of X.
+X'Inc    X'Inc denotes the result of calling procedure S'Inc with *Arg* being X and
+         *Count* being 1, where S is the nominal subtype of X.
 
-X'Dec   Denotes a parameterless procedure that updates X with the result of
-        S'Pred(X), where S is the nominal subtype of X.
+X'Inc(N)  X'Inc denotes the result of calling procedure S'Inc with *Arg* being X and
+         *Count* being N, where S is the nominal subtype of X.
 
-X'Dec(N)   Denotes a parameterless procedure that updates X with the result of
-           S'Pred(X) repeated N times, where S is the nominal subtype of X.
+X'Dec   X'Dec denotes the result of calling procedure S'Dec with *Arg* being X and
+         *Count* being 1, where S is the nominal subtype of X.
 
-[Alternatively, we could describe the entire procedure:
-    procedure X'Inc (N : *universal_integer* := 1) is
-       *Obj*  : *S* renames X;
-       *Temp* : *S* := Obj;
-    begin
-       for I in 1 .. N loop
-         *Temp* := *S*'Succ(*Temp*);
-       end loop;
-       *Obj* := *Temp*;
-    end X'Inc;
+X'Dec(N)   X'Dec denotes the result of calling procedure S'Dec with *Arg* being X and
+         *Count* being N, where S is the nominal subtype of X.
 
-But that seems like overkill - Editor.]
-
-AARM Ramification: The prefix X in the above attributes is evaluated once,
-read once, and written once (this latter matters if X is volatile). The
-equivalent code written explicitly (unless renames and temporaries are used)
-evaluates the prefix multiple times, which could produce different results
-if X involves a function. This also reduces the chance of accidentally writing
-X differently in the two uses in X := S'Succ(X); which can happen if X is
+AARM Ramification: The prefix X in uses of the X'Inc and X'Dec
+is evaluated once, read once, and written once (this latter matters if the prefix is
+volatile). These attributes also reduce the chance of accidentally writing
+X differently in the two uses in X := S'Succ(X); which can easily happen if X is
 lengthy or complex.
 
 Legality Rules
@@ -81,7 +99,46 @@ a positive (nonzero) value.
 !discussion
 
 The form of the wording for the N parameter is similar to that used for First
-and Last in 3.6.2.
+and Last in 3.6.2, specifically 3.6.2(1).
+
+We define the S'Inc/S'Dec forms mainly to make the definition of the X'Inc/X'Dec
+forms sensible; we expect the latter forms to be used in most contexts.
+
+
+These attributes (unfortuately) do not chain: since these are procedures,
+   X'Inc'Inc
+is illegal.
+
+As writing X'Inc; X'Inc; is annoying and reintroduces the potential for errors
+that we are trying to remove, we provide an optional repeat count.
+Thus X'Inc'Inc should be written X'Inc(2).
+
+
+Note that the repeat counts in the X'Inc/X'Dec forms are attribute parameters
+which are required to be static and positive, while there are no requirements
+on the repeat count parameter on the S'Inc/S'Dec forms.
+
+There are a number of reasons for this difference:
+
+* We avoid creating an anomoly where a parameter to a subprogram has additional
+  requirements beyond the ones implied by its specification, and we also
+  avoid treating these new attributes differently than existing attributes like
+  First and Last.
+
+* Requiring the repeat count to be static for X'Inc and X'Dec avoids the
+  potential for confusion that otherwise would arise when the prefix type is
+  an integer type. In particular, X'Inc(X) is illegal (as X has to be a variable).
+  Confusing Inc and Succ is likely (they do similar operations), and receiving
+  the result X*2 from X'Inc(X) is likely to be a surprise. We do not think
+  that this will be a problem for S'Inc, as S'Inc(X, X) does not resemble
+  S'Succ (it is more like S'Max) and it seems likely that X*2 would be expected.
+  (We also don't expect the S'Inc form to be used often.)
+
+* Requiring the count to be static makes it clearer that this is
+  not an addition/subtraction operation. In particular, this does not use
+  any user-defined "+" or "-" operator. A := A + B is not necessarily the same
+  as A'Inc(B), even if A has an integer type and B is static.
+
 
 These aspects are similar to the magic Inc and Dec subprograms in Modula.
 Indeed, the author originally thought that the purpose of the Succ and Pred
@@ -91,32 +148,15 @@ uses Succ and Pred attributes; the proposed attributes would be much more
 useful.)
 
 
-These attributes (unfortuately) do not chain: since these are procedures,
-   X'Inc'Inc
-is illegal.
-
-As writing X'Inc; X'Inc; is annoying and reintroduces the potential for errors
-that we are trying to remove, we provide an optional form with a repeat count.
-Thus X'Inc'Inc should be written X'Inc(2).
-
-We require the repeat count to be static in order to avoid the potential for
-confusion that otherwise would arise when the prefix type is an integer type.
-In particular, X'Inc(X) is illegal (as X has to be a variable). Confusing
-Inc and Succ is likely (they do similar operations), and receiving the result
-X*2 from X'Inc(X) is likely to be a surprise.
-
-Additionally, requiring the count to be static makes it clearer that this is
-not an addition/subtraction operation. In particular, this does not use
-any user-defined "+" or "-" operator. A := A + B is not necessarily the same
-as A'Inc(B), even if A has an integer type and B is static.
-
-
 This issue was originally raised in AI05-0187-1. Most of the discussion on
 that AI centered on a ":=+" shorthand. That proved to be problematical when
 user-defined operations were involved; when the target and operators are
 overloaded in some way, X := X + 1 and X :=+ 1 could resolve to different
 operations. That's not a problem for Inc and Dec, which only use the
 predefined Succ and Pred.
+
+In addition, Inc and Dec do not require any new syntax (or lexical changes!),
+and as such are much less intrusive to the existing language and tools.
 
 
 !ASIS
@@ -129,5 +169,57 @@ An ACATS C-Test is needed to verify that the attributes are implemented as speci
 
 !appendix
 
+From: Randy Brukardt
+Sent: Friday, October  2, 2015  8:52 PM
+
+Here is a rewrite of the original AI12-0125-1 based on the discussion in
+Madrid. The main change is to add S'Inc and S'Dec forms as these are easier
+to describe, and then define the X'Inc and X'Dec forms in terms of them.
+
+One thought that I had -- since these are no longer called Succ and Pred, I
+wonder if they should only be defined for discrete types. The problem is that
+Some_Fixed'Succ advances by the Some_Fixed'Small value, so that
+    X : Some_Fixed := ...;
+
+    X'Inc(2);
+
+does not add 2.0 to X (which is what one would naively expect) but rather adds
+2*Some_Fixed'Small. (The situation for floating point values is even
+weirder.) Probably the likelihood of confusion outweighs any value these might
+have for fixed and floating point types, so I think that they probably only
+ought to be defined for discrete types. (I didn't write the AI that way, but
+it's a trivial fix: change the 3.5(55/3) insertion reference to 3.5.5(7.3/4),
+and delete the second insertion reference -- it would all be inserted in one
+piece.)
+
+[This is version /04 of the AI - Editor.]
+
 ****************************************************************
 
+From: Tucker Taft
+Sent: Saturday, October  3, 2015  11:53 AM
+
+> ...
+> X'Inc    X'Inc denotes the result of calling function S'Inc with *Arg* being X and
+>           *Count*  being 1, where S is the nominal subtype of X.
+>
+> X'Inc(N)  X'Inc denotes the result of calling function S'Inc with *Arg* being X and
+>           *Count*  being N, where S is the nominal subtype of X.
+>
+> X'Dec   X'Dec denotes the result of calling function S'Dec with *Arg* being X and
+>           *Count*  being 1, where S is the nominal subtype of X.
+>
+> X'Dec(N)   X'Dec denotes the result of calling function S'Dec with *Arg* being X and
+>           *Count*  being N, where S is the nominal subtype of X.
+
+I think you meant "the result of calling procedure S'..." in all of the above.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, October  3, 2015  6:24 PM
+
+Obviously. Too much cut-and-paste. I'll correct the version that we'll look at
+for the meeting.
+
+****************************************************************
