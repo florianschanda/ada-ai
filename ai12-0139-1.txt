@@ -1,4 +1,4 @@
-!standard A(3/4)                             15-10-12   AI12-0139-1/01
+!standard A(3/4)                             15-10-14   AI12-0139-1/02
 !standard A.18(5)
 !class Amendment 14-10-13
 !status work item 14-10-13
@@ -14,71 +14,137 @@ Add variants of the standard libraries that are thread-safe.
 !problem
 
 With the advent of multi-core computers, concurrency in the software
-becomes the normal case, not the specialized application. Yet, presently, the
-Ada standard libraries are not required to be thread-safe. They should be.
+becomes the normal case, not the specialized application. Yet,
+presently, the Ada standard libraries are not required to be
+thread-safe. They should be. In particular, the Container libraries
+are thread-unsafe, yet often used for communicating among concurrent
+threads. The same is true for "simpler" data structures provided by
+standard libraries such as vectors or the variants of strings. It is
+rather dangerous to leave the user in the dark about whether a particular 
+library package is thread-safe or not.
 
 !proposal
 
 We propose to add a variant of the Ada Standard library that is required to be
 thread-safe.
 
-We define the package Ada.Protected as a new root for a duplicate of the entire
-Ada library and postulate thread-safeness for the entire content of the package,
-including its child units.
+We define the package Ada.Safe as a new root for a duplicate of
+the entire Ada library and postulate thread-safeness for the entire
+content of the package, including its child units.
 
 !wording
 
-Add as A (2.1):
+Add as A (2.1) :
 
-In addition, the package Ada.Protected is predefined. It contains duplicates of
-all child units of the package Ada listed above. Syntax and Semantics of all
-declarations and specifications are identical, except for the different root of
-the unit hierarchy.
+In addition, the package Ada.Safe is predefined. It contains
+duplicates of all child units of the package Ada listed above. Syntax
+and semantics of all declarations and specifications are identical,
+except for the different root of the unit hierarchy and the behaviour in the
+presence of concurrency as specified in this clause.
 
-In addition to the semantics of package Ada and its child units, the effects of
-concurrent invocations of all subprograms, protected operations, and primitive
-operations defined within the child units of Ada.Protected shall be the same as
-the effects of some {arbitrary] sequence of the same invocations.
+In addition to the semantics of package Ada and its child units, the
+effects of concurrent invocations of all subprograms, protected
+operations, and primitive operations defined within the child units of
+Ada.Safe shall be the same as the effects of some [arbitrary]
+sequence of the same invocations.
 
-Add as A (3.2):   -- Note to ARG: this is within Implementation Requirements
+Causing a call to any operation of the library from within the library, e.g., 
+by callback mechanisms, is a bounded error. The call may perform as specified
+or it may deadlock[, in which case implementations are allowed to raise 
+Program_Error].  
 
-Within Ada.Protected and its child units, implementations shall ensure the
-implied atomicity of operations on global ressources and the visibility of
-changes across the boundaries of concurrent units as implied by atomic changes
-to shared ressources.
 
+Add as A (3.2.1 and 3.2.2) :   
+-- Note to ARG: this is within Implementation Requirements
+
+Within Ada.Safe and its child units, implementations shall ensure
+the implied atomicity of operations on global resources and the
+visibility of changes across the boundaries of concurrent units as
+implied by atomic changes to shared resources.
+
+Implementation should provide for mutual exclusion at a high degree of
+granularity. 
+ 
 !discussion
 
-To mandate that the existing library shall be thread-safe is considered to be
-too much of a performance burden, particulary for applications that include no
-concurrency. Hence a thread-safe duplicate of the library is proposed.
+To mandate that the existing library shall be thread-safe is
+considered to be too much of a performance burden, particularly for
+applications that include no concurrency. Hence a thread-safe
+duplicate of the library is proposed.
 
-Switching between thread-safe and thread-unsafe versions is done by altering the
-package prefixes. With good "use"-clauses, the change can be confined to the
-"with/use"-clauses only.
+Examining each unit of the standard library to determine whether a
+thread-safe version is needed or wanted is a possible alternative with
+major disadvantages:
 
-The protected notion extends across child units and it does so intentionally,
-since there are child units in the Ada library whose semantics interact via
-shared ressources. The thread-safeness therefore needs to extend across child
-units.
+1. The user would carry the burden of having to check for each subunit
+whether it is thread-safe or not, and if not, whether an alternative
+exists and, if so, under which name. Thus, cognitive burden to the user 
+is high.
 
-It is also intentional, that the types defined in the child units of package Ada
-are incompatible with types defined in child units of package Ada.Protected. No
-mixing with all the ensueing semantic complications.
+2. Chances to make existing units thread-safe are very low, since the
+consensus seems to be that the added execution cost should not be part
+of the default behavior.
+
+3. The implementation burden of making individual units thread-safe may be 
+considerably higher than an overall scheme (which, with very coarse lock
+granularity, allows automated generation of the implementation). 
+
+4. Ultimately only the implementer knows whether deep down in the
+implementation thread-unsafe mechanisms, e.g., a fault handling
+strategy with shared state, are used. A prescription of lock
+granularity, as is implied by postulating a unit-by-unit
+thread-safeness, may be very costly to implementers, since
+dependencies might need to be undone.
+
+5. Short of explicit statements to the effect, it is not possible to
+judge whether a subunit is already thread-safe for the reasons above.
+
+The global approach has the following advantages:
+
+1. Switching between thread-safe and thread-unsafe versions is done by
+altering the package prefixes. With good "use"-clauses, the change can
+be confined to the "with/use"-clauses.
+ 
+2. The protected notion extends across child units and it does so
+intentionally, since there are child units in the Ada library whose
+semantics interact via shared resources. The thread-safeness
+therefore needs to extend across child units.
+ 
+3. Implementations can start with coarse-grained locks and trivial
+implementations and gradually refine the locks in those areas where 
+they believe that a higher degree of concurrency is needed by customers.
+
+4. Nothing stands in the way of users, who want to use the
+thread-unsafe versions and "roll their own" protection against
+destructive data races.
+ 
+It is intentional that the types defined in the child units of
+package Ada are incompatible with types defined in child units of
+package Ada.Safe. We want to avoid any mixing with all the 
+ensuing semantic complications.
+
+The semantic specification is intentionally focused only on the needed effect,
+leaving the actual realization to the implementations. Given this freedom, 
+all callbacks of library operations from within the library are at risk to 
+cause deadlocks. It is questionable whether lock granularity can be specified 
+tightly enough for deterministic behavior at reasonable implementation effort.
+
+This approach allows later refinements when the community feels that
+the freedom of implementation was too wide and some granularity of
+locking is to be required.
 
 -----
 Note to ARG: The proposal extends to the entire library; a more modest
-alternative is to apply the change only to package Containers to cover only
-containers. I advise against it, since it would be hard to extend compatibly
-later on. Also I do not see why the rest of the library should not also work
-correctly for concurrent calls.
-End of Note.
+alternative is to apply the change only to package Containers to cover
+all containers. I advise against it, since it would be hard to extend
+compatibly later on. Also I do not see why the rest of the library
+should not also work correctly for concurrent calls.  End of Note.
 ------
 
 
 !examples
-
-Any existing code calling library operations.
+  
+Any existing code calling library operations from within concurrent tasks. 
 
 !ASIS
 
@@ -1213,5 +1279,52 @@ to solve?
 problems that typical programmers face, and discussed some of the alternative
 solutions already available, and the cases where the existing solutions are
 particularly painful.
+
+***************************************************************
+
+From: Erhard Ploedereder
+Sent: Wednesday, October 14, 2015  11:14 AM
+
+> The whole notion of "Current_Output" and friends is bizarre in a 
+> multi-threaded program, so that one really can't be fixed, unless we 
+> make it per-task, I suppose, which is certainly not providing 
+> "equivalent" thread-safe functionality.
+
+Well, with two threads writing a string to Current_Output, I would rather
+have a guarantee not to get  (-- forgive the non-Ada strings)
+
+ "this thiis res isalw
+  loyr basde
+ "
+and instead get
+
+ "this is really bad
+  this is worse"
+or
+ "this is worse
+  this is really bad"
+
+
+That's the point of making calls sequentially consistent, which I think my
+proposal does.
+
+I don't find it bizarre at all to get a race for which string gets outputted
+first, if I coded my tasks to not coordinate/synchronize. I do find it
+bizarre, however, to get gibberish seemingly unrelated to my calls.
+
+As to the rest, I tried to pick that up in the revised AI.
+
+***************************************************************
+
+From: Erhard Ploedereder
+Sent: Wednesday, October 14, 2015  10:56 AM
+Delivered:  Wednesday, October 28, 2015  9:16 PM -- it was caught in the spam filter
+
+Here is revision [this is version /02 of the AI - Editor] responding to
+comments about
+ - deadlock by callback
+ - reserved name of package
+ - more rationale needed
+ - the alternative of making selected units thread-safe
 
 ***************************************************************
