@@ -1,4 +1,4 @@
-!standard 4.9(6)                                  15-08-25    AI12-0075-1/03
+!standard 4.9(6)                                  15-10-17    AI12-0075-1/04
 !standard 4.9(18)
 !class Amendment 13-06-09
 !status work item 13-06-09
@@ -21,6 +21,38 @@ can get quite large.
 (See summary.)
 
 !wording
+
+Replace 4.9(6)
+
+  - a function_call whose function_name or function_prefix statically
+    denotes a static function, and whose actual parameters, if any
+    (whether given explicitly or by default), are all static expressions;
+
+with
+
+  - a function_call whose function_name or function_prefix statically
+    denotes a static function, whose actual parameters, if any (whether
+    given explicitly or by default), are all static expressions, and which
+    satisfies an additional condition: either the function_name or
+    function_prefix does not statically denote an expression function
+    or the compile-time evaluation of the call does not fail any
+    language-defined check.
+
+    Note: This means that a call to a static expression function whose
+    (compile-time) evaluation fails a language-defined check is not a
+    static expression (as opposed to being illegal). The motivation for
+    this is to avoid incompatibly introducing legality violations
+    for calls to expression functions occurring in dead code, as in
+     declare
+       N : constant := Pkg1.This - Pkg2.That; -- it happens that N = 0
+       function Divide_By_N (X : Integer) return Integer is (X / N);
+       Y : Integer;
+     begin
+       if N /= 0 then
+          Y := Divide_By_N (1234);
+       end if;
+       ...
+    end;
 
 Add just before the definition of "static function" (i.e., just
 before 4.9(18)):
@@ -74,7 +106,7 @@ at the end of the 4.9 (19-22) list):
 
 Add at the and of the 4.9 "Legality Rules" section:
 
-  AARM Discussion: 
+  AARM Discussion:
   The preceding "statically unevaluated" rule allows
        X : constant := (if True then 37 else (1 / 0))
   but does not allow
@@ -86,88 +118,31 @@ Add at the and of the 4.9 "Legality Rules" section:
 
 !discussion
 
-1) It has been suggested that a new aspect, perhaps named Static_Function
-(or perhaps just Static), should be introduced and that a function is not
-a static function unless its Static_Function aspect is specified to be True
-(even if it meets all of the other requirements).
-
-This proposal has its advantages and disadvantages, but one strong
-argument seems to be the existing treatment of static constants.
-This question was already settled (for static constants) back in Ada83 and
-static expression functions should be treated consistently with static
-constants.
-
-This leads to the conclusion that the proposed new aspect is a bad idea.
-
-On the other hand, there is the question of compatibility.
-The following example is currently legal:
+1) This change is incompatible in some cases.
+The following example is currently legal
 
    procedure Foo is
       function Inc (X : integer) return Integer is (X + 1);
       subtype S is Integer range 0 .. Inc (3);
-      X : S := ... ;
+      Y : S := ... ;
    begin
-      case X is
+      case Y is
          when  0 .. 33 => ...;
          when  44 .. 55 => ...;
          when others => ... ;
       end case;
-   end; 
+   end;
 
-The proposal given above would cause this example to become
-illegal (because the subtype S would become a static subtype).
-The Static_Function (or just Static) aspect would eliminate this
-incompatibility.
+but will become illegal because with this change Y will have
+a static nominal subtype.
 
-This incompatibility would only affect code which uses expression
-functions. Expression functions were first introduced in Ada 2012,
-so the importance of this compatibility issue is less clear than
-if pre-Ada-2012 code could be affected.
+The most significant compatibility issues are addressed via
+the rule that a call to an expression function whose compile-time
+evaluation fails a check is non-static but still legal (as opposed
+to being illegal).
 
-[Editor's note: There are many other ways to cause this incompatibility.
-For instance, consider the following
-
-    procedure Bar is
-       NUM_ITEMS : constant := 0;
-       Count : constant Natural := 12;
-       function Average (Count : in Natural) return Natural is (Count / NUM_ITEMS);
-
-    begin
-       if NUM_ITEMS > 0 then
-           Put_Line ("Average =" & Natural'Image(Average(Count))); -- (!!)
-       end if;
-    end Bar;
-
-The proposal given above would make the call to Average illegal (because it
-divides by zero), even though it could never be executed. Obviously, the
-non-static version is not a problem (I just said it won't be executed :-).
-
-And of course one can construct similar examples using any of the 4.9(33-36)
-rules - out of base type values (also plausible in conditional code, or even
-precision for decimal types.
-
-While expression functions were only introduced in Ada 2012, they are widely
-used because of their convinience, and it will be six years after their
-introduction before this change is adopted. We need to be very careful not
-to introduce incompatibilties for a nice-to-have feature. End Editor's Note.]
-
-
-If it is decided that a new aspect is needed, then the following
-changes to the preceding proposal would be needed:
-
-   - The new aspect is a Boolean aspect which can only be specified
-     as part of an Expression_Function declaration with the usual
-     "must be static Boolean value" rule. Inheritance rules for the
-     aspect would be needed.
-
-   - A new legality rule stating that if an expression
-     function's Static_Function aspect is True, then the function's
-     expression shall be a potentially static expression.
-
-   - The following clause in the definition of static expression function:
-       "whose expression is a potentially static expression; and"
-     would be replaced with
-       "whose Static_Function aspect is True; and" .
+The alternative of defining a new Boolean aspect (perhaps named
+Static_Function) was discussed and not selected.
 
 2) It would be simpler to say that an inherited subprogram is never
 a static expression function.
@@ -218,7 +193,7 @@ potentially static expression. Pre/post conditions for one-part
 value, but supporting PPCs might make more sense for two-part functions.
 
 5) We've got the 3.8 rule
-  
+
     If the discriminant is used to define the constraint of a component, the
     bounds of an entry family, or the constraint of the parent subtype in a
     derived_type_definition, then its name shall appear alone as a direct_name
@@ -272,25 +247,6 @@ Given
 neither of the two functions are static expression functions.
 This is because, as viewed from the point where F2 calls F1,
 F1 is not an expression function.
-
-7) There has been some discussion on ada-comment about somehow
-allowing comes calls to System.Storage_Elements.To_Address to
-be considered "static" in some sense in order to allow an
-address aspect specification in a preelaborated package.
-
-That seems like a separate issue that should be dealt with in
-a separate AI.
-
-Ditto for things like allowing Some_Private_Type'Size to be static
-in some cases so that it can be used in a representation clause
-for an enclosing composite type.
-
-This AI is only about allowing expression functions to be called
-in static expressions.
-
-[Editor's note: I feel this is a mistake, as we're piling up special
-gizmos without integrating them. See AI12-0175-1 for a possible way
-to solve all of these problems with one integrated solution.]
 
 !example
 
@@ -493,5 +449,20 @@ From: Tucker Taft
 Sent: Monday, September 14, 2015  3:52 PM
 
 Looks good.  I agree we probably don't want an attribute.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Saturday, September 17, 2015 11:20 PM
+
+!wording differences from previous version are highlighted. [This is
+version /04 of the AI - Editor.]
+
+The idea with this change is that a call to an expression function with static
+arguments which fails a check (during its compile time evaluation) is simply
+not a static expression, as opposed to being illegal.
+
+This addresses the compatibility issue that Randy raised. [But it doesn't
+address the original compatibility issue that Steve himself raised - Editor.]
 
 ****************************************************************
