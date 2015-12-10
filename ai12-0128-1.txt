@@ -1,4 +1,5 @@
-!standard C.6(15)                                   15-10-17    AI12-0128-1/05
+!standard C.6(13.2/3)                                 15-12-10    AI12-0128-1/06
+!standard C.6(19)
 !standard C.6(20)
 !standard C.6(22/2)
 !class Amendment 14-10-03
@@ -10,7 +11,8 @@
 
 !summary
 
-** TBD **
+Memory accesses to subcomponents of an atomic composite object must
+read or write the entire object.
 
 !problem
 
@@ -35,17 +37,27 @@ The language should be defined so this doesn't happen.
 
 !wording
 
-Append to end of C.6 Dynamic Semantics section
+Add after C.6(13.2/3) [the end of the Legality Rules section]
 
-  All reads of or writes to any non-atomic subcomponent of an atomic object
+   If a nonatomic subcomponent of an atomic object is passed as
+   the actual parameter in a call then the formal parameter shall
+   allow pass by copy (and, at run time, the parameter shall be
+   passed by copy).
+   A nonatomic subcomponent of an atomic object shall not be
+   used as an actual for a generic formal of mode in out.
+   A nonatomic subcomponent of an atomic type shall not be aliased.
+   A nonatomic subcomponent of an atomic type or object shall not have
+   components that are specified to be independently addressable.
+
+Add after C.6(19) [the end of the Dynamic Semantics section]
+
+  All reads of or writes to any nonatomic subcomponent of an atomic object
   shall be implemented by reading and/or writing all of the nearest
-  enclosing atomic object. Notwithstanding any rule to the contrary, any
-  two components of an atomic object are not independently addressable
-  if at least one of them is not atomic.
+  enclosing atomic object.
 
   Implementation Note:
 
-  For example, if a 32-bit record object has 4 non-atomic components, each
+  For example, if a 32-bit record object has four nonatomic components, each
   occupying one byte, then an assignment to one of those components might
   normally be implemented on some target machines via some sort of
   store_byte instruction; if the record object is atomic then instead
@@ -55,166 +67,99 @@ Append to end of C.6 Dynamic Semantics section
   matter whether the store_byte instruction would have executed atomically.
   This rule is needed in some cases for memory-mapped device registers.
 
-  As another example, consider an atomic object having two
-  nonoverlapping volatile-but-not-atomic components.
-  A read of or write to either component will access
-  the entire object, notwithstanding the other rules given in this section
-  about accessing volatile objects. This is similar to other target-dependent
-  cases where reading or writing one component necessarily involves reading
-  and/or writing neighboring storage and that neighboring storage
-  happens to overlap a volatile object.
+Modify C.6(20): [the Implementation Requirements section]
 
-Append at the end of the legality rules section (after 13.2):
+  The external effect of a program (see 1.1.3) is defined to include each
+  read and update of a volatile or atomic object. The implementation shall
+  not generate any memory reads or updates of atomic or volatile objects
+  other than those specified by the program. {However, there may be
+  target-dependent cases where reading or writing a volatile but nonatomic
+  object (typically a component) necessarily involves reading and/or
+  writing neighboring storage, and that neighboring storage might overlap
+  a volatile object.}
 
-   If a non-atomic subcomponent of an atomic object is passed as
-   the actual parameter in a call then the formal parameter shall
-   allow pass by copy (and, at run-time, the parameter shall be
-   passed by copy).
-   A non-atomic subcomponent of an atomic object shall not be
-   used as an actual for a generic formal of mode in out.
-   A non-atomic subcomponent of an atomic type shall not be aliased.
-   A non-atomic subcomponent of an atomic type or object shall not have
-   components which are specified to be independently addressable.
+Modify C.6(22/2): [part of the Implementation Advice section]
 
+  A load or store of a volatile object whose size is a multiple of
+  System.Storage_Unit and whose alignment is nonzero, should be implemented
+  by accessing exactly the bits of the object and no others, except in
+  the case of a volatile but nonatomic subcomponent of an atomic object. 
+
+Add after C.6(25/4): [an additional user Note]
+
+  11 When mapping an Ada object to a memory-mapped hardware register, the
+  Ada object should be declared atomic to ensure that the compiler will
+  read and write exactly the bits of the register as specified in the
+  source code and no others.
+
+  AARM Discussion: This is especially important for a write-only hardware
+  register, as in such a case a read-modify-write cycle will not work.
+  The only time the language guarantees such a cycle will not happen is
+  when writing an entire atomic object. If one wants to write individual
+  components of a write-only hardware register (assuming the hardware
+  supports that), those also need to be declared atomic.
 
 !discussion
 
-[Editor's note: The discussion below is based on the proposal of version
-/03 of this AI. Versions /04 or /05 didn't update it, so it doesn't
-exactly match the proposal. (Like it's 100% diferent.)]
+Consider the case of a memory mapped device register which is
+represented as an atomic object of a record or array type. Suppose
+further that there is a requirement that all memory references to this
+object must read or write the entire object/register. For example, if
+it is a 32 bit register and you want to modify one byte of the register,
+then you must perform a 32-bit load into a 32-bit temporary, modify the
+appropriate byte of the temporary, and then copy the value of the
+temporary into the register via a 32-bit assignment.
 
-The problem isn't really C.6(15). C.6(8/3) says that the subcomponents of
-a volatile object are also volatile. (Recall that atomic objects are also
-volatile.) The same rule that is supposed to help us then causes problems,
-as C.6(22/2) says that volatile objects should be accessed exactly
-if possible. That applies to the components as much as the object as a whole,
-so the language *expects* that the components will be accessed in a smaller
-size. (C.6(22/2) is "only" Implementation Advice, so a compiler could ignore
-it, but that is not the intent of the language.)
+This AI is intended to improve Ada's support for this situation,
+which is viewed as being common enough to warrant such support.
 
-The usual recommendation is that temporaries should be used to access the
-object as a whole, and then the reading/writing of the individual components
-be done on the temporary.
+The solution chosen in this AI is to unconditionally assume that any
+composite atomic object is subject to this requirement. An alternative
+which was considered would be to introduce a new Boolean aspect,
+Whole_Object_Reference, which could be used to indicate that a given
+atomic composite object is subject to this requirement. This
+finer-grained specification was deemed to introduce too much
+complexity (e.g., should the aspect be specifiable for a formal
+parameter, with corresponding changes to the conformance rules?).
 
-This follows from the most important rule of volatile objects, the requirement
-that reads and writes be "what you see is what you get". An Ada compiler is not
-allowed to generate a read for an assignment into a volatile object.
+C.6 already imposes rules to ensure that any code which manipulates
+a reference to a volatile object (e.g., via 'Access or via passing
+an actual parameter by reference) knows that the referenced object
+is volatile - problems result if code can access a volatile object
+without knowing that the object is volatile. Similar rules are added
+for preventing references to subcomponents of an atomic object
+from "leaking out" to contexts which are unaware of the existence
+of the enclosing atomic object.
 
-The problem with this recommendation is that forgetting to do it (which is
-very natural to an Ada programmer) will cause a very hard to find bug in the
-program. In such cases, the hardware typically does not respond to the
-incorrect sized read or write, which will cause an error of omission in the
-program -- the hardest kind of bug to find, made worse because the source
-code will appear correct.
+This "whole object reference" requirement implies that two
+components of an atomic object are never independently addressable.
+This could theoretically introduce an incompatibility in the
+case of a program which has two tasks which asynchronously
+manipulate different components of an atomic object (in the case
+where the two components were, until this AI came along, independently
+addressable). Another such case involves the case of an atomic
+record with two components, C1 and C2.
+Reading or writing C2 will now introduce reads and/or writes of C1,
+violating the usual rule about implicit reads of volatile objects
+(note that C1 is necessarily volatile because atomicity implies
+volatility and volatility of an object implies volatility of
+a component thereof); but the point of this AI is that this
+change is considered to be desirable.
 
-The only sensible way for a project to avoid the problem is to not allow
-composite atomic objects (a restriction that can easily be checked with
-a style checker). But this means that bit fields have to be handled with
-masks or the like, which are much more likely to contain errors. This is
-a negative incentive that we need to avoid.
+There is also a permission mentioned explicitly in the
+new wording which was previously only implicit (and even that
+is debatable):
 
-As such, we propose an aspect to declare that a volatile object is to be
-read or written in the exact size of the object, and the aspect should be
-rejected if that cannot be done. In addition, direct access to any
-subcomponents of the object are banned.
+  However, there may be target-dependent cases where reading or writing
+  a volatile but nonatomic object (typically a component) necessarily
+  involves reading and/or writing neighboring storage, and that neighboring
+  storage might overlap a volatile object.
 
-The aspect should be a relatively cheap solution for Ada implementations (only
-a few new legality checks are needed), and it ensures that programmers use
-temporaries as needed (mistakes are illegal).
-
----
-
-A friendlier solution would be to somehow define that all accesses to such
-atomic objects as a whole are read/written as a whole. This would require
-some sort of read/write cycle for components. While this sound appealing,
-it has a number of fatal flaws:
-
-(1) Some devices can only be written. A read/write cycle on such a device
-would read nonsense (or unrelated data) -- such devices can only be
-written as a whole; writing a single component isn't possible. An automatic
-solution fixes nothing for these sorts of devices.
-
-(2) Such a read/write cycle would require a hole be made in C.6(20);
-we'd have a situation where the generated code involves a read not included
-in the source. But C.6(20) is the rule that makes it possible to program
-unusual hardware reliably. Weakening it is unlikely to help in general,
-and doing so would be incompatible (most volatile objects aren't memory-mapped
-device registers with unusual hardware restrictions).
-
-(3) We could try repealing C.6(8/3) so that the components aren't
-volatile. That would prevent C.6(22/2) from applying to the components,
-and could fix the problem for reads. But for writes, we're still need a
-pre-read which would still violate C.6(20). In addition, the compatiblity
-problems would be worse (existing code could very easily depend on the
-components being volatile).
-
-(4) Since composite volatile objects are not uncommon, and the vast majority
-are in normal memory (not associated with memory-mapped hardware), the
-reduced performance could be a problem. It's much better for the unusual
-case to be declared rather than a penalize all users for the possible
-existence of that case.
-
----
-
-Notes on the solution:
-
-(1) C.6(19) prevents problems with parameter passing; passing by copy
-essentially means that a temporary is made implicitly by the compiler.
-
-(2) The original problem was with atomic objects, but there seems to be no
-reason for it not to apply to volatile objects as well. It's really an
-extension of C.6(22/2), which applies to volatile objects.
-
-(3) Aggregates are legal for the object even when the aspect is specified; an
-aggregate is formally defined as a temporary object, so an assignment of it
-is an assignment of the object as a whole.
-
-(4) We do say that build-in-place is not allowed for a type with the new
-aspect; we do not want compilers doing component-at-a-time assignments.
-
-(5) The new aspect applies to objects of all types, but it has no visible
-effects on objects of elementary types other than to check that the size of
-the object can be written exactly.
-
-(6) I can't think of any effects caused by generic units other than the
-"in out" one that aren't already covered by existing rules. But I expect
-Steve will find one. ;-)
-
-(7) An alternative name for the aspect was No_Partial_Access. That name
-emphasizes the language problem rather than the intended use, so I
-changed to Exact_Size_Only, which echoes the wording of C.6(22/2) and
-is a positive statement. The effect is the same with either name.
-
-(8) I defined the term "exact size object" because I was quickly tired
-of trying to fit "object with the aspect Exact_Size_Only having the value
-True" into wording and have it remain readable. Especially as I found that
-I had a few more rules than I originally expected. But we don't strictly
-need it.
-
----
-
-I'm assuming that C.6(20) is a critical part of C.6, as it allows matching
-the operations to the oddities of the hardware. (In particular, the
-write-only register case noted above.) If that's not true, we may want to
-explore supporting direct component reads/writes using the full size of
-the object (but only by declaration by an aspect, so as to keep
-compatibility).
-
-One thought comes up. If the hardware can't access only the bits of a
-volatile object, what happens for writes? Consider the example below.
-For a read of component Ready, a read of the whole object and a bit-mask
-certainly will work and not violate C.6(20). However, any write of
-of component Ready would have to have a pre-read of the other bits of the
-object before writing the component, and that necessarily would violate
-C.6(20) [there would be no read in the source]. I don't see any rules
-allowing compilers to reject such component accesses or to reject volatile
-objects with such components, so does that mean C.6(20) is baloney?
-Or do we have a hole? Or what?
-
-We've suggested the minimum solution to this problem (adding a To Be Honest
-note), but it not clear that's a good solution to the problem.
-
-
+Consider, for example, a volatile array of 32 Booleans with a component
+size of 1. An assignment to an element of this array will typically
+require read-modify-writing at least the enclosing byte. Note that
+there are no atomic objects in this scenario, so this permission
+is only tangentially related to the main topic of this AI.
 !example
 
     type Status is
@@ -245,14 +190,13 @@ note), but it not clear that's a good solution to the problem.
 
 !ASIS
 
-The new aspect would need to be added to the appropriate ASIS enumeration type.
-
+No ASIS effect.
 
 !ACATS test
 
-An ACATS B-Test should be created to check the Legality Rules for the new
-aspect. The actual read/write size cannot be tested by the ACATS,
-unfortunately, so we don't need or want a C-Test.
+An ACATS B-Test should be created to check the new Legality Rules. The actual
+read/write size cannot be tested by the ACATS, unfortunately, so we don't need
+or want a C-Test.
 
 !appendix
 
