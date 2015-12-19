@@ -1,0 +1,546 @@
+!standard 9.5.1(11)                                15-12-18    AI12-0064-2/01
+!standard 9.5.1(18)
+!class Amendment 15-10-17
+!status work item 15-12-18
+!status received 15-10-17
+!priority Medium
+!difficulty Medium
+!subject Nonblocking subprograms
+!summary
+
+Aspect and attribute Nonblocking are added.
+
+!problem
+
+During a protected action, it is a bounded error to invoke an operation that
+is potentially blocking. There is currently no mechanism (other than a
+comment) to specify that a given subprogram is intended to be safely callable
+during a protected action (i.e., that the subprogram will not invoke an
+operation that is potentially blocking). This seems like a useful part of a
+subprogram's "contract" that should be (optionally) specifiable at the point
+of a subprogram's declaration.
+
+!proposal
+
+Modify 3.10.2(33/3):
+
+   ...  The accessibility level of P shall not be statically deeper than that
+   of S. {If S is nonblocking, P shall be nonblocking. }In addition to the
+   places where Legality Rules normally apply (see 12.3),
+   {these rules apply}[this rule applies] also in the private part of an
+  instance of a generic unit.
+
+Add after 4.6(24.21/4): [Type conversion Legality Rules for access-to-subprogram types]
+
+  * If the target type is nonblocking, the operand type shall be nonblocking. 
+
+[Editor's note: This was moved from Tucker's explicit wording; we're not
+scattering conversion rules all over the Standard.]
+
+Add after 4.9(8):
+
+  * an attribute_reference whose designator is Nonblocking;
+
+Modify 9.5.1(11):
+
+  * an entry_call_statement{, or a call on a procedure that
+    renames or is implemented by an entry};
+    
+Add after 9.5.1(18):
+
+   For a program unit other than a protected operation, for
+   a formal package, formal subprogram, formal object of an anonymous
+   access-to-subprogram type, and for a named access-to-subprogram type
+   (including a formal type), the following language-defined
+   representation aspect may be specified:
+
+   Nonblocking
+
+       The type of aspect Nonblocking is Boolean. When aspect
+       Nonblocking is False for a program unit, the entity might contain
+       a potentially blocking operation. If the aspect is True for a
+       program unit, the program unit is said to be *nonblocking*. If
+       directly specified, the aspect_definition shall be a static
+       expression. This aspect is inherited by overridings of
+       dispatching subprograms.
+     
+       For a generic instantiation, the aspect is determined by the setting
+       for the generic unit[Redundant, re-evaluated based on the actual
+       parameters.] If the aspect is directly specified for an instance,
+       the value shall be confirming.
+
+       AARM Ramification: The value for the generic unit might be different
+       than that for the instance if it involves one or more Nonblocking
+       attribute references.
+
+       [Editor's note: I'm presuming that all of the contents of the instance
+       are re-evaluated by the rules of 12.3. I didn't go look that up, so
+       we might need a special rule to force that; but it would be the
+       expected "macro" behavior.]
+
+       For any other program unit, formal package,
+       formal subprogram, formal object, or (formal) access-to-subprogram
+       type, the aspect is determined by the setting for the innermost
+       program unit enclosing the entity.
+       
+       If not specified for a library unit, the default is True if the
+       library unit is declared pure and is not a generic unit, and
+       False otherwise.
+
+       A nonblocking program unit shall not contain, other than within
+       nested units with Nonblocking specified as False, a call on a
+       callable entity for which the Nonblocking aspect is False, nor
+       shall it contain any of the following:
+
+         * a select_statement;
+         * an accept_statement;
+         * entry_call_statement or a call on a procedure that renames an entry;
+         * a call on a primitive procedure of a synchronized tagged type that
+           does not have Synchronization aspect of By_Protected_Procedure;
+
+[Editor's note: The above rewording is from the ARG meeting #54 minutes. But
+can't a primitive procedure of a limited interface type be implemented by an
+entry??? Nothing in the Legality Rules of 3.9.4 prevent it, and the example
+in 3.9.4 shows that it would be possible indirectly at a minimum. Consider
+that Append could be implemented by an entry for the synchronized interface
+in that example. Thus this rule needs to include limited interfaces (which,
+unfortunately, would effectively prevent them from being used in nonblocking
+contexts - unless we extended the aspect to interfaces, in which case we'd
+need some additional matching rules).]
+
+         * a delay_statement;
+         * an abort_statement;
+         * task creation or activation.
+
+       AARM Ramification: Implicit calls for finalization, storage pools, and
+       the like are covered by the above prohibition. The rules above say
+       "a call", not "an explicit call".
+
+[Editor's note: The above note was added to address Steve's concern about
+implicit calls.]
+
+       A subprogram shall be nonblocking if it overrides a nonblocking
+       dispatching operation. An entry shall not implement a
+       nonblocking procedure. In an Access attribute_reference for a
+       nonblocking access-to-subprogram type, the subprogram denoted by
+       the prefix shall be nonblocking.
+
+       AARM Discussion: Rules elsewhere in the standard (4.6 and 3.10.2)
+       ensure that access-to-subprogram conversion and the Access attribute
+       enforce nonblocking.
+
+[Editor's note: I moved those rules, leaving this note for the language-lawyer
+reader.]
+       
+       In a generic instantiation:
+       
+        * the actual subprogram corresponding to a nonblocking formal
+          subprogram shall be nonblocking (an actual that is an entry is
+          not permitted in this case); 
+        
+        * the actual type corresponding to a nonblocking formal
+          access-to-subprogram type shall be nonblocking; 
+        
+        * the actual object corresponding to a formal object of a
+          nonblocking access-to-subprogram type shall be of a nonblocking
+          access-to-subprogram type; 
+          
+        * the actual instance corresponding to a nonblocking formal package
+          shall be nonblocking.
+       
+       In addition to the places where Legality Rules normally apply
+       (see 12.3), the above rules apply also in the private part of an
+       instance of a generic unit.      
+            
+         AARM Ramification: specifying Nonblocking is False imposes
+         no requirements. Specifying Nonblocking is True imposes
+         additional compile-time checks to prevent blocking, but does not
+         prevent deadlock. pragma Detect_Blocking can be used to ensure
+         that Program_Error is raised in a deadlock situation.
+
+For a prefix S that denotes a subprogram (including a formal subprogram): 
+
+S'Nonblocking
+       Denotes whether subprogram S is considered nonblocking; the value
+       of this attribute is of type Boolean, Redundant[and is always
+       static].
+
+       The prefix S shall statically denote a subprogram.
+
+       AARM Ramification: The evaluation of the prefix S will have no effect,
+       which is necessary for S'Nonblocking to be static. For the intended
+       use in aspect specifications, we don't want any evaluation, as it
+       would happen at some freezing point.
+
+       If S denotes a formal subprogram, the value of S'Nonblocking is True.
+       Otherwise, S'Nonblocking returns the value of the Nonblocking aspect
+       of S.
+
+       AARM Reason: Inside a generic unit, we assume the worst about
+       S'Nonblocking, so we enforce the nonblocking restrictions on
+       entities that use it to define their own nonblocking aspect. The
+       actual subprogram does not have to be nonblocking.
+
+       AARM To Be Honest: In an instance, S'Nonblocking returns the value
+       of the nonblocking aspect of the actual subprogram, even if referenced
+       through the name of the formal.
+
+For a prefix S that denotes an access-to-subprogram subtype (including formal
+access-to-subprogram subtypes): 
+
+S'Nonblocking
+       Denotes whether a subprogram designated by a value of type S is
+       considered nonblocking; the value of this attribute is of type
+       Boolean, Redundant[and is always static].
+
+       The prefix S shall statically denote a subtype. [Editor's note:
+       is it possible for it not to? If not, we don't need this rule.]
+
+Wording Locations TBD:
+
+       Language-defined operators other than "=" for record types are
+       nonblocking; "=" for record types is potentially blocking.
+
+       AARM Reason: Record equality can be composed of operations including
+       user-defined "=" operators, which might be potentially blocking. We
+       can't introduce an incompatibility here, so we have to assume the worst.
+
+[Editor's note: We might be able to do better here for untagged types, but
+sadly for tagged types we have to allow it to be potentially blocking as
+some overriding might need it (and all of the overridings need to be the same).]
+
+       The default implementations of stream-oriented attributes for elementary
+       types are nonblocking. Other default implementations of stream-oriented
+       attributes are potentially blocking.
+
+       AARM Reason: As with equality, composite stream-oriented attributes can
+       be composed out of user-defined routines. Again, we have to assume the
+       worst.
+
+[Editor's note: We intend that language-defined subprograms are nonblocking
+unless this Standard says otherwise. Specifically, 9.5.1(18) says:
+
+  Certain language-defined subprograms are potentially blocking. In particular,
+  the subprograms of the language-defined input-output packages that
+  manipulate files (implicitly or explicitly) are potentially blocking. Other
+  potentially blocking subprograms are identified where they are defined. When
+  not specified as potentially blocking, a language-defined subprogram is
+  nonblocking. 
+
+We'll accomplish that by adding "with Nonblocking => True" to all of the
+language-defined packages unless otherwise noted here.
+
+We don't need to add that to units that are non-generic and declared pure,
+as those already default to True.
+
+For generic units that have formal subprograms (like the Ada.Containers packages),
+the package would instead have
+"with Nonblocking => Formal1'Nonblocking and Formal2'Nonblocking and ...;".
+This automatically matches the nonblocking setting to that of the actual
+subprograms (see the !discussion for more on this).
+
+The I/O packages are potentially blocking (Nonblocking => False), but we will
+mark the Put/Get routines that put into a string or get from a string as
+Nonblocking (see the first !example).
+
+There are special cases where subprograms are specifically marked as
+   "with Nonblocking => False;"
+* individual subprograms identified in the Standard as potentially blocking;
+* subprograms with anonymous-access-to-subprogram parameters (else we would
+   introduce a compatibility problem).
+
+Writing the exact text for this can wait until the larger details are worked
+out. In the case of the containers, it may make more sense to include those
+contracts in the AI that defines preconditions for the container operations;
+it probably makes the most sense to add all of the contracts at once.
+
+End lengthy editor's note.]
+
+!discussion
+
+We considered changing the aspect name from "Nonblocking" to
+"Potentially_Blocking," as that matches RM terminology better, but we
+ultimately concluded that would be a mistake. Furthermore, "nonblocking"
+is used in 9.5.1, albeit somewhat informally. Were we to switch to
+Potentially_Blocking, the default would be True rather than False, which
+is unlike other Boolean aspects. Furthermore, with Potentially_Blocking
+=> True, we wouldn't *require* that it be potentially blocking, merely
+allow it. Perhaps Allow_Blocking would be better, but that doesn't match
+RM terminology at all, and still has the "wrong" default.
+
+We initially modeled this aspect after No_Return, which has a somewhat
+similar purpose and presumably has already worked out some of the needed
+rules. However, we have gone beyond that, because we now have
+nonblocking access-to-subprogram types, nonblocking formal subprograms,
+etc.
+
+The rules do not allow calling "normal" subprograms from a nonblocking
+subprogram. This allows detecting any potentially blocking operations
+used in a nonblocking subprogram statically. This is important if pragma
+Detect_Blocking is used, as such detection is required. (Otherwise, this
+is just a bounded error and the "mistake" can be ignored with the usual
+consequences.)
+
+We have provided package-level defaults, given that many packages will
+have all of their subprograms non-blocking. We chose to make the default
+for a declared pure, non-generic library unit to be nonblocking, as that
+is almost always the case, since blocking typically implies the use of
+some kind of global lock. We do not foresee significant
+incompatibilities, since declared pure library units may only depend on
+other declared pure library units. For pure generic units we leave the
+default at False for compatibility reasons, because these might have
+existing instances where an actual subprogram (or access-to-subprogram
+type) is potentially blocking. 
+
+We did not specify that protected subprograms are by default
+Nonblocking=>True, since that would be incompatible, as they then could
+not call subprograms with a default Nonblocking aspect value of False.
+It might be possible to specify Nonblocking=>True as the default for
+protected subprograms in a future version of the standard (and clearly
+an implementation could at least provide a warning when a call is made
+to a subprogram with Nonblocking of False).  Because of the confusion
+related to the fact that protected operations are always required to be
+nonblocking at run-time, we don't allow specifying the attribute
+directly on an individual protected operation.  However, we allow
+specifying Nonblocking on a protected unit to determine the setting for
+all of the enclosed protected operations.
+
+We only allow specifying a confirming value of Nonblocking on a generic
+instantiation; the value of the aspect comes from the generic unit
+(possibly after re-evaluating the aspect based on the values of the
+actual parameters). Specifying a different value would simply be
+confusing, as it wouldn't change the enforcement of Legality Rules
+in the generic unit (and it would be wrong to supply a value of
+True for an instance of a unit that have the value of False, as in
+that case no rules would have been enforced in the body).
+
+----
+
+The attribute Nonblocking is primarily useful for use in the Nonblocking
+aspect of other subprograms, and mainly for the non-blocking property
+of formal subprograms.
+
+We allow the prefix to be any subprogram to avoid having special cases,
+and as it may be useful to ensure that a group of subprograms all have
+the same contract. In the case of nonblocking, that could be accomplished
+with a constant, but in the case of other static contracts that we are
+considering like exception contracts (AI12-0015-1) and global contracts
+(AI12-0079-1), a mechanism to copy them will be valuable (especially as
+they may be lengthy). As we want all of the contracts to work as similarly
+as possible, we make the attribute Nonblocking as general as possible.
+
+The primary use for this attribute is in aspects of generic units. The
+attribute makes it possible for a generic unit to have a nonblocking
+aspect that depends on those of the actual subprograms. That's especially
+important for the containers, which we want to be primarily nonblocking.
+
+This mechanism takes some effort for the implementer of a generic unit,
+but it means that the instantiator of such a unit does not need to
+worry about nonblocking, as the most restrictive setting compatable with
+the actual subprograms will automatically be chosen.
+
+Unfortunately, this mechanism doesn't have an obvious extension to support
+anonymous access-to-subprogram parameters; the type is anonymous and the
+actual is typically an Access attribute. One could imagine allowing the
+prefix to be a parameter, something like:
+
+   procedure Iterate
+      (Container : in Hashed_Maps;
+       Process   : not null access procedure (Position : in Cursor)
+      when Nonblocking => Process'Nonblocking and
+                          Hash'Nonblocking and
+                          Equivalent_Keys'Nonblocking);
+
+But in that case the Nonblocking value would have to be determined
+based on the actuals of the call; it would be weird for the Legality
+of a call to depend on the details of actual parameters. Thus we didn't
+propose such a mechanism.
+
+----
+
+We could simplify this proposal further by dropping the ability to specify
+Nonblocking on generic formal parameters, and just depending on the Nonblocking
+aspect to handle that. That would eliminate the rules about generic formal
+matching. We didn't do that as that would require having nonblocking attributes
+for formal packages and formal objects (which would reduce the value somewhat),
+and would eliminate the "easy" solution for new code (which is to simply
+require everything to be nonblocking). Not everyone needs to write the most
+flexible possible generics.
+
+---
+
+Comparing Alternative 1 with this proposal.
+
+The problem with alternative 1 is that a generic unit like the containers
+can be set to nonblocking, but then using this with a not nonblocking
+routine requires an explicit override by the user on the instance. Since the
+default for most routines is that they are not nonblocking, this could provide
+a significant compatibility problem.
+
+An alternative for alternative 1 would be to declare units like the containers
+to be blocking; but then they can never be nonblocking (and we surely want to
+use them as blocking).
+
+In contrast, this proposal puts all of the burden on the implementer of a
+package (where it should be) and none on the user of the package. Alternative
+1 is definitely easier for the implementer of a package, and harder for a 
+user.
+
+Container usage examples:
+
+Imagine that a user has an existing user-defined Hash function:
+
+    subtype Label is String (1..10);
+    function Hash (Key : in Label) return Ada.Containers.Hash_Type;
+
+With this proposal (as outlined in the example section below), if they don't
+care about nonblocking (as is likely to be the case for recompiling existing
+code), their existing instantation will compile with no problem:
+
+    package My_Hashed_Map is new
+       Ada.Containers.Hashed_Map (Label, Element, Hash, "=");
+
+If they do care about blocking behavior, they can add Nonblocking to Hash
+and they will get the Nonblocking behavior they want:
+
+    function Hash (Key : in Label) return Ada.Containers.Hash_Type
+       with Nonblocking => True;
+
+Alternatively, they could declare the instance to be Nonblocking:
+
+    package My_Hashed_Map is new
+       Ada.Containers.Hashed_Map (Label, Element, Hash, "=")
+       with Nonblocking => True;
+
+which would cause an error (as Nonblocking is False), hopefully with an error
+message that Hash has Nonblocking set as False (since that's the default).
+With a good error message, the correct fix should be easy to find.
+
+-------------------
+
+For alternative 1 (as described in AI12-0064-1/05), the situation is different.
+
+The original instantation of:
+
+    package My_Hashed_Map is new
+       Ada.Containers.Hashed_Map (Label, Element, Hash, "=");
+
+is now illegal, as Hash has Nonblocking = False, and that fails to match the 
+default for the formal parameter Hash (which is Nonblocking => True). Thus the
+user has to change their code and add Nonblocking => True to Hash or add
+Nonblocking => False to the instance My_Hashed_Map.
+
+That doesn't seem good.
+
+If the default of Ada.Containers.Hashed_Map is changed to False, then the
+above works, but there no longer is any way to get a Nonblocking container.
+
+    package My_Hashed_Map is new
+       Ada.Containers.Hashed_Map (Label, Element, Hash, "=")
+       with Nonblocking => True;
+
+should be illegal in this case, as the restrictions were not enforced in the
+generic body.
+
+---------------
+
+There is one known problem with this proposal as it is written. The prefix
+of the Nonblocking attribute has to resolve without any context. That means
+that in many circumstances, overloaded prefixes aren't going to be usable.
+That could be a huge problem for operators (like "=" in the containers) that
+are widely used.
+
+I considered using subprogram calls rather than subprogram names in the
+prefix, but that ran into issues both with having appropriate parameters
+to use (in the generic case) and with evaluation of the prefix (which we
+don't want to do).
+
+I also consider using qualification, but that doesn't help for relational
+operators (they all return Boolean!).
+
+The problem could be reduced somewhat by only allowing formal subprograms
+as the prefix of Nonblocking, but that is not a complete fix and does reduce
+the capability somewhat. In particular, both the inner and outer generics
+in Ordered_Sets have a formal "<" operator; it wouldn't be possible to refer
+to "<"'Nonblocking inside the nested generic.
+
+One of course can avoid using operators in generic specifications, but that's
+impractical for existing generics and a usage pain for new generics.
+
+I'm at a loss for other ideas to try at this point, short of some sort of
+profile in the prefix (something we've managed to avoid up to this point in
+the development of Ada).
+
+!example
+
+  package Ada.Text_IO 
+    with Nonblocking => False is
+   ...
+    generic
+      type Enum is (<>);
+    package Enumeration_IO is  --  implicitly Nonblocking => False
+
+      Default_Width   : Field := 0;
+      Default_Setting : Type_Set := Upper_Case;
+
+      procedure Get(File : in  File_Type;  -- implicitly Nonblocking => False
+      ...
+
+      procedure Get(From : in  String;
+                    Item : out Enum;
+                    Last : out Positive)
+        with Nonblocking => True;   --  explicitly Nonblocking => True
+        
+      procedure Put(To   : out String;
+                    Item : in  Enum;
+                    Set  : in  Type_Set := Default_Setting)
+        with Nonblocking => True;   --  explicitly Nonblocking => True
+        
+    end Enumeration_IO
+   ...
+  end Ada.Text_IO;
+
+
+  with Ada.Iterator_Interfaces;
+  generic
+  type Key_Type is private;
+  type Element_Type is private;
+  with function Hash (Key : Key_Type) return Hash_Type;
+  with function Equivalent_Keys (Left, Right : Key_Type)
+     return Boolean;
+  with function "=" (Left, Right : Element_Type)
+     return Boolean is <>;
+  package Ada.Containers.Hashed_Maps is
+     with Nonblocking => Hash'Nonblocking and
+                         Equivalent_Keys'Nonblocking and
+                         "="'Nonblocking;
+     pragma Preelaborate(Hashed_Maps);
+     pragma Remote_Types(Hashed_Maps);
+
+     ...
+
+     procedure Iterate
+        (Container : in Map;
+         Process   : not null access procedure (Position : in Cursor))
+        with Nonblocking => False;
+     ...
+
+  end Ada.Containers.Hashed_Maps;
+
+Alternatively, we could separately specify the blocking for the individual
+routines, depending on which of the formal routines they are allowed to use.
+(Given that we leave that unspecified in the Standard, it's probably better to
+use a global setting as was done here.)
+
+!ASIS
+
+TBD.
+
+!ACATS test
+
+ACATS B-Tests and C-Tests.
+
+!appendix
+
+****************************************************************
+
