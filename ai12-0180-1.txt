@@ -1,0 +1,259 @@
+!standard 13.1.1(12/3)                                 16-01-05  AI12-0180-1/01
+!class binding interpretation 16-01-05
+!status work item 16-01-05
+!status received 15-12-09
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Using protected subprograms and entries within an invariant
+!summary
+
+Entries and protected subprograms are directly visible with an aspect
+specification for a (task or protected) type.
+
+!question
+
+AI05-0183-1 gives (in part) the text for 13.1.1(12/3) as:
+
+  If the associated declaration is a type_declaration, within the
+  aspect_definition the names of any visible components, protected
+  subprograms, and entries are directly visible, and the name of the
+  first subtype denotes the current instance of the type (see 8.6).
+
+The Standard, hoever, says:
+
+  If the associated declaration is a type_declaration, within the
+  aspect_definition the names of any components are directly visible,
+  and the name of the first subtype denotes the current instance of the type
+  (see 8.6).
+
+This difference in wording seems to be an editing mistake where the text in
+the full Standard differs than that in the AI. Should the Standard be
+changed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 13.1.1(12/3):
+
+  If the associated declaration is for a subprogram or entry, the names of
+  the formal parameters are directly visible within the aspect_definition,
+  as are certain attributes, as specified elsewhere in this International
+  Standard for the identified aspect. If the associated declaration is a
+  type_declaration, within the aspect_definition the names of any {visible}
+  components{, protected subprograms, and entries} are directly visible,
+  and the name of the first subtype denotes the current instance of the
+  type (see 8.6). If the associated declaration is a subtype_declaration,
+  within the aspect_definition the name of the new subtype denotes the
+  current instance of the subtype.
+
+!discussion
+
+This could matter in a type invariant for a protected type; Prot.Sub is
+an external call on Sub, but an invariant shouldn't start a separate
+protected action (it should use internal calls).
+
+This appears to be an editing error where the !wording and !corrigendum
+sections did not match in AI05-0183-1, which prevented the checking tools
+from detecting a problem.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+Create a test similar to the existing CD11001 to check that entries and
+protected subprograms are directly visible. (Careful that we don't cause
+issues with protected actions.)
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, December  9, 2015  9:49 PM
+
+I created an ACATS test for 13.1.1(12/3), specifically checking that the
+entities that are made directly visible hide any homographs that happen to be
+visible at the point of the aspect specification.
+
+GNAT had a problem with the rule "If the associated declaration is a
+type_declaration, within the aspect_definition the names of any components are
+directly visible, and the name of the first subtype denotes the current instance
+of the type (see 8.6)." That caused me to try to see if I could figure out
+precisely why components are made directly visible.
+
+I didn't manage to find that, but I did find that the AI's !wording section has
+the rule as:
+
+"If the associated declaration is a type_declaration, within the
+aspect_definition the names of any visible components, protected subprograms,
+and entries are directly visible, and the name of the first subtype denotes the
+current instance of the type (see 8.6)."
+
+The RM, in contrast, doesn't mention protected subprograms and entries. (Nor
+does the !corrigendum section in that AI, else tools would have pointed out the
+difference.)
+
+I can't find anything that would have made this change (none of the editorial
+reviews touch on it). Thus I conclude that the editor (I won't mention who that
+is :-) just botched this wording. [In any event, the !wording and !corrigendum
+should have been the same, so I have to think it is most likely that the editor
+blew it.]
+
+My question is do we need to fix this? It would only matter in an aspect given
+on a protected type, and I can't think of any language-defined aspects for which
+it would be critical. It might help with a dynamic predicate or type invariant,
+but I'd think most of those would directly use the components rather than a
+subprogram or (horrors) an entry.
+
+As the wording in the Standard doesn't include protected subprograms and
+entries, we'd need to make a Binding Interpretation to include them.
+
+So:
+
+(1) Does anyone remember if protected subprograms and entries were omitted on
+purpose?
+
+(2) Does anyone remember why components, et. al. are directly visible? It seems
+unusual in a normal type declaration:
+
+      type Priv1 is record
+          Comp1 : Natural := 0;
+      end record
+      with Type_Invariant => Comp1 in 0 .. 9;
+
+It makes sense in a protected type, but those are a lot less common.
+
+(3) Should we change the wording to match the original intent (as in the
+!wording section), or some other way, or not at all?
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, December 10, 2015  2:51 AM
+
+> (2) Does anyone remember why components, et. al. are directly visible?
+> It seems unusual in a normal type declaration:
+>
+>       type Priv1 is record
+>           Comp1 : Natural := 0;
+>       end record
+>       with Type_Invariant => Comp1 in 0 .. 9;
+
+This seems to me as a fairly useful use case, but I think the real question
+is why access the components directly, rather than:
+       type Priv1 is record
+           Comp1 : Natural := 0;
+       end record
+       with Type_Invariant => Priv1.Comp1 in 0 .. 9;
+
+Right?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 10, 2015  19:45 AM
+
+Right. In the case of task and protected types, Tsk.Ent and Prot.Ent mean
+something different semantically than Ent, and Prot.Comp is not even legal. But
+for "normal" types, Typ.Comp and Comp mean the same thing and we usually don't
+allow just writing Comp -- but we do for some reason in aspect specifications.
+
+I was wondering if that was intentional for some reason that I forgot, or if it
+was just a weird consequence, and either way, whether it should be changed.
+
+(And of course the real issue is that protected subprograms and entries
+*aren't* made directly visible by what looks like an editing error -- that
+probably ought to be fixed.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, December 10, 2015  11:15 AM
+
+> I was wondering if that was intentional for some reason that I forgot,
+> or if it was just a weird consequence, and either way, whether it
+> should be changed.
+
+I think it was intentional.  I'm surprised that you are surprised.
+The aspects are part of the type declaration, so I would expect them to see the
+components, and anyway, invariants are often going to refer to components, so
+it's useful.
+
+Note that record representation clauses can see components.
+
+> (And of course the real issue is that protected subprograms and
+> entries
+> *aren't* made directly visible by what looks like an editing error...
+
+Yes, that looks like an oversight.
+
+>... -- that
+> probably ought to be fixed.)
+
+I don't much care whether it gets fixed.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, December 10, 2015  12:54 PM
+
+> I created an ACATS test for 13.1.1(12/3), specifically checking that
+> the entities that are made directly visible hide any homographs that
+> happen to be visible at the point of the aspect specification.
+>
+> ...
+> "If the associated declaration is a type_declaration, within the
+> aspect_definition the names of any visible components, protected
+> subprograms, and entries are directly visible, and the name of the
+> first subtype denotes the current instance of the type (see 8.6)."
+>
+> The RM, in contrast, doesn't mention protected subprograms and
+> entries. (Nor does the !corrigendum section in that AI, else tools
+> would have pointed out the difference.) ...
+> My question is do we need to fix this? It would only matter in an
+> aspect given on a protected type, and I can't think of any
+> language-defined aspects for which it would be critical. It might help
+> with a dynamic predicate or type invariant, but I'd think most of
+> those would directly use the components rather than a subprogram or
+> (horrors) an entry.
+
+Yes, I think we ought to fix this.
+
+> As the wording in the Standard doesn't include protected subprograms
+> and entries, we'd need to make a Binding Interpretation to include them.
+>
+> So:
+>
+> (1) Does anyone remember if protected subprograms and entries were
+> omitted on purpose?
+
+No.
+
+> (2) Does anyone remember why components, et. al. are directly visible?
+> It seems unusual in a normal type declaration:
+>
+>        type Priv1 is record
+>            Comp1 : Natural := 0;
+>        end record
+>        with Type_Invariant => Comp1 in 0 .. 9;
+>
+> It makes sense in a protected type, but those are a lot less common.
+
+I think it could be important in cases when you are not talking about the
+*value* of a component, but rather something about the *properties* of the
+component itself.  E.g. a specification regarding ordering or alignment of the
+component.  We do allow aspect specifications on components directly, but record
+representation clauses are associated with the record type, and those have
+direct visibility on components (as Bob noted).
+
+> (3) Should we change the wording to match the original intent (as in
+> the !wording section), or some other way, or not at all?
+
+The !wording from the AI seems fine.  That is what the ARG and WG9 approved.  So
+this seems clearly just a bug in the !corrigendum translation.
+
+****************************************************************
