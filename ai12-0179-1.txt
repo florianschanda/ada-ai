@@ -988,3 +988,253 @@ postconditions!).
 to a record... :-)
 
 ****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, January 5, 2016  11:16 PM
+
+>I don't know off-hand. The one and only version of the AI is dated May 15,
+>2014 ...
+
+I had replied on this (accidentally only to Bob it seems) that Paris voted
+Keep Alive on AI-112, if that helps.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, January 5, 2016  4:33 PM
+
+> > But I think there are various other loopholes.  Should I give examples?
+> > As I said, I don't want to reargue the issue -- I just want to study 
+> > its effect on assertions in the predefined library.
+> 
+> I'd definitely be interested if you can find such examples.
+
+I fear if I give examples of loopholes, you'll want to fix them.  ;-)
+
+> ...a package author, rather than a
+> client, can have the last say on this, ...
+
+I never thought it was a worthwhile goal that the package author is "in
+control", as in preventing junk data from being passed in to that package.
+As I said, I won't try to change that now (I lost that battle, which is fine).
+But I don't particularly want to spend MORE time trying to achieve that goal.
+
+OK, OK, here's one I discussed privately with Steve:
+
+The rules about predicates seem to say you can cause the library's predicate
+to be Ignored by adding a new predicate in the client.
+
+    package Library is
+
+       subtype Nonzero is Integer with
+         Static_Predicate => Nonzero /= 0;
+
+       procedure P(X: Nonzero);
+
+    end Library;
+
+    with Text_IO; use Text_IO;
+    package body Library is
+
+       procedure P(X: Nonzero) is
+       begin
+          Put_Line(X'Img);
+          -- We just printed a Nonzero value that is 0.
+       end P;
+
+    end Library;
+
+    with Library; use Library;
+    procedure Client is
+       pragma Assertion_Policy(Ignore);
+       -- Ignores the predicate on Nonzero as well as the one on
+       -- My_Nonzero.
+       subtype My_Nonzero is Nonzero with
+         Static_Predicate => False;
+       X : My_Nonzero := 0; -- Wrong!
+    begin
+       P(X);
+    end Client;
+
+I have decided that predicates are better than pre/post, in cases where we're
+talking about a property of a single parameter (as opposed to a relationship
+between two parameters), because you can reuse the predicate -- there will be
+other parameters that have the same property, and also local variables. That's
+why I would tend to write the above as a predicate.
+
+It doesn't bother me too much that Client can disable Library's predicate, but
+I suspect it bothers you and others.
+
+If someone thinks Library is "in control", they might reason that Suppress can
+be based on forced-on assertions.  So add the following after "-- We just
+printed a Nonzero value that is 0.":
+
+          declare
+             pragma Suppress(Range_Check);
+             -- Suppress should be safe, because X is not zero.
+
+             Y : Integer range 1..1 := X; -- In fact, X = 0.
+             -- Now we're in erroneous territory.
+          begin
+             Put_Line(Y'Img);
+          end;
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, January 5, 2016  5:27 PM
+
+> OK, OK, here's one I discussed privately with Steve:
+
+Hmm.  Maybe this isn't a loophole after all.  After re-reading the RM, it seems
+that one can set a My_Nonzero variable to 0, but it will still be checked on
+entry to P, which takes a Nonzero parameter.  Is that right?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January 5, 2016  5:37 PM
+
+> I fear if I give examples of loopholes, you'll want to fix them.  ;-)
+
+It's possible. :-)
+
+> > ...a package author, rather than a
+> > client, can have the last say on this, ...
+> 
+> I never thought it was a worthwhile goal that the package author is 
+> "in control", as in preventing junk data from being passed in to that 
+> package.  As I said, I won't try to change that now (I lost that 
+> battle, which is fine).  But I don't particularly want to spend MORE 
+> time trying to achieve that goal.
+> 
+> OK, OK, here's one I discussed privately with Steve:
+> 
+> The rules about predicates seem to say you can cause the library's 
+> predicate to be Ignored by adding a new predicate in the client.
+> 
+>     package Library is
+> 
+>        subtype Nonzero is Integer with
+>          Static_Predicate => Nonzero /= 0;
+> 
+>        procedure P(X: Nonzero);
+> 
+>     end Library;
+> 
+>     with Text_IO; use Text_IO;
+>     package body Library is
+> 
+>        procedure P(X: Nonzero) is
+>        begin
+>           Put_Line(X'Img);
+>           -- We just printed a Nonzero value that is 0.
+>        end P;
+> 
+>     end Library;
+> 
+>     with Library; use Library;
+>     procedure Client is
+>        pragma Assertion_Policy(Ignore);
+>        -- Ignores the predicate on Nonzero as well as the one on
+>        -- My_Nonzero.
+>        subtype My_Nonzero is Nonzero with
+>          Static_Predicate => False;
+>        X : My_Nonzero := 0; -- Wrong!
+>     begin
+>        P(X);
+>     end Client;
+> 
+> I have decided that predicates are better than pre/post, in cases 
+> where we're talking about a property of a single parameter (as opposed 
+> to a relationship between two parameters), because you can reuse the 
+> predicate -- there will be other parameters that have the same 
+> property, and also local variables.  That's why I would tend to write 
+> the above as a predicate.
+> 
+> It doesn't bother me too much that Client can disable Library's 
+> predicate, but I suspect it bothers you and others.
+
+It does bother me, somewhat.
+
+But that's where we decided to draw the line, because it would be too weird
+(and would require a lot of chasing around) to have the rule be anything else.
+In particular, the meta-rule is that the policy is determined by the last
+declaration that contains the aspect in question. That does allow clients to
+"counterfeit" an aspect, but only if they *explicitly* redefine it. That's not
+going to be an accident, or likely to be surprising. (There are similar
+"loopholes" involving extensions for class-wide preconditions, postconditions,
+and type invariants.)
+
+I would hope that anyone reading the above would find the "Static_Predicate =>
+False" to be suspicious (well, *especially* that).
+
+Note that there is no loophole with the more likely:
+
+       subtype My_Nonzero is Nonzero;
+ 
+> If someone thinks Library is "in control", they might reason that 
+> Suppress can be based on forced-on assertions.  So add the following 
+> after "-- We just printed a Nonzero value that is 0.":
+> 
+>           declare
+>              pragma Suppress(Range_Check);
+>              -- Suppress should be safe, because X is not zero.
+> 
+>              Y : Integer range 1..1 := X; -- In fact, X = 0.
+>              -- Now we're in erroneous territory.
+>           begin
+>              Put_Line(Y'Img);
+>           end;
+
+I think this example might be a bit more compelling if it wasn't almost
+certain to be erroneous (it would be unless X = 1 in the above example, and I
+don't see any reasoning that could prove that, even assuming the predicates).
+
+Try
+    Y : Positive := X; -- In fact, X = 0.
+or something like that.
+
+But the above doesn't bother me much; the use of Suppress should be so limited
+(and one should assume that any code in the scope of a Suppress is most likely
+erroneous -- at least, that's how it works for me :-) that the above situation
+should almost never come up.
+
+Anyway, this particular loophole was a big fight in the ARG, and we settled on
+the above rule (essentially cutting the baby in half, but I digress). I
+certainly wouldn't try to reopen that, as we knew about the above cases at the
+time that we designed the rules.
+
+In an ideal world, no one would ever feel a need to Suppress checks or Ignore
+assertions (as the majority of them would be optimized away), but we don't
+live in that world. (Even though a lot of people who do those things have no
+real reason to do so, given the gains are minimal.) One hopes that the current
+rules are good enough, as they prevent casual misuse, but not blatant attempts
+to avoid checking (it's probably not possible to prevent the evil programmer
+from achieving their goals without making it too hard for the honest programmer
+to get their work done).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January 5, 2016  5:49 PM
+
+> Hmm.  Maybe this isn't a loophole after all.  After re-reading the RM, 
+> it seems that one can set a My_Nonzero variable to 0, but it will 
+> still be checked on entry to P, which takes a Nonzero parameter.  Is 
+> that right?
+
+Surely the subtype conversion to Nonzero would canonically be checked (that
+predicate is Checked, not Ignored). In the absence of any optimization, there
+is no loophole in this specific case.
+
+The problem is that I don't know how the rules that allow optimization of
+predicates operate in this case. That's in large part because I can't find any
+such rules, even though 3.2.4(31.b/3) hints at their existence. (Effectively,
+I can't figure out the justification for 31.b from the RM wording, and that
+might matter in a case like this. Maybe I could figure it out by re-reading
+the associated AIs, but I'd like to do some useful work today... ;-)
+
+So I can't give you a definitive answer.
+
+****************************************************************
