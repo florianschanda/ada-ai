@@ -1,0 +1,338 @@
+!standard 13.1(9/4)                                    16-01-07  AI12-0181-1/01
+!standard 13.1(9.1/4)
+!standard 13.14(19)
+!class binding interpretation 16-01-07
+!status work item 16-01-07
+!status received 15-12-07
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Self-referencing representation aspects
+!summary
+
+The expression of an aspect specification for a representation aspect cannot
+freeze the entity itelf.
+
+A representation item for an entity has to appear before the entity is frozen.
+
+!question
+
+Are the following self-referential aspects legal?
+
+procedure BD11002 is
+
+  Sizer : constant Natural := Integer'Size
+     with Size => Sizer;                                 -- (Illegal.)
+  function Foo (P : in Natural) return Natural
+     with Pre => P in 0 .. 3 or else Foo (P - 4) = 0;    -- (Legal.)
+
+  function Foo (P : in Natural) return Natural is
+  begin
+     return P;
+  end Foo;
+
+begin
+    null;
+end BD11002;
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 13.1(9/4):
+
+{A representation item that directly specifies an aspect of an entity shall
+appear before the entity is frozen (see 13.14). In addition, a}[A]
+representation item that directly specifies an aspect of a subtype or type
+shall appear after the type is completely defined (see 3.11.1)[, and before
+the subtype or type is frozen (see 13.14)].
+
+Add after 13.1(9.1/4):
+
+An aspect_specification that specifies a representation or operational aspect
+of an entity shall not freeze that entity.
+
+AARM Ramification: Such an aspect cannot refer to the entity itself, directly
+or indirectly. For instance:
+
+    Sizer : constant Natural := Integer'Size
+       with Size => Sizer;      -- Illegal!
+
+
+Replace the redundant brackets around 13.14(19), and replace "The Proof" that
+was deleted in 2002.
+
+!discussion
+
+There is no problem with some aspects being self-referential, as in the
+precondition (so long as it is written so that the recursion terminates).
+OTOH, self-referential representation items are illegal, and we certainly
+want a similar rule for aspect_specifications. Thus we add one.
+
+In determining where to put this rule, it because obviously apparent that the
+rule in 13.1(9/4) is missing part of the requirements. This was noted in 2002,
+to which the reply was that 13.14(19) covers it and we'd already changed the
+AARM to not mark that paragraph as redundant (supposely we'd noticed it
+earlier, but the author wasn't able to find any reference to that).
+
+The problem with the 2000 fix is that it leaves 3/4 of the rules given in
+13.1, 1/2 of the rules given in 13.14, and nowhere are all of the rules. The
+author, after reading 13.1(9-9.1/4), mistakenly concluded that was all the
+rules there are in the Standard. The rule in 13.1(9.1/4) in particular caused
+that conclusion, as it is complete for operational aspects. If it was a problem
+for the author, It has to be harder for other readers, thus we add the
+missing rule in 13.1(9/4) and replace the redundant brackets on 13.14(19).
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS B-Test that try cases like the ones in the various examples should be
+constructed. (These originally were in test BD11002, but were removed when it
+became apparent that they might be legal.)
+
+!appendix
+
+From: Randy Brukardt
+Sent: Monday, December 7, 2015  11:33 PM
+
+In testing 13.1.1(12/3), I had some objectives that too much is not made
+visible. However, it strikes me that such objectives are untestable as the
+declaration itself is visible at the end of the declarative region. That
+suggests that self-referential aspects could be legal:
+
+procedure BD11002 is
+
+  Sizer : constant Natural := Integer'Size
+     with Size => Sizer;                                       -- Sizer??
+  function Foo (P : in Natural) return Natural
+     with Pre => P in 0 .. 3 or else Foo (P - 4) = 0;          -- Foo??
+
+  function Foo (P : in Natural) return Natural is
+  begin
+     return P;
+  end Foo;
+
+begin
+    null;
+end BD11002;
+
+These hardly seem useful, but perhaps there is nothing really wrong with
+allowing them? (Surely these are a pathology which the ACATS wouldn't test, my
+question is mainly as to whether they should be illegal.)
+
+For the first one, GNAT reports "representation appears too late". How it could
+appear any earlier is a mystery left for another time. ;-) I suppose this means
+that freezing Sizer requires evaluating the aspect, which requires freezing
+Sizer, which requires evaluating the aspect, and so on forever, and GNAT put out
+confusing message rather than going into an infinite loop. [Note that
+13.14(7.2/3 & 8/4) say that static expressions in a aspect specification don't
+freeze until the end of the declaration list; not immediately as happens for
+other static expressions.]
+
+GNAT seems happy with the second; I didn't try running the resulting program to
+see if the precondition works.
+
+Thoughts??
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, December 7, 2015  11:54 PM
+
+Freezing rules should definitely make the Size specification illegal in my view,
+since the use in the aspect should freeze the object, and you cannot complete
+the freezing of an object until you have determined its representation.
+13.14(7.2/3) should probably be clarified that an aspect specification for a
+representation aspect is illegal if it causes freezing of its associated entity.
+
+The Pre seems fine but stupid, since Pre is not a representation aspect, but it
+probably deserves a warning at least.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, December 8, 2015  2:09 AM
+
+> Freezing rules should definitely make the Size specification illegal
+> in my view, since the use in the aspect should freeze the object, and
+> you cannot complete the freezing of an object until you have
+> determined its representation.  13.14(7.2/3) should probably be
+> clarified that an aspect specification for a representation aspect is
+> illegal if it causes freezing of its associated entity.
+
+Agreed
+
+> The Pre seems fine but stupid, since Pre is not a representation
+> aspect, but it probably deserves a warning at least.
+
+May seem stupid as written, but I think it could make sense to have f.e.
+a recursive precondition.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, December 8, 2015  9:04 AM
+
+I agree with Tucker.
+
+> For the first one, GNAT reports "representation appears too late". How
+> it could appear any earlier is a mystery left for another time. ;-)
+
+It's not so mysterious if you know how GNAT works.  GNAT transforms aspect
+specifications into the old-fashioned pragma or rep clause, and then analyzes
+that.  If there is no such, we invent one, such as pragma Precondition.  Yes,
+this method sometimes results in confusing messages.  Here, it is complaining
+that the "for Sizer'Size use Sizer;" that it concocted is too late.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Tuesday, December 8, 2015  9:38 AM
+
+I’m modifying the compiler to produce a more sensible message:
+
+gcc -c bd11002.adb
+bd11002.adb:3:02: aspect specification causes premature freezing of "Size"
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 7, 2015  7:35 PM
+
+> >    Sizer : constant Natural := Integer'Size
+> >       with Size => Sizer;      -- Sizer??
+>
+> Freezing rules should definitely make the Size specification illegal
+> in my view, since the use in the aspect should freeze the object, and
+> you cannot complete the freezing of an object until you have
+> determined its representation.  13.14(7.2/3) should probably be
+> clarified that an aspect specification for a representation aspect is
+> illegal if it causes freezing of its associated entity.
+
+I am writing up an AI (AI12-0181-1) to accomplish this, and I wanted to see what
+has the needed effect for "traditional" representation items.
+
+The only rule I can find is 13.1(9/4):
+
+A representation item that directly specifies an aspect of a subtype or type
+shall appear after the type is completely defined (see 3.11.1), and before the
+subtype or type is frozen (see 13.14).
+
+Operational items have a simpler rule in 13.1(9.1/4):
+
+An operational item that directly specifies an aspect of an entity shall appear
+before the entity is frozen (see 13.14).
+
+These work to prevent self-referencing representation items as if the item
+itself causes freezing of the entity, they fail (they're not *before* the
+freezing.
+
+My idea was to put third rule following these two to cover the self-referencing
+aspect_specification case for both (it seems like it should go here, since other
+rules on aspect_specifications of representation and operational aspects are
+here in 13.1).
+
+Specifically:
+
+An aspect_specification that specifies a representation or operational aspect of
+an entity shall not freeze that entity.
+
+AARM Ramification: Such an aspect cannot refer to the entity itself, directly or
+indirectly. For instance:
+
+    Sizer : constant Natural := Integer'Size
+       with Size => Sizer;      -- Illegal!
+
+[End proposed wording.]
+
+I had the new wording cover both representation and operational aspects as both
+of these are currently required to occur before freezing of the entity.
+
+Up to this point, I was just going to write up the AI like I usually do and not
+post here. But if you're on your game, you've already noticed something odd
+about the two rules given above - they're not as similar as one would expect.
+And, in particular, there doesn't seem to be anything that covers representation
+items of entities that aren't types and subtypes!
+
+For instance:
+
+   Sizer : constant Natural := Integer'Size
+   for Sizer'Size use Sizer;
+
+is not covered by 13.1(9/4). Apparently it is legal to put a representation item
+anywhere one wants, so long as it is not for a type or subtype.
+
+Similarly:
+
+   function Inc (A : Integer) return Integer is (A + 1);
+   Obj : Integer range 0 .. 127 := 0;
+   Obj2 : Integer range 0 .. 127 := Inc(Obj); -- Freezes Obj.
+   for Obj'Size use 8;
+
+Again, the representation item isn't made illegal by any existing rule I can
+find (presuming the compiler supports this particular specification).
+
+Thus, I think we need to add a second sentence to 13.1(9/4):
+
+A representation item that directly specifies an aspect of an entity other than
+a subtype or type shall appear before the entity is frozen.
+
+[Note: This seems to allow representation items on deferred constants. Not sure
+if that was intended or not. In any case, the original wording only works for
+types, since the notion of completely defined is only defined for types. And we
+surely don't want to prevent giving convention pragmas on subprogram
+specifications.]
+
+An alternative way to put this is to split the original sentence:
+
+A representation item that directly specifies an aspect of an entity shall
+appear before the entity is frozen (see 13.14). In addition, a representation
+item that directly specifies an aspect of a subtype or type shall appear after
+the type is completely defined (see 3.11.1).
+
+That's probably what the original intent was.
+
+It's especially odd that we have a stronger rule for operational items than to
+do for representation items, so I have to conclude this is just an omission
+(like the original question).
+
+Thoughts???
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 7, 2015  7:48 PM
+
+...
+> Up to this point, I was just going to write up the AI like I usually
+> do and not post here. But if you're on your game, you've already
+> noticed something odd about the two rules given above - they're not as
+> similar as one would expect.
+> And, in particular, there doesn't seem to be anything that covers
+> representation items of entities that aren't types and subtypes!
+
+Turns out this is a false alarm -- sort of. 13.14(19) covers this. All of the
+Legality Rules in 13.14 were intended to be repeats of those elsewhere in the
+Standard, but during the Corrigendum work, we noticed the missing rule in 13.1
+and removed "The Proof" and the redundant brackets around this rule rather than
+fixing 13.1.
+
+That's formally correct, but it's obviously confusing as it just got me again.
+
+We should either drop 13.1(9.1/4) [as it is a complete repeat of 13.14(19)] and
+put in an AARM cross-reference so we can find it in the future, or change
+13.1(9/4) as I suggested [which we probably ought to have done in 2000] and put
+13.14(19) back as it was in Ada 95. It's bizarre to cover 3/4s of the rules in
+one place, and 3/4s of the rules in a different place, but have some overlapping
+rules and nowhere have all of the rules together.
+
+My preference is to actually fix this as was suggested several times at the
+start of the millennium.
+
+****************************************************************
+
