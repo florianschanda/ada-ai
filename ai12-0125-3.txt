@@ -1,14 +1,16 @@
-!standard 5.2.1(0)                                 15-10-13  AI12-0125-3/01
+!standard 5.2.1(0)                                 16-01-08  AI12-0125-3/02
+!standard 4.1(2/3)
+!standard 8.6(9/4)
 !class Amendment 15-10-13
 !status work item 15-10-13
 !status received 15-09-22
 !priority Low
 !difficulty Medium
-!subject Add <<>> as a shorthand for the LHS of an assignment
+!subject Add @ as a shorthand for the LHS of an assignment
 
 !summary
 
-Define <<>, which can be used in the right-hand side of an assignment
+Define @, which can be used in the right-hand side of an assignment
 statement as a shorthand for the name of the left-hand side.
 
 !problem
@@ -26,119 +28,226 @@ mismatching array indices.
 
 !proposal
 
-We define a new symbol, <<>>, which represents a rename of the left-hand
-side of an assignment.
+We define a new symbol, @, the *target name* which represents a constant view
+of the left-hand side of an assignment.
 
 !wording
 
-Add <<>> to Primary in 4.4, with -- See 5.2.1.
+Add after 3.3(21.1/3): [Editor's note: This is the list of items that are
+defined to be constant. Since that list is defined to be exclusive, we have
+to include target_name here.]
+   * a target_name of an assignment_statement when used in the
+     expression of the assignment (see 5.2.1);
+
+[Editor's note: The "when used in the expression of the assignment" isn't
+strictly necessary, as that is the only place a target_name is allowed. But
+this is a forward reference and a causal reader might interpret this as
+applying to the *variable_*name of the assignment -- which it does not.]
+
+Add target_name to the syntax of Name in 4.1(2/3).
+
+[Editor's note: We add a new syntax nonterminal because all of the other
+kinds of name are defined that way, rather than by reference to other
+subclauses as is done for a primary. We try to be consistent within
+a clause, even if the Standard is not consistent for similar constructs.]
 
 Add a new subclause:
 
-        5.2.1 Target name (<<>>) shorthand
+    5.2.1 Target name (@) shorthand
 
-        <<>>, known as the *target name* of an assignment statement,
-        provides a shorthand to avoid repetition of potentially long
-        names in assignment statements.
+    @, known as the *target name* of an assignment statement,
+    provides a shorthand to avoid repetition of potentially long
+    names in assignment statements.
 
-        Name Resolution Rules
+    Syntax
 
-        <<>> has the nominal subtype of the /variable_/name of an
-        assignment_statement.
+        Target_Name ::= @
 
-        Legality Rules
+    Name Resolution Rules
 
-        <<>> shall only appear in the expression of an assignment_statement.
+    Redundant[If a target_name *T* occurs in an assignment_statement *A*, the
+    *variable_*name *V* of *A* is a complete context.] *T* is a constant view
+    of *V*, having the nominal subtype of *V*.
 
-        If <<>> appears in the expression of an assignment_statement S,
-        and the expression contains any function calls other than those
-        to predefined operators or any equality operation of a record
-        type, then the /variable_/name of S shall not denote a
-        subcomponent that depends on discriminants of an object whose
-        nominal subtype is unconstrained, unless the object is known to be
-        constrained.
+    AARM The Proof: The complete context rule is formally given in 8.6.
 
-        AARM Note: This is just the renames legality rule; we allow this
-        in the case that no user-defined routines can be called, as there
-        is no way to change the discriminant in that case. Record equality
-        might have composed a user-defined routine, thus it is included
-        here.
+    Legality Rules
 
-        [Editor's note: This rule could have been omitted. However, it seems
-        preferable that any erroneous execution be as explicitly written as
-        possible - that is, the names of the components should explicitly
-        appear so that a reviewer can clearly see potential danger. That
-        seems more important with this proposal as <<>> can appear anywhere
-        in an expression, so it could be somewhat hidden if the expression
-        is large.]
+    A target_name shall only appear in the expression of an
+    assignment_statement.
 
-        Static Semantics
+    Static Semantics
 
-        If <<>> appears in the expression of an assignment statement S,
-        then S is equivalent to a local object renaming that declares a
-        unique temporary name of the same type as the /variable_/name,
-        to be a renaming of the /variable_/name; this is followed by an
-        assignment_statement with its /variable_/name being this
-        temporary name, and with its expression being the expression of S
-        with all of the <<>> names being replaced by the temporary name.
+    If a target_name with nominal subtype *S* appears in the expression of
+    an assignment statement *A*, then *A* is equivalent to a local anonymous
+    procedure having an in out parameter *P* of subtype *S*, with a
+    body being *S* with the *variable_*name being replaced by *P*, and
+    any target_names being replaced by the qualified expression
+    *S*'(*P*); followed by a call on the anonymous procedure with the
+    actual parameter being the *variable_*name of *S*.
 
-        AARM Discussion:
+    [Editor's note: We use a qualified expression here to ensure the
+    replacement has the semantics of a constant view. I would have preferred
+    to avoid that (a target_name is a constant view by rule), but just using
+    *P* here is misleading, especially if someone is doing expression
+    analysis after this expansion. We could probably drop the explicit
+    definition of @ as a constant view, since this expansion would have
+    that effect anyway, but it seems valuable to emphasize that to readers.]
+
+    AARM Reason: This equivalence defines all of the Dynamic Semantics
+    for these assignment statements. We use the parameter to bind the
+    *variable_*name; it is evaluated only once.
+
+    AARM Discussion:
         For example, the expression
-            My_Array(I) := <<>>*2 + <<>>/2;
+            My_Array(I) := @*2 + @/2;
         would be equivalent to
             declare
-               [Target_Name] : [Target_Type] renames My_Array(I);
+               procedure [Anon] ([Target] : in out [Target_Subtype]) is
+               begin
+                  [Target] := [Target_Subtype]'([Target])*2 +
+                              [Target_Subtype]'([Target])/2;
+               end [Anon];
+ 
             begin
-               [Target_Name] := [Target_Name]*2 + [Target_Name]/2;
+               [Anon] ([Target] => My_Array(I));
             end;
+        where all of the identifiers in square brackets are anonynous
+        placeholders.
+    End AARM Discussion.
 
-        All of the Dynamic Semantics follow directly from this equivalence.
-        End AARM Discussion.
+Add after 8.6(9/4):
 
+   * The *variable_*name of an assignment_statement *A*, if the expression of
+     *A* contains one or more target_names.
 
 !examples
   
-   X := <<>> + 1;  --  A short hand for X := X + 1;
+   X := @ + 1;  --  A shorthand for X := X + 1;
 
-   A(I) := Integer'Max (<<>>, 10);  --  Equivalent to:
+   A(I) := Integer'Max (@, 10);  --  Equivalent to:
    --  declare
-   --     Temp : Integer renames A(I);
+   --     procedure Anon (Target : in out Integer) is
+   --     begin
+   --         Target := Integer'Max (Integer'(Target), 10);
+   --     end Anon;
    --  begin
-   --     Temp := Integer'Max (Temp, 10);
+   --     Anon (A(I));
    --  end;
 
 !discussion
 
-<<>> is defined by equivalence to a local rename followed by an assignment
-statement; all of the static and dynamic semantics follow from this equivalence.
+The occurrence of a target_name (@) in an assignment makes the
+/variable_/name (the left-hand side of the assignment) a complete context.
+This avoids complicating resolution unnecessarily; otherwise it would be
+possible for the LHS to be overloaded in such a way that the uses of @
+determine which possibility is correct. This is especially complicated
+as @ has to resolve the same as the LHS, whereas a simple textual substitution
+would not have that property. We avoid the complication by legislating it
+away.
 
-Possible issue: Resolution of an assignment_statement is unchanged when <<>>
-is used. That means that <<>> might be overloaded if the /variable_/name is
-overloaded. That might complicate the implementation a bit; care needs to be
-taken that <<>> always is resolved with the same type. (It's possible to write
-an assignment where the text is the same on both sides of the expression
-but a different function is resolved.)
+This is potentially a maintenance hazard, as introducing @ into an
+assignment_statement potentially could make it illegal. However, since
+stand-alone objects and parameters cannot be overloaded, this will rarely make
+a difference in practice (there is rarely more than one interpretation of
+the LHS of an assignment).
 
-We considered making the /variable_/name a complete context in the case that
-<<>> is used, but that potentially would be a (minor) maintenance hazard,
-as introducing <<>> might cause a perfectly good assignment to become illegal
-(if the target is overloaded).
+
+The expansion in terms of an anonymous procedure preserves the possibility of
+erroneous execution in obscure cases:
+
+    type Mutable (D : Boolean := True) is record
+       case D is
+          when True =>
+              I : Integer;
+          when False =>
+              F : Float;
+       end case;
+    end record;
+
+    Obj : Mutable;
+
+    function Fooey return Integer is
+       Temp : Integer := Obj.I;
+    begin
+       Obj := (D => False, F => Float(Temp));
+       return Temp;
+    end Fooey;
+
+    Obj.I := @ + Fooey; -- (1)
+    Obj.I := Obj.I + Fooey; -- (2)
+
+In these assignments, the I component doesn't exist when it is written. Ada
+doesn't try to prevent that, both (1) and (2) are erroneous.
+
+We considered using a renames formulation instead:
+
+    Obj.I := @ + 1;
+being the same as:
+    declare
+       <Target> : renames Integer := Obj.I; -- (3)
+    begin
+       <Target> := <Target> + 1;
+    end;
+
+However, this doesn't work in this case, as the renames of a discriminant
+dependent-component (like (3)) is illegal. Since the update to the I component
+is the sort of use this feature is constructed for, making it illegal seems
+too restrictive. (And this is not a new kind of erroneous execution, as
+demonstrated previously).
+
+Note that the subprogram call introduced by this formulation could introduce
+an extra possibility of a failing subtype check, but this can happen only if
+the value of the *variable_*name is invalid or a predicate has a side-effect.
+In these cases, reading the *variable_*name isn't going to be safe anyway, so
+the effect is mainly to make a latent error more visible.
+
+
+The target_name is a constant view of the LHS of the assignment. We do this
+mainly so that the use of @ does not trigger the Taft anti-aliasing rules
+(6.4.1). A side-effect is that the target object cannot be modified directly
+via @, preventing problems. We accomplish this by defining the target_name
+to expand to a qualified_expression; that expression could introduce an
+extra exception, but only if a predicate has a side-effect (the subtype
+conversion was already done by the parameter passing, this is just a repeat).
+
 
 This proposal is better than AI12-0125-2, as
- (1) No new lexical symbols are needed.
- (2) It is more flexible; it can be used in function calls other than operators
+ (1) It is more flexible; it can be used in function calls other than operators
      (as shown by the 'Max example above).
- (3) It doesn't depend on visibility of anything; it's always available if the
-     assignment meets the criteria of the Legality Rules.
+ (2) There is a positive indication that this notation is being used (the
+     addition of an @ as opposed to deleting an '='); 
+ (3) It doesn't (directly) depend on visibility of anything; it's always
+     available unless the LHS of the assignment is overloaded.
 
 It is different than the proposal of AI12-0125-2: (whether these are advantages
 or disadvantages are in the eye of the beholder -- the author finds these to be
 advantages)
 
- (1) It doesn't have an "obvious" extension to a user-defined version, which
+ (1) Only one new lexical symbol is needed, rather than many.
+ (2) It doesn't have an "obvious" extension to a user-defined version, which
      avoids a nasty slippery slope.
- (2) It doesn't look like we're out of ideas by stealing groddy parts of other
+ (3) It doesn't look like we're out of ideas by stealing groddy parts of other
      languages.
+
+This proposal is the same as the proposal AI12-0125-2 in the following ways:
+
+ (1) The semantics is described in terms of an anonymous procedure.
+ (2) The left-hand side of the assignment is treated as a complete context,
+     meaning that in rare cases, introducing @ into an assignment (or using
+     :+) would make the assignment illegal.
+
+These should be considered issues with solving the problem as opposed to
+negatives against a particular proposal.
+
+ (3) Both are only one character different from very different expressions:
+     Obj:=@+1;   vs. Obj:=+1; -- This proposal
+     Obj:+1;     vs. Obj:=+1; -- The alternative AI12-0125-2
+
+Of course, writing without whitespace is discouraged in Ada, but these are
+legal expressions regardless of common practice. This problem could be
+eliminated for this proposal by using more than one character for the target
+name (as the original proposal <<>> did).
 
 !ASIS
 
