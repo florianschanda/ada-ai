@@ -1,0 +1,530 @@
+!standard 13.1.1(16/3)                                 16-02-24  AI12-0182-1/01
+!class binding interpretation 16-02-24
+!status work item 16-02-24
+!status received 16-02-04
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Pre'Class and protected operations
+!summary
+
+** TBD.
+
+!question
+
+Protected operations (both entries and subprograms) do not appear to be
+primitive operations of the protected type, as they don't meet any of the
+qualifications of 3.2.3(2-7) [which defines primitive subprograms].
+13.1.1(16/3) requires that an aspect ending with 'Class be given only
+on tagged types or primitive subprograms of a tagged type.
+
+Thus, Pre'Class is not allowed on a protected operation, regardless of
+whether the protected type is tagged or whether the operation implements some
+primitive subprogram of the type (inherited from a progenitor).
+
+That poses a problem for protected operations, as Pre'Class is "or"ed with
+any inherited Pre'Class, while Pre (which is legal) is effectively "and"ed.
+A strict follower of LSP therefore cannot use Pre unless no Pre'Class is
+inherited. Since a wrapper subprogram would not be allowed if the
+Synchronization_Kind was By_Entry or By_Protected_Subprogram (as the
+wrapper is neither of these things), we have a problem. Should Pre'Class
+be allowed in these contexts? (Yes.)
+
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 13.1.1(16/3):
+
+   If the aspect_mark includes 'Class, then the associated entity shall
+   be a tagged type, a primitive subprogram of a tagged type, or an entry
+   or protected subprogram that implements a primitive subprogram of a
+   tagged type.
+
+!discussion
+
+Note that the same issues as described in the question apply to task entries;
+the rules are written to cover those as well.
+
+** Mostly TBD. -- See RLB mail of Feb 24th.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+This rule should be tested with B-Tests and C-Tests; those are likely included
+in the detailed objectives for 6.1.1 (which already have been created).
+
+!appendix
+
+From: Randy Brukardt
+Sent: Thursday, February 4, 2016  5:00 PM
+
+I'm trying to figure out precisely where Pre'Class and Post'Class are legal,
+so I can create tests to check that. (It also has a bearing on how important
+various other objectives are; as if the only way to involve Pre'Class in a
+protected operation is via inheritance, tests are less important than if
+they can be directly specified as well.)
+
+All of this discussion also applies to task entries, but I'll avoid mentioning
+that for the most part to keep this simple(r).
+
+I think I've concluded that protected operations (and task entries) do not allow
+Pre'Class and Post'Class, but it's not crystal-clear. And I don't think it
+matters for anything other than this rule, so I'm not sure that we ever really
+answered the question.
+
+The important rule is 13.1.1(16.3):
+
+   If the aspect_mark includes 'Class, then the associated entity shall be a
+   tagged type or a primitive subprogram of a tagged type.
+
+Now, it's obvious that if the protected type is not tagged, then Pre'Class and
+Post'Class are not allowed on any operation. So that's open and shut.
+
+However, you can make a protected type tagged by including a progenitor. So that
+alone doesn't fully answer the question.
+
+I tried to apply the Dewar rule to see what we want, and that didn't help
+either. On one hand, you can't derive from a protected type, so there is no use
+for inheritance of Pre'Class and Post'Class. Post in particular will work just
+fine in place of Post'Class. But (on the other hand), Pre is "and"ed with any
+inherited Pre'Class, so Pre strengthens, not weakens, the precondition. If you
+are strictly trying to follow LSP and you already have a Pre'Class, you can't
+use Pre.
+
+So that leaves figuring out what operations are primitive. At this point, I
+think an example is needed:
+
+   package Int is
+      type Intf is synchronized interface;
+      function Is_OK (Obj : Intf) return Boolean;
+      procedure Proc (Obj : in out Intf)
+         with Pre'Class => Is_OK (Obj);
+      procedure Ent (Obj : in out Intf)
+         with Pre'Class => Is_OK (Obj), Synchronization => By_Entry;
+   end Int;
+
+   with Int;
+   package Pack is
+       protected type Prot is new Intf with
+          function Is_OK return Boolean;
+          function Is_Wobbly return Boolean;
+          procedure Proc;
+          procedure Proc2;
+          entry Ent;
+          entry Ent2;
+       private
+          ...
+       end Prot;
+       -- function Is_OK (Obj : Prot) return Boolean; -- Inherited here.
+       -- procedure Proc (Obj : in out Prot); -- Inherited here.
+       -- procedure Ent (Obj : in out Prot); -- Inherited here.
+   end Pack;
+
+So, first of all, are any of the operations in Prot "primitive subprograms of a
+tagged type"? Clearly, they're all operations of a tagged type (since Prot is
+tagged), so that part is handled. What about the primitive subprogram part?
+
+3.2.3 gives the definition of primitive subprograms as:
+
+2 The primitive subprograms of a specific type are defined as follows:
+
+3 The predefined operators of the type (see 4.5);
+
+4 For a derived type, the inherited (see 3.4) user-defined subprograms;
+
+5 For an enumeration type, the enumeration literals (which are considered
+  parameterless functions - see 3.5.1);
+
+6 For a specific type declared immediately within a package_specification, any
+  subprograms (in addition to the enumeration literals) that are explicitly
+  declared immediately within the same package_specification and that operate on
+  the type;
+
+6.1/3 For a specific type with an explicitly declared primitive "=" operator
+  whose result type is Boolean, the corresponding "/=" operator (see 6.6);
+
+7/2 For a nonformal type, any subprograms not covered above [that are explicitly
+  declared immediately within the same declarative region as the type] and
+  that override (see 8.3) other implicitly declared primitive subprograms of
+  the type.
+
+------
+
+We're not interested in operators right now, so paras 3 and 6.1 don't apply, and
+this surely isn't an enumeration type, so paragraph 5 does not apply. Paragraph
+4 applies to the 3 subprograms that I showed commented out, but certainly not to
+any of the operations declared inside of Prot. Similarly, paragraph 6 doesn't
+apply (as the protected operations are not declared immediately within the same
+package specification; they're inside of the protected type instead). Note that
+it *could* apply to a subprogram declared after the commented out procedure Ent,
+but that's obvious and the same as any other type so let's not consider that
+further.
+
+That just leaves us with paragraph 7. Clearly, it cannot apply to Is_Wobbly,
+Proc2, and Ent2 (there is no implicitly declared primitive subprogram that
+corresponds to those).
+
+It seems pretty clear that paragraph 7 doesn't apply to the others, either. It
+specifically uses "override", and none of these operations override anything;
+rather they are "implemented by" the corresponding protected operations. (I
+forget why we used that model, but we did so very intentionally -- I presume
+there were some ramifications of overriding that were inappropriate for
+"implemented by" operations.
+
+Therefore, none of the protected operations Is_OK, Proc, nor Ent are primitive
+for the tagged type Prot, and thus none of these operations allow Pre'Class or
+Post'Class.
+
+Question 1: Do you agree? Did I get this analysis right?
+
+Question 2: Is this really what we want?
+
+In particular, we can't weaken the precondition of Proc. (Proc has an inherited
+precondition of Is_OK (Obj) from the interface.) For example, let's say that we
+wanted to eliminate the precondition on Proc. That can't be done (directly):
+
+    procedure Proc with Pre'Class => True; -- Is illegal by the above analysis
+
+    procedure Proc with Pre => True; -- Has no effect, the effective precondition is "Is_OK (Self) and True"
+
+One could do it by having Is_OK always return True, but that might not be
+appropriate for some other reason.
+
+Of course, I'm assuming that weakening a precondition is actually useful --
+that's a premise I doubt in actual fact -- so I don't know if this really
+matters. In the absence of weakening as being useful, Pre and Post work fine,
+since no inheritance is possible anyway (since derivation is illegal).
+
+In addition, adding an explicit subprogram declaration at the end of the visible
+part of the package would indeed allow the use of Pre'Class:
+    procedure Proc (Obj : in out Prot) with Pre'Class => True;
+then renaming the protected operation Proc to Local_Proc and writing a body of:
+    procedure Proc (Obj : in out Prot) is
+    begin
+       Obj.Local_Proc;
+    end Proc;
+This is really what "implemented by" does anyway, so it's only slightly annoying
+to write this out. Note that Local_Proc is no longer inheriting a precondition,
+so we've solved the problem (if there is one).
+
+Thus my answers to my own questions are (1) of course!; and (2) dunno, but let's
+leave it illegal until we hear screaming from actual users. (After all, changing
+illegal to legal is almost always a compatible change; going in the other
+direction isn't possible, in general.)
+
+I guess I'd like some confirmation before putting in a bunch of hours to write
+tests for these cases.
+
+What say others here? (Or have I put you all to sleep?? ;-)
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, February 4, 2016  11:31 PM
+
+> Question 1: Do you agree? Did I get this analysis right?
+
+Well, that's exactly what the text says...
+
+> Question 2: Is this really what we want?
+
+Not even talking about pre/post, it is possible to dispatch to such operations.
+According to your analysis, it is therefore possible to dispatch to
+non-primitive operations. Ouch! Something has to be done...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 5, 2016  12:25 AM
+
+I'm unsure if that really matters; it might mess up the 20,000 foot view of Ada
+a bit, but I doubt that 99% of users would care. And it clearly was intended
+that "implemented by" is different than "overriding". I think the model of
+"implemented by" is that there is a compiler-generated primitive operation that
+calls the non-primitive operation, which certainly isn't unusual (there's no
+reason that any primitive operation can't call something non-primitive - it
+happens all the time).
+
+So I think the issue is exclusively with Pre/Post (as inheritance is not
+allowed).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, February 11, 2016  3:43 PM
+
+> Therefore, none of the protected operations Is_OK, Proc, nor Ent are
+> primitive for the tagged type Prot, and thus none of these operations
+> allow Pre'Class or Post'Class.
+>
+> Question 1: Do you agree? Did I get this analysis right?
+
+Yes.
+
+> Question 2: Is this really what we want?
+
+No, I think we want to allow Pre'Class and Post'Class on any protected operation
+that implements a primitive operation.
+
+> ... In addition, adding an explicit subprogram declaration at the end of the
+> visible part of the package would indeed allow the use of Pre'Class:
+>      procedure Proc (Obj : in out Prot) with Pre'Class => True;
+> then renaming the protected operation Proc to Local_Proc and writing a body of:
+>      procedure Proc (Obj : in out Prot) is
+>      begin
+>         Obj.Local_Proc;
+>      end Proc;
+> This is really what "implemented by" does anyway, so it's only slightly
+> annoying to write this out. Note that Local_Proc is no longer inheriting a
+> precondition, so we've solved the problem (if there is one).
+
+But that doesn't work for operations that have a "Synchronized => By_Entry" or
+"Synchronized => By_Protected_Procedure" since they cannot be implemented by a
+hand-written wrapper.
+
+...
+> What say others here? (Or have I put you all to sleep?? ;-)
+
+I would say we should allow 'Class aspects on any protected operation that
+implements a tagged primitive.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, February 11, 2016  4:37 PM
+
+>> ... In addition, adding an explicit subprogram declaration at the end of the
+>> visible part of the package would indeed allow the use of Pre'Class:
+>>      procedure Proc (Obj : in out Prot) with Pre'Class => True; then
+>> renaming the protected operation Proc to Local_Proc and writing a body of:
+>>      procedure Proc (Obj : in out Prot) is
+>>      begin
+>>         Obj.Local_Proc;
+>>      end Proc;
+>> This is really what "implemented by" does anyway, so it's only
+>> slightly annoying to write this out. Note that Local_Proc is no
+>> longer inheriting a
+>> precondition, so we've solved the problem (if there is one).
+
+>But that doesn't work for operations that have a "Synchronized => By_Entry" or
+>"Synchronized => By_Protected_Procedure" since they cannot be implemented by a
+>hand-written wrapper.
+
+Good point. But...
+
+>> It seems pretty clear that paragraph 7 doesn't apply to the others, either.
+>> It specifically uses "override", and none of these operations
+>> override anything; rather they are "implemented by" the corresponding
+>> protected operations. (I forget why we used that model, but we did so
+>> very intentionally -- I presume there were some ramifications of
+>> overriding that were inappropriate for "implemented by" operations.
+
+I didn't get this analysis quite right. There is in fact an implicitly declared
+subprogram that overrides for "implemented by". But that clearly is a
+*different* subprogram than the original operation; so the current rules allow
+Pre'Class on the implicit subprogram but not on the original protected
+operation.
+
+The interesting thing is that this implicitly declared subprogram wouldn't be
+allowed explicitly (as Tuck points out), and that's downright weird, as the
+semantics (other than the one Legality Rule) are defined completely in terms of
+an implicit subprogram that you're not allowed to write explicitly. There would
+clearly be no harm in allowing some explicit subprograms within limits -- but
+clearly that isn't important enough to mess with.
+
+...
+> I would say we should allow 'Class aspects on any protected operation
+> that implements a tagged primitive.
+
+Sigh. We always chose the hardest path that makes it impossible to cross off
+items on my work lists. :-)
+
+I presume that the same ought to be true for a task entry that implements a
+tagged primitive.
+
+So you are suggesting that we change 13.1.1(16/3) to something like:
+
+If the aspect_mark includes 'Class, then the associated entity shall be a tagged
+type, a primitive subprogram of a tagged type, or an entry or protected
+subprogram that implements a primitive subprogram of a tagged type.
+
+Right?
+
+I take it I get to write up an AI to this effect??
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, February 11, 2016  5:26 PM
+
+> ... So you are suggesting that we change 13.1.1(16/3) to something like:
+>
+> If the aspect_mark includes 'Class, then the associated entity shall
+> be a tagged type, a primitive subprogram of a tagged type, or an entry
+> or protected subprogram that implements a primitive subprogram of a
+> tagged type.
+>
+> Right?
+
+Right.
+
+>
+> I take it I get to write up an AI to this effect??
+
+Yes, that seems appropriate ;-).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 24, 2016  7:50 PM
+
+> > ... So you are suggesting that we change 13.1.1(16/3) to something like:
+> >
+> > If the aspect_mark includes 'Class, then the associated entity shall
+> > be a tagged type, a primitive subprogram of a tagged type, or an
+> > entry or protected subprogram that implements a primitive subprogram
+> > of a tagged type.
+> >
+> > Right?
+>
+> Right.
+>
+> >
+> > I take it I get to write up an AI to this effect??
+>
+> Yes, that seems appropriate ;-).
+
+I've tried doing this (it will be AI12-0182-1; I mostly wanted the number so I could put it into my ACATS tests and documents), and in a case of what Steve calls "heat vision", I've got more questions than answers. :-)
+
+(1) Are we sure that we want the suggested rule? Consider the original example with some additional preconditions:
+
+   package Int is
+      type Intf is synchronized interface;
+      function Is_OK (Obj : Intf) return Boolean;
+      procedure Proc (Obj : in out Intf)
+         with Pre'Class => Is_OK (Obj);
+      procedure Ent (Obj : in out Intf)
+         with Pre'Class => Is_OK (Obj), Synchronization => By_Entry;
+   end Int;
+
+   with Int;
+   package Pack2 is
+       protected type Prot2 is new Intf with
+          function Is_OK return Boolean;
+          function Is_Wobbly return Boolean;
+          procedure Proc
+             with Pre'Class => Is_OK (Prot2); -- (1)
+          procedure Proc2
+             with Pre'Class => Is_OK (Prot2); -- (2)
+          entry Ent
+             with Pre'Class => Is_OK (Prot2); -- (3)
+          entry Ent2
+             with Pre'Class => Is_OK (Prot2); -- (4)
+       private
+          ...
+       end Prot2;
+       -- function Is_OK (Obj : Prot2) return Boolean; -- Inherited here.
+       -- procedure Proc (Obj : in out Prot2); -- Inherited here.
+       -- procedure Ent (Obj : in out Prot2); -- Inherited here.
+   end Pack2;
+
+With Tucker's originally proposed rule (as worded by me), aspects (1) and (3)
+are legal, but aspects (2) and (4) are illegal. While this can be explained, I'd
+say that the usability of this is suspect. One has to look up the definition of
+the interface type(s) to be able to determine whether Pre'Class/Post'Class are
+legal. I know I would rather have an all-or-nothing rule for that, rather than
+having niggle with declaration details.
+
+So, I suggest that we consider an alternative replacement for 13.1.1(16/3):
+
+   If the aspect_mark includes 'Class, then the associated entity shall
+   be a tagged type, a primitive subprogram of a tagged type, or a visible
+   entry or visible protected subprogram of a tagged synchronized type.
+
+This allows all of (1)-(4), but disallows 'Class on private/body operations of
+the protected type.
+
+But all is not yet well...
+
+(2) The interaction of either of these rules with the (im)famous 6.1.1(7/4) --
+the "nominal generic formal type" rule seems problematical (but not fatal).
+
+Consider another version of the original example:
+
+   with Int;
+   package Pack3 is
+       protected type Prot3 is new Intf with
+          function Is_OK return Boolean;
+          function Is_Wobbly return Boolean;
+          procedure Proc
+             with Pre'Class => Is_Wobbly (Prot3); -- (1)
+          procedure Proc2
+             with Pre'Class => Is_Wobbly (Prot3); -- (2)
+          entry Ent
+             with Pre'Class => Is_Wobbly (Prot3); -- (3)
+          entry Ent2
+             with Pre'Class => Is_Wobbly (Prot3); -- (4)
+       private
+          ...
+       end Prot3;
+       -- function Is_OK (Obj : Prot3) return Boolean; -- Inherited here.
+       -- procedure Proc (Obj : in out Prot3); -- Inherited here.
+       -- procedure Ent (Obj : in out Prot3); -- Inherited here.
+   end Pack3;
+
+All four of (1) .. (4) are illegal by 6.1.1(7/4) -- because the "nominal generic
+formal type" only has access to primitive and class-wide subprograms of the
+ancestor type, and Is_Wobbly is not primitive (as discussed by the original
+version of this question).
+
+In the previous Prot2 example, Is_OK does pass 6.1.1(7/4), as is it is an
+inherited primitive operation of Intf. So this is a weird restriction on the
+contents of Pre'Class (and Post'Class).
+
+The good news is that this isn't fatal, in that one can always create a dummy
+interface to use a progentitor to make any helper functions that aren't
+otherwise primitive into primitive functions:
+
+   with Int;
+   package Pack4 is
+       type Dummy_Intf is limited interface;
+       function Is_Wobbly (Obj : Dummy_Intf) return Boolean;
+
+       protected type Prot4 is new Intf and Dummy_Intf with
+          function Is_OK return Boolean;
+          function Is_Wobbly return Boolean;
+          procedure Proc
+             with Pre'Class => Is_Wobbly (Prot4); -- (1)
+          procedure Proc2
+             with Pre'Class => Is_Wobbly (Prot4); -- (2)
+          entry Ent
+             with Pre'Class => Is_Wobbly (Prot4); -- (3)
+          entry Ent2
+             with Pre'Class => Is_Wobbly (Prot4); -- (4)
+       private
+          ...
+       end Prot4;
+       -- function Is_OK (Obj : Prot4) return Boolean; -- Inherited here.
+       -- function Is_Wobbly (Obj : Prot4) return Boolean; -- Inherited here.
+       -- procedure Proc (Obj : in out Prot4); -- Inherited here.
+       -- procedure Ent (Obj : in out Prot4); -- Inherited here.
+   end Pack4;
+
+Of course, this isn't very usable, but perhaps this situation will not come up
+often??
+
+I'm not much interested in revisiting the rabbit hole that 6.1.1(7/4) was,
+especially as it is correct in the majority of the cases -- but perhaps we have
+to?? [I note that we already have in a sense in AI12-0170-1, but for that we're
+mostly confirming the obvious.]
+
+Thoughts??
+
+****************************************************************
