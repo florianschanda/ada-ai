@@ -469,3 +469,742 @@ gizmo. I recall someone telling us that Ada was about a building block approach.
 So lets put any effort into the building blocks, not the gizmos.
 
 ****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, January 12, 2016  9:54 AM
+
+Re AI12-0171: "Jeff will talk to Alan about this. Bob will investigate the
+effect in GNAT with help from Tucker. Bob announces that there are 15 versions
+of the implementation for GNAT for different targets."
+
+I've talked to Alan (who discussed with Andy Wellings).  Their preference would
+be that it should handle multiple suspending tasks, as Ravenscar users are
+likely to expect it, but it's not a strong preference and they might reconsider
+if it had a serious impact on performance.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, January 12, 2016  10:00 AM
+
+I have yet to understand an implementation that cannot handle multiple
+suspending tasks and still properly implement the rest of the semantics.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, January 12, 2016  10:24 AM
+
+> Re AI12-0171: "Jeff will talk to Alan about this. Bob will investigate
+> the effect in GNAT with help from Tucker. Bob announces that there are
+> 15 versions of the implementation for GNAT for different targets."
+
+As I recall, I had no idea how to implement it in GNAT, but Tucker said it's
+trivial.  So I think the ball is in Tucker's court, to prove his point.  I'm
+not planning to do any more investigating any time soon.
+
+I think it failed on Linux (with tasking built on top of Posix threads), and
+we don't know if it fails on any other platforms.
+
+The minutes say, "Bob is concerned about the possibility harming efficiency."
+Yes, I probably was -- after all, this feature is intended to be super-simple
+in order to be super-efficient.  But I think I was even more concerned about
+being able to implement it at all.
+
+> I've talked to Alan (who discussed with Andy Wellings).  Their
+> preference would be that it should handle multiple suspending tasks,
+
+I'm not surprised.  ;-)
+
+>... as Ravenscar users are likely to expect it,
+
+But we know that to be false.  Exactly one customer expected it, in the 20
+years this bug (if it is a bug) has existed in GNAT.
+(I'm pretty sure the it's been that way from the beginning.)
+
+****************************************************************
+
+From: Alan Burns
+Sent: Wednesday, January 13, 2016  3:51 AM
+
+>> >... as Ravenscar users are likely to expect it,
+> But we know that to be false.  Exactly one customer expected it, in
+> the 20 years this bug (if it is a bug) has existed in GNAT.
+> (I'm pretty sure the it's been that way from the beginning.)
+>
+
+If the 'bug' would only manifest itself if there were parallel (not just
+concurrent) calls to Suspend_Until_True then it could easily not be unnoticed
+for 20 years!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, January 13, 2016  4:51 PM
+
+> As I recall, I had no idea how to implement it in GNAT, but Tucker
+> said it's trivial.  So I think the ball is in Tucker's court, to prove
+> his point.  I'm not planning to do any more investigating any time
+> soon.
+>
+> I think it failed on Linux (with tasking built on top of Posix
+> threads), and we don't know if it fails on any other platforms.
+
+Tucker could not believe that this implementation (or any implementation)
+could fail without having some major bug, such that it doesn't meet one of
+the existing requirements. (He's probably right for a bare-machine
+implementation, but that's as far as I can say anything useful.) The question
+of exactly why the implementation failed was raised, and I think we're going
+to need to know that in order to progress this AI.
+
+I'd do that investigation myself, but I know so little about GNAT's runtime
+and Posix threads that I'd have no chance of figuring any of it out. It would
+take me weeks. I would hope that you or someone else at AdaCore would do that.
+The odds that Tucker would do it, are nil, however, because he won't even look
+at his homework until he's on the plane to Italy, and I suspect this problem
+is going to need a better debugging facility than one would have on a
+small-screened laptop.
+
+> The minutes say, "Bob is concerned about the possibility harming
+> efficiency."  Yes, I probably was -- after all, this feature is
+> intended to be super-simple in order to be super-efficient.  But I
+> think I was even more concerned about being able to implement it at
+> all.
+
+That seems non-sensical to me. There is an obvious and simple implementation
+in terms of protected types (which I showed in my earlier messages on this
+topic). Such an implementation is likely to be heavier weight than is wanted
+for this purpose, but surely it would do to meet the requirements of the
+Standard. So an implementation exists. The only question is whether an "super
+lightweight" implementation exists (and the Standard doesn't and can't
+*require* that).
+
+Of course, simply *because* this semantics can be implemented with a protected
+type, there is no reason to risk making existing implementations more
+expensive by adding new requirements. If someone *really* needs suspension
+objects that can work with multiple tasks, they can write a protected object
+that works that way.
+
+> > I've talked to Alan (who discussed with Andy Wellings).  Their
+> > preference would be that it should handle multiple suspending tasks,
+>
+> I'm not surprised.  ;-)
+>
+> >... as Ravenscar users are likely to expect it,
+>
+> But we know that to be false.  Exactly one customer expected it, in
+> the 20 years this bug (if it is a bug) has existed in GNAT.
+> (I'm pretty sure the it's been that way from the beginning.)
+
+Absolutely. Precisely one person tried to end run the clear intent of the rules
+(as explained in the AARM notes). I don't see any reason to change that intent
+at this point, even if someone cleverly took advantage of an unclear part of
+the rules to do something unexpected. But how do we get Tucker and others to
+stand down on this point?? We (the ARG) need your help, I think (at least to
+find some other expert at AdaCore to figure out what's going on). Otherwise,
+this AI will be permanently on our agenda, which is a situation I'd like to
+avoid.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, January 13, 2016  5:26 PM
+
+> ...  Precisely one person tried to end run the clear intent of the
+> rules (as explained in the AARM notes). ...
+
+We actually don't know that.  What we know is that one person using a
+multiprocessor, running on an O/S and with a version of GNAT where this didn't
+work, bumped into this problem.  Clearly on an O/S where it works fine or on a
+monoprocessor, no one will have bumped into it.  As more embedded-computing
+folks move to multiprocessors, this problem may become more common.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, January 13, 2016  6:01 PM
+
+We certainly know that people who try exploit mistakes in the Standard get
+what they deserve, and this is a case where the intent is crystal-clear in the
+AARM and pretty obvious in the RM. I doubt that there are many such people (at
+least intentionally), and I'd suspect that the actual number is one. It's
+always possible that someone mistakenly does this on a monoprocessor, but I
+would guess that they'd realize it was a bug as soon as it was pointed out to
+them.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, January 12, 2016  7:04 PM
+
+But Alan doesn't see this as a bug, nor do I.  To me it is a clever and
+reasonable use of the primitive.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 18, 2016  8:42 AM
+
+> If the 'bug' would only manifest itself if there were parallel (not just
+> concurrent) calls to Suspend_Until_True then it could easily not be
+> unnoticed for 20 years!
+
+Well, multiprocessors have been in common use for at least 10 of those 20
+years.
+
+I don't know if the 'bug' manifests on a uniprocessor, and unfortunately I
+don't really have time to investigate that right now.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 18, 2016  8:55 AM
+
+> Tucker could not believe that this implementation (or any
+> implementation) could fail without having some major bug, such that it
+> doesn't meet one of the existing requirements.
+
+Well, despite what Tucker can or cannot believe, we have an implementation
+that DOES fail the test in question without having some (other) major bug.
+
+I looked at the code months ago, and (if I recall correctly) I didn't
+understand why it doesn't work.  Tucker's opinion that's it's trivial to
+implement efficiently doesn't change that fact.
+
+> > The minutes say, "Bob is concerned about the possibility harming
+> > efficiency."  Yes, I probably was -- after all, this feature is
+> > intended to be super-simple in order to be super-efficient.  But I
+> > think I was even more concerned about being able to implement it at
+> > all.
+>
+> That seems non-sensical to me. There is an obvious and simple
+> implementation in terms of protected types...
+
+OK, if that's true (and I'll believe you, because I don't have time to think
+about it right now), then it's "just" an efficiency issue. But I'll note that
+this feature wouldn't even exist if efficiency weren't the concern -- we'd
+just let programmers implement it themselves.
+
+>...We (the ARG) need your help,
+> I think (at least to find some other expert at AdaCore to figure out
+>what's  going on).
+
+Sorry, but I don't have time to work on this any time soon, and I'm not really
+in a position to tell someone else at AdaCore to work on it.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 18, 2016  11:24 AM
+
+> Well, despite what Tucker can or cannot believe, we have an
+> implementation that DOES fail the test in question without having some
+> (other) major bug.
+>
+> I looked at the code months ago, and (if I recall correctly) I didn't
+> understand why it doesn't work.  Tucker's opinion that's it's trivial
+> to implement efficiently doesn't change that fact. ...
+
+What I should have said is that I couldn't imagine how a correct
+implementation could fail this. That apparently reflects a lack of imagination
+or understanding on my part, since as you point out, we have such an
+implementation.  But the strange thing is that even when looking at the
+implementation it is not obvious how it could fail.  It was certainly not
+designed to *intentionally* fail such a test.  Presumably this is some sort of
+very subtle caching or out-of-order execution problem.  Which is usually a
+safe statement when dealing with multiprocessors!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  3:53 PM
+
+> What I should have said is that I couldn't imagine how a correct
+> implementation could fail this.
+
+As far as I know, that's what you said.
+
+> That apparently
+> reflects a lack of imagination or understanding on my part, since as
+> you point out, we have such an implementation.  But the strange thing
+> is that even when looking at the implementation it is not obvious how
+> it could fail.  It was certainly not designed to *intentionally* fail
+> such a test.
+> Presumably this is some sort of very subtle caching or out-of-order
+> execution problem.  Which is usually a safe statement when dealing
+> with multiprocessors!
+
+And this is the thing we need to understand. If this implementation is in
+fact correct, then it is clear evidence that requiring the case in question
+requires extra overhead, and that is something we don't want to require in
+this case.
+
+But we don't really know if the implementation is correct on the margins.
+For that, we need to understand why it fails, so that we can figure out
+whether a similar failure could occur when used as intended. (That wouldn't
+surprise me, nor would it surprise me if the weird case in fact is a problem
+by itself.)
+
+I doubt that we can progress the AI without having that information (since we
+have a supposedly correct implementation that fails, and fixing that failure
+almost certainly would have a performance cost, and we simply don't want to
+pay *any* unnecessary cost in this case). Surely I wouldn't support
+"confirming" that multiple tasks can indeed call a suspension object in one
+unusual case, unless I was convinced that there was no cost to doing so.
+
+We seem to have an equal number of people who think this weird case should
+work (unless the performance cost is unacceptable), and seem to believe that
+any correct implementation would work (so there isn't any performance cost).
+That way will never lead to a conclusion unless we have some additional
+evidence one way or the other.
+
+So how do we progress the AI? Bob seems to flat out refuse to find the answer;
+not that I blame him, this is likely going to be hard work. But who is going
+to do that relatively hard work??
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 18, 2016  4:32 PM
+
+> So how do we progress the AI?
+
+It's not clear that we can.
+
+>...Bob seems to flat out refuse to find the  answer;
+
+Right.  At least, not during 2016.  I just have way too much other work to do,
+that AdaCore deems more important.  And AdaCore is paying me; ARG is not.  ;-)
+
+>... not that I blame him, this is likely going to be hard work.
+
+Right, I already worked on it a little bit, and the failure was mysterious to
+me.
+
+>...But who is going to do that relatively hard work??
+
+I fear nobody qualified has the time.  Sorry.  :-(
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 18, 2016  9:32 PM
+
+> ... So how do we progress the AI? Bob seems to flat out refuse to find
+> the answer; not that I blame him, this is likely going to be hard
+> work. But who is going to do that relatively hard work??
+
+I took another look at one of our implementations, and I think I understand the
+problem. In at least some of our implementations (e.g. VxWorks) we use both a
+binary semaphore and a mutex (actually implemented using a binary semaphore) in
+the following way:
+
+    type Suspension_Object is record
+       Sema  : System.OS_Interface.SEM_ID :=
+                 System.OS_Interface.semBCreate
+                   (System.OS_Interface.SEM_Q_FIFO,
+                    System.OS_Interface.SEM_EMPTY);
+       Mutex : System.OS_Interface.SEM_ID :=
+                 System.OS_Interface.semBCreate
+                   (System.OS_Interface.SEM_Q_FIFO,
+                    System.OS_Interface.SEM_FULL);
+    end record;
+
+    ...
+
+    procedure Set_False (S : in out Suspension_Object) is
+       St : STATUS;
+       pragma Unreferenced (St);
+    begin
+       --  Need to get the semaphore into the "empty" state.
+       --  On return, this task will have made the semaphore
+       --  empty (St = OK) or have left it empty.
+
+       St := semTake (S.Sema, NO_WAIT);
+    end Set_False;
+
+    --------------
+    -- Set_True --
+    --------------
+
+    procedure Set_True (S : in out Suspension_Object) is
+       St : STATUS;
+       pragma Unreferenced (St);
+    begin
+       St := semGive (S.Sema);
+    end Set_True;
+
+    ------------------------
+    -- Suspend_Until_True --
+    ------------------------
+
+    procedure Suspend_Until_True (S : in out Suspension_Object) is
+       St : STATUS;
+    begin
+       --  Determine whether another task is pending on the suspension
+       --  object. Should never be called from an ISR. Therefore semTake can
+       --  be called on the mutex
+
+       St := semTake (S.Mutex, NO_WAIT);
+
+       if St = OK then
+          --  Wait for suspension object
+
+          St := semTake (S.Sema, WAIT_FOREVER);
+          St := semGive (S.Mutex);
+
+       else
+          --  Another task is pending on the suspension object
+
+          raise Program_Error;
+       end if;
+    end Suspend_Until_True;
+
+---
+
+Now remember that the way the user was trying to use Suspension_Objects was to
+call Set_True at the beginning, and then have two tasks coordinate by using
+"Suspend_Until_True" as getting a Lock and "Set_True" as releasing the Lock.
+
+Now if we create the following sequence we can see the above implementation can
+produce a "raise Program_Error" with this pattern of use, if there is any
+interleaving in the execution of the two Suspend_Until_True's:
+
+   Default_init: S.Sema = 0 (aka empty), S.Mutex count = 1 (aka full)
+
+   Either task: Set_True --  semGive(S.Sema) -- S.Sema count = 1
+
+   Task1: Suspend_Until_True: semTake(S.Mutex, No_Wait), error if fails
+                                 -- S.Mutex count = 0
+                              semTake(S.Sema, Wait_Forever)
+                                 -- S.Sema count = 1, no suspend
+                              semGive(S.Mutex)
+                                 -- S.Mutex count = 1
+
+   Task2: Suspend_Until_True: semTake(S.Mutex, No_Wait), error if fails
+                                 -- S.Mutex count = 0
+                              semTake(S.Sema, Wait_Forever)
+                                 -- S.Sema count = 1, no suspend
+                              semGive(S.Mutex)
+                                 -- S.Mutex count = 1
+
+
+Clearly if Task2 tries to do a semTake on S.Mutex while Task1 holds the S.Mutex,
+we will get a Program_Error, even if Task1 does not actually need to suspend.
+
+So it isn't that hard to create this situation after all.
+
+An alternative approach such as the following doesn't always work, because it
+uses the Mutex with WAIT_FOREVER in Set_True (Set_False need not change), and
+that isn't allowed because Set_True can be called during a protected action,
+including from the interrupt level (D.10(11)).  To make this work, the mutex
+would have to use a spin lock on a multiprocessor and have a ceiling priority --
+i.e. be the kind of mutex used to implement a protected object -- and VxWorks in
+particular doesn't provide one of those (at least I couldn't find one).  You
+would end up having to play the same sort of tricks we presumably play with
+protected objects on VxWorks, where interrupt-level protected objects use a
+different mechanism (e.g. hardware priorities) than non-interrupt level
+protected objects (which can use VxWorks mutexes).
+
+In any case, here is a mechanism that would work, provided that the mutexes used
+spin locks and ceiling priorities.
+
+    procedure Set_True (S : in out Suspension_Object) is
+       St : STATUS;
+       pragma Unreferenced (St);
+    begin
+       St := semTake (S.Mutex, WAIT_FOREVER);
+       S.Is_Waiting := False;   -- This is a No-Op if no waiting task
+       St := semGive (S.Sema);  -- Wake up any waiting task
+       St := semGive (S.Mutex);
+    end Set_True;
+
+    ...
+
+    procedure Suspend_Until_True (S : in out Suspension_Object) is
+       St : STATUS;
+    begin
+       --  Determine whether another task is pending on the suspension
+       --  object. Should never be called from an ISR. Therefore semTake can
+       --  be called on the mutex
+
+       St := semTake (S.Mutex, WAIT_FOREVER);
+       St := semTake (S.Sema, No_Wait);
+       if St = OK then
+          --  State was "True" already
+          --  Just return after releasing the mutex
+          St := semGive (S.Mutex);
+          return;
+       end if;
+       --  State is "False," check if anyone is waiting
+       if S.Is_Waiting then
+          --  Someone was already waiting, error
+          St := semGive (S.Mutex);
+          raise Program_Error;
+       end if;
+
+       --  Remember that a task is waiting
+       S.Is_Waiting := True;
+       St := semGive (S.Mutex);
+
+       --  Suspend until a semGive on Sema
+       St := semTake (S.Sema, Wait_Forever);
+
+    end Suspend_Until_True;
+
+
+So hopefully this gives us some idea of the tradeoffs -- perhaps enough to
+allow us to consider the AI again.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  10:18 PM
+
+...
+> I took another look at one of our implementations, and I think I
+> understand the problem.
+
+Thanks Tuck!!!
+
+<<Lengthy description of the problem>>
+
+...
+> Clearly if Task2 tries to do a semTake on S.Mutex while Task1 holds
+> the S.Mutex, we will get a Program_Error, even if Task1 does not
+> actually need to suspend.
+>
+> So it isn't that hard to create this situation after all.
+
+And it's pretty clear that this implementation does meet D.10(7./2), since the
+Set_False and Set_True operations just use a single mutex operation (which I
+presume is atomic, else nothing makes sense).
+
+So there clearly is some value to the rules as intended; one can use a simpler
+implementation for Suspend_Until_True if one doesn't require it to be atomic
+itself and assume more than one task calling it is an error.
+
+It's of course possible to implement a Suspension_Object in terms of a protected
+object (or, in as you suggest, terms of primitives that act like a protected
+object), but that seems like a form of abstraction inversion -- especially if
+the target doesn't directly support those primitives (as on VxWorks).
+
+> So hopefully this gives us some idea of the tradeoffs -- perhaps
+> enough to allow us to consider the AI again.
+
+Yup. It seems I was right all along. ;-)
+
+I guess that leaves us with the problem of properly defining what happens when
+multiple tasks call Suspend_Until_True. It seems we don't want to allow it, but
+we wouldn't want any overhead to check that. A Bounded Error seems right, but
+what are the bounds? I'd hate to make it erroneous.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 18, 2016  11:10 PM
+
+> ... I guess that leaves us with the problem of properly defining what
+> happens when multiple tasks call Suspend_Until_True. It seems we don't
+> want to allow it, but we wouldn't want any overhead to check that. A
+> Bounded Error seems right, but what are the bounds? I'd hate to make it
+> erroneous.
+
+The bounds are either it raises Program_Error, or it works as our poor user
+hoped it would.
+
+By the way, we could make it much more *likely* that it would work as our user
+had hoped by inserting the following at the beginning of Suspend_Until_True:
+
+     St := semTake(S.Sema, No_Wait);
+     if St = OK then
+        return;
+     end if;
+
+This would handle the case where the State is already True, without involving
+the mutex. The only way things would fail would be if the "Set_True" happened
+after this first call on SemTake, but before the second call.  In fact I believe
+this change would always correctly handle the particular use-case identified in
+the AI, because the Set_True is being performed by one of the two tasks involved
+in the race, so you would never get a Program_Error due to both tasks going
+after the same mutex at the same time.
+
+Hmmm..., that might allow us to narrow the restriction ... e.g. two tasks must
+not be calling Suspend_Until_True concurrently if a third task could be calling
+Set_True.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 18, 2016  11:27 PM
+
+> Hmmm..., that might allow us to narrow the restriction ... e.g. two
+> tasks must not be calling Suspend_Until_True concurrently if a third task
+> could be calling Set_True.
+
+A better way of saying it might be:  It is a bounded error if the State is False
+and two tasks are calling Suspend_Until_True concurrently, even if the State
+becomes True before either of them blocks.  Program_Error might be raised in
+this case even though only one ultimately would have blocked.
+
+This means that so long as you know the State is True on entry to
+Suspend_Until_True for at least one of the tasks, you are fine.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, January 19, 2016  6:39 AM
+
+> I took another look at one of our implementations, and I think I understand
+> the problem.
+
+Thanks.
+
+> In at least some of our implementations (e.g. VxWorks) ...
+
+What about Linux?  I think the original bug report was on Linux.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, January 19, 2016  9:45 AM
+
+I believe our default implementation on Linux uses mutexes in Set_True, and
+doesn't seem to have any obvious race conditions.  The original bug report was
+actually on Mac OSX (O708-005), but you indicated you were able to reproduce it
+on Linux.  Pat Rogers said that we didn't have full support for Symmetric Multi
+Processing (SMP) in our critical sections yet.  Not quite sure what that means
+in the context of Linux or Mac OSX, which both have had SMP for many years.
+
+Here is the platform info for the original bug report:
+
+Platform: x86-64 Mac OS X (64 bits)
+Version: GNATMAKE GPL 2015 (20150428-49)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Tuesday, January 19, 2016  10:00 PM
+
+> I believe our default implementation on Linux uses mutexes in
+> Set_True, and doesn't seem to have any obvious race conditions.
+
+That's the only one I looked at carefully (IIRC), and I didn't see any obvious
+race conditions, either.
+
+>...The original bug report was actually on Mac OSX  (O708-005), but you
+>indicated you were able to reproduce it on Linux.
+
+Ah, OK, I had forgotten that.  I always try to reproduce bugs on Linux, because
+that's what I have at hand.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, January 19, 2016  10:11 AM
+
+> That's the only one I looked at carefully (IIRC), and I didn't see any
+> obvious race conditions, either. ...
+
+Pat Rogers mentioning something about incomplete SMP implementation makes me
+think that perhaps the mutexes we are using are not guaranteed to work in a
+multiprocessor environment, or we aren't doing the appropriate amount of cache
+flushing and "fencing," so that perhaps the S.Waiting flag isn't being properly
+updated across processors.
+
+****************************************************************
+
+From: Arnaud Charlet
+Sent: Tuesday, January 19, 2016  10:22 PM
+
+Pat was talking about our bare board implementation, not our POSIX/Linux/Darwin
+implementation, so that's unrelated to this discussion as far as I know.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Tuesday, January 19, 2016  9:25 AM
+
+>I took another look at one of our implementations, and I think I understand
+>the problem. ...
+
+That is because the algorithm is wrong. What has been constructed is 1/2 of a
+monitor. The Suspend_Until_True sets the monitor lock and suspends itself, but
+the monitor lock then is not opened once it is suspended. The Set_True function
+and the Set_False functions ignore the monitor lock, which is not allowed. You
+either must use only a single semaphore or build a complete functioning monitor.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, February 9, 2016  10:56 AM
+
+> A better way of saying it might be:  It is a bounded error if the
+> State is False and two tasks are calling Suspend_Until_True
+> concurrently, even if the State becomes True before either of them
+> blocks.  Program_Error might be raised in this case even though only one
+> ultimately would have blocked.
+
+Or both might be blocked, I suppose.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 9, 2016  6:32 PM
+
+> Another item for the Pisa agenda?
+
+Of course, it's an open AI. It would be on the agenda even if neither you nor
+Bob had provided any additional information.
+
+Do you have a specific wording proposal (in particular, where does the wording
+go?). Perhaps you should just spend 10 minutes and update the AI (it's assigned
+to you and Bob anyway). [As always, it's easier to have a wording proposal and
+then decide not to use it rather than not having a wording proposal and then
+having to decide use something nebulous.]
+
+****************************************************************
+
+From: Alan Burns
+Sent: Wednesday, February 10, 2016  2:51 AM
+
+Would ARG like the IRTAW (which meets in April) to discuss both Synchronous Task
+Control and Synchronous Barriers?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, February 10, 2016  7:02 AM
+
+Yes, please!
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Wednesday, February 10, 2016  6:56 AM
+
+Yes please Alan, we do seem to spend some time trying to second guess exactly
+what the IRTAW would like.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 10, 2016  2:05 PM
+
+I agree here as well. I'd also like some idea of how IRTAW plans to extend
+Ravenscar in the future. It seems to me that the two goals ("small, simple
+runtime" and "analyzability") are diverging, since with more powerful computers
+and techniques, more can be analyzed all the time, but what can be put into a
+small, simple runtime changes little over time. That's especially true for bare
+machine systems (I always think of our MS-DOS tasking system as a bare machine,
+since MS-DOS provided little other than I/O - we did everything else ourselves
+-- so I consider my expertise to be in the bare machine area). Clearly, in a
+system where the runtime sits on top of some other OS (be it Windows or Posix or
+some real time kernel), there's little advantage to the runtime to excluding
+features that are provided by the underlying system anyway. So if that exclusion
+isn't needed for analysis reasons, it's just in the way. OTOH, on a bare
+machine, every new capability means more work and complication (and often
+verification effort). I suspect that these diverging goals need separate
+profiles going forward, but of course I know just enough to cause trouble. :-)
+
+****************************************************************
