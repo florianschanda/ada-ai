@@ -1,14 +1,15 @@
-!standard 13.1.1(16/3)                                 16-02-24  AI12-0182-1/01
-!class binding interpretation 16-02-24
+!standard 13.1.1(16/3)                                 16-04-21 AI12-0182-1/02
+!class ramification 16-04-21
 !status work item 16-02-24
 !status received 16-02-04
 !priority Low
 !difficulty Easy
-!qualifier Omission
 !subject Pre'Class and protected operations
 !summary
 
-** TBD.
+Class-wide aspects cannot be given for protected operations or task entries,
+regardless of whether the protected type or task type inherits from an
+interface.
 
 !question
 
@@ -28,28 +29,44 @@ A strict follower of LSP therefore cannot use Pre unless no Pre'Class is
 inherited. Since a wrapper subprogram would not be allowed if the
 Synchronization_Kind was By_Entry or By_Protected_Subprogram (as the
 wrapper is neither of these things), we have a problem. Should Pre'Class
-be allowed in these contexts? (Yes.)
+be allowed in these contexts? (No.)
 
+!response
 
-!recommendation
+The problem can always be worked around by introducing additional interfaces.
+Any class-wide preconditions can be placed on such an additional interface,
+such that it will be inherited by the protected operations. Such an interface
+can have the appropriate Synchronization_Kind (unlike a wrapper subprogram),
+and it would not have any semantic effect on operations of existing
+interfaces (the same operations, calls, and uses would be legal).
 
-(See Summary.)
-
-!wording
-
-Modify 13.1.1(16/3):
-
-   If the aspect_mark includes 'Class, then the associated entity shall
-   be a tagged type, a primitive subprogram of a tagged type, or an entry
-   or protected subprogram that implements a primitive subprogram of a
-   tagged type.
+Since tagged protected types is a rarely used feature, and there is a
+workaround whose main drawback is extra verbosity, we do not make a language
+change at this time.
 
 !discussion
 
-Note that the same issues as described in the question apply to task entries;
-the rules are written to cover those as well.
+Note that the same issues as described in the question apply to task entries.
 
-** Mostly TBD. -- See RLB mail of Feb 24th.
+Any attempt to fix this issue has to be aware of interactions with 6.1.1(7/4)
+(from AI12-0113-1). The effect of that AI is to only allow primitive and
+class-wide operations of the type in Pre'Class expressions. Again, since
+protected operations are not primitive, they would not be allowed in a
+Pre'Class expression unless the operation was inherited from an interface.
+
+Thus, a simple rule allowing Pre'Class and Post'Class to be specified
+by protected operations and task entries that implement an interface operation
+would have a significant useability drawback (any routines specific to this
+particular concrete implementation couldn't be used in a class-wide pre- or
+postcondition). It also would mean that the Legality of Pre'Class on a
+protected operation could easily change during program maintenance (as
+primitive routines are added, deleted, or changed). Such a rule doesn't appear
+to be much of an advantage over the current situation.
+
+One could allow Pre'Class and Post'Class to be specified by protected
+operations and task entries of any synchronized tagged type. But for that
+to work cleanly, we'd also need to somehow allow them in the class-wide
+pre- or postcondition expression. That does not look easy.
 
 !ASIS
 
@@ -57,7 +74,8 @@ No ASIS effect.
 
 !ACATS test
 
-This rule should be tested with B-Tests and C-Tests; those are likely included
+We need B-Tests to check that Pre'Class and Post'Class are not allowed for
+protected operations and task entries; those are likely included
 in the detailed objectives for 6.1.1 (which already have been created).
 
 !appendix
@@ -401,9 +419,12 @@ Sent: Wednesday, February 24, 2016  7:50 PM
 >
 > Yes, that seems appropriate ;-).
 
-I've tried doing this (it will be AI12-0182-1; I mostly wanted the number so I could put it into my ACATS tests and documents), and in a case of what Steve calls "heat vision", I've got more questions than answers. :-)
+I've tried doing this (it will be AI12-0182-1; I mostly wanted the number so I
+could put it into my ACATS tests and documents), and in a case of what Steve
+calls "heat vision", I've got more questions than answers. :-)
 
-(1) Are we sure that we want the suggested rule? Consider the original example with some additional preconditions:
+(1) Are we sure that we want the suggested rule? Consider the original example
+with some additional preconditions:
 
    package Int is
       type Intf is synchronized interface;
@@ -526,5 +547,204 @@ to?? [I note that we already have in a sense in AI12-0170-1, but for that we're
 mostly confirming the obvious.]
 
 Thoughts??
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, February 24, 2016  8:26 PM
+
+I cannot see how we can justify doing anything complex to support this
+feature.
+
+At this point I would suggest one can neither override nor define a 'Class
+aspect on a protected operation.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, February 24, 2016  8:50 PM
+
+I guess it comes down to how important LSP operation of Pre'Class is on
+protected operations. If one considers that important, then doing nothing is
+probably not good.
+
+It certainly would be consistent to adopt your original rule and do nothing
+else. In that case, you could only write Pre'Class on implemented-by
+routines, and you could only use implemented-by routines in Pre'Class.
+Usability isn't wonderful, but it would work and cost relatively little in
+terms of language rules (and hopefully implementation of those rules).
+
+The alternative of doing nothing at all is also consistent (we don't have to
+worry about what one can write in a Pre'Class if you can't write a Pre'Class
+:-). That leaves the LSP hole with no workaround for By_Entry and
+By_Protected_Subprogram cases. (One could imagine fixing that by allowing
+explicit wrappers, since the compiler is generating implicit wrappers with
+the same parameters -- but that's probably even more complex than the more
+straightforward fix - since such wrappers would have to be heavily
+restricted.)
+
+I agree that the full fix (which is to allow tagged PTs to use Pre'Class on
+any protected operation, and allow Pre'Class to use any protected operation)
+seems to be too complex for a lesser-used part of the Standard.
+
+Anyway, I guess we'll have to talk about this, at least a little -- I don't
+know exactly what I think and it would help to hear from a broader range
+than the usual suspects here in e-mail.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, February 25, 2016  4:55 AM
+
+> With Tucker's originally proposed rule (as worded by me), aspects (1) 
+> and (3) are legal, but aspects (2) and (4) are illegal. While this can be 
+> explained, I'd say that the usability of this is suspect. One has to 
+> look up the definition of the interface type(s) to be able to 
+> determine whether Pre'Class/Post'Class are legal. I know I would 
+> rather have an all-or-nothing rule for that, rather than having niggle
+> with declaration details.
+
+I don't find this surprising. Contracts and the LSP are for OO stuff,
+therefore anything related to contracts originates from the interface part.
+Operations that are /not/ part of an interface are not subject to contracts,
+like a PT that does not implement any interface.
+
+If you really want to be fully consistent, then you'll have to consider all
+PT as tagged - we certainly don't want to go that way.
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Thursday, February 25, 2016 11:54 AM
+
+JP has a point on this one (except for the dismissive "stuff" attached to
+OOP ;-) Moreover, the interaction between OOP inheritance and concurrency
+(more specifically, synchronization protocols, which are special kind of
+"operations" to stay on JP's point) is known to be a thorny problem.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, February 25, 2016  3:17 PM
+
+Surely, but neither of you actually answered the question.
+
+Which is, what to do? I can't test the rule if we don't decide what it is!
+
+(1) Do nothing; that effectively means that OOP contracts can *only* be
+   given/modified on interfaces -- one would have to introduce an extra
+   interface to make any (OOP) precondition changes to a tagged synchronized
+   type.
+
+(2) Adopt Tucker's rule only; that allows making direct OOP precondition
+    changes, but all of the operations have to be declared in an interface
+    (so an extra interface still might be required).
+
+(3) Something else, presumably to get completely get rid of the need for an
+    extra interface.
+
+Choosing (1) has the extra advantage that I can immediately write the
+necessary tests (and it also requires the least objectives in total, because
+synchronized tagged types don't need any separate testing from interfaces),
+but surely we shouldn't be guided solely what's best for testing!
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, February 26, 2016  2:36 AM
+
+> Surely, but neither of you actually answered the question.
+> 
+> Which is, what to do? I can't test the rule if we don't decide what it 
+> is!
+
+I think my comment implied 1)...
+
+> (1) Do nothing; that effectively means that OOP contracts can *only* 
+> be given/modified on interfaces
+
+But we are talking about pre/post'CLASS here, not simple Pre/Post, right? So
+yes, I find it quite natural that these are connected to the interface only
+ - since that's the only thing that allows "classes" of POs.
+
+> -- one would have to introduce an
+> extra interface to make any (OOP) precondition changes to a tagged 
+> synchronized type.
+ 
+So what? The alternative is to allow pre/post'Class on things not related to
+inheritance. Not better if you ask me...
+
+****************************************************************
+
+From: Tuillo Vardanega
+Sent: Friday, February 26, 2016  3:21 AM
+
+I am tempted to side with JP on the preference for (1), for the reason he
+gives. But I am also not fully happy with it, because the language allows in
+fact POs to derive from interfaces, which justifies reasoning on 'Class for
+ Pre and Post for them.
+
+All in all, I suppose the bottom line is to require that one cannot override a
+'Class aspect on a protected operation (I am not sure that I would go as far
+as also disallowing one to define that).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, February 26, 2016  4:21 PM
+
+...
+> > -- one would have to introduce an
+> > extra interface to make any (OOP) precondition changes to a tagged 
+> > synchronized type.
+> > 
+> So what? The alternative is to allow pre/post'Class on things not 
+> related to inheritance. Not better if you ask me...
+
+Not at all. The proposed alternative (2) is to allow Pre/Post'Class on
+implemented-by protected operations only (that is, the ones that override
+interface operations, although the mechanism is formally more than just
+overriding). Surely those are "related to inheritance". And specifying Pre is
+very different than Pre'Class if there is already a non-trivial Pre'Class --
+I would hope that style guides would not allow mixing of them.
+
+Besides, there's no such limitation for "regular" tagged types; you can use
+Pre/Post'Class on any operation even if there is no intention to ever inherit
+from them. (I.e. "final" in some other languages.) And one easily could
+imagine a future version of Ada allowing limited derivation from tagged
+synchronized types. (The problem being implementation inheritance, not the
+inheritance of the operations.) It seems wrong to assume that such derivations
+are forever impossible.
+
+I can see the argument that it isn't worth the complication to allow anything
+for protected operations, as the workaround (introduce extra, otherwise
+unneeded interfaces) isn't too awful [the main objection is just extra clutter
+- a LOT of extra clutter] and the feature in general isn't used that much.
+(Given my personal feelings about interfaces, it's funny that I'm even arguing
+this... :-) But I don't see any different between any of the options (1, 2, or
+3) in relation to inheritance -- they're all related to inheritance, in my
+view. You don't have to actually inherit something to be related to
+inheritance, otherwise you are basing language rules on what the programmer
+intends to write.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, February 26, 2016  4:37 PM
+
+> ... I can see the argument that it isn't worth the complication to 
+> allow anything for protected operations, as the workaround (introduce 
+> extra, otherwise unneeded interfaces) isn't too awful [the main 
+> objection is just extra clutter - a LOT of extra clutter] and the 
+> feature in general isn't used that much....
+
+At this point I think I would vote for only allowing an overriding of 'Class
+aspects on primitives, and give up on doing it on protected operations.  As
+you point out, you can create multiple synchronized interfaces if it is
+important to have (effectively) two different 'Class aspects on two (concrete)
+descendants of the same synchronized interface.
+ 
+That seems adequate for this very special case, and it simplifies our life.
+If this becomes a hot button, we can always permit it some time down the road.
 
 ****************************************************************
