@@ -1,0 +1,367 @@
+!standard 13.14(15)                                 16-04-21  AI12-0186-1/01
+!class ramification 16-04-21
+!status work item 16-04-21
+!status received 16-01-09
+!priority Low
+!difficulty Easy
+!subject Profile freezing for the Access attribute
+!summary
+
+Using the access attribute does not freeze the profile of the associated
+access type; that only happens upon a call of a value of the access type,
+use as a generic actual parameter of an instance, the occurrence of a
+body, or at the end of the declarative part.
+
+!question
+
+Consider:
+
+   procedure Proc (It : Blob);
+   type Ptr is access procedure (It : Blob);
+       
+   Link  : Ptr :=  Proc'access;
+
+The declaration freezes Ptr, and the expression freezes Proc,  but NOT its
+profile. However, freezing an entity means (intuitively) that the entity is
+usable at that point. An access_to_subrogram with an unknown profile is certainly
+not usable yet.
+
+13.14(15) says that any names in a full_type_declaration are frozen when the
+type is. Thus, in the above example, the declaration of Link freezes Ptr,
+and Ptr freezes Blob (because it is a name appearing in a
+full_type_declaration). This effectively freezes the profile, since everything
+in it is frozen.
+
+However, a couple of ACATS tests fail when this interpretation is implemented.
+Is our compiler or the ACATS tests correct? (The ACATS tests.)
+
+!response
+
+13.14 freezes profiles only in a few places:
+  * "General" freezing points like the occurrence of a body or the
+    end of a declarative part. (At these places, everything is frozen.)
+    - 13.14(3/5) and others.
+  * Calls to a function - 13.14(10.1/4) and 13.14(8.1/3).
+  * When a subprogram is used as an actual parameter to a generic
+    instantation - 13.14(10.2/4).
+
+A reference to an Access attribute is definitely not a place where the profile
+of a subprogram is frozen.
+
+The questioner has misinterpreted 13.14(15). The "expressions and names" it is
+talking about are those that explicitly appear directly in the syntax of the
+full_type_declaration; it does not refer to names that appear in other entities
+that happen to occur in the full_type_declaration.
+
+This is easy to see. First, if any name was involved, none of the wording about
+subtypes would be necessary (every subtype_indication includes a number of names
+and expressions). Typically, the AARM marks text that is intentionally
+redundant, and this text is not marked.
+
+Even more obviously, AARM 13.14(15.b) says that "Freezing an access type does
+not freeze its designated subtype." If the names that occurred within a
+subtype_indication were included in 13.14(15), it would be impossible for
+this to be true:
+   type Ptr2 is access Blob;
+This full_type_declaration does not freeze Blob, even though the "name" Blob
+appears in the subtype_indication of the access_type_definition.
+
+Finally, this wording ("any expressions or names within the full type
+definition cause freezing") has been in every version of since the very early
+drafts of Ada 9x (it appears in version 2.0 of March 1993). It is impossible
+to believe that every Ada expert since that time has been misreading this
+paragraph.
+
+As such, there is nothing wrong with the Standard. We add a To Be Honest note
+in order to clarify the wording for anyone that remains confused.
+
+!wording
+
+Add before AARM 13.14(15.a):
+
+AARM To Be Honest:
+
+The "expressions or names within the full_type_declaration" is speaking
+syntactically; any expressions or names inside of other entities appearing in
+the type declaration are not considered. In particular, the parts of any
+subtype_marks or subtype_indications appearing in full_type_declaration
+are frozen only if this rule specifies that the associated subtype is
+frozen. (For instance, subtypes appearing in profiles and in designated types
+are not frozen by this rule.)
+
+!discussion
+
+There clearly is some implementation impact from being able to use the
+Access attribute for a subprogram with an unfrozen profile. In particular,
+if a wrapper is needed, that will have to be deferred (at least) until the
+freezing point of the profile.
+
+However, Ada 2012 already has similar requirements for incomplete types (which
+are never frozen, confirmed by AI12-0155-1). For a Taft-amendment type, the
+real profile of a subprogram may not be known until the body is compiled, long
+after the specification is compiled. For instance:
+
+    package P1 is
+        type T is private;
+        ...
+    private
+        type Taft;
+        type T is access Taft;
+        type Ptr is access procedure (It : Taft); -- Legal, even in Ada 95.
+        package Inner is -- Make the operation non-primitive.
+           procedure Proc (It : Taft); -- Legal in Ada 2012.
+        end Inner;
+        Link : Ptr := Proc'Access; -- Legal.
+    end P1;
+
+So long as Link is called after the completion of Taft in the body, this is
+all legal. A compiler has to be able to generate Proc'Access without knowing
+anything about the representation of Taft. (If Taft is a tagged incomplete
+type, a child package could even call Link without knowing the exact
+representation of Taft.)
+
+Since similar cases already exist, there doesn't seem to be any need to adopt
+an incompatible rule to have Proc'Access freeze the profile.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+A fairly low priority ACATS C-Test is needed to check examples like that
+in the question and discussion.
+
+!appendix
+
+From: Edmond Schonberg
+Sent: Saturday, January  9, 2016  4:42 PM
+
+A propos of which ... [split from a different e-mail thread]
+
+we are having troubles implementing properly the old AI05-019.  The specific
+example is the declaration for an object to subprogram:
+
+       procedure Proc (It : Blob);
+       type Ptr is access procedure (It : Blob);
+       
+       Link  : Ptr :=  Proc’access;
+
+The declaration freezes Ptr, and the expression freezes Proc,  but NOT its
+profile.  Now freezing an entity means (intuitively) that the entity is usable
+at that point.  An access_to_subrogram with an unknown profile is certainly
+not usable yet.  The GNAT backend has always assumed that when creating that
+object the full profile is available (i.e. its parameter types are frozen) and
+crashes or misbehaves if this is not the case.  Is this is a gap in the heart
+of darkness (13.14) , or are we misleading AI0-019?  A couple of ACATS tests
+trigger additional errors if subprogram profiles are frozen when an Access
+reference attribute appears in an object declaration. 
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, January 11, 2016  9:41 AM
+
+This may be so painfully obvious that people were too embarrassed to answer.
+I would still like some comment or confirmation:
+
+  does the declaration of Link freeze type Blob?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 11, 2016  11:59 AM
+
+Not according to 13.14.  The only things that freeze profiles are the "general"
+freezing points, a function call, and a generic instantiation.  I believe the
+freezing should be deferred until you make a call on a dereference of an object
+of type Ptr.  In other words, when you make a function call, you freeze the
+profile, whether it comes from a function declaration, or from an
+access-to-function type.  Access-to-procedure profiles would only be frozen by
+"general" freezing points, and presumably by generic instantiations.
+
+Some sort of AI seems needed to clarify this!
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, January 11, 2016  12:23 PM
+
+> Not according to 13.14.  The only things that freeze profiles are the
+> "general" freezing points, a function call, and a generic instantiation.
+
+and an object declaration (13.14 (6), That certainly freezes the type of the
+object. Then 13.14 (16) states that all names in the type definition are
+frozen. So I’m not convinced.
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Monday, January 11, 2016  1:07 PM
+
+(Presumably you mean 13.14(15).)  The "names" referred to there don't
+include things like subtype_marks, but refers to names in expressions.  Note
+that component subtypes are called out separately in that rule.  So this
+doesn't include parameter subtypes of a profile in the access-to-subprogram
+type.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, January 11, 2016  1:18 PM
+
+> (Presumably you mean 13.14(15).)  The "names" referred to there don't 
+> include things like subtype_marks, but refers to names in expressions.
+
+Could be the intent, but I certainly cannot deduce it from the text. A name
+is something that denotes an entity, and that certainly includes
+subtype_marks. Why are they excluded by this paragraph?
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Monday, January 11, 2016  1:34 PM
+
+Umm, so that subtypes in profiles wouldn't be frozen?  ;-)
+
+Let's just say that I think it's the intent that those subtypes aren't frozen
+by declaration of an object of the access type.  I believe that the
+"expressions and names" of the rule refers to top-level syntactic instances of
+those things, and the "name" of a subtype_mark is buried deeper and doesn't
+count.  Perhaps the rule could be clearer (assuming that's the intent).  Let's
+see what other think.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, January 11, 2016  2:21 PM
+
+I agree.  13.14(15) says:
+
+   "At the place where a subtype is frozen, its type is frozen. At the place
+   where a type is frozen, any expressions or names within the
+   full_type_definition cause freezing; the first subtype, and any component
+   subtypes, index subtypes, and parent subtype of the type are frozen as well.
+   For a specific tagged type, the corresponding class-wide type is frozen as
+   well. For a class-wide type, the corresponding specific type is frozen as
+   well."
+
+I believe the use of the term "name" is overly general here, and should not
+include names that are subtype_marks.  Otherwise, the discussion about first
+subtype, component subtypes, index subtypes, etc. would be largely redundant.
+It should probably be "names that denote objects or subprograms" ...
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, January 11, 2016  2:34 PM
+
+Let us say that as a justification,  “otherwise this other line would be
+redundant” is not terribly compelling.  In any case we’ll have to rethink the
+implementation of freezing for access_to_subprograms in GNAT.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April 21, 2016  7:04 PM
+
+I'm trying to make sense of this discussion so I can create an AI.
+
+I don't mind the "otherwise this line would be redundant" justification, as we
+try hard to avoid redundant text in the Standard, and also try to mark
+anything that is intentionally redundant.
+
+But I can do better: AARM 13.14(15.b) says "Freezing an access type does not
+freeze its designated subtype." If we used Ed's interpretation of 13.14(15),
+there is no way that could be true, since there is always a "name" within the
+subtype_mark of the designated type:
+
+          type Ptr is access Blob;
+          P : Ptr; -- Does not freeze Blob by 13.14(15.b)
+
+Since Blob is not frozen here (to make the clear intent of 15.b True),
+13.14(15) cannot be talking about the "name" within the "subtype_mark" Blob.
+QED.
+
+Tucker suggested trying to reword the rule to make it clearer that "name"
+isn't talking about names in subtype_marks. Specifically:
+
+> It should probably be "names that denote objects or subprograms" ...
+
+I think his rewording is dangerous, as it potentially leaves a hole for other
+kinds of entities (exceptions? named numbers? etc.)
+
+I think we'd be better off with a To Be Honest note suggesting that the
+"expressions or names within the full_type_declaration" is speaking
+syntactically; we're not looking inside of other entities appearing in the
+type declaration (like subtype_marks and subtype_indications). If it turns out
+not to be right either, we at least won't have broken anything (AARM Notes can
+always be ignored, and are much more easily fixed than RM wording.) This
+wording has been around since (at least) Ada 9X version 3.0 (and a version of
+the rule is in version 2.0 as well), and I don't remember anyone challenging
+it before. Doesn't seem critical to change.
+
+---
+
+I've also been mulling the actual problem. It seems to me that it is related
+(in a sense) to incomplete types (there's not much difference between an
+unfrozen type and an incomplete type, which never is frozen). One can construct
+a similar case with Taft-Amendment types:
+
+    package P1 is
+        type T is private;
+        ...
+    private
+        type Taft is tagged;
+        type T is access Taft;
+        type Ptr is access procedure (It : Taft); -- Legal, even in Ada 95.
+        package Inner is -- Make the operation non-primitive.
+           procedure Proc (It : Taft); -- Legal in Ada 2012.
+        end Inner;
+        Link : Ptr := Proc'Access; -- Legal.
+    end P1;
+
+The declaration of Link doesn't violate any freezing rules, and it doesn't
+violate any accessibility or conformance rules, so it must be legal. And one
+could call it in a child package that has no knowledge of the type (even worse
+than the freezing case).
+
+An actual call will (outside of incomplete types) freeze the types of the
+parameters, so one never has to generate a call without freezing. But one
+might need to defer a wrapper until the end of the unit (or when the profile
+is frozen; usually I find the former easier, but YMMV):
+
+    package P2 is
+       type Blob is range 0 .. 100;
+       function Func (It : Blob) return Natural;
+       type Ptr is access function (It : Blob) return Natural;
+       Link : Ptr := Func'Access; -- Does not freeze the profile of Func, thus does not freeze Blob.
+       for Blob'Size use 8; -- An evil rep. clause.
+       Var : Natural := Link(10); -- Freezes the profile of Ptr, thus freezes Blob.
+    end P2;
+
+If Func'Access needs a wrapper of some sort, it can't be generated until the
+profile is frozen, and that doesn't happen until Var is declared. The explicit
+use of Func'Access just has to be a label of some sort. (I generally just do
+deferred things at the end of the unit, as it doesn't matter where the actual
+code lives, since it is accessed by the label anyway. Once you have to defer
+it a little, it doesn't matter how much it gets deferred.)
+
+---
+
+Anyway, I've concluded that there isn't any real problem here, at least not
+any NEW problem, so I'm going to write this up as a Ramification (with a To
+Be Honest note) and you can throw bricks in Pisa.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April 21, 2016  8:08 PM
+
+The proposed TBH uses Gary's explanation that "name" and "expression" in this
+rule are talking about direct syntax and not about names or expressions that
+happen to occur in other constructs that make up the full_type_declaration.
+I'm happy to take credit for the AI if it is correct, but if there is
+something wrong with Gary's explanation then that's all his idea. ;-) :-)
+
+****************************************************************
