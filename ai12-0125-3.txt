@@ -1,4 +1,4 @@
-!standard 5.2.1(0)                                 16-01-08  AI12-0125-3/02
+!standard 5.2.1(0)                                 16-04-11  AI12-0125-3/03
 !standard 4.1(2/3)
 !standard 8.6(9/4)
 !class Amendment 15-10-13
@@ -135,6 +135,88 @@ Add after 8.6(9/4):
    --     Anon (A(I));
    --  end;
 
+The following example is some real code from the web log analyzer that makes
+usage reports for Ada-Auth.org and Archive.AdaIC.com (among others). The value
+of this proposal in reducing clutter is more evident in a real example. First,
+the original Ada 2012 code (41 lines):
+
+    procedure Record_Amount (Data : in out Item_Data;
+                             Month : in Month_Number;
+                             Year : in Report_Year_Number;
+                             Amount : in Item_Count := 1;
+                             Is_Scanner : in Boolean := False;
+                             Is_View : in Boolean := True) is
+    begin
+        if Data.By_Month (Year, Quarter_Num (Month)) = Empty_Quarter_Item_Data then
+            -- We need to allocate an item.
+            Last_Allocated_Quarter_Item_Data := Last_Allocated_Quarter_Item_Data + 1;
+            Data.By_Month (Year, Quarter_Num (Month)) :=
+               Last_Allocated_Quarter_Item_Data;
+        end if;
+        Data.Total.Hit_Count := Data.Total.Hit_Count + Amount;
+        Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count :=
+           Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                (Quarter_Item (Month)).Hit_Count + Amount;
+        if not Is_Scanner then
+            Data.Total.Non_Scanner_Hit_Count := Data.Total.Non_Scanner_Hit_Count + Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).Non_Scanner_Hit_Count :=
+               Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                    (Quarter_Item (Month)).Non_Scanner_Hit_Count + Amount;
+        end if;
+        if Is_View then
+            Data.Total.View_Count := Data.Total.View_Count + Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).View_Count :=
+               Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                    (Quarter_Item (Month)).View_Count + Amount;
+            if not Is_Scanner then
+                Data.Total.Non_Scanner_View_Count := Data.Total.Non_Scanner_View_Count + Amount;
+                Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                     (Quarter_Item (Month)).Non_Scanner_View_Count :=
+                   Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                        (Quarter_Item (Month)).Non_Scanner_View_Count + Amount;
+            end if;
+        end if;
+    end Record_Amount;
+
+Here is the same example using the @ shorthand (33 lines):
+
+    procedure Record_Amount (Data : in out Item_Data;
+                             Month : in Month_Number;
+                             Year : in Report_Year_Number;
+                             Amount : in Item_Count := 1;
+                             Is_Scanner : in Boolean := False;
+                             Is_View : in Boolean := True) is
+    begin
+        if Data.By_Month (Year, Quarter_Num (Month)) = Empty_Quarter_Item_Data then
+            -- We need to allocate an item.
+            Last_Allocated_Quarter_Item_Data := @ + 1;
+            Data.By_Month (Year, Quarter_Num (Month)) :=
+               Last_Allocated_Quarter_Item_Data;
+        end if;
+        Data.Total.Hit_Count := @ + Amount;
+        Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count := @ + Amount;
+        if not Is_Scanner then
+            Data.Total.Non_Scanner_Hit_Count := @ + Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).Non_Scanner_Hit_Count := @ + Amount;
+        end if;
+        if Is_View then
+            Data.Total.View_Count := @ + Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).View_Count := @ + Amount;
+            if not Is_Scanner then
+                Data.Total.Non_Scanner_View_Count := @ + Amount; 
+                Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                     (Quarter_Item (Month)).Non_Scanner_View_Count :=
+                     @ + Amount;
+            end if;
+        end if;
+    end Record_Amount;
+
 !discussion
 
 The occurrence of a target_name (@) in an assignment makes the
@@ -258,5 +340,2148 @@ name (as the original proposal <<>> did).
 ACATS B and C-Tests would be needed.
 
 !appendix
+
+From: Randy Brukardt
+Sent: Friday, January 8, 2016  6:52 PM
+
+I've been revising AI12-0125-3, "@ as a shorthand for the LHS of an
+assignment", as I was tasked to do during the Bennington meeting. (I'll post
+that later this evening, so you can look at it if you want.)
+
+I'm thinking about how that proposal (indeed, all of the proposals) deal
+with the two major objections to it:
+
+(1) Easy to lose the special case in a complex RHS expression. Even though @
+is a "big" character, it's still only one character. It does well in the
+normal case:
+      Obj.I := @ + 1;
+so we didn't worry about this too much.
+
+(2) A one character difference can transform an expression into something
+else legal that means something very different.
+
+This originally was raised with the proposal of AI12-0125-2:
+     Obj:+1;     vs. Obj:=+1;
+
+But AI12-0125-3 has the same problem:
+     Obj:=@+1;   vs. Obj:=+1;
+
+I tried for quite a while to come up with a reason why the latter is less of
+a problem than the former, and I've sadly concluded that the only reason
+that's true is because I want it to be so. :-)
+
+That led me to think about alternatives that would avoid the second problem,
+and I realized that there is a idea that avoids the first problem as well,
+with a bit of extra verbosity. So I'll outline it here so it doesn't get
+completely lost in the mists of time.
+
+-------------
+
+The basic idea is to resurrect the use of square brackets for this purpose
+(as was once proposed by someone). But rather than just using [] to
+represent the target_name, we also surround the actual target name in square
+brackets as well:
+
+   [X] := [] + 1;  --  A shorthand for X := X + 1;
+
+   [A(I)] := Integer'Max ([], 10); -- A shorthand for A(I) := Integer'Max
+(A(I), 10);
+
+The square brackets around the LHS keys the reader that (A) this is an
+assignment with a shorthand; (B) the text in brackets is a complete context.
+Thus the use of the target_name shorthand does not harm readability in that
+way.
+
+I think the mental model of this feature would be a bit easier to think
+about as well: one would think of the target_name [] as being a placeholder
+for the contents of the square brackets on the LHS. That's not 100%
+accurate, but it would be close enough for almost all uses.
+
+The actual semantics would be exactly the same as proposed in AI12-0125-3
+for @. One could imagine an extension to the idea where more or less
+arbitrary names or expressions could be repeated this way, but I am not
+trying to propose that.
+
+The next message will have an extended example of this idea, and others, in
+a more realistic situation.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 8, 2016  7:16 PM
+
+One of the problems that we've had evaluating these proposals is that the
+examples tend to be rather silly, where the repeated names are not a problem
+for readability. In order to give us something more realistic to chew on,
+following is a routine that forms part of the log analyzer that I created to
+make web site reports for Ada-Auth.Org, Archive.AdaIC.com, and others.
+(Originally it was used on AdaIC.org as well, but not anymore.) [Note: I
+removed a renames, but otherwise this is the actual code, not a constructed
+example.] Note that this example doesn't need the flexibility proposed by
+some of the alternatives, so I can present how it looks 4 ways.
+
+
+Ada 2012 version (41 lines):
+
+    procedure Record_Amount (Data : in out Item_Data;
+                             Month : in Month_Number;
+                             Year : in Report_Year_Number;
+                             Amount : in Item_Count := 1;
+                             Is_Scanner : in Boolean := False;
+                             Is_View : in Boolean := True) is
+    begin
+        if Data.By_Month (Year, Quarter_Num (Month)) = Empty_Quarter_Item_Data then
+            -- We need to allocate an item.
+            Last_Allocated_Quarter_Item_Data := Last_Allocated_Quarter_Item_Data + 1;
+            Data.By_Month (Year, Quarter_Num (Month)) :=
+               Last_Allocated_Quarter_Item_Data;
+        end if;
+        Data.Total.Hit_Count := Data.Total.Hit_Count + Amount;
+        Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count :=
+           Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                (Quarter_Item (Month)).Hit_Count + Amount;
+        if not Is_Scanner then
+            Data.Total.Non_Scanner_Hit_Count := Data.Total.Non_Scanner_Hit_Count + Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).Non_Scanner_Hit_Count :=
+               Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                    (Quarter_Item (Month)).Non_Scanner_Hit_Count + Amount;
+        end if;
+        if Is_View then
+            Data.Total.View_Count := Data.Total.View_Count + Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).View_Count :=
+               Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                    (Quarter_Item (Month)).View_Count + Amount;
+            if not Is_Scanner then
+                Data.Total.Non_Scanner_View_Count := Data.Total.Non_Scanner_View_Count + Amount;
+                Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                     (Quarter_Item (Month)).Non_Scanner_View_Count :=
+                   Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                        (Quarter_Item (Month)).Non_Scanner_View_Count + Amount;
+            end if;
+        end if;
+    end Record_Amount;
+
+
+New alternative version [33 lines]:
+
+    procedure Record_Amount (Data : in out Item_Data;
+                             Month : in Month_Number;
+                             Year : in Report_Year_Number;
+                             Amount : in Item_Count := 1;
+                             Is_Scanner : in Boolean := False;
+                             Is_View : in Boolean := True) is
+    begin
+        if Data.By_Month (Year, Quarter_Num (Month)) = Empty_Quarter_Item_Data then
+            -- We need to allocate an item.
+            [Last_Allocated_Quarter_Item_Data] := [] + 1;
+            Data.By_Month (Year, Quarter_Num (Month)) :=
+               Last_Allocated_Quarter_Item_Data;
+        end if;
+        [Data.Total.Hit_Count] := [] + Amount;
+        [Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count] := [] + Amount;
+        if not Is_Scanner then
+            [Data.Total.Non_Scanner_Hit_Count] := [] + Amount;
+            [Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).Non_Scanner_Hit_Count] := [] + Amount;
+        end if;
+        if Is_View then
+            [Data.Total.View_Count] := [] + Amount;
+            [Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).View_Count] := [] + Amount;
+            if not Is_Scanner then
+                [Data.Total.Non_Scanner_View_Count] := [] + Amount;
+                [Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                     (Quarter_Item (Month)).Non_Scanner_View_Count] :=
+                   [] + Amount;
+            end if;
+        end if;
+    end Record_Amount;
+
+
+AI12-0125-3 version [33 lines]:
+
+    procedure Record_Amount (Data : in out Item_Data;
+                             Month : in Month_Number;
+                             Year : in Report_Year_Number;
+                             Amount : in Item_Count := 1;
+                             Is_Scanner : in Boolean := False;
+                             Is_View : in Boolean := True) is
+    begin
+        if Data.By_Month (Year, Quarter_Num (Month)) = Empty_Quarter_Item_Data then
+            -- We need to allocate an item.
+            Last_Allocated_Quarter_Item_Data := @ + 1;
+            Data.By_Month (Year, Quarter_Num (Month)) :=
+               Last_Allocated_Quarter_Item_Data;
+        end if;
+        Data.Total.Hit_Count := @ + Amount;
+        Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count := @ + Amount;
+        if not Is_Scanner then
+            Data.Total.Non_Scanner_Hit_Count := @ + Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).Non_Scanner_Hit_Count := @ + Amount;
+        end if;
+        if Is_View then
+            Data.Total.View_Count := @ + Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).View_Count := @ + Amount;
+            if not Is_Scanner then
+                Data.Total.Non_Scanner_View_Count := @ + Amount; 
+                Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                     (Quarter_Item (Month)).Non_Scanner_View_Count :=
+                     @ + Amount;
+            end if;
+        end if;
+    end Record_Amount;
+
+
+AI12-0125-2 version: (33 lines)
+
+    procedure Record_Amount (Data : in out Item_Data;
+                             Month : in Month_Number;
+                             Year : in Report_Year_Number;
+                             Amount : in Item_Count := 1;
+                             Is_Scanner : in Boolean := False;
+                             Is_View : in Boolean := True) is
+    begin
+        if Data.By_Month (Year, Quarter_Num (Month)) = Empty_Quarter_Item_Data then
+            -- We need to allocate an item.
+            Last_Allocated_Quarter_Item_Data :+ 1;
+            Data.By_Month (Year, Quarter_Num (Month)) :=
+               Last_Allocated_Quarter_Item_Data;
+        end if;
+        Data.Total.Hit_Count :+ Amount;
+        Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count :+ Amount;
+        if not Is_Scanner then
+            Data.Total.Non_Scanner_Hit_Count :+ Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).Non_Scanner_Hit_Count :+ Amount;
+        end if;
+        if Is_View then
+            Data.Total.View_Count :+ Amount;
+            Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                 (Quarter_Item (Month)).View_Count :+ Amount;
+            if not Is_Scanner then
+                Data.Total.Non_Scanner_View_Count :+ Amount;
+                Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                     (Quarter_Item (Month)).Non_Scanner_View_Count :+ Amount;
+            end if;
+        end if;
+    end Record_Amount;
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January 8, 2016  7:52 PM
+
+> (1) Easy to lose the special case in a complex RHS expression. Even 
+> though @ is a "big" character, it's still only one character. It does 
+> well in the normal case:
+>       Obj.I := @ + 1;
+> so we didn't worry about this too much.
+
+Right, I don't buy arguments of the form, "that feature would allow people to
+deliberately obfuscate".  If @ buried deep is confusing, then Don't Do That.
+
+> (2) A one character difference can transform an expression into 
+> something else legal that means something very different.
+> 
+> This originally was raised with the proposal of AI12-0125-2:
+>      Obj:+1;     vs. Obj:=+1;
+> 
+> But AI12-0125-3 has the same problem:
+>      Obj:=@+1;   vs. Obj:=+1;
+
+I don't get the "one character difference" argument that comes up all the time
+(not just in this AI).  I mean, you can write "X := X + 1;"
+when you meant "X := X - 1;" and it's just one character different.
+It's a real problem, but that sort of thing can happen in every language I
+know, and I don't see how to prevent it.
+
+And of course you've made the problem look worse by leaving out the usual
+spaces.
+
+>    [X] := [] + 1;  --  A shorthand for X := X + 1;
+> 
+>    [A(I)] := Integer'Max ([], 10); -- A shorthand for A(I) := 
+> Integer'Max (A(I), 10);
+> 
+> The square brackets around the LHS keys the reader that (A) this is an 
+> assignment with a shorthand; (B) the text in brackets is a complete context.
+> Thus the use of the target_name shorthand does not harm readability in 
+> that way.
+
+The idea of marking the LHS somehow as "this will have one or more
+shorthands", and then using the shorthands, seems like a great idea.
+But I really, REALLY don't like using square brackets for that.
+To me, [X] should be a one-element aggregate, and [] should mean
+"(null record)" or "(1..0 => junk_value)" or whatever obfuscation
+Ada currently requires.
+
+I like your semantics, but unless you can come up with a better syntax,
+I say squelch it.  (Sorry, I can't think of better syntax at the
+moment.)
+
+> The next message will have an extended example of this idea, and others, in
+> a more realistic situation.
+
+I saw the next message, and I think it nicely illustrates that a
+shorthand notation can be more readable in real situations.
+Thank you for a more realistic example.
+
+I still prefer the @ notation, and I still very much dislike the []
+notation.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 8, 2016  8:05 PM
+
+...
+> The idea of marking the LHS somehow as "this will have one or 
+> more shorthands", and then using the shorthands, seems like a 
+> great idea.
+> But I really, REALLY don't like using square brackets for that.
+> To me, [X] should be a one-element aggregate, and [] should 
+> mean "(null record)" or "(1..0 => junk_value)" or whatever 
+> obfuscation Ada currently requires.
+
+(others => <>)   ;-)
+ 
+> I like your semantics, but unless you can come up with a 
+> better syntax, I say squelch it.  (Sorry, I can't think of 
+> better syntax at the
+> moment.)
+
+Well, one could use {} instead, but I suspect that has the same problem in
+your mind (and I didn't want to make Ada even vaguely look like C).
+
+I suppose one could use a keyword for that (and keep @), but no existing
+keyword comes to mind, and making a new reserved word seems like overkill:
+
+     let A(I) := @ + 1;
+
+The real example seemed to suggest that there is no real problem with losing
+@ so long as one formats the code a bit (if you don't use whitespace, you
+can lose just about anything in Ada code!). So maybe this isn't worth
+fixing.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Saturday, January 9, 2016  6:38 AM
+
+Randy’s suggested change is in my “I could live with” category, but I still
+prefer the @ option.
+
+For once Ada will be adding something that looks simple to users, plus it
+doesn’t look like C.
+
+PS. Yesterday I found my step - 4 * great grandmother Ann Cousins’ statement
+from when she entered the workhouse in 1852.  It uses N÷
+rather than @ as a shorthand for “at” when listing previous addresses.
+
+****************************************************************
+
+From: John Barnes
+Sent: Monday, January 11, 2016  7:16 AM
+
+I think I suggesetd the square brackets a long time ago. But it was simply an
+example of how to denote the LHS. We could make lhs a reserved word!
+
+I am happy with @.
+
+The one character problem cannot be overccome in a language with the same
+symbol being both unary minus and subtraction.
+
+A point of clarity. I presume we can use the @ in any part of an rhs
+expression such as a function parameter. Are there any restrictions? Thus
+
+Pig.cat(37) := Func(@);
+
+I should read the AI again.
+
+Oh and Happy New Year.
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Monday, January 11, 2016  3:36 PM
+
+Right, that's the intention.  There are only minor restrictions.  It's a 
+onstant view, so it can't be used as an actual for an out parameter in a
+function call, and the left-hand side can't be overloaded, but other than
+those it can be used generally on the rhs.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, January 14, 2016  4:33 AM
+
+>    [X] := [] + 1;  --  A shorthand for X := X + 1;
+> 
+>    [A(I)] := Integer'Max ([], 10); -- A shorthand for A(I) := 
+> Integer'Max (A(I), 10);
+> 
+> The square brackets around the LHS keys the reader that (A) this is an 
+> assignment with a shorthand; (B) the text in brackets is a complete context.
+> Thus the use of the target_name shorthand does not harm readability in 
+> that way.
+
+I like the idea of having a more explicit syntax like this one better than
+simply @, whose only justification is that it is not already used by the
+syntax.
+
+Using "<>" would be tempting, but of course doesn't work because of "(...
+with <>)". Other combinations of characters build on the box idea could work:
+<->,  <=< (kind of a left arrow)...
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, January 14, 2016  7:56 AM
+
+One interesting point is that currently "()" is illegal in Ada, as is the use
+of parens around the LHS of an assignment.  So we could propose the following:
+
+(This.Is.A.Long.Name[I]) := () + 1;
+
+This avoids introducing a new special character.  I agree with Bob that if we
+are going to  start using '[' and ']' there are a lot more interesting things
+we should do with it, and it will confuse the heck out of people coming from C
+if you can't use [] for indexing.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, January 14, 2016  8:50 AM
+
+Maybe we are getting hung up on having different characters for the left and
+right bookmark. Some good options might involve using the same character for
+both.  eg. Maybe the colon? as in;
+
+:X: := :: + 1;
+
+I like this also better if it can be more generally useful. Rather than say
+its always a substitution for the lhs of an assignment, this might allow for
+substituting an expression that occurs earlier on the rhs.
+
+I have written code like this before where a complex subexpression appears
+more than once in a bigger expression.
+
+-- Taken from actual code
+Finish := Index_Type'Val
+             (Index_Type'Pos (Start) +
+               ((Index_Type'Pos (Finish) -
+                  Index_Type'Pos (Start)) / 2));
+
+If we allowed such substitution, one could write;
+
+Finish := Index_Type'Val
+             (:Index_Type'Pos (Start): +
+                ((Index_Type'Pos (Finish) - ::) / 2));
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 15, 2016  12:33 PM
+
+> Maybe we are getting hung up on having different characters for the 
+> left and right bookmark.
+
+We're not "hung up" on it. My idea was that the characters used had to look
+like bracketing or quoting of some sort. There are 6 sets of such characters
+in ASCII: () [] {} <> "" '' and obviously some of these are already used for
+something.
+
+> Some good options might
+> involve using the same character for both.  eg. Maybe the colon?
+> as in;
+> 
+> :X: := :: + 1;
+
+(1) I don't think :: looks like brackets; I think of colon as a separator.
+(2) I think using colons for this would make error correction harder.
+
+> I like this also better if it can be more generally useful. 
+> Rather than say its always a substitution for the lhs of an 
+> assignment, this might allow for substituting an expression that 
+> occurs earlier on the rhs.
+
+I thought about that as a possibility, but I rejected it as pretty much
+ensuring that the proposal goes nowhere. Loading it up with bells and whistles
+is the sure-fire way to kill something optional. Also, that defeats the
+primary purpose of making the use of the shorthand more visible. (If you don't
+believe that is a need, then @ alone is the best choice, because it's the
+shortest possible shorthand and it shows up easily.)
+
+The combination of these ideas would be especially ugly in declarations:
+
+   Obj : Rec (:Func:) := (D => ::, C => Foo);
+
+I could sort of see it using square brackets:
+
+   Obj : Rec ([Func]) := (D => [], C => Foo);
+
+...but this discussion has proved to me that @ really is the best approach,
+because it shows up well enough in real code, and finding characters that we'd
+agree on for the prefix approach looks unlikely.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 14, 2016  12:42 PM
+
+> One interesting point is that currently "()" is illegal in 
+> Ada, as is the use of parens around the LHS of an assignment. 
+>  So we could propose the following:
+> 
+> (This.Is.A.Long.Name[I]) := () + 1;
+> 
+> This avoids introducing a new special character.  I agree 
+> with Bob that if we are going to start using '[' and ']' 
+> there are a lot more interesting things we should do with it, 
+> and it will confuse the heck out of people coming from C if 
+> you can't use [] for indexing.
+
+That seems like an advantage to me. ;-) Seriously, the more different two
+programming languages are, the easier it is to program in both. (The most
+difficulty I ever had was in the early days of Janus/Ada when the compiler
+was still written in Pascal; keeping straight the rules for both languages
+was a nightmare.) The fewer syntax similarities with C the better (after
+all, that's the reason we're discussing this proposal). 
+
+The reason that we ultimately went away from <<>> to using @ was that some
+people were concerned about confusion with other uses of the characters,
+especially from mistyping. This would be worse, since parens are a common
+part of an expression anyway.
+
+I've become convinced, particularly from the "real" examples I created and
+posted, that the best solution is indeed @. @ is plenty visible with proper
+formatting, and in "causal" reading, you don't need to know that the
+short-hand is in use until you reach it. Very few people will ever encounter
+the minor semantic differences (how often have you used an overloaded
+function of the LHS of an assignment?? I think I've only done it in ACATS
+tests).
+
+I'd like to withdraw my [] proposal, but I realize that's rather impossible.
+:-)
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, January 15, 2016  2:12 AM
+
+More seriously, I’m not persuaded that any of the suggested alternatives are
+any better than @.
+
+Bracketing the left hand side in particular looks like unnecessary clutter,
+and, as someone said, : is a separator.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, January 15, 2016  8:48 AM
+
+I kind of like "()".  Any comments on that?
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, January 15, 2016  10:11 AM
+
+Probably the best of the alternatives, but I don’t see any real advantage
+over @.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January 15, 2016  10:54 AM
+
+> I kind of like "()".  Any comments on that?
+
+I don't much like it, although I like it more that "[]".  I don't see any 
+compelling reason to mark the lhs at all.  Randy gave two reasons, but they
+seem pretty weak -- reasonable whitespace solves them.
+
+There's no need for syntax that says, "Pay attention to this lhs, because it's
+going to be referred back to soon!"  When you see @, you can go back and look
+at the lhs to see what it means.
+
+If I slept through this discussion, from 2010, and woke up in 2022, Rip Van
+Winkle-like, and saw () in some Ada code, my best guess as to the semantics
+is that it means "empty aggregate".  It doesn't scream "left-hand side".
+
+And finally, I prefer the concise syntax of @.
+
+****************************************************************
+
+From: John Barnes
+Sent: Friday, January 15, 2016  10:56 AM
+
+I would prefer [] to (). Two parens together look awfully like a zero in some
+fonts.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, January 15, 2016  11:00 AM
+
+> Probably the best of the alternatives, but I don’t see any real advantage
+> over @.
+
+The main advantage of "()" is that it avoids adding another special character
+to Ada's lexical character set.  "@" smacks a bit of a C-like construct, where
+there are a zillion special characters like !, ~, ^, &, %, ... making the code
+look a bit like chicken scratchings.  A construct like "()" seems more nearly
+English, and generally feels more consistent with the rest of Ada syntax.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, January 15, 2016  11:53 AM
+
+If I woke up from the rip van winkle effect, or just as someone completely
+new to the language, I think I would notice both the parens on the LHS, and
+the empty parens, and would probably be able figure out that the empty parens
+are referring to the text in the LHS parents.
+
+If I saw the @ however, the syntax would not give any such clue. In fact I
+would likely to think this is some sort of non-standard preprocessor macro
+substitution is being applied. It reminds me of assembler macros I've seen
+in the distant past. The parens however are obviously syntax and part of the
+language.
+
+Another couple of tweaks to Tuckers suggestion...
+
+In for loops we have  syntax  to allow 
+     for I in 1 .. 10 loop
+
+the ".." can be viewed as a substitution for all the numbers between 1 and 10
+in this example.
+
+Suppose instead of () from Tuckers suggestion, we used (..)
+
+The .. here similarly would imply all the text between '(' and ')' from the LHS
+
+This would also address John's complaint about () being mistaken for a 0.
+
+This would allow;
+
+(Really_Really_Long_Name(I)) := (..) + 1;
+
+A second optional tweak would be to the RHS, instead of "(" and ")", one would
+use "(." and ".)"
+
+ie.
+
+(. Really_Really_Long_Name(I) .) := (..) + 1;
+
+This might provide a further visual clue about what the (..) is referring to,
+plus it has the advantage that if we ever decided down the road to allow
+similar substitutions on the RHS, we could add that to the language in a
+compatible manner. 
+
+eg.   Answer := (. Really_Really_Long_Name(I) .) * 2 + (..) mod 2;
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, January 15, 2016  1:07 PM
+
+I like your "(..)" idea.  Definitely the best looking and most Ada-like
+suggestion so far.
+
+I don't think we should try to generalize this to represent anything but the
+left-hand side, because you can easily get into order-of-evaluation problems,
+and more complex overload resolution situations.
+
+I am not sure about whether we need to parenthesize the LHS, but I at least
+could live with either solution.  Having to parenthesize the LHS does make the
+whole thing somewhat heavier.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 15, 2016  1:06 PM
+
+> I kind of like "()".  Any comments on that?
+
+It's not one of your better ideas. ;-)
+
+(1) As John noted, from 20000 feet it looks like a zero.   A := () + B;  vs
+    A := 0 + B;  That's insufficiently different;
+(2) Parens are normally present in expressions anyway, so there is a danger
+    in accidentally converting something into this shorthand;
+(3) Parens in an expression are usually a meaningless grouping agent, so one
+    is trained to ignore them and focus on the ids and operators;
+(4) The meaning isn't intuitive - Bob says he thinks its an empty aggregate;
+(5) I tend to use () as a short-term TBD when constructing larger expressions,
+    for instance when I have to go look up the name of something.
+If I'm interrupted and forget to finish the expression, the compiler will tell
+me that it is incomplete. (If I expect it to be a while before I come back to
+it, then of course I'll use a comment as well, but for the short term, writing
+a comment and then deleting it is wasted programming time.)
+
+> The main advantage of "()" is that it avoids adding another special
+> character to Ada's lexical character set. 
+
+We discussed that in Bennington in the context of whether to use "<<>>" (a
+better choice, IMHO, if we're sticking with existing characters only) or to
+use a new character. The discussion and vote was pretty clear that an
+additional character is better than trying to overload a meaning which is
+guaranteed to cause confusion.
+
+Adding one special character is hardly going to turn the syntax into C (and in
+any case, Ada needs more operators; it's not the special characters that bother
+me about C, it's the overly concise syntax for statements and declarations).
+
+****************************************************************
+
+From: Dan Eilers
+Sent: Friday, January 15, 2016  1:17 PM
+
+> This would allow;
+>
+> (Really_Really_Long_Name(I)) := (..) + 1;
+
+Or how about:
+
+   Really_Really_Long_Name(I) := ... + 1;
+
+or
+
+   temp renames Really_Really_Long_Name(I) := temp + 1;
+
+****************************************************************
+
+
+From: Stephen Michell
+Sent: Friday, January 15, 2016  1:14 PM
+
+I think that Brad's proposal is the best so far, but no mandatory brackets
+on the left. 
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, January 15, 2016  1:30 PM
+
+I think it would be clear from the context that @ was an operand not an
+operator, and it can’t be too hard to learn what a single character means.
+
+Though I quite like the argument for (..) that .. implies substitution,
+remember that we would probably have gone for <> due to is implication of
+substitution if it wasn’t already taken for other purposes.
+
+But I still don’t like the idea of bracketing the LHS, it’s just clutter,
+double brackets such as the )) in
+
+(Really_Really_Long_Name(I)) := (..) + 1;
+just cause confusion.
+
+****************************************************************
+
+From: John Barnes
+Sent: Friday, January 15, 2016  2:49 PM
+
+How about three dots rather than two? Thus
+
+Sow.piglets := (...) + 1;
+
+I rather like that.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, January 15, 2016  2:57 PM
+
+> Though I quite like the argument for (..) that .. implies 
+> substitution, remember that we would probably have gone for <> due to 
+> is implication of substitution if it wasn’t already taken for other 
+> purposes.
+> 
+> But I still don’t like the idea of bracketing the LHS, it’s just 
+> clutter, double brackets such as the )) in
+> 
+> (Really_Really_Long_Name(I)) := (..) + 1; just cause confusion.
+
+We could say that the LHS parens are redundant and thus are optional and can
+be eliminated.
+
+Or we could go further and say that since the LHS parens are always redundant,
+they are not allowed and illegal. We could use this as an explanation to
+justify the (..) syntax on the LHS.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 15, 2016  3:08 PM
+
+> How about three dots rather than two? Thus
+> 
+> Sow.piglets := (...) + 1;
+> 
+> I rather like that.
+
+That would be the first lexeme with three characters (or five, depending on
+the rules), which might cause some problems for tools.
+
+In general, I think the implementation cost is about the same for a new
+character vs. a new symbol based on existing characters, and possibly the
+latter would be more expensive because it would have the potential to break
+some of the invariants surrounding lexing Ada code.
+
+Brad's (..) could be the cheapest of all, as it could be actually three
+existing symbols syntactically put together ("(", "..", and ")"). No lexical
+changes would definitely be an advantage for a proposal.
+
+Readability-wise, I don't mind this anywhere near as much as I dislike
+Tucker's "()".
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 15, 2016  3:10 PM
+
+> Or we could go further and say that since the LHS parens are always 
+> redundant, they are not allowed and illegal.
+
+The LHS is a name, parens are not allowed now. So we don't have to say
+anything to not allow something that is already not allowed.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January 15, 2016  4:02 PM
+
+> If I woke up from the rip van winkle effect, or just as someone 
+> completely new to the language, I think I would notice both the parens 
+> on the LHS, and the empty parens, and would probably be able figure 
+> out that the empty parens are referring to the text in the LHS 
+> parents.
+
+Really?  If I woke up from the winkle effect, and saw:
+
+(Really_Really_Long_Name(I)) := () + 1;
+
+I would think, "Great.  ARG has finally got rid of the silly syntactic
+distinction between 'name' and 'expression'.  Everything is 'expression', and
+you can always parenthesize an expression -- that's used for grouping, and has
+no other effect.  I would think "(Really_Really_Long_Name(I))" means the exact
+same thing as "Really_Really_Long_Name(I)", as indeed it already does on the
+right-hand side.
+
+In C, you can say:
+
+    (foo.bar[2]) += 2;
+
+and it means the exact same thing as:
+
+    foo.bar[2] += 2;
+
+C is better than Ada in this regard.
+
+X+Y is just a shorthand for "+"(X, Y), right?  Well, no, you can say:
+
+    "+"(X, Y)'Image
+
+but you can't say:
+
+    (X + Y)'Image
+
+but you CAN say:
+
+    T'(X + Y)'Image
+
+> If I saw the @ however, the syntax would not give any such clue.
+
+It's fine to not give a clue.  Most of the suggested syntaxes (..), (...),
+..., ::, @ don't give a clue.  You have to learn the language.
+But parens already have meaning, so they give a WRONG clue, which is worse.
+
+I don't see why folks are pushing for more and more verbose syntaxes (none of
+which give clues).  C programmers who write:
+
+    some[long].name++;
+
+will laugh at us, and rightly so.
+
+I wrote:
+
+> And finally, I prefer the concise syntax of @.
+
+Still.  ;-)
+
+****************************************************************
+
+From: John Barnes
+Sent: Friday, January 15, 2016  4:24 PM
+
+I suggested three dots because it is the ellipsis linguistic symbol meaning
+"an omission of one or more words..."
+
+The trouble with two dots is that it is embedded in every Ada person's brain
+as a range.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 15, 2016  4:28 PM
+
+> > And finally, I prefer the concise syntax of @.
+> 
+> Still.  ;-)
+
+What he said. :-)
+
+Keep in mind this is supposed to be a "shorthand"! It doesn't do for it to get
+very verbose. Brad and Dan both suggested syntaxes that took 8 or more
+characters for the "shorthand". That could get nearly as tedious as the
+original Ada form. Recall (part of) the example I posted last week:
+
+        Data.Total.Hit_Count := Data.Total.Hit_Count + Amount;
+        Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count :=
+           Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+                (Quarter_Item (Month)).Hit_Count + Amount;
+
+Using '@':
+
+        Data.Total.Hit_Count := @ + Amount;
+        Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count := @ + Amount;
+
+Using "(..)":
+
+        (.Data.Total.Hit_Count.) := (..) + Amount;
+        (.Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count.) := (..) + Amount;
+
+Using Dan's inline renames:
+
+        LHS renames Data.Total.Hit_Count := LHS + Amount;
+        LHS renames Quarter_Item_Data (Data.By_Month (Year, Quarter_Num (Month)))
+             (Quarter_Item (Month)).Hit_Count := LHS + Amount;       
+
+It's pretty clear to me which of these is the most readable. But I'll let you
+draw your own conclusions (it's @ :-).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January 15, 2016  4:32 PM
+
+> The main advantage of "()" is that it avoids adding another special 
+> character to Ada's lexical character set.
+
+I see that as a DISadvantage -- creating new notations is better than creating
+new meanings for existing notations.  Yeah, I know "(name)" is not allowed on
+the lhs of an assignment, but if it were it would/should mean the same thing
+as "name".
+
+By the way, nobody has explained very well why one should be required to mark
+the left-hand side with any syntax at all, just because you want to use this
+new feature.
+
+>..."@" smacks a bit of a C-like construct, where there are a zillion  
+>special characters like !, ~, ^, &, %, ... making the code look a bit 
+>like chicken  scratchings.
+
+Yeah, I guess.  I prefer "not" over "!" and "and" over "&&" and
+"Shift_Left(...)" over "... << ...".
+
+For the same reason, I'd prefer a keyword instead of @.  But I thought we
+discussed that at the last meeting, and we were worried that WG9 can't stomach
+non-reserved keywords, and I (we?) can't stomach an incompatibility here.  So
+we're stuck with some sort of weird symbol(s), and we should choose something
+not easily mistaken for something else, and something concise.
+
+>...A construct like "()" seems more nearly English, and generally feels 
+>more consistent with the rest of Ada syntax.
+
+To me, it feels more overloaded/confused with existing Ada syntax.
+As to English, well analogies with natural language are weak, IMHO, but
+anyway, parens are used for grouping (i.e. parenthetical clauses) in English,
+but you want to use them as a pronoun in Ada.
+
+As I said, I could live with (), or with some of the other suggestions.
+I think the main goal is:
+
+    You can refer to the lhs without repeating it verbatim,
+    and without creating a name for it.
+
+The secondary goal is:
+
+    Be concise.
+
+****************************************************************
+
+From: John Barnes
+Sent: Friday, January 15, 2016  4:35 PM
+
+I must admit that the jolly old @ does stand out.
+
+J@hn
+
+That's odd, Mr Gates has underlined it.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, January 15, 2016  5:35 PM
+
+Looks like an email address.  I'm impressed that you own a two-letter domain
+name, "hn".  ;-)
+
+By the way, I think I would be annoyed if the ellipsis "..." would become an
+Ada token, because then how would I write examples, like:
+
+    if ... then
+        ... -- do some work
+    end if;
+
+And by the by the way, when teaching Ada, I once had a question, "What does <>
+mean in Ada?".  Well, it means all sorts of things.  My point is, let's not
+make the question "What do parens mean in Ada?" harder.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Friday, January 15, 2016  5:11 PM
+
+So, thinking about the keyword issue, I am thinking that we are often nervous
+about a new keyword conflicting with names in user code. Why not consider
+using "ditto" as the keyword. Hence Some_Really_Long_Name := ditto + 1;  Every
+English speaker recognizes what "ditto" means, so brain interpretation is
+instantaneous. 
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 15, 2016  6:13 PM
+
+... 
+> >..."@" smacks a bit of a C-like construct, where there are a zillion 
+> >special characters like !, ~, ^, &, %, ... making the code look a bit 
+> >like chicken  scratchings.
+> 
+> Yeah, I guess.  I prefer "not" over "!" and "and" over "&&" 
+> and "Shift_Left(...)" over "... << ...".
+> 
+> For the same reason, I'd prefer a keyword instead of @.  But I thought 
+> we discussed that at the last meeting, and we were worried that WG9 
+> can't stomach non-reserved keywords, and I
+> (we?) can't stomach an incompatibility here.  So we're stuck with some 
+> sort of weird symbol(s), and we should choose something not easily 
+> mistaken for something else, and something concise.
+
+I don't view it as "stuck". I think a keyword would be worse than a character
+or symbol for this use. A keyword would more easily get lost in an expression,
+because it would just look like an identifier to a reader that didn't know
+about the new feature. (Or even one that did know about the feature!)
+
+If I got some Ada code reading,
+
+        Data.Total.Hit_Count := @ + Amount;
+
+I'd know there is something to figure out, and I'd go look in an Ada manual or
+ask a question on comp.lang.ada or stackoverflow.
+
+If I got instead:
+
+       Data.Total.Hit_Count := ditto + Amount;
+
+(using Steve's suggestion), I'd probably waste a lot of time trying to figure
+out where "ditto" is defined.
+
+I suppose if you are using an editor that colors or boldfaces keywords, it
+would be less of an issue, but not everyone uses those (by choice or
+requirements). Note that we don't have that in our code examples here.
+
+Additionally, I don't see what "non-reserved keywords" has to do with this
+case. This isn't like "some", that only is used in a single context where no
+identifier can be used. These appear in arbitrary expressions. And we surely
+couldn't allow adding a declaration for "ditto" to change the meaning of
+assignments that just happen to be in scope. (And we couldn't just ignore such
+a declaration, either, that would be pure evil.) So, I don't see how we could
+avoid having a keyword used in this context be fully reserved.
+
+Anyway, I think I prefer this to be lexically distinct from anything that might
+appear in an Ada 2012 expression. And conciseness is important, thus @ is still
+leading in my mind.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Friday, January 15, 2016  7:05 PM	
+
+I was proposing ditto as a reserved keyword. 
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, January 15, 2016  7:53 PM
+
+No need to keep complaining about "()". I prefer "(..)" which I believe is
+visible, short, and nicely Ada-ish. 
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, January 15, 2016  9:19 PM
+
+...
+> By the way, nobody has explained very well why one should be required 
+> to mark the left-hand side with any syntax at all, just because you 
+> want to use this new feature.
+
+I am totally OK with dropping the LHS parens, and I sense that others are as
+well. I agree that they are unnecessary and just add clutter.
+
+>> ..."@" smacks a bit of a C-like construct, where there are a zillion
+>> special characters like !, ~, ^, &, %, ... making the code look a bit like chicken
+>> scratchings.
+>
+> Yeah, I guess.  I prefer "not" over "!" and "and" over "&&" and
+> "Shift_Left(...)" over "... << ...".
+>
+> For the same reason, I'd prefer a keyword instead of @.  But I thought
+> we discussed that at the last meeting, and we were worried that WG9
+> can't stomach non-reserved keywords, and I (we?) can't stomach
+> an incompatibility here.  So we're stuck with some sort of weird
+> symbol(s), and we should choose something not easily mistaken
+> for something else, and something concise.
+>
+
+Here's a relevant quote from para 7 of page 1 of the RM. (Design Goals)
+
+"The need for languages that promote reliability and simplify 
+maintenance is well established. Hence emphasis was placed on program 
+readability over ease of writing."
+
+  ...   -- No pun intended...  (OK maybe that one)
+
+"Furthermore, error-prone notations have been avoided, and the syntax of 
+the language avoids the use of encoded forms in favor of more 
+English-like constructs. "
+
+This suggests that it should be unimportant whether one has to type 4 
+characters instead of 1, and @ is definitely an encoded form, so it 
+should be avoided.
+
+The @ character has no association with text replacement, so it is 
+entirely a cryptic notation, which seems to not be in the spirit of the 
+Ada design goals.
+
+I'd prefer to see something that conveys meaning, ideally an English 
+word, such as ditto, like Steve suggests, but if new keywords are 
+problematic, the next best thing would be some symbolic representation 
+that has similar meaning.
+
+We've been discussing ..., since it is a symbolic representation of 
+ellipses which indicate an omission, but ditto seems closer to what we 
+are trying to convey since it means that the text above(~before) is 
+repeated.
+
+The symbolic representation of ditto of course is ", but I recognize 
+there would be confusion and parsing problems if we used the double 
+quote character alone.
+
+One could however look at the convention used Polish, Czech, and 
+Austrian German, which is to use the ditto mark surrounded by em-dashes.
+
+ie.  -"-
+
+According to;
+    https://en.wikipedia.org/wiki/Iteration_mark
+
+So this would give us...
+
+Really_Really_Long_Name(I) := -"- + 1;
+
+****************************************************************
+
+From: Ben Brosgol
+Sent: Friday, January 15, 2016  9:25 PM
+
+I haven't been following this complete thread, so apologies if this has
+been already suggested and trashed, but there's also "(.)" which maybe is
+more unix-ish than Ada-ish. But the dot carries the idea of "here", and the
+construct would be one character shorter than "(..)" which has the look and
+feel of a range as others have noted.
+
+****************************************************************
+
+From: John Barnes
+Sent: Saturday, January 16, 2016  5:58 AM
+
+This could go on for ever.
+
+For me @ is much more visible than something like (..) but if you like
+brackets around something then why not (@)?
+
+Highly visible and we get a syntax error if a bit is left out.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Saturday, January 16, 2016  11:56 AM
+
+What I believe you need to specify somewhere is that side-effects have no
+influence on whatever the repetition is supposed to designate.
+
+That is (for the () proposal), in
+(A(I)) := change_the_I_or_the_access_A(42) * (); the semantics are
+well-defined. Or do you want textual macros?(Uggh. I hope not.)
+
+This may have already been said in an early message but all the discussion
+over syntax should not loose the thought.
+
+-----------------
+A few more concerns about the reuse of existing operators and about the
+marking of the LHS. If (lhs) can only be applied to the entire LHS, is is
+useless clutter, plus this already noted "oops an illegal paranthesized
+expression LHS" - complication to semantic rules interacting with syntax.
+
+If it can be applied more broadly, what does
+A(I) := 42 * ();
+mean? Presumably illegal, since the () are the indexing op?
+
+What about
+A(4*(I)) := 42 * ();
+A((I)) := ();
+Hmm. Is ()=I?
+----------
+
+Of all the existing proposals, I like @ or ?.
+I hate "()" - too small a hamming distance to other programs.
+(...) is read as "to be filled in later"
+(.) is better but looks like Sumerian writing :-) .
+
+And I am dead set against marking the LHS, if only full LHS can be marked.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Saturday, January 16, 2016  11:46 AM
+
+I am going to add another possibility to the fray, this one derived from
+pattern matching language:
+ ThisIsVery_Long_andUgly(i)! := ? + 1;
+
+The meaning of the operators ! and ? are obvious, I trust.
+! is a postfix view operator on names, i.e. it does nothing to the name, but
+it remembers the location/entity denoted by the name.
+
+Pro: No way to misread this syntax. Syntax known to some in pattern languages.
+No question on what do do, when operator is applied to non-name expressions
+(syntactically/semantically excluded). Can be applied to any part of the LHS,
+as in:
+
+A(complicated.index.name.getit!) := B(?);
+
+Con: two more special symbols.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, January 17, 2016  1:30 AM
+
+At this point, it's clear that there are several acceptable possibilities,
+everybody on this list has it's pet one (my preference would be for (..)),
+and it will be hard to get consensus.
+
+We've been accused every now then of deciding everything from our ivory tower.
+Since the chosen syntax is mainly a matter of taste, why not ask the community
+and make a public poll? We can choose a small number of solutions, make a
+doodle, and advertise it on c.l.a, AE and SigAda mailing lists, and other
+similar groups.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Sunday, January 17, 2016  3:05 AM
+
+That sounds like a recipe for indecision to me.
+Can we complete our vote on @ and see what its conclusion is?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, January 17, 2016  2:53 PM
+
+> I am totally OK with dropping the LHS parens, and I sense that others 
+> are as well. I agree that they are unnecessary and just add clutter.
+
+OK, sounds good.
+
+> Here's a relevant quote from para 7 of page 1 of the RM. (Design 
+> Goals)
+> 
+> "The need for languages that promote reliability and simplify 
+> maintenance is well established. Hence emphasis was placed on program 
+> readability over ease of writing."
+> 
+>   ...   -- No pun intended...  (OK maybe that one)
+
+It took me a while to understand what pun you were referring to!  ;-)
+
+> "Furthermore, error-prone notations have been avoided, and the syntax 
+> of the language avoids the use of encoded forms in favor of more 
+> English-like constructs. "
+
+Well, I'm sure we all agree with the above platitudes.  But the only way to 
+be English-like would be a keyword.  You can't use the above to argue for @
+over (..) or vice versa -- ALL of the non-keyword suggestions are not
+English, and have no intuitive meaning, so people will need to memorize what
+it means.
+
+I suppose I half-agree with your argument that "..." is somewhat intuitive.
+But I would hate to make that part of the syntax, because I am in the habit
+of explaining things with examples that use that to leave out irrelevant
+parts, as in:
+
+    function F(...) return String;
+    ...
+    X: String := F(...);
+
+I feel pretty strongly about that; "..." is hugely useful in discussions
+about programming languages.
+
+> This suggests that it should be unimportant whether one has to type 4 
+> characters instead of 1, and @ is definitely an encoded form, so it 
+> should be avoided.
+
+It's not typing; the conciseness is for readability.
+
+> So this would give us...
+> 
+> Really_Really_Long_Name(I) := -"- + 1;
+
+So the compiler has to look ahead to distinguish the above from:
+
+    Really_Really_Long_Name(I) := -"- + 1";
+
+Does the following use a maximal munch rule?
+
+    Really_Really_Long_Name(I) := -"- + 1" + -"-;
+
+Hmm.  I suggest we avoid using quote marks in any way, here.
+
+Anyway, there's nothing intuitive about that for me.
+I'd have to look it up and memorize what it means, just like most of the other
+suggestions.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, January 17, 2016  2:54 PM
+
+> What I believe you need to specify somewhere is that side-effects have 
+> no influence on whatever the repetition is supposed to designate.
+> 
+> That is (for the () proposal), in
+> (A(I)) := change_the_I_or_the_access_A(42) * (); the semantics are 
+> well-defined. Or do you want textual macros?(Uggh. I hope not.)
+
+Right, I'm pretty sure everybody agrees we don't want macro-expansion
+semantics here!  In fact, one of the benefits of this feature is:
+
+    A(F(X)) := A(F(X)) + 1;
+
+We don't know if F(X) returns the same value both times, but:
+
+    A(F(X)) := @ + 1;
+
+We know it's not an issue.
+
+At the meeting, people suggested wording via various equivalences.
+I suggested using the kind of wording that you'd use to explain it to a normal
+person:
+
+    @ denotes the value of the left-hand side, but the left-hand side is
+    evaluated only once.
+
+I think everybody else wanted to obfuscate.  ;-) ;-)
+
+> This may have already been said in an early message but all the 
+> discussion over syntax should not loose the thought.
+> 
+> -----------------
+> A few more concerns about the reuse of existing operators and about 
+> the marking of the LHS.
+> If (lhs) can only be applied to the entire LHS, is is useless clutter, 
+> plus this already noted "oops an illegal paranthesized expression LHS" 
+> - complication to semantic rules interacting with syntax.
+> 
+> If it can be applied more broadly, what does
+> A(I) := 42 * ();
+> mean? Presumably illegal, since the () are the indexing op?
+> 
+> What about
+> A(4*(I)) := 42 * ();
+> A((I)) := ();
+> Hmm. Is ()=I?
+
+Right, all good reasons to avoid overgeneralizing this.
+
+> ----------
+> 
+> Of all the existing proposals, I like @ or ?.
+> I hate "()" - too small a hamming distance to other programs.
+> (...) is read as "to be filled in later"
+> (.) is better but looks like Sumerian writing :-) .
+> 
+> And I am dead set against marking the LHS, if only full LHS can be 
+> marked.
+
+I'm against marking the LHS, dot.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, January 17, 2016  6:10 PM
+
+> What I believe you need to specify somewhere is that side-effects have 
+> no influence on whatever the repetition is supposed to designate.
+
+The semantics are of a rename of the LHS.
+
+> That is (for the () proposal), in
+> (A(I)) := change_the_I_or_the_access_A(42) * (); the semantics are 
+> well-defined. Or do you want textual macros?(Uggh. I hope not.)
+>
+> This may have already been said in an early message but all the 
+> discussion over syntax should not loose the thought.
+
+I believe it was captured in the original AIs.
+
+...
+> Of all the existing proposals, I like @ or ?.
+> I hate "()" - too small a hamming distance to other programs.
+> (...) is read as "to be filled in later"
+> (.) is better but looks like Sumerian writing :-) .
+
+And what about "(..)" suggested by Brad, and preferred by myself, and I
+believe JP?
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, January 17, 2016  2:50 PM
+
+> If I got some Ada code reading,
+> 
+>         Data.Total.Hit_Count := @ + Amount;
+> 
+> I'd know there is something to figure out, and I'd go look in an Ada 
+> manual or ask a question on comp.lang.ada or stackoverflow.
+> 
+> If I got instead:
+> 
+>        Data.Total.Hit_Count := ditto + Amount;
+> 
+> (using Steve's suggestion), I'd probably waste a lot of time trying to 
+> figure out where "ditto" is defined.
+> 
+> I suppose if you are using an editor that colors or boldfaces 
+> keywords, it would be less of an issue, but not everyone uses those 
+> (by choice or requirements). Note that we don't have that in our code 
+> examples here.
+
+I don't like those color-izing editors.  But Rip should know that keywords are
+typically in lower case.  ;-)
+
+> Additionally, I don't see what "non-reserved keywords" has to do with 
+> this case. This isn't like "some", that only is used in a single 
+> context where no identifier can be used. These appear in arbitrary 
+> expressions. And we surely couldn't allow adding a declaration for 
+> "ditto" to change the meaning of assignments that just happen to be in 
+> scope. (And we couldn't just ignore such a declaration, either, that 
+> would be pure evil.) So, I don't see how we could avoid having a keyword
+> used in this context be fully reserved.
+
+Easy:  If the compiler sees a declaration of "ditto", it gives a diagnostic
+message.  (Yet another example where requiring messages is beneficial.) Within
+the scope of that decl, "ditto" refers to the declaration; it's not the
+keyword.  I guess it should warn on every such USE of ditto as well.
+
+In other words, it's a preference rule.  And preference rules are evil, so we
+want diagnostic messages.
+
+BTW, I don't much like "ditto".  I'd call it "it".  Or "lhs" is tolerable.
+
+Anyway, if nobody is seriously proposing a keyword (reserved or not), we don't
+need to settle these issues.
+
+> Anyway, I think I prefer this to be lexically distinct from anything 
+> that might appear in an Ada 2012 expression. And conciseness is 
+> important, thus @ is still leading in my mind.
+
+OK with me.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Sunday, January 17, 2016  8:05 PM
+
+The reason that I suggested “ditto” is that I believe that it could be a
+keyword (reserved) and not interfere with projects using “Ditto”. Ditto is
+such a specialized word in English that I suspect that it would be used in
+names of functions, types, or objects names. The fact that it is lowercase and
+bolded or coloured in many editors would give a strong clue that it is
+reserved. 
+
+I am against using specialized symbols such as @ or (). Ada almost never uses
+symbols that are not words or mathematical symbols. It is very much out of
+character to start introducing such symbols now.
+
+****************************************************************
+
+From: John Barnes
+Sent: Monday, January 18, 2016  2:04 AM
+
+The key thing in favour of @ for me is that it stands out like a sore thumb. 
+I hate () because it looks so much like zero or o.
+
+Let's vote.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Monday, January 18, 2016  6:20 AM
+
+I have a question about the (..) idea.
+
+If we have given up the idea of bracketing the lhs, is there still value in
+having the parens around ".."?
+
+Otherwise, I think it is an improvement to just use .., as in.
+
+Really_Long_Name := .. + 1;
+
+This would address Bob's concern about overloading parens in the syntax, and
+also has the advantage of not introducing new symbols to the language.  The
+existing use of .. is a shorthand for inclusion, and seems to be compatible
+with this new shorthand, as a form of inclusion of text from the lhs.
+
+I agree with others that using a keyword for this purpose is problematic
+because it is more ambiguous and therefore confusing. The problem is that the
+keyword appears in the same place that a name can appear, so I can see that
+people would get confused and look for a variable or constant declared
+somewhere with the same name. Add to that the backwards compatibility problems
+of adding new keywords, and that pretty much kills that idea, in my mind.
+
+I like .. better than @ because its an existing symbol, which all existing Ada
+programmers would recognize, and because this new usage has some compatibility
+with the existing usage, in the sense that it is a form of inclusion.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  3:56 PM
+
+> What I believe you need to specify somewhere is that side-effects have 
+> no influence on whatever the repetition is supposed to designate.
+
+We discussed that extensively in Bennington; all of the proposals nail down
+the semantics carefully. (See the current draft of AI12-0125-3 specifically).
+
+The only real open issue (other than editorial wording changes) is the actual
+syntax in question. Which *everyone* has an opinion on. 
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  4:05 PM
+
+...
+> At the meeting, people suggested wording via various equivalences.
+> I suggested using the kind of wording that you'd use to explain it to 
+> a normal person:
+> 
+>     @ denotes the value of the left-hand side, but the left-hand side is
+>     evaluated only once.
+> 
+> I think everybody else wanted to obfuscate.  ;-) ;-)
+
+Everyone else wants preciseness. We want it obvious how to answer questions
+about erroneousness, finalization, accessibility, and the like.
+
+We tried it your way with 'Old, and we ended up spending twice as long to
+redo it so the semantics are nailed down. The same would hold here.
+
+(Besides, this would be inconsistent with the rest of the standard. We never
+say things like "evaluated only once". And what is getting evaluated? The LHS
+isn't a value at all. Etc.)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  4:13 PM
+
+...
+> > Additionally, I don't see what "non-reserved keywords" has to do 
+> > with this case. This isn't like "some", that only is used in a 
+> > single context where no identifier can be used. These appear in 
+> > arbitrary expressions. And we surely couldn't allow adding a 
+> > declaration for "ditto" to change the meaning of assignments that 
+> > just happen to be in scope. (And we couldn't just ignore such a 
+> > declaration, either, that would be pure evil.) So, I don't see how 
+> > we could avoid having a keyword used in this context be fully reserved.
+> 
+> Easy:  If the compiler sees a declaration of "ditto", it gives a 
+> diagnostic message.  (Yet another example where requiring messages is 
+> beneficial.)  Within the scope of that decl, "ditto" refers to the 
+> declaration; it's not the keyword.  I guess it should warn on every 
+> such USE of ditto as well.
+> 
+> In other words, it's a preference rule.  And preference rules are 
+> evil, so we want diagnostic messages.
+
+So let me get this straight: in order to avoid making it reserved, you want
+to require every use of the keyword as an identifier to have a soft error?
+Which you'd have to suppress to continue? How is that any sort of advantage
+over having it reserved? Plus you'd still have the danger of someone making
+a compiler which turns these warnings off (Robert used to threaten that about
+GNAT and soft errors) and then the meaning changing silently.
+
+I mean, this is the sort of thinking that gives non-reserved keywords a bad
+name. In the cases of "overriding" and "some", the keyword can only appear
+syntactically where no identifier is allowed, so there can be no confusion
+and no need for any sort of warning. So those make sense (even though we've
+never been able to convince enough people of that value). If the keyword can
+appear somewhere a name can, the only possibility is confusion, no matter what
+rules are adopted.
+
+> BTW, I don't much like "ditto".  I'd call it "it".  Or "lhs" 
+> is tolerable.
+> 
+> Anyway, if nobody is seriously proposing a keyword (reserved or not), 
+> we don't need to settle these issues.
+
+Steve Michell has seriously proposed "ditto". Twice. I guess since he's not an
+ARG member, he doesn't count?
+
+I'm strongly against such a proposal, as the confusion possibilities are too
+much.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  4:19 PM
+
+> That sounds like a recipe for indecision to me.
+
+I agree. I don't think the exact syntax matters all that much; whatever we 
+choose, everyone will get used to.
+
+So long as we don't chose anything severely bad: whatever we chose should not
+easily be confused with some existing Ada use (thus a keyword is out [confused
+with a name of a declaration], () is out [confused with zero], and probably ..
+is out [confused with a range]).
+
+The other issues of conciseness and naturalness are secondary. And I agree
+with Bob that the latter is probably not possible (or important).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  4:25 PM
+
+> I have a question about the (..) idea.
+> 
+> If we have given up the idea of bracketing the lhs, is there still 
+> value in having the parens around ".."?
+> 
+> Otherwise, I think it is an improvement to just use .., as in.
+> 
+> Really_Long_Name := .. + 1;
+
+I don't think this works. Ada users expect ".." to mean a range. And ranges
+can appear in expressions:
+
+  Long_Object_Name := (if Long_Object_Name in 1 .. 10 then 0 else Long_Object_Name - 10);
+
+Using '@' improves the readability of this expression:
+
+  Long_Object_Name := (if @ in 1 .. 10 then 0 else @ - 10);
+
+Use "..", umm, does not:
+
+  Long_Object_Name := (if .. in 1 .. 10 then 0 else .. - 10);
+
+Using "(..)" (or "(.)") would be OK, I think:
+
+  Long_Object_Name := (if (..) in 1 .. 10 then 0 else (..) - 10);
+
+But @ still seems to lead.
+
+Moral: Examples help! (Even if they are a bit contrived.)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 18, 2016  4:25 PM
+
+>... And what is getting evaluated? The
+> LHS isn't a value at all.
+
+The LHS is a name, and names are evaluated.
+See 5.2(7).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  4:38 PM
+
+> >... And what is getting evaluated? The  LHS isn't a value at all.
+> 
+> The LHS is a name, and names are evaluated.
+> See 5.2(7).
+
+Sure, but your wording talked about "the value of the LHS" or something like
+that. Nothing about the name of the LHS at all.
+
+Preciseness of wording is a virtue. :-)
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 18, 2016  4:58 PM
+
+> Sure, but your wording talked about "the value of the LHS" or 
+> something like that.
+
+No, it didn't.  It talked about "the left-hand side".  But I guess you're
+right -- the syntactic term is "the variable_name".  The term "left-hand side"
+is used only in the AARM annotations.  But it's quite clear that "the
+left-hand side" in the AARM is synonymous with "the variable_name".
+
+>... Nothing about the name of the LHS at all.
+
+The left-hand side IS a name. The "name OF the left-hand side" makes no sense.
+
+> Preciseness of wording is a virtue. :-)
+
+Indeed.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, January 18, 2016  5:45 PM
+
+> So let me get this straight: in order to avoid making it reserved, you 
+> want to require every use of the keyword as an identifier to have a soft error?
+
+Yes.  Or maybe just every declaration.
+
+> Which you'd have to suppress to continue?
+
+No.  The whole point of soft errors is to give people a choice:
+If it's expensive to modify code in your project, you can choose to ignore the
+errors, and your program will still mean what it used to mean.  That's
+"compatibility".  On the other hand, if you want to maximize readability, you
+can change all the uses of "Ditto" as an identifier to something else, and
+then start using "ditto" as a keyword.
+
+You can phase in such changes over many months, if you like.
+These decisions should be up to Ada project managers, not ARG.
+
+>...How is that any sort of advantage
+> over having it reserved?
+
+Ask Jeff.  Same reason as with "interface".
+
+>...Plus you'd still have the danger of someone making  a compiler which 
+>turns these warnings off (Robert used to threaten that  about GNAT and 
+>soft errors) and then the meaning changing silently.
+
+I've no idea what you mean.  If the RM requires a diagnostic message, then
+we can have an ACATS test that tests conformance with that rule.
+And of course one can write a nonconforming implementation of not-quite-Ada,
+and of course compilers can have switches that turn messages on and off.  So
+what?
+
+> I mean, this is the sort of thinking that gives non-reserved keywords 
+> a bad name. In the cases of "overriding" and "some", the keyword can 
+> only appear syntactically where no identifier is allowed, so there can 
+> be no confusion and no need for any sort of warning.
+
+On the contrary, if nonreserved keywords existed, I think they deserve a
+warning.  And certainly the people who think nonreserved keywords are evil
+think that it's confusing to use a keyword as an identifier, no matter where
+in the syntax.  I would think soft errors would make those people more
+comfortable with the idea.
+
+>...So those make sense (even though we've  never been able to convince 
+>enough people of that value). If the keyword can  appear  somewhere a 
+>name can, the only possibility is confusion, no matter  what rules are 
+>adopted.
+> 
+> > BTW, I don't much like "ditto".  I'd call it "it".  Or "lhs"
+> > is tolerable.
+> >
+> > Anyway, if nobody is seriously proposing a keyword (reserved or 
+> > not), we don't need to settle these issues.
+> 
+> Steve Michell has seriously proposed "ditto". Twice. I guess since 
+> he's not an ARG member, he doesn't count?
+
+I can't keep track of who proposed what, nor how serious they are.
+I stand by my statement "IF (IF!) nobody is seriously proposing a keyword
+(reserved or not), we don't need to settle these issues."
+My statement doesn't say anything about who "counts".
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 18, 2016  6:23 PM
+
+> > Which you'd have to suppress to continue?
+> 
+> No.  The whole point of soft errors is to give people a choice:
+> If it's expensive to modify code in your project, you can choose to 
+> ignore the errors, and your program will still mean what it used to 
+> mean.  That's "compatibility".  On the other hand, if you want to 
+> maximize readability, you can change all the uses of "Ditto" as an 
+> identifier to something else, and then start using "ditto" as a 
+> keyword.
+
+That's what I meant by "Suppress". In Ada Standard terms, that's some sort
+of pragma (either for Ignore or Suppress). Compilers might have other ways as
+well (command line options, project files, etc.), but that's outside of what
+the language can talk about. I called it "suppressed" since for most of them,
+the default semantics is erroneous execution.
+
+> You can phase in such changes over many months, if you like.
+> These decisions should be up to Ada project managers, not ARG.
+
+And that's fine if it isn't confusing to readers. But this case (and I mean
+*specifically* this case) would be too confusing to readers.
+ 
+> >...How is that any sort of advantage
+> > over having it reserved?
+> 
+> Ask Jeff.  Same reason as with "interface".
+
+"Interface" is like "some" and "overriding" (if I was going to list all of
+keywords that didn't need to be reserved, that would certainly be on the
+list). It doesn't appear in expressions as a keyword.
+
+Let me reiterate that I'm generally on your side on this issue, but I don't
+agree with over-the-top arguments that *everything* ought to be done that way,
+even at the cost of pages of rules about soft errors and the like.
+
+> >...Plus you'd still have the danger of someone making  a compiler 
+> >which turns these warnings off (Robert used to threaten that about 
+> >GNAT and soft errors) and then the meaning changing silently.
+> 
+> I've no idea what you mean.  If the RM requires a diagnostic message, 
+> then we can have an ACATS test that tests conformance with that rule.
+> And of course one can write a nonconforming implementation of 
+> not-quite-Ada, and of course compilers can have switches that turn 
+> messages on and off.  So what?
+
+The default for GNAT is the real defacto standard (sadly). When Robert
+threatened to make the default for GNAT that soft errors are off, that pretty
+much killed the idea for me. A soft error is an error that should be
+suppressed only by a knowledgable user, who's made an explicit decision to
+live with the consequences (hopefully because they've analyzed them). The
+default for beginners is that they're errors.
+
+Now, I realize the landscape has changed on that, but I still worry about
+this. (And yes, the ACATS would check for the diagnostics *and* also check
+the behavior when the error is suppressed or ignored or whatever it gets
+called.)
+
+> > I mean, this is the sort of thinking that gives non-reserved 
+> > keywords a bad name. In the cases of "overriding" and "some", the 
+> > keyword can only appear syntactically where no identifier is 
+> > allowed, so there can be no confusion and no need for any sort of warning.
+> 
+> On the contrary, if nonreserved keywords existed, I think they deserve 
+> a warning.  And certainly the people who think nonreserved keywords 
+> are evil think that it's confusing to use a keyword as an identifier, 
+> no matter where in the syntax.  I would think soft errors would make 
+> those people more comfortable with the idea.
+
+This I completely disagree with - in part because "those people" are wrong,
+and I don't see much point in making them comfortable. The entire idea of
+unreserved keywords should only be used in the case of keywords that exist
+mainly to make the syntax more readable, and for those, there is no conflict
+with declarations. I have parameters named "some", and I see no confusion
+between those and the direction of a quantifier. Warnings would just be noise.
+
+If there is a significant possible conflict, then the keywords should be
+reserved. Period.
+
+> >...So those make sense (even though we've  never been able to 
+> >convince enough people of that value). If the keyword can appear 
+> >somewhere a name can, the only possibility is confusion, no matter 
+> >what rules are adopted.
+> > 
+> > > BTW, I don't much like "ditto".  I'd call it "it".  Or "lhs"
+> > > is tolerable.
+> > >
+> > > Anyway, if nobody is seriously proposing a keyword (reserved or 
+> > > not), we don't need to settle these issues.
+> > 
+> > Steve Michell has seriously proposed "ditto". Twice. I guess since 
+> > he's not an ARG member, he doesn't count?
+> 
+> I can't keep track of who proposed what, nor how serious they are.
+> I stand by my statement "IF (IF!) nobody is seriously proposing a 
+> keyword (reserved or not), we don't need to settle these issues."
+> My statement doesn't say anything about who "counts".
+
+Right, but why say "If False, we don't have to settle this?". It's a clear
+no-op. The idea wouldn't have ever been discussed if someone wasn't seriously
+suggesting it. (We surely don't need any straw men in this discussion, we have
+plenty of wacky serious suggestions. :-)
+
+If you had said, "Unless there is strong support for a keyword (reserved or
+not), we don't need to settle these issues.", I wouldn't have complained.
+
+(And I agree we don't have to settle these issues -- I was just wondering how
+you could imagine that it ever would make sense to have a new keyword in an
+expression unreserved. Which you've answered, so we both can shut up. :-)
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, January 18, 2016  7:27 AM
+
+>> Of all the existing proposals, I like @ or ?.
+>> I hate "()" - too small a hamming distance to other programs.
+>> (...) is read as "to be filled in later"
+>> (.) is better but looks like Sumerian writing :-) .
+> 
+> And what about "(..)" suggested by Brad, and preferred by myself, and 
+> I believe JP?
+
+Well, (..) and (...) share this "to be filled in later" problem. If I wrote on
+a slide in class:
+
+A(F(X)) :=  B(Y) * (..);
+
+99% of students would read this as "irrelevant detail omitted".
+
+For
+
+A(F(X)) := B(Y) * @;
+
+they'd ask what the funny symbol stands for.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, January 19, 2016  7:54 AM
+
+> For
+> 
+> A(F(X)) := B(Y) * @;
+> 
+> they'd ask what the funny symbol stands for.
+
+And nobody could justify using this...
+
+In my courses, I generally make fun at C for chosing '!' for "not", saying
+that the only rationale for it was that it was not yet used on the keyboard.
+Now the same would apply to Ada...
+
+TBH, I'm afraid of very hostile reactions from the community. So let's be
+clear about what I proposed: NOT to discuss with the public at large, but if
+(as is likely) we have 2 or 3 proposals that are roughly on equal footing
+amongst us, conduct a poll for user preference.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, January 19, 2016  9:23 AM
+
+Here is yet another alternative, but it instantly appeals to me over other
+suggestions, so it seems I should throw it out there.
+
+Suppose we define an attribute, 'lhs   (short for left hand side),
+where there prefix of the attribute is implicitly the current source line.
+
+Really_Long_Name := 'lhs + 1;
+
+Seems quite readable to me, and more Ada "friendlier" than
+
+Really_Long_Name := @ + 1;
+
+Similarly, extending Randy's example below
+
+Long_Object_Name :=
+   (if 'lhs in 1 .. 10 then 0 else 'lhs + Foo('lhs) - 10);
+
+Seems more readable to me than
+
+Long_Object_Name :=
+   (if @ in 1 .. 10 then 0 else @ + Foo(@) - 10);
+
+Also, I find that the @ in this example looks not that different than a zero
+on my computer, the zeros and the @'s in the example kind of blend together, so
+if its a sore thumb we're after, it feels like we need to hit it with a hammer
+a couple times to make it stand out more.
+
+I realize we dont have implicit prefixes yet in Ada, but perhaps we've not had
+the need for one. In this case, resolving the entity for the lhs attribute is
+always referring to a single known entity, the current source line.  Mentally
+processing the examples above, I find the 'lhs provides a better mental
+reminder of what is being substituted, whereas @ requires a double translation.
+@ translates to lhs which translates to ...
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, January 19, 2016  9:42 AM
+
+> Here is yet another alternative
+And another one: <:=>, where the <> carries the meaning "stands for", and ":="
+means assignment ;-)
+
+ (if <:=> in 1 .. 10 then <:=> else <:=> + Foo(<:=>) - 10);
+
+Variants: <>:=   <:=
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January 19, 2016  2:27 PM
+
+> > For
+> > 
+> > A(F(X)) := B(Y) * @;
+> > 
+> > they'd ask what the funny symbol stands for.
+> And nobody could justify using this...
+> 
+> In my courses, I generally make fun at C for chosing '!' for "not", 
+> saying that the only rationale for it was that it was not yet used on 
+> the keyboard. Now the same would apply to Ada...
+
+Really? You don't think any of us will ever come up with an appropriate rationale??
+
+> TBH, I'm afraid of very hostile reactions from the community. 
+
+Possibly, but that's *not* going to be because of the choice of syntax.
+Ada's style is verbose, and this feature is all about our admitting that there
+is such a thing as too much verbosity. Some people are not going to want to
+admit that, and will be against any shorthand, regardless of syntax. (Just as
+we've gotten people who are against conditional expressions; I've heard plenty
+of hostility about those.)
+
+For everyone else, it will not take long at all to get used to whatever
+choice we make. And we need to make a choice that has the least possibility of
+confusion. (But I think most of the people here are simply trying too hard --
+this particular item has no short, natural notation, so we just have to choose
+something and get used to it.)
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Tuesday, January 19, 2016  3:08 PM
+
+Perhaps, but that's not my point. I'm just saying that if there is no clear
+agreement between us, we can ask users what they prefer for syntax. I'm NOT
+proposing to poll for or against the whole proposal.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April 21, 2016  9:55 PM
+
+The reliability of Internet polls to decide serious questions is iffy at
+best. Exhibit A: the British research vessel recently named "Boaty McBoatface"
+by an Internet poll.
+
+We'd probably get people trying to come up the most verbose possible syntax;
+something like:
+    Obj := <Rename_of_Target> + 1;
+would likely win. :-) Well, really it would be a lot worse than that, but I
+lack the imagination to come up with something that looks vaguely useful and
+is also insanely long.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, March 8, 2016  8:38 AM
+
+This might be of interest:
+
+http://www.bbc.com/news/magazine-35744456
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, March 8, 2016  9:16 AM
+
+My favorite name for "@" is "smudge" ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April 21, 2016  10:32 PM
+
+In filing the mail on the various threads on this AI, I'm struck by the sheer
+number of ideas that this group has thrown out. At the risk of restarting a
+discussion that has thankfully died out, I've gathered them all together.
+
+Going back to Bennington, all of the following have been seriously proposed
+for this idea (the first three are the only ones that ever had any significant
+traction, the rest are in the order of occurrence -- I used a full example of
+each so all of the nuances are visible):
+
+  Obj01 := <<>> + 1;
+  Obj02 := @ + 1;
+  Obj03 := (..) + 1;
+
+  Obj04 := [] + 1;
+  Obj05 := $ + 1;
+  Obj06 := # + 1;
+  Obj07 := % + 1;
+  Obj08 := <LHS> + 1;
+  [Obj09] := [] + 1;
+  {Obj10} := {} + 1;
+  Obj11 := <-> + 1;
+  Obj12 := <=< + 1;
+  (Obj13) := () + 1;
+  :Obj14: := :: + 1;
+  (Obj15) := (..) + 1;
+  (.Obj16.) := (..) + 1;
+  Obj17 := ... + 1;
+  temp renames Obj18 := temp + 1;
+  Obj19 := (...) + 1;
+  Obj20 := ditto + 1;
+  Obj21 := -"- + 1;
+  Obj22 := (.) + 1;
+  Obj23! := ? + 1;
+  Obj24 := it + 1;
+  Obj25 := lhs + 1;
+  Obj26 := .. + 1;
+  Obj27 := 'lhs + 1;
+  Obj28 := <:=> + 1;
+  Obj29 := <>:= + 1;
+  Obj30 := <:= + 1;
+
+
+That's 30 distinct proposals, which is more than 2 per ARG member! (I admit,
+I've proposed my fair share. :-)
+
+(And of course, this discussion goes back long before Bennington, but I can't
+justify reading years of old mail - even though it might be more fun than
+work. :-)
+
+If you want to see why any of these were proposed, or who was responsible, or
+what the objections were, I refer you to the mail filed in AI12-0125-3.
 
 ****************************************************************
