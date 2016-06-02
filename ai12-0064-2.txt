@@ -1,4 +1,4 @@
-!standard 9.5.1(11)                                15-12-18    AI12-0064-2/01
+!standard 9.5.1(11)                                16-06-02    AI12-0064-2/02
 !standard 9.5.1(18)
 !class Amendment 15-10-17
 !status work item 15-12-18
@@ -64,6 +64,12 @@ Add after 9.5.1(18):
        expression. This aspect is inherited by overridings of
        dispatching subprograms.
      
+         AARM Ramification: specifying Nonblocking is False imposes
+         no requirements. Specifying Nonblocking is True imposes
+         additional compile-time checks to prevent blocking, but does not
+         prevent deadlock. pragma Detect_Blocking can be used to ensure
+         that Program_Error is raised in a deadlock situation.
+
        For a generic instantiation, the aspect is determined by the setting
        for the generic unit[Redundant, re-evaluated based on the actual
        parameters.] If the aspect is directly specified for an instance,
@@ -151,13 +157,14 @@ reader.]
        In addition to the places where Legality Rules normally apply
        (see 12.3), the above rules apply also in the private part of an
        instance of a generic unit.      
-            
-         AARM Ramification: specifying Nonblocking is False imposes
-         no requirements. Specifying Nonblocking is True imposes
-         additional compile-time checks to prevent blocking, but does not
-         prevent deadlock. pragma Detect_Blocking can be used to ensure
-         that Program_Error is raised in a deadlock situation.
 
+       AARM Ramification: For a generic formal parameter to be nonblocking
+       (thus, for these rules to apply), either it or some enclosing
+       unit has to explicitly specify aspect Nonblocking to be True.
+       In particular, these rules do not apply when it or some enclosing unit
+       specifies aspect Nonblocking to be an expression involving attribute
+       Nonblocking of a generic formal parameter (see below).
+            
 For a prefix S that denotes a subprogram (including a formal subprogram): 
 
 S'Nonblocking
@@ -360,7 +367,7 @@ propose such a mechanism.
 
 We could simplify this proposal further by dropping the ability to specify
 Nonblocking on generic formal parameters, and just depending on the Nonblocking
-aspect to handle that. That would eliminate the rules about generic formal
+attribute to handle that. That would eliminate the rules about generic formal
 matching. We didn't do that as that would require having nonblocking attributes
 for formal packages and formal objects (which would reduce the value somewhat),
 and would eliminate the "easy" solution for new code (which is to simply
@@ -379,7 +386,7 @@ a significant compatibility problem.
 
 An alternative for alternative 1 would be to declare units like the containers
 to be blocking; but then they can never be nonblocking (and we surely want to
-use them as blocking).
+use them as nonblocking).
 
 In contrast, this proposal puts all of the burden on the implementer of a
 package (where it should be) and none on the user of the package. Alternative
@@ -447,7 +454,7 @@ generic body.
 There is one known problem with this proposal as it is written. The prefix
 of the Nonblocking attribute has to resolve without any context. That means
 that in many circumstances, overloaded prefixes aren't going to be usable.
-That could be a huge problem for operators (like "=" in the containers) that
+That could be a problem for operators (like "=" in the containers) that
 are widely used.
 
 I considered using subprogram calls rather than subprogram names in the
@@ -455,21 +462,15 @@ prefix, but that ran into issues both with having appropriate parameters
 to use (in the generic case) and with evaluation of the prefix (which we
 don't want to do).
 
-I also consider using qualification, but that doesn't help for relational
+I also considered using qualification, but that doesn't help for relational
 operators (they all return Boolean!).
 
-The problem could be reduced somewhat by only allowing formal subprograms
-as the prefix of Nonblocking, but that is not a complete fix and does reduce
-the capability somewhat. In particular, both the inner and outer generics
-in Ordered_Sets have a formal "<" operator; it wouldn't be possible to refer
-to "<"'Nonblocking inside the nested generic.
+It's possible to rename operators to unique names, so the problem isn't
+unsurmountable, but of course that clutters the name space of packages.
+(We can use renames as aspects aren't resolved until the freezing point.)
 
 One of course can avoid using operators in generic specifications, but that's
 impractical for existing generics and a usage pain for new generics.
-
-I'm at a loss for other ideas to try at this point, short of some sort of
-profile in the prefix (something we've managed to avoid up to this point in
-the development of Ada).
 
 !example
 
@@ -513,10 +514,12 @@ the development of Ada).
   package Ada.Containers.Hashed_Maps is
      with Nonblocking => Hash'Nonblocking and
                          Equivalent_Keys'Nonblocking and
-                         "="'Nonblocking;
+                         Element_Equal'Nonblocking;
      pragma Preelaborate(Hashed_Maps);
      pragma Remote_Types(Hashed_Maps);
 
+     function Element_Equal (Left, Right : Element_Type)
+        return Boolean renames "="; -- Rename of formal "=".
      ...
 
      procedure Iterate
