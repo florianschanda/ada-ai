@@ -1,0 +1,1056 @@
+!standard 5.5.2(2/3)                                  16-06-02  AI12-0189-1/01
+!class Amendment 16-06-02
+!status work item 16-06-02
+!status received 16-05-06
+!priority Medium
+!difficulty Medium
+!subject Lambda loops
+!summary
+
+** TBD.
+
+!problem
+
+Currently, the way to create an iterator for some abstraction is to create an
+implementation of the iterator interface. This requires the invention of a
+cursor type, and often the use of the Rosen technique (as the iterator object
+parameters of the iterator interface are of mode "in").
+
+But not all abstractions have natural cursors. Moreover, some have multiple
+items (key - value pairs are particularly common.
+
+Most of these abstractions (like Ada.Directories and
+Ada.Environment_Variables) already have closed iterators that do not expose
+cursors. If we could map to them, we could simplify many iterators without
+adding ridiculous amounts of new capabilities.
+
+!proposal
+
+A loop body can be used to specify the implementation of a procedure to be
+passed as the actual for an access-to-subprogram parameter, when used in
+the context of a special kind of for-loop statement, whose
+iterator_specification is given by a procedure_iterator:
+
+   iterator_specification ::= procedure_iterator
+
+   procedure_iterator ::=
+     iterator_parameter_specification OF iterator_procedure_call
+
+   iterator_parameter_specification ::=
+       ( identifier {, identifier } ) | formal_part
+
+The body of the associated loop becomes the body of an anonymous procedure,
+whose formal parameter identifiers (and optionally subtypes, modes, etc.) are
+given by the iterator_parameter_specification.  The anonymous procedure is
+passed as the actual for an access-to-procedure parameter, in the place of the
+"<>" in the iterator_procedure_call:
+
+   iterator_procedure_call ::= procedure_name [ actual_parameter_part_with_box ]
+
+   actual_parameter_part_with_box ::=
+     ( parameter_association_with_box { , parameter_association_with_box } )
+
+   parameter_association_with_box ::= parameter_associationEq
+     | [ formal_parameter_selector_name => ] <>
+
+A parameter association with a <> may appear at most once in an
+iterator_procedure_call.
+In the absence of such an association, it is equivalent to the actual for the
+last parameter of the called procedure being specified as <>.
+
+Here is an example of iterating over the environment variables:
+
+    for (Name, Val) of Ada.Environment_Variables.Iterate(<>) loop
+       --  or "Ada_Environment_Variables.Iterate" since "<>" is last param
+
+       Put_Line (Name & " => " & Val);
+
+    end loop;
+
+In order to use this capability to support keyed iteration for Ada.Containers,
+we should add additional iterators to the Map and Set containers (the Set
+containers in the enclosed generic) like:
+
+   procedure Iterate
+     (Container : in out Map;
+      Process   : not null access procedure (Key     : in Key_Type;
+                                             Element : in out Element_Type));
+
+   procedure Constant_Iterate
+     (Container : in Map;
+      Process   : not null access procedure (Key     : in Key_Type;
+                                             Element : in Element_Type));
+
+   procedure Iterate
+     (Container : in Map;
+      Process   : not null access procedure (Key     : in Key_Type));
+
+!wording
+
+** TBD.
+
+!discussion
+
+This proposal is more general than the proposals in AI12-0009-1 and
+AI12-0188-1. If adopted, those AIs should be killed (given No Action status).
+
+!ASIS
+
+** TBD.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the new capabilities are supported.
+
+
+!appendix
+
+From: Tucker Taft
+Sent: Friday, May 6, 2016  2:05 PM
+
+Now that we have a number of language-defined subprograms that take
+access-to-subprogram parameters, it seems worth considering supporting some kind
+of "anonymous" function/procedures.  Here are two proposals, one for anonymous
+(lambda) functions, and one for anonymous (loop-body) procedures:
+
+[Editor's note: See AI12-0190-1 for the other proposal.]
+
+Loop-body procedures (these were discussed a bit in Vermont):
+
+A loop body can be used to specify the implementation of a procedure to be
+passed as the actual for an access-to-subprogram parameter, when used in the
+context of a special kind of for-loop statement, whose iterator_specification is
+given by a procedure_iterator:
+
+   iterator_specification ::= procedure_iterator
+
+   procedure_iterator ::=
+     iterator_parameter_specification OF iterator_procedure_call
+
+   iterator_parameter_specification ::=
+       ( identifier {, identifier } ) | formal_part
+
+The body of the associated loop becomes the body of an anonymous procedure,
+whose formal parameter identifiers (and optionally subtypes, modes, etc.) are
+given by the iterator_parameter_specification.  The anonymous procedure is
+passed as the actual for an access-to-procedure parameter, in the place of the
+"<>" in the iterator_procedure_call:
+
+   iterator_procedure_call ::= procedure_name [ actual_parameter_part_with_box ]
+
+   actual_parameter_part_with_box ::=
+     ( parameter_association_with_box { , parameter_association_with_box } )
+
+   parameter_association_with_box ::= parameter_associationEq
+     | [ formal_parameter_selector_name => ] <>
+
+A parameter association with a <> may appear at most once in an
+iterator_procedure_call. In the absence of such an association, it is equivalent
+to the actual for the last parameter of the called procedure being specified as
+<>.
+
+Here is an example of iterating over the environment variables:
+
+    for (Name, Val) of Ada.Environment_Variables.Iterate(<>) loop
+       --  or "Ada_Environment_Variables.Iterate" since "<>" is last param
+
+       Put_Line (Name & " => " & Val);
+
+    end loop;
+
+=====================
+
+Again, if there is interest, I can write up these ideas as AIs.  As mentioned,
+we discussed the loop-body procedures a bit in Vermont.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May 12, 2016  5:21 PM
+
+> Again, if there is interest, I can write up these ideas as AIs.  As
+> mentioned, we discussed the loop-body procedures a bit in Vermont.
+
+Right, and this topic was assigned to Bob Duff. Given your well-known huge pile
+of homework, I recommend that you let Bob write the AI(s) on this topic. (If he
+doesn't do it, we can revisit, there certainly isn't any rush at this point.)
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, May 12, 2016  10:55 PM
+
+[Editor's note: From a thread in AI12-0190-1.]
+
+Anonymous functions are fairly common in programming languages, and apparently
+can be found in languages including C++, C#, Dart, Erlang, Go, Haskell, Java,
+Javascript, List, Lua, Mathematica, Perl, PHP, Python, Ruby, Scala, Smalltalk,
+Swift, ...
+
+https://en.wikipedia.org/wiki/Anonymous_function
+
+There must be at least some folks out there who grok lambdas.
+
+Well, I have one more example, that is kind of interesting that I plan to use
+for a tutorial at Ada Europe... Interesting here not from the standpoint of
+parallelism, but from the standpoint of being called from multiple languages,
+and involving multiple anonymous subprogram parameters.
+
+The following non-generic Ada subprogram that can be called from multiple
+languages including C, C++, C#, and Java, as it exports the C calling convention
+for the C and C++ case, and can be easily ported to C# and Java as well, which I
+have done using the GNAT dot net and java compilers....
+
+procedure Parallel_Loop
+   (From           : Loop_Index;
+    To             : Loop_Index;
+    Reset          : not null access procedure;
+    Loop_Body      : not null access
+      procedure (Start, Finish : Loop_Index);
+    Reduce         : not null access procedure);
+
+Basically,
+    Reset is used to reinitialize task local variables,
+    Loop_Body does the processing of the loop,
+    and Reduce combines results produced by the Loop_Body.
+
+Currently to call this routine from Ada to calculate the sum of numbers from 1
+to 1_000_000, one might write in Ada....
+
+    package Partial_Sums is new
+       Ada.Task_Attributes (Attribute     => Integer,
+                            Initial_Value => 0);
+    procedure Reset is
+    begin
+       Partial_Sums.Set_Value (0);
+    end Reset;
+
+    procedure Compute_Sum
+      (Start, Finish : Parallel.Loop_Index)
+    is
+       Partial_Sum : Integer renames Partial_Sums.Reference.all;
+    begin
+       for I in Start .. Finish loop
+          Partial_Sum := Partial_Sum + I;
+       end loop;
+    end Compute_Sum;
+
+    Sum : Integer := 0;
+
+    procedure Reduce () is
+    begin
+       Sum := Sum + Partial_Sums.Value;
+    end Reduce;
+
+    Reducing_Loops.Work_Seeking.Parallel_Loop
+      (From           => 1,
+       To             => 1_000_000,
+       Reset          => Reset'Access,
+       Process        => Compute_Sum'Access,
+       Reduce         => Reduce'Access);
+
+To call this same Ada library from C#, one can currently write...
+
+    [ThreadStatic]
+    private static int partial_sum;
+    ...
+       int sum = 0;
+
+       paraffin_pkg.parallel_loop
+          (from   : 1,
+           to     : 1000000,
+           reset  : () => { partial_sum = 0; },
+           process: (start, finish) =>
+             {
+               for (int i = start; i <= finish; i++)
+                  partial_sum += i;
+             },
+           Reduce : () => { sum += partial_sum; });
+
+Which of these two versions do you find more readable?
+
+I prefer the C# version mostly because there is less "noise" text, and the
+formal parameters of the call are directly associated with the code. In Ada, you
+are first presented with a bunch of routines, not knowing their purpose, until
+you get down to the call, but then your eyes have to jump up and down to
+associate the logic with the call site.
+
+In this example, it appears to be actually easier to call Ada code from C#, than
+from Ada, I would say.
+
+If instead, some sort of general lambda feature existed in Ada, I might be able
+to write something like...
+
+package Partial_Sums is new
+       Ada.Task_Attributes (Attribute     => Integer,
+                            Initial_Value => 0);
+    Sum : Integer := 0;
+
+    Reducing_Loops.Work_Seeking.Parallel_Loop
+      (From     => 1,
+       To       => 1_000_000,
+       Reset    => is Partial_Sums.Set_Value (0),
+       Process  => (Start, Finish) is
+          Partial_Sum : constant access Integer :=
+             Partial_Sums.Reference;
+         begin
+            for I in Start .. Finish loop
+               Partial_Sum.all := Partial_Sum.all + I;
+            end loop;
+         end,
+       Reduce   => is Sum := Sum + Partial_Sums.Value);
+
+Which I find more readable, but maybe thats just me...
+
+>
+> I'm also getting worried about feature creep. We expanded expressions
+> to include if and case and quantified and expression functions because
+> of the needs of contract aspects. I don't know what is supposed to be
+> driving lambdas.
+
+I suppose its mostly just syntactic sugar to hopefully improve readability with
+a short hand form of expression, in the same way that loop iterators of Ada 2012
+did that for loops.
+
+Also I think it would be beneficial to be able to say that Ada provides a lambda
+feature comparable to most other main stream languages.
+
+If I am alone in seeing the benefit of this, then I wont bother promoting the
+idea, but then I tend to agree with the worry of feature creep for special
+purpose syntax that has limited use. My concern would be to wonder if the same
+capability can be provided reasonably with just a library addition.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May 13, 2016  12:04 AM
+
+A couple of thoughts rather than a complete response to your message because its
+important to hear more from the rest of the group before beating to death ideas
+that may not have much support anyway:
+
+...
+>> I'm pretty much against all of the other proposals, I don't see the
+>> value of the complications (especially as access-to-anything ought to
+>> be minimized, especially in reusable code). And the idea of sticking
+>> statements in the middle of expressions is a bridge too far to me.
+>> All of the languages that you listed as having lambdas seem to me to
+>> be also those languages that are actively against readability!
+
+>Anonymous functions are fairly common in programming languages, and apparently
+>can be found in languages including C++, C#, Dart, Erlang, Go, Haskell, Java,
+>Javascript, List, Lua, Mathematica, Perl, PHP, Python, Ruby, Scala, Smalltalk,
+>Swift, ...
+>
+>https://en.wikipedia.org/wiki/Anonymous_function
+
+We've come to regret almost everything anonymous that has ever been in or added
+to Ada. They tend to cause all kinds of definitional and usage problems. I'm
+quite opposed to repeating that mistake; every time we've been told how it will
+all work out fine, and it never does.
+
+What does help is to have short-hand syntax (like generalized references and
+generalized indexing) where named stuff can be used with a shorthand.
+
+Besides, what is really going on in most of those languages is some sort of
+poor-man's subprogram type and values. The benefit isn't in anonymity but rather
+in having subprogram values. We'd be better off looking in that direction if we
+really needed it (but still, all of the subprogram types and values should have
+names).
+
+...
+> The following non-generic Ada subprogram that can be called from
+> multiple languages including C, C++, C#, and Java, as it exports the C
+> calling convention for the C and C++ case, and can be easily ported to
+> C# and Java as well, which I have done using the GNAT dot net and java
+> compilers....
+>
+> procedure Parallel_Loop
+>    (From           : Loop_Index;
+>     To             : Loop_Index;
+>     Reset          : not null access procedure;
+>     Loop_Body      : not null access
+>       procedure (Start, Finish : Loop_Index);
+>     Reduce         : not null access procedure);
+>
+> Basically,
+>     Reset is used to reinitialize task local variables,
+>     Loop_Body does the processing of the loop,
+>     and Reduce combines results produced by the Loop_Body.
+>
+> Currently to call this routine from Ada to calculate the sum of
+> numbers from 1 to 1_000_000, one might write in Ada....
+>
+>     package Partial_Sums is new
+>        Ada.Task_Attributes (Attribute     => Integer,
+>                             Initial_Value => 0);
+>     procedure Reset is
+>     begin
+>        Partial_Sums.Set_Value (0);
+>     end Reset;
+>
+>     procedure Compute_Sum
+>       (Start, Finish : Parallel.Loop_Index)
+>     is
+>        Partial_Sum : Integer renames Partial_Sums.Reference.all;
+>     begin
+>        for I in Start .. Finish loop
+>           Partial_Sum := Partial_Sum + I;
+>        end loop;
+>     end Compute_Sum;
+>
+>     Sum : Integer := 0;
+>
+>     procedure Reduce () is
+>     begin
+>        Sum := Sum + Partial_Sums.Value;
+>     end Reduce;
+>
+>     Reducing_Loops.Work_Seeking.Parallel_Loop
+>       (From           => 1,
+>        To             => 1_000_000,
+>        Reset          => Reset'Access,
+>        Process        => Compute_Sum'Access,
+>        Reduce         => Reduce'Access);
+>
+> To call this same Ada library from C#, one can currently write...
+>
+>     [ThreadStatic]
+>     private static int partial_sum;
+>     ...
+>        int sum = 0;
+>
+>        paraffin_pkg.parallel_loop
+>           (from   : 1,
+>            to     : 1000000,
+>            reset  : () => { partial_sum = 0; },
+>            process: (start, finish) =>
+>              {
+>                for (int i = start; i <= finish; i++)
+>                   partial_sum += i;
+>              },
+>            Reduce : () => { sum += partial_sum; });
+>
+> Which of these two versions do you find more readable?
+
+Neither. A loop should look like a loop; otherwise causal reading/tools will not
+discover where the majority of the work is happening.
+
+Tucker's "loop procedure" proposal does look like a loop; it would make this
+look something like:
+
+   for (First, Last) of Reducing_Loops.Work_Seeking.Parallel_Loop
+       (From           => 1,
+        To             => 1_000_000,
+        Reset          => Reset'Access,
+        Process        => <>,
+        Reduce         => Reduce'Access) loop
+      declare
+        Partial_Sum : Integer renames Partial_Sums.Reference.all;
+      begin
+        for I in Start .. Finish loop
+           Partial_Sum := Partial_Sum + I;
+        end loop;
+      end;
+   end loop;
+
+...and the rename inside the loop body makes it messier. (You still have the
+instance and other subprograms, which to me demonstrate that the original
+routine is too complex to be used; I'd never bother trying to understand a
+routine that takes THREE subprograms. At least the intent is that parallel loops
+are directly supported by Ada syntax and the compiler - no subprograms -
+anonymous or otherwise - anywhere.)
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, May 13, 2016  12:32 AM
+
+...
+> Tucker's "loop procedure" proposal does look like a loop; it would
+> make this look something like:
+>
+>     for (First, Last) of Reducing_Loops.Work_Seeking.Parallel_Loop
+>         (From           => 1,
+>          To             => 1_000_000,
+>          Reset          => Reset'Access,
+>          Process        => <>,
+>          Reduce         => Reduce'Access) loop
+>        declare
+>          Partial_Sum : Integer renames Partial_Sums.Reference.all;
+>        begin
+>          for I in Start .. Finish loop
+>             Partial_Sum := Partial_Sum + I;
+>          end loop;
+>        end;
+>     end loop;
+
+Ok, I didn't realize Tucker's solution could be applied to this case...
+I still worry that people coming from C++, Java, C# etc, might criticize that we
+didn't go far enough to allow Reset and Reduce to also be "inlined", or that
+other sorts of non-loop cases can't be lambdaized, but I would like to hear
+others comments on this as well. John said he had some notes about statements
+within expressions from some time ago that would be good to hear.
+
+> ...and the rename inside the loop body makes it messier. (You still
+> have the instance and other subprograms, which to me demonstrate that
+> the original routine is too complex to be used; I'd never bother
+> trying to understand a routine that takes THREE subprograms.
+
+Just thought it would be worth pointing out that C#'s current official
+parallelism approach actually looks very similar to the library I have. Their
+library also takes three subprograms....
+
+Here is how one would do the same loop using the C# "standard" libraries.
+
+int sum = 0;
+
+Parallel.ForEach
+    (source      : Partitioner.Create(1, 1000001),
+     LocalInit   : () => 0,        // Reset
+     body        : (range, loopState, local) =>
+        {
+          for (int i = range.Item1; i < range.Item2; i++)
+            { local += i; }
+          return local;
+        },
+     localFinally: local =>        // Reduce
+        {Interlocked.Add(ref sum, local);});
+
+Its a similar looking library routine, except that it is genericized so that the
+thread local variables are passed into the body lambda, instead of having to be
+declared separately, and that the programmer has to supply locking around the
+code in the Reduce routine.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, May 13, 2016  2:23 AM
+
+> I still worry that people coming from C++, Java, C# etc, might
+> criticize that we didn't go far enough to allow Reset and Reduce to
+> also be "inlined", or that other sorts of non-loop cases can't be
+> lambdaized
+<rant>
+We've been trying for 30 years to find the killer feature that would attract
+those people. The truth is that they don't intend to switch to Ada, and that
+their criticizing is just for finding excuses for not switching languages. Ada
+has its own strengthes, most of which reside in /not/ doing things the same way
+as other languages.
+
+So I suggest we just close our ears to these criticisms </rant>
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, May 12, 2016  2:55 AM
+
+...
+> We've come to regret almost everything anonymous that has ever been in
+> or added to Ada. They tend to cause all kinds of definitional and
+> usage problems. I'm quite opposed to repeating that mistake; every
+> time we've been told how it will all work out fine, and it never does.
+
+John B certainly regrets most of the anonymous stuff, and purged a lot of it
+when he revised his book.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, May 17, 2016  6:57 AM
+
+> Tucker's "loop procedure" proposal does look like a loop; it would
+> make this look something like:
+>
+>     for (First, Last) of Reducing_Loops.Work_Seeking.Parallel_Loop
+>         (From           => 1,
+>          To             => 1_000_000,
+>          Reset          => Reset'Access,
+>          Process        => <>,
+>          Reduce         => Reduce'Access) loop
+>        declare
+>          Partial_Sum : Integer renames Partial_Sums.Reference.all;
+>        begin
+>          for I in Start .. Finish loop
+>             Partial_Sum := Partial_Sum + I;
+>          end loop;
+>        end;
+>     end loop;
+
+I am warming up to the idea of using this syntax, but I have two outstanding
+criticisms.
+
+For parallel loops, I also have a generic interface, where the reduction is
+expressed as a function that would fit nicely with Tucker's lambda function
+expression in many cases.
+
+generic
+    type Loop_Index is range <>;
+    type Result_Type is private;
+package Parallel.Loops is
+
+    subtype Iteration_Count is Loop_Index'Base;
+
+    function Parallel_Loop
+      (From       : Loop_Index := Loop_Index'First;
+       To         : Loop_Index := Loop_Index'Last;
+       Identity   : Result_Type;
+       Reducer    : not null access
+         function (L, R : Result_Type) return Result_Type;
+       Process    : not null access
+         procedure (From, To : Loop_Index;
+                    Result   : in out Result_Type)) return Result_Type;
+
+end Parallel.Loops;
+
+If we had the proposed loop body syntax, I would want to use that syntax, which
+would cause me to change the above to be a procedure instead of a function, and
+pass the result as an in out parameter.
+
+Something like;
+
+generic
+    type Loop_Index is range <>;
+    type Result_Type is private;
+package Parallel.Loops is
+
+    subtype Iteration_Count is Loop_Index'Base;
+
+    procedure Parallel_Loop
+      (From       : Loop_Index := Loop_Index'First;
+       To         : Loop_Index := Loop_Index'Last;
+       Identity   : Result_Type;
+       Reducer    : not null access
+         function (L, R : Result_Type) return Result_Type;
+       Process    : not null access
+         procedure (From, To : Loop_Index;
+                    Result   : in out Result_Type),
+       Result     : in out Result_Type);
+
+end Parallel.Loops;
+
+Then, to calculate the sum of integers from 1 to N, I could write using a
+combination of loop body syntax and lambda function expression syntax, the
+following.
+
+package Natural_Loops is new Parallel.Loops
+    (Loop_Index => Natural,
+     Result_Type => Parallel.Long_Iteration_Count); use Natural_Loops;
+
+Sum : Integer := 0;
+
+for (Start, Finish, Partial_Sum) of
+     Parallel_Loop (From => 1,
+                    To   => N,
+                    Identity => 0,
+                    Reducer => (lambda(L, R)(L+R)),
+                    Result => Sum) loop
+    for I in Start .. Finish loop
+       Partial_Sum := Partial_Sum + I;
+    end loop;
+end loop;
+
+That feels satisfying to write.
+
+However here are my two criticisms.
+
+1) Recall that I originally wanted to write my loop as a function. The syntax
+   encouraged me to change my design to use a procedure instead of a function.
+   If the goal of this syntax is to appease the functional programming crowd,
+   are they going to be happy that we are encouraging them to write procedures
+   instead of functions? It kind of reminds me how Ada's function syntax
+   encouraged people to use access types to get around being only allowed to
+   write "in" mode parameters, until Ada 2012 where we finally allowed in out
+   parameters.
+
+2) You said above "A loop should look like a loop". Would that not also give us
+   the corollary, "That that is not a loop, should not look like a loop"?
+
+If one looks at the above, we see a nested loop inside another. If the outer
+loop is supposedly iterating through something, then why is there an inner loop?
+What exactly is the outer loop iterating through?
+
+It seems to me that we are trying too hard to make something look like a loop
+that fundamentally isnt, particularly if I want to express this as a function
+that returns the value of the reduction.
+
+However, if we use something like what I was suggesting, both of these
+criticisms go away. i.e.,
+
+Sum := Parallel_Loop
+          (From => 1
+           To   => N,
+           Identity => 0,
+           Reducer => (lambda(L, R)(L+R)),
+           Body => (Start, Finish, Partial_Sum) is
+             begin
+               for I in Start .. Finish loop
+                  Partial_Sum := Partial_Sum + I;
+               end loop;
+             end);
+
+Here I am able to keep the function of my original design, and there is only one
+loop. The expression of code more closely looks like the original call, which is
+a function, not a loop.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May 17, 2016  6:02 PM
+
+...
+> However here are my two criticisms.
+>
+> 1) Recall that I originally wanted to write my loop as a function.
+> The syntax encouraged me to change my design to use a procedure
+> instead of a function. If the goal of this syntax is to appease the
+> functional programming crowd, are they going to be happy that we are
+> encouraging them to write procedures instead of functions?
+
+I would hope that we are not doing anything to "appease" any "crowd", because
+that sort of thing is a fool's game (they'll never be happy with us no matter
+what we do). The issue is what we need to do to make Ada programming more
+intuitive for people who are already reasonably happy with the procedural/OOP
+style that Ada provides.
+
+...
+> 2) You said above "A loop should look like a loop". Would that not
+> also give us the corollary, "That that is not a loop, should not look
+> like a loop"?
+
+Right. But...
+
+> If one looks at the above, we see a nested loop inside another. If the
+> outer loop is supposedly iterating through something, then why is
+> there an inner loop? What exactly is the outer loop iterating through?
+>
+> It seems to me that we are trying too hard to make something look like
+> a loop that fundamentally isnt, particularly if I want to express this
+> as a function that returns the value of the reduction.
+>
+> However, if we use something like what I was suggesting, both of these
+> criticisms go away. i.e.,
+>
+> Sum := Parallel_Loop
+>           (From => 1
+>            To   => N,
+>            Identity => 0,
+>            Reducer => (lambda(L, R)(L+R)),
+>            Body => (Start, Finish, Partial_Sum) is
+>              begin
+>                for I in Start .. Finish loop
+>                   Partial_Sum := Partial_Sum + I;
+>                end loop;
+>              end);
+
+Sorry, but this *entire* construct represents a loop from 1 to N. The "inner
+loop" in "Body" here is not really a loop at all, it is just an artifact of your
+library approach. It is the sort of thing that shouldn't appear at all in the
+proper syntax for the parallel loop (one does not want to expose those inner
+workings more than absolutely necessary). I'd hope to see something like:
+
+     for I in 1 .. L in parallel
+        with Reducer => lambda(L, R)(L+R), Partial => Partial_Sum : Natural := 0, Giving => Sum
+        loop
+        Partial_Sum := Partial_Sum + I;
+     end loop;
+
+Hopefully with all of those aspects defaulted such that that they wouldn't have
+to be given most of the time.
+
+And that has nothing really to do with Tucker's proposal, which is all about
+containers anyway. (The library approach to parallelism is doomed to be far more
+complex and less readable than necessary, and it goes against the way Ada has
+supported parallelism to date. I really hope we aren't going there, except as a
+stop-gap for existing systems.)
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, May 29, 2016  11:15 AM
+
+The upshot from my previous two emails [See AI12-0009-1 - ED] is that it appears
+that if someone wants to write a container that works with the Ada 2012 iterator
+syntax and they want the code to be portable, then they have to make their
+container a limited type (and use the Rosen trick).
+
+At least that's what I am seeing.
+
+I doubt this was the intent.
+
+This seems like an issue that might be suitable for a binding interpretation AI
+to correct, or is that even an option?
+
+Or maybe those limitations are acceptable?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, May 29, 2016  11:42 AM
+
+Can you capture your concern in a short example (without assuming we have read
+and understood those two previous e-mails)?  The straightforward implementation
+of tampering does require a level of indirection, I believe, if that is what you
+mean.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, May 29, 2016  1:35 PM
+
+I likely have spoken too soon.
+
+The problem I was having was in trying to obtain a reference to the container in
+the subprogram identified by the Default_Iterator aspect.
+
+Typically the iterator object would need to contain a reference to the
+container, and using 'Unchecked_Access was not letting me obtain that reference,
+because the Container parameter was an "in" mode parameter to that call.
+
+I got around this though, by declaring the reference using a constant access as
+in;
+
+    type Constant_Iterator is  --  The iterable container type
+      limited new Iterators.Forward_Iterator with
+       record
+          Container : access constant Container_Type;
+       end record;
+
+This allowed me to eliminate all usage of the Rosen Trick, and also allowed me
+to make the container type non-limited.
+
+I think I may be able to make this work for a variable iterator as well, but
+should probably try that out just to be sure...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 30, 2016  6:01 PM
+
+> The upshot from my previous two emails is that it appears that if
+> someone wants to write a container that works with the Ada 2012
+> iterator syntax and they want the code to be portable, then they have
+> to make their container a limited type (and use the Rosen trick).
+
+You mean the iterator type, I hope. (The container itself has nothing to do with
+the iterator type; the container could even be virtual.)
+
+And there's no huge problem with the iterator type being limited, since in
+normal use no one needs to copy it anyway (it gets created when one starts an
+iteration and destroyed when the iteration ends).
+
+It *is* annoying to need to use the Rosen technique for an iterator. That came
+from my original intent that the container actually be the iterator object.
+After we changed away from that, I should have rethought the interface (which
+originally was intended to match the Ada container interface exactly; once that
+was no longer necessary, it should have been changed more than it was).
+
+Arguably, we could "fix" that by changing the parameter modes on the interface,
+but that would break any existing iterators. Not sure whether there are enough
+existing iterators for that to be a problem.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 30, 2016  6:06 PM
+
+...
+> Can you capture your concern in a short example (without assuming we
+> have read and understood those two previous e-mails)?  The
+> straightforward implementation of tampering does require a level of
+> indirection, I believe, if that is what you mean.
+
+The general problem with the iterators is that the interface uses all "in"
+parameters for iterator operations (such as First and Next). Thus, if you need
+updatable state in the iterator type (rather than in the cursor type), you have
+to make it limited and use the Rosen technique to access the state. I think this
+is the problem that Brad ran into (but his message seems to confuse the iterator
+and container, so I'm not certain).
+
+Brad had a similar problem with his ACATS tests for iterators, but he didn't
+notice because GNAT didn't enforce the rules properly at the time. I had to do
+some rather extensive corrections to those tests when the problem was noticed.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, May 30, 2016  8:53 PM
+
+> Arguably, we could "fix" that by changing the parameter modes on the
+> interface, but that would break any existing iterators. Not sure
+> whether there are enough existing iterators for that to be a problem.
+
+Conceivably we could allow "in" and/or "in out" modes.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 30, 2016  10:21 PM
+
+Yes, at the addition of some complexity.
+
+Arguably, however, this sort of problem mostly comes up when one doesn't have a
+natural cursor for the iterator and you need to fake something. If we were to
+adopt the "Tuck lambda loop" (or should I call it the "Duff lambda loop", since
+I think it was originally Bob's idea in Vermont), one wouldn't need a (visible)
+cursor at all (it can stay inside of the iterator procedure). Perhaps that's a
+better solution to the actual problem.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, May 31, 2016  11:21 PM
+
+>> Sum := Parallel_Loop
+>>            (From => 1
+>>             To   => N,
+>>             Identity => 0,
+>>             Reducer => (lambda(L, R)(L+R)),
+>>             Body => (Start, Finish, Partial_Sum) is
+>>               begin
+>>                 for I in Start .. Finish loop
+>>                    Partial_Sum := Partial_Sum + I;
+>>                 end loop;
+>>               end);
+>
+> Sorry, but this *entire* construct represents a loop from 1 to N. The
+> "inner loop" in "Body" here is not really a loop at all, it is just an
+> artifact of your library approach.
+
+Actually this represents an outer loop, and a nested inner loop. The outer loop
+is iterating through "chunks" of the iterations between 1 and N, and the inner
+loop is iterating through each chunk.
+
+What I was getting at, is that the outer loop, and the chunk abstraction being
+iterated over is internal to the library call. The inner loop is provided by the
+user.
+
+If one has the visibility of the code, which is quite often the case,
+particularly for user code, we can see those two loops in the code, and they
+make sense to be viewed as loops.
+
+How do we make sense of this third "fake" loop that is being introduced here? It
+can't really be doing any iterating, surely the two real loops are doing the
+real iterating. So it is not really a loop. It is just some loop syntax that
+suggests that there probably is another loop somewhere, that you cant see,
+possibly iterating over object types and abstractions that are not visible at
+this point in the code. I'm not entirely convinced that this syntax wouldn't be
+used for non-loop callback cases, but I suppose we could say that its processing
+a loop of a single iteration.
+
+I provided the parallel loop library call just as an example of using the lambda
+loop syntax. I wasn't  suggesting that this is the way to go with parallelism.
+I do think it is probably a good idea to see what can be done with a more
+general library call. If nothing else, it sets the bar that loop syntax needs to
+significantly improve upon.
+
+One can take one extreme solving the problem with pure syntax, or the other
+extreme of solving the problem with purely library calls, or there can be middle
+ground where there is some combination of both approaches, or possibly multiple
+approaches.
+
+> It is the sort of thing that shouldn't appear at all
+> in the proper syntax for the parallel loop (one does not want to
+> expose those inner workings more than absolutely necessary). I'd hope
+> to see something like:
+>
+>       for I in 1 .. L in parallel
+>          with Reducer => lambda(L, R)(L+R), Partial => Partial_Sum :
+> Natural := 0, Giving => Sum
+>          loop
+>          Partial_Sum := Partial_Sum + I;
+>       end loop;
+>
+> Hopefully with all of those aspects defaulted such that that they
+> wouldn't have to be given most of the time.
+
+This something quite similar to what we started out looking at, since then we've
+looked at a number of different ideas, but may come back to something like this,
+as we haven't yet settled on anything in particular.
+
+One interesting library approach is the one that Java provides, which is a
+streaming approach resembling a pipeline, which I think could be adapted to Ada.
+
+In Java, the above loop can be written as a 1 liner.
+
+int sum =  IntStream.range(1,L).parallel().sum();
+
+It's the most concise expression of such a loop that I've seen so far.
+
+It appears to be a pretty flexible and expressive approach, probably worth
+having a closer look at.
+
+> And that has nothing really to do with Tucker's proposal, which is all
+> about containers anyway. (The library approach to parallelism is
+> doomed to be far more complex and less readable than necessary, and it
+> goes against the way Ada has supported parallelism to date. I really
+> hope we aren't going there, except as a stop-gap for existing
+> systems.)
+
+Tucker's proposal looked more general to me than just for containers. I can see
+this being used for subprograms that accept callback parameters.
+
+Regarding parallelism, a combination of syntax and library may be worth
+considering, as a library can possibly produce more controls and adapt more
+closely to specific target platforms than a general purpose syntax solution, for
+those who want or need to be closer to the bare metal.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 2, 2016  12:45 AM
+
+> Actually this represents an outer loop, and a nested inner loop.
+> The outer loop is iterating through "chunks" of the iterations between
+> 1 and N, and the inner loop is iterating through each chunk.
+
+No, it represents a single loop from 1 .. N. The other stuff is an
+implementation artifact. I keep hearing here that we want *more* abstraction in
+iteration, and clearly, exposing all of the "guts" of a parallel loop is going
+in the opposite direction of that.
+
+Moreover, it smacks of premature optimization. (Indeed, using "parallel" at all
+tends to be premature optimization.) Ideally, all one would need to do to
+parallelize a loop is to stick "parallel" on it; only if it *still* isn't fast
+enough would one want to break it down in the level of detail that your library
+does.
+
+Certainly, some users will need that level of control, but the library approach
+seems fine for those that need the guts exposed, and the majority of users won't
+want to go that way.
+
+(Ideally, the compiler would be able to recognize the reducer in the source of
+the loop; it probably will need some help but it shouldn't be necessary to give
+names to intermediate variables as your library requires.)
+
+...
+> One interesting library approach is the one that Java provides, which
+> is a streaming approach resembling a pipeline, which I think could be
+> adapted to Ada.
+>
+> In Java, the above loop can be written as a 1 liner.
+>
+> int sum =  IntStream.range(1,L).parallel().sum();
+>
+> It's the most concise expression of such a loop that I've seen so far.
+
+Sure, but it *still* doesn't look like a loop.
+
+I may be naive, but what I want is to be able to stick "parallel" on some code
+and the compiler will either do all of the work or tell me why it can't. If one
+is properly avoiding premature optimization, one will write all of the code as
+sequential, and then only parallelize the 10% (or more likely 1%) that is too
+slow. So the closer that parallel and sequential code is, the better.
+
+If the coding style is going to be wildly different, we aren't helping much:
+we've had a wildly different style for parallelism since Ada 83. And it works
+fine, but is hard to use correctly. If we need more, it has to be a lot easier
+to use. Your various libraries have proven that we can do parallism pretty well
+with the constructs that Ada already has, but those are prone to race conditions
+and deadlocks that no library could ever do anything about. I am not interested
+in tiny changes to the existing parallel; that's lipstick on a pig when it comes
+to ease of programming.
+
+Anyway, my 10 cents worth.
+
+****************************************************************
