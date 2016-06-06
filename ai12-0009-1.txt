@@ -1,4 +1,4 @@
-!standard A.16(3/2)                             15-10-11    AI12-0009-1/03
+!standard A.16(3/2)                             16-06-05    AI12-0009-1/04
 !standard A.16(36.1/3)
 !standard A.16(98/2)
 !standard A.16(112.1/3)
@@ -43,7 +43,8 @@ Append after A.16(36/3) the following
    -- Directory Iteration
 
    type Directory_Listing is tagged limited private
-      with Constant_Indexing => Current_Entry,
+      with Preelaborable_Initialization,
+           Constant_Indexing => Current_Entry,
            Default_Iterator => Iterate,
            Iterator_Element => Directory_Entry_Type;
 
@@ -53,22 +54,23 @@ Append after A.16(36/3) the following
       Filter    : in Filter_Type := (others => True))
        return Directory_Listing;
 
-   type Entry_Presence is new Boolean;
+   type Cursor is private
+      with Preelaborable_Initialization;
 
-   function Has_Element
-     (EP : in Entry_Presence) return Boolean is (Boolean (EP));
+   function Has_Entry
+     (Position : in Cursor) return Boolean;
 
    package Directory_Iterators is
-      new Ada.Iterator_Interfaces (Entry_Presence, Has_Element);
+      new Ada.Iterator_Interfaces (Cursor, Has_Entry);
 
    function Iterate
      (Listing : in Directory_Listing)
       return Directory_Iterators.Forward_Iterator'Class;
 
    function Current_Entry
-     (Entries : in Directory_Listing; EP : in Entry_Presence)
-      return Directory_Entry_Type
-     with Pre => Has_Element (EP);
+     (Entries  : in Directory_Listing;
+      Position : in Cursor) return Directory_Entry_Type
+     with Pre => Has_Entry (Position);
 
 
 Modify A.16(98/2)
@@ -83,13 +85,16 @@ Modify A.16(98/2)
 Append after A.16(112/3)
 
    type Directory_Listing is tagged limited private
-      with Constant_Indexing => Current_Entry,
+      with Preelaborable_Initialization,
+           Constant_Indexing => Current_Entry,
            Default_Iterator => Iterate,
            Iterator_Element => Directory_Entry_Type;
 
    The type Directory_Listing contains the state of a directory search.
-   A default-initialized Directory_Listing object has no entries available.
-   The type Directory_Listing need finalization.
+   An object of type Directory_Listing can be used in generalized loop
+   iteration (see 5.5.2) to visit each available directory entry for a
+   particular directory search. A default-initialized Directory_Listing object
+   has no entries available. The type Directory_Listing need finalization.
 
    function Entries
      (Directory : in String;
@@ -97,15 +102,13 @@ Append after A.16(112/3)
       Filter    : in Filter_Type := (others => True))
        return Directory_Listing;
 
-   For generalized loop iteration (see 5.5.2), Entries returns an iterable
-   container object for the loop that will generate a forward container element
-   iterator as the loop iterator and a loop cursor designating each available
-   directory entry in the return object. Entries starts a search in the
-   directory named by Directory for entries matching Pattern and Filter. Pattern
-   represents a pattern for matching file names. If Pattern is the null string,
-   all items in the directory are matched; otherwise, the interpretation of
-   Pattern is implementation-defined. Only items that match Filter will be
-   returned. After a successful call on Entries, the return object may have
+   Returns an object that represents the result of a search in the directory
+   named by Directory for entries matching Pattern and Filter. 
+   Pattern represents a pattern for matching file names. If Pattern is the
+   null string, all items in the directory are matched; otherwise, the
+   interpretation of Pattern is implementation-defined.
+   Only items that match Filter will be returned.
+   After a successful call on Entries, the return object may have
    entries available, but it may have no entries available if no files or
    directories match Pattern and Filter. The exception Name_Error is propagated
    if the string given by Directory does not identify an existing directory, or
@@ -115,24 +118,39 @@ Append after A.16(112/3)
    absence of Name_Error). When Start_Search propagates Name_Error or Use_Error,
    the return object will have no entries available.
 
+   type Cursor is private
+      with Preelaborable_Initialization;
+   
+   A cursor is a reference to a directory entry within a directory listing. 
+
+To Be Honest: There may not be an actual reference component needed,
+but the abstraction of a cursor into a directory listing is intuitive and
+is consistent with other container iterators in the standard.
+
+   function Has_Entry
+     (Position : in Cursor) return Boolean;
+ 
+   Returns True if Position designates a directory entry, and returns False
+   otherwise.
+
    function Iterate
      (Listing : Directory_Listing)
       return Directory_Iterators.Forward_Iterator'Class;
-      Iterate returns a forward iterator object (see 5.5.1) that will generate a
-      value for a loop parameter (see 5.5.2) designating each directory entry in Listing,
-      starting with the first directory entry and moving the cursor as per the
-      Next function. The iterator object needs finalization.
+
+   Iterate returns a forward iterator object (see 5.5.1) that will generate a
+   value for a loop parameter (see 5.5.2) designating each directory entry in Listing,
+   starting with the first directory entry and moving the cursor as per the
+   Next function. The iterator object needs finalization.
 
    function Current_Entry
-     (Entries : Directory_Listing; EP : Entry_Presence)
+     (Entries : Directory_Listing;
+      Position : Cursor)
       return Directory_Entry_Type
-     with Pre => Has_Element (EP);
+     with Pre => Has_Entry (Position);
 
-    If Entries is a default-initialized object or if EP is true and the current
-    state of Entries has no entries available or is not involved
-    in generalized loop iteration, then Program_Error is propagated.
-    Otherwise, Current_Entry returns the Directory_Entry associated with
-    the current state of the generalized iterator or container element iterator.
+    If Entries is a default-initialized object then Program_Error is propagated.
+    Otherwise, Current_Entry returns the Directory_Entry designated by Position
+    when used with a generalized iterator or container element iterator.
     It is implementation-defined as to whether the results returned by this
     subprogram are altered if the contents of the directory are altered during
     the current iteration of the loop (for example, by another program). The
@@ -146,8 +164,8 @@ Modify A.16(125/3)
 
 Modify A.16(125.a/3)
     Implementation Advice: Directories.Start_Search{,} [and ]
-    Directories.Search{, and Entries} should raise Name_Error for malformed
-    patterns.
+    Directories.Search{, and Directories.Entries} should raise Name_Error for
+    malformed patterns.
 
 Modify A.17(3/2)
 "{with Ada.Iterator_Interfaces;}
@@ -156,76 +174,104 @@ Modify A.17(3/2)
 
 Append after A.17(8/3) the following
 
-   type Name_Value_Pair_Type is limited private;
+   package Name_Value_Pairs is
+
+      type Name_Value_Pair_Type is tagged limited private;
+
+      -- Operations on Name_Value_Pairs
+
+      function Name (Name_Value_Pair : in Name_Value_Pair_Type) return String;
+
+      function Value (Name_Value_Pair : in Name_Value_Pair_Type) return String;
+
+   private
+      ... -- not specified by the languages
+   end Name_Value_Pairs;
+
+   use Name_Value_Pairs;
 
    type Environment_Variable_Listing is tagged limited private
-      with Constant_Indexing => Current_Entry,
-           Default_Iterator => Iterate,
-           Iterator_Element => Name_Value_Pair_Type;
+      with Preelaborable_Initialization,
+           Constant_Indexing => Current_Variable,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Name_Value_Pair_Type;
 
-   function All_Variables
+   function Environment
        return Environment_Variable_Listing;
 
-   type Variable_Presence is new Boolean;
+   type Cursor is private
+      with Preelaborable_Initialization;
 
-   function Has_Element
-     (VP : in Variable_Presence) return Boolean is (Boolean (VP));
+   function Has_Environment_Variable
+     (Position : in Cursor) return Boolean;
 
    package Environment_Variable_Iterators is
-      new Ada.Iterator_Interfaces (Variable_Presence, Has_Element);
+      new Ada.Iterator_Interfaces (Cursor, Has_Environment_Variable);
 
    function Iterate
      (Listing : in Environment_Variable_Listing)
       return Environment_Variable_Iterators.Forward_Iterator'Class;
 
    function Current_Variable
-     (Variables : in Environment_Variable_Listing; VP : in Variable_Presence)
-      return Name_Value_Pair
-     with Pre => Has_Element (VP);
-
-   -- Operations on Name_Value_Pairs
-
-   function Name (Name_Value_Pair : in Name_Value_Pair_Type) return String;
-
-   function Value (Name_Value_Pair : in Name_Value_Pair_Type) return String;
+     (Variables : in Environment_Variable_Listing;
+      Position  : in Cursor) return Name_Value_Pair_Type
+     with Pre => Has_Environment_Variable (Position);
 
 Append after A.17(24/2)
 
    type Name_Value_Pair_Type is limited private;
 
    The type Name_Value_Pair_Type represents a single environment variable of
-   the execution environment. These items can only be created by generalized
-   loop iteration on the return object of the All_Variables function
-   in this package}. Information about the item can be obtained from the
-   functions declared in this package. A default-initialized object of this
+   the execution environment. A default-initialized object of this
    type is invalid; objects returned by generalized loop iteration on the
    result of Entries are valid.
 
+   function Name (Name_Value_Pair : in Name_Value_Pair_Type) return String;
+
+   Returns the name of the environment variable represented by Name_Value_Pair.
+
+   function Value (Name_Value_Pair : in Name_Value_Pair_Type) return String;
+   Returns the value of the environment variable represented by Name_Value_Pair.
+
    type Environment_Variable_Listing is tagged limited private
-      with Constant_Indexing => Current_Variable,
+      with Preelaborable_Initialization,
+           Constant_Indexing => Current_Variable,
            Default_Iterator => Iterate,
            Iterator_Element => Name_Value_Pair_Type;
 
-   If the external execution environment supports environment variables, then
-   for generalized loop iteration (see 5.5.2), an object of the type
-   Environment_Variable_Listing can be an iterable container object for the loop
-   that will generate a forward container element iterator as the loop iterator
-   and a loop cursor designating each environment variable of the execution
-   environment. Otherwise, Program_Error is propagated for generalized loop
-   iteration involving the object. The type Environment_Variable_Listing
-   contains the iteration state of the environment variables of the execution
-   environment. A default-initialized Environment_Variable_Listing object
-   represents all environment variables of the execution environment. The type
-   Environment_Variable_Listing need finalization.
+   The type Environment_Variable_Listing contains the state of an environment
+   variable search for the execution environment.
+   An object of type Environment_Variable_Listing can be used in generalized
+   loop iteration (see 5.5.2) to visit each environment variable from the
+   external environment. A default-initialized Environment_Variable_Listing
+   object represents all environment variables from the external environment.
+   The type Environment_Variable_Listing need finalization.
 
-   function All_Variables return Environment_Variable_Listing;
+   If the external execution environment does not support environment variables,
+   then Program_Error is propagated for generalized loop iteration.
 
-   If the external execution environment supports environment variables, then
-   for generalized loop iteration (see 5.5.2), All_Variables returns an iterable
-   container object for the loop that will generate a forward container element
-   iterator as the loop iterator and a loop cursor designating each environment
-   variable of the execution environment. Otherwise, Program_Error is
-   propagated.
+   function Environment return Environment_Variable_Listing;
+
+   Returns an object that represents the state of an environment variable 
+   search for all environment variables from the execution environment.
+   The exception Program_Error is propagated if the external execution environment
+   does not support environment variables.
+
+   type Cursor is private
+      with Preelaborable_Initialization;
+   
+   A cursor is a reference to an environment variable name value pair within
+   an environment variable listing. 
+
+To Be Honest: There may not be an actual reference component needed,
+but the abstraction of a cursor into an environment variable listing is intuitive
+and is consistent with other container iterators in the standard.
+
+   function Has_Environment_Variable
+     (Position : in Cursor) return Boolean;
+ 
+   Returns True if Position designates an environment variable name value pair,
+   and returns False otherwise.
 
    function Iterate
      (Variables : Environment_Variable_Listing)
@@ -237,32 +283,18 @@ Append after A.17(24/2)
    cursor as per the Next function. The iterator object needs finalization.
 
    function Current_Variable
-     (Variables : Environment_Variable_Listing; VP : Variable_Presence)
-      return Name_Value_Pair
-     with Pre => Has_Element (VP);
+     (Variables : Environment_Variable_Listing;
+      Position : Cursor) return Name_Value_Pair
+     with Pre => Has_Environment_Variable (Position);
 
-   If VP is true and the current state of Variables is not involved
-   in generalized loop iteration, then Program_Error is propagated.
-   Otherwise, Current_Variable returns the Name_Value_Pair associated with
-   the current state of the generalized iterator or container element iterator.
-
-   function Name (Name_Value_Pair : in Name_Value_Pair_Type) return String;
-
-   Returns the name of the environment variable represented by Name_Value_Pair.
-
-   function Value (Name_Value_Pair : in Name_Value_Pair_Type) return String;
-   Returns the value of the environment variable represented by Name_Value_Pair.
+   Current_Variable returns the Name_Value_Pair designated by Position that is
+   associated with the current state of the generalized iterator or container
+   element iterator.
 
 Modify A.17(25/2)
    It is a bounded error to call Value {if the call does not involve an object
    of type Name_Value_Pair_Type,} if more than one environment variable exists
    with the given name; the possible outcomes are that:
-
-Modify A.17(28/2)
-   Making calls to the procedures Set or Clear concurrently with calls to any
-   subprogram of package Environment_Variables, or to any instantiation of
-   Iterate, {or during generalized loop iteration of an
-   Environment_Variable_Listing object} results in erroneous execution.
 
 !discussion
 
@@ -1559,6 +1591,413 @@ for AIs cannot handle the format of typical library subprogram definitions, as
 it starts with some code and then is followed by some indented text. *Never*
 worry about the formatted output -- *always* look at the raw text version before
 complaining about the "pretty" format.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Saturday, May 28, 2016  3:02 PM
+
+I have been looking at my homework regarding adding iterators to
+Ada.Directories.
+
+In short, I have a new implementation and API that I would like to propose. If
+this new API is favoured, I would write up a new version of the AI to match this
+API.
+
+In Vermont, Steve commented that the Entry_Presence type should be a private
+type. This type represents the cursor for the directory listing, and currently
+was implemented as a Boolean type.
+
+I found it improved the abstraction quite a bit to rename this type to be
+"Cursor" (as well as make it private), then it fits better with existing
+container types, where the Cursor is used to iterate through the directory
+listing, rather than a Boolean type.
+
+I then went further, and thought about someone wanting to iterate through the
+directory in a particular order, or to have better control over which files are
+iterated over.
+
+This led me to a new prototype, where one can optionally specify a sort order
+for the results, and a filter that gives much more control than the existing
+one, which only lets you specify file type.
+
+I have implemented this prototype in GNAT, and it appears to work. Also, it
+seems worth noting that my existing test program did not require any changes to
+switch over to this new API.
+
+Internally, the implementation changed from just wrapping calls to Search, to
+fetching a vector of matching directory entries, and storing that list in the
+Directory_Listing type.
+
+This also allows one to query how many items match the search criteria, via a
+Length subprogram. The Directory_Listing type ends up being a finalized type
+that looks more like one of the other standard Containers.
+
+A couple of other notes:
+I added Preelaborable_Initialization to both the Directory_Listing and the
+Cursor type, which wasn't in the previous writeup of the AI.
+
+Also. I think
+with Ada.Finalization;
+
+should be changed to
+
+with private Ada.Finalization;
+
+Since all the finalization details are all in the private part.
+
+With these changes, the additions to the Ada.Directories package would look like the following;
+
+    --  Searches in the directory named by Directory for entries matching
+    --  Pattern. The subprogram designated by Process is called with each
+    --  matching entry in turn. Pattern represents a pattern for
+    --  matching file names. If Pattern is null, all items in the
+    --  directory are matched;
+    --  otherwise, the interpretation of Pattern is implementation-
+    --  defined.
+    --  Only items that match Filter will be returned. A null Filter
+    --  does not apply a filter, otherwise only items in the directory
+    --  that return True from the filter, are included in the search.
+    --  The ordering of the results is determined by the Sorting
+    --  parameter.
+    --  By default, the results are sorted in alphanumeric order, but the
+    --  Sorting parameter can be specified which returns True if the Left
+    --  Item should appear bnefore the Right item in the sort order.
+    --  The exception Name_Error is propagated if the string given by
+    --  Directory does not identify an existing directory, or if Pattern
+    --  does not allow the identification of any possible external file
+    --  or directory.
+    --  The exception Use_Error is propagated if the external
+    --  environment does not support the searching of the directory with
+    --  the given name (in the absence of Name_Error).
+
+    type Directory_Listing is tagged limited private
+      with Preelaborable_Initialization,
+           Constant_Indexing => Current_Entry,
+           Default_Iterator => Iterate,
+           Iterator_Element => Directory_Entry_Type;
+
+    function Alphanumeric
+        (Left, Right : Directory_Entry_Type) return Boolean;
+
+    function Entries  --  Returns an iterable container
+      (Directory : String;
+       Pattern   : String;
+       Filter    : access function (Item : Directory_Entry_Type)
+                                      return Boolean := null;
+       Sorting   : not null access
+                    function (Left, Right : Directory_Entry_Type)
+                           return Boolean := Alphanumeric'Access)
+        return Directory_Listing;
+
+    function Length
+      (Container : Directory_Listing) return Ada.Containers.Count_Type;
+
+    type Cursor is private
+      with Preelaborable_Initialization;
+
+    function Has_Element
+      (Position : Cursor) return Boolean;
+
+    package Directory_Iterators is
+       new Ada.Iterator_Interfaces (Cursor, Has_Element);
+
+    function Current_Entry  --  "indexing" operation
+      (Entries : Directory_Listing; Position : Cursor)
+       return Directory_Entry_Type
+      with Pre => Has_Element (Position);
+
+    function Iterate
+      (Listing : Directory_Listing)
+       return Directory_Iterators.Forward_Iterator'Class;
+
+
+Example of Usage:
+
+    for Dir_Entry of Ada.Directories.Entries ("/home/brad", "*.txt") loop
+       Put_Line (Ada.Directories.Simple_Name (Dir_Entry)));
+    end loop;
+
+I considered whether the Filter and Sort should be generic formals instead of
+anonymous subprograms, but I think this would be inconvenient for users to have
+to instantiate generics. Also, one might want to process various filters and
+sort criteria and it is nicer to be able to do that on the fly in my opinion.
+
+Do these changes look worthwhile to writeup?
+
+****************************************************************
+
+From: Brad Moore
+Sent: Saturday, May 28, 2016  10:46 PM
+
+I now have a working implementation of Ada.Environment_Variables as well.
+
+I have a few notes and comments about this design as well that differs from the
+previous writeup.
+
+1) Similar to how the pattern parameter of Ada.Directories is useful to limit
+   the set of entries involved in the iteration, I added a similar pattern
+   parameter to the new iterator for the Ada Environment Variables. In my
+   experience, when I am looking for environment variables, I typically am only
+   interested in those that match a certain pattern. Eg, "GTK*" could be used to
+   find all the environment variables associated with GTK. The default for the
+   pattern is "*" which retrieves all variables.
+
+2) I find that when using the new Ada 2012 iterator syntax, I want to use the
+   object prefix view notation.
+
+    eg.
+
+    for Variable of Ada.Environment_Variables.All_Variables
+      (Pattern => "PARALLEL*") loop
+       Put_Line (Variable.Name & "= " & Variable.Value);
+    end loop;
+
+rather than
+
+for Variable of Ada.Environment_Variables.All_Variables
+(Pattern => "PARALLEL*") loop
+    Put_Line (Ada.Environment_Variables.Name (Variable) & "= " &
+              Ada.Environment_Variables.Value (Variable)); end loop;
+
+To achieve this, the Name_Value_Pair type needs to be a tagged type.
+
+One issue with having an iterator return an object of a tagged type, is you run
+into having to create an indexing function that is dispatching on more than one
+type, which doesn't compile.
+
+To get around this, I had to create a nested package for the Name_Value_Pair
+type, so that the function tied to the Constant_Indexing aspect of the
+Environment Variable listing can be dispatching only on the listing type.
+
+I don't mind that too much, because the name value pair is separated as a
+separate abstraction. It might even be worth considering moving that to its own
+package. Maybe someone has a better suggestion.
+
+Another benefit of the approach of retrieving the full list and storing in the
+listing object is that it removes the need for some of the Rosen Trick
+difficulty I ran into, in the previous implementations. It doesn't completely
+remove this, as the Rosen Trick is still needed for the Default_Iterator aspect,
+because that function has an "in" parameter for the container, but typically the
+iterator needs to store a reference to the container.
+
+This issue is actually common to all the standard containers, which is why I
+believe GNAT appears to be using 'Unrestricted_Access in all the standard
+containers for the Default_Iterator aspects. Using such an attribute would
+eliminate the need for using the Rosen Trick and also gets around the issue of
+having to make the container a limited type, but unfortunately, this is a
+non-portable technique.
+
+Presumably other compiler vendors would need to use a similar implementation
+defined attribute, or some other technique to get around this issue.
+
+Ideally, the parameter would have been "in out" which would have avoided these
+issues.
+
+Not sure what can be done about that now though...
+
+The Design I have for the Ada.Environment_Variables package adds the following
+to the public part of the spec...
+
+Unless I hear back any comments in the next couple of days, I will proceed to
+write up the new version of the AI to include this.
+
+    package Name_Value_Pairs is
+       type Name_Value_Pair is tagged private;
+
+       ------------------------------------
+       -- Operations on Name_Value_Pairs --
+       ------------------------------------
+
+       function Create (Name, Value : String) return Name_Value_Pair;
+       function Name   (Name_Value  : Name_Value_Pair) return String;
+       function Value  (Name_Value  : Name_Value_Pair) return String;
+
+    private
+        ...
+    end Name_Value_Pairs;
+
+    use Name_Value_Pairs;
+
+    type Environment_Variable_Listing is tagged limited private
+       with Preelaborable_Initialization,
+            Constant_Indexing => Current_Variable,
+            Default_Iterator => Iterate,
+            Iterator_Element => Name_Value_Pair;
+
+    function All_Variables
+      (Pattern : String := "*")
+        return Environment_Variable_Listing;
+
+    function Length
+      (Container : Environment_Variable_Listing)
+       return Ada.Containers.Count_Type;
+
+    type Cursor is private
+      with Preelaborable_Initialization;
+
+    function Has_Element (Position : Cursor) return Boolean;
+
+    package Environment_Iterators is new
+      Ada.Iterator_Interfaces (Cursor      => Cursor,
+                               Has_Element => Has_Element);
+
+    function Current_Variable  --  "indexing" operation
+      (Variables : Environment_Variable_Listing; Position : Cursor)
+       return Name_Value_Pair
+      with Pre => Has_Element (Position);
+
+    function Iterate
+      (Listing : Environment_Variable_Listing)
+      return Environment_Iterators.Forward_Iterator'Class;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 30, 2016  5:55 PM
+
+...
+> I then went further, and thought about someone wanting to iterate
+> through the directory in a particular order, or to have better control
+> over which files are iterated over.
+>
+> This led me to a new prototype, where one can optionally specify a
+> sort order for the results, and a filter that gives much more control
+> than the existing one, which only lets you specify file type.
+
+I think this is a bad idea. (See below.)
+
+> I have implemented this prototype in GNAT, and it appears to work.
+> Also, it seems worth noting that my existing test program did not
+> require any changes to switch over to this new API.
+>
+> Internally, the implementation changed from just wrapping calls to
+> Search, to fetching a vector of matching directory entries, and
+> storing that list in the Directory_Listing type.
+
+And this is why. This means that the memory requirements for a directory search
+are unpredictable, and potentially much, much more than the basic iterators as
+currently defined.
+
+In particular, on Windows, the search API uses a handle and some calls to
+implement the existing searching capabilities. There is no buffering needed
+other than for the value being currently returned. (I believe that Linux would
+be similar, but it's been long enough since I've done that I don't want to be
+definitive.)
+
+Contrast that to the (dynamic) memory requirements needed to store the entire
+directory. And remember that a directory can have nearly an unlimited set of
+files; I have directories with nearly 10,000 files (there is one with 9522 files
+as I write this). We surely don't want a disincentive to use the "improved"
+forms.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, May 31, 2016  10:32 PM
+
+> I think this is a bad idea. (See below.)
+>
+>> I have implemented this prototype in GNAT, and it appears to work.
+>> Also, it seems worth noting that my existing test program did not
+>> require any changes to switch over to this new API.
+>>
+>> Internally, the implementation changed from just wrapping calls to
+>> Search, to fetching a vector of matching directory entries, and
+>> storing that list in the Directory_Listing type.
+>
+> And this is why. This means that the memory requirements for a
+> directory search are unpredictable, and potentially much, much more
+> than the basic iterators as currently defined.
+
+On linux, there are two functions.
+
+struct dirent *readdir(DIR *dirp);
+
+Which would be similar to the Windows API you describe, and the existing Ada
+API.
+
+There is also;
+
+int scandir(const char *dirp, struct dirent ***namelist,
+               int (*filter)(const struct dirent *),
+               int (*compar)(const struct dirent **,
+               const struct dirent **));
+
+Which is where I found the inspiration for the suggestion, and is very similar
+to what I proposed.
+
+I could see it being useful to have both these forms available. One for the case
+where the directories are large, and you generally want to process all the
+files, and the other when storage is not an issue, but a need for processing
+files in a certain order, or filtering on certain files, such as those within a
+certain date range, or file size.
+
+Only the filenames that satisfy the pattern and filter would actually get stored
+in the container.
+
+Maybe it is worth considering having both forms?
+
+For environment variables though, I think it is more reasonable to have the list
+stored in the "container", rather than the iterator, mostly because environment
+variables are not typically or even likely to be encountered in the numbers that
+you might find in a directory. I doubt it makes sense to have two forms for this
+package though. I'm guessing that you'd still dislike the storage requirements
+for this approach though, as having to copy and then finalize that copy of the
+environment may be undesirable, if the OS can in pass the environment, as it
+does for C programs, presumably more efficiently as an array of string pointers.
+
+So, nix the idea for environment variables, but what about having two forms for
+the directory iteration?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May 31, 2016  11:13 PM
+
+...
+> So, nix the idea for environment variables, but what about having two
+> forms for the directory iteration?
+
+That seems like overkill to me. It's easy enough to write it yourself if you
+need it (given the existence of the indefinite vectors). The cost for many of my
+programs would be prohibitive (remember, one directory has 9522 files). And
+you've got a lot of RM text there just for one version.
+
+I'd probably be a bit less negative if we were just talking about a single
+procedure, as in:
+
+    procedure Search (
+       Directory : in String;
+       Pattern   : in String;
+       Sort_Order: in Sort_Order_Type; -- Not defaulted for compatibility.
+       Filter    : in Filter_Type := (others => True);
+       Process   : not null access procedure (
+           Directory_Entry : in Directory_Entry_Type));
+
+This would work well with Tucker's (or is it Bob's) lambda loops.
+
+Note that we'll probably consider the lambda loops first, because if we decide
+to go that way, we'll probably leave Environment_Variables and Directories
+unchanged. (Making all of your work a waste, other than to prove it didn't work
+very well -- I guess an important data point that we needed anyway.) My
+recollection of the reason that Bob/Tucker came up with that idea was an
+alternative way to get the functionality that you were struggling with.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Sunday, June 5, 2016  5:42 PM
+
+Here is another part of my homework. [This is version /04 of the AI - Ed.]
+This is an update to an existing AI about adding Ada 2012 iterator support to
+Ada.Directories and Ada.Environment_Environment_Variables.
+
+I basically addressed Jeff and Randy's comments that arrived subsequent to
+our last meeting in Vermont.
+
+There were a few other minor changes as well, such as renaming the
+Entry_Presence type to a Cursor type, which I found reads a lot better now.
 
 ****************************************************************
 
