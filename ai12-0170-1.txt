@@ -1,4 +1,4 @@
-!standard 3.9.3(7)                                   15-10-13  AI12-0170-1/02
+!standard 3.9.3(7)                                   16-06-04  AI12-0170-1/03
 !standard 6.1.1(7/4)
 !standard 6.1.1(18.2/4)
 !standard 7.3.2(5/4)
@@ -11,7 +11,10 @@
 !subject Abstract subprogram calls in class-wide precondition expressions
 !summary
 
-** TBD.
+Rules are largely OK as is, but we clarify that the notional type NT is
+non-abstract, and the check on the corresponding expression is performed
+for the original type itself, provided the original subprogram is
+non-abstract.
 
 !question
 
@@ -27,7 +30,8 @@ Consider:
   end Pkg;
 
 Does the call to F1 violate the rule against non-dispatching calls to abstract
-subprograms? (Surely, there are no exceptions to this rule. ;-)
+subprograms?
+  (No, because aspect re-interpreted using notional, non-abstract descendant)
 
 Recall that any type is a descendant of itself.
 
@@ -40,20 +44,15 @@ So 6.1.1(18.2/4) which applies to primitive operations of descendants of a type 
 also applies to the original operation of T itself.
 
 This makes the example legal, but it would allow all sorts of things that we
-would not want to allow. So clearly that is not the intent.
+would not want to allow. Is this the intent?  (Yes, but it doesn't allow
+all sorts of things, because the interpretation of the expression using
+the notional non-abstract type NT must be legal.)
 
 !recommendation
 
 (See Summary.)
 
 !wording
-
-Modify 3.9.3(7):
-
-A call on an abstract subprogram{, unless it appears within an aspect
-specification of an abstract subprogram,} shall be a dispatching call;
-[Redundant: nondispatching calls to an abstract subprogram are not
-allowed.]
 
 Modify 6.1.1(7/4):
 
@@ -65,7 +64,7 @@ visible primitive operations. Similarly, a name that denotes a formal access
 parameter (or S'Result) of type access-to-T is interpreted as having type
 access-to-NT. The result of this interpretation is that the only operations
 that can be applied to such names are those defined for such a formal derived
-type. 
+type.
 
   AARM Ramification: The operations of NT are also nonabstract, so the
   rule against a call of an abstract subprogram does not trigger for a
@@ -76,8 +75,8 @@ Modify 6.1.1(18/4):
 If a Pre'Class or Post'Class aspect is specified for a primitive subprogram S
 of a tagged type T, or such an aspect defaults to True, then a corresponding
 expression also applies to the corresponding primitive subprogram S of each
-descendant of T {(other than T itself)}. The corresponding expression is
-constructed from the associated expression as follows:
+descendant of T {Redundant[(including T itself)]}. The corresponding expression
+is constructed from the associated expression as follows:
 
 Modify 7.3.2(5/4):
 
@@ -89,77 +88,30 @@ aspect of a type T, the type of this current instance is interpreted as though
 it had a (notional) {nonabstract} type NT that is a visible formal derived
 type whose ancestor type is T. The effect of this interpretation is that the
 only operations that can be applied to this current instance are those defined
-for such a formal derived type. 
+for such a formal derived type.
 
 !discussion
 
-We allow calls on abstract subprograms if they are within the aspect
-specification of an abstract subprogram.
+The existing wording was essentially correct as written, but we have
+added two clarifications, namely that the notional formal derived type
+NT is non-abstract, and that the legality rule about corresponding
+expressions applies to the original type T itself (unless the original
+subprogram is abstract).  Note that if the original subprogram is not abstract, even if T is abstract, then the corresponding expression for T itself
+must be legal.  This would mean for the example given in the !question,
+it would be illegal if F2 were instead a null procedure rather than an
+abstract function, and F1 were still abstract.
 
-6.1.1(18-18.2/4) was intended to apply only to operations of actual descendants
-and not to the original operation. 6.1.1(18.1/4) doesn't make much sense
-otherwise, and one cannot daisy-pick readings that they like for individual
-phrases. Even so, we clarify the wording.
+Since according to paragraph 18/4, we interpret the class-wide aspect
+expressions for Pre'Class and Post'Class as though they apply to a
+notional, non-abstract type NT, normal legality rules will prevent the
+illegal things mentioned in the original !question. Because NT is
+non-abstract, all of its primitives are non-abstract, and so we also
+don't have the opposite problem, namely that the example in the
+!question would be illegal.  The check on the legality of the
+"corresponding expression" is irrelevant for Ifc itself, because F2 is
+abstract.
 
-We also clarify 6.1.1(7/4) (and the similar 7.3.2(5/4)) to make it clear
-that the notional type NT is not abstract, since we want the expression to
-work in non-abstract contexts.
-
-Having done this, the original question is easy to answer: no, the call is
-not legal. However, that seems weird because such an expression makes sense.
-
-Note, however, that other expressions that "make sense" have never been allowed
-in Ada. For instance, consider:
-
-  package Pkg2 is
-    type T is interface;
-
-    function Empty return T is abstract;
-    procedure Init (X : out T; Value : T := Empty) is abstract;
-  end Pkg2;
-
-Empty is clearly illegal here, because it is not a dispatching call; it
-violates 3.9.3(7). (That rule is not conditional on the context.)
-
-It's tempting to think this was a mistake, but it should be obvious that such
-a call only works in calls where the controlling tag comes from somewhere else.
-Most such expressions could never have a legal call:
-
-  package Pkg3 is
-    type T is interface;
-
-    function Empty return T is abstract;
-    function Length (Value : T := Empty) return Integer is abstract;
-  end Pkg3;
-
-A call of Length using the default parameter would end up statically bound to
-T, which is not a call we want to allow.
-
-Since this has been true since Ada 95 (replace "interface" with "abstract tagged
-null record" and you have Ada 95 code), and all Ada 95 compilers tested reject
-this, we leave well-enough alone. (It seems unlikely that this is important,
-as if it was we would have heard about it by now - it's been 20 years since
-Ada 95 was approved and 8 years since Ada 2005 was approved.)
-
-[Editor's note: I tried the Ada 95 example on both GNAT and Janus/Ada; both
-rejected the call of "Empty". I suspect that there is an ACATS test that
-requires this. Changing something here strikes me as answering a question not
-asked. Why make work for implementers?]
-
-** TBD.
-
-[Editor's note: I have no solution for the original question. The problem here
-is that an abstract function has to be called in a dispatching call, but
-Pre'Class (post AI12-0113-1) expressions are usually statically bound. On top
-of which, 3.9.3(7) is not context dependent. Declaring that NT is abstract in
-this case does not help - 3.9.3(7) still applies.
-
-The only way that I can see to do this is to make an exception for 3.9.3(7) in
-the case when the expression is used directly in some expression of an abstract
-operation ("some expression" = precondition, postcondition, default expression of
-a parameter of an abstract type, more???). But then there has to be some recheck
-on a call, else nonsense like the Length call above or its Pre'Class
-counterpart would be allowed. For instance, we can't allow:
+Here are some examples, and how the clarified rules apply to them:
 
   package Pkg4 is
     type Ifc is interface;
@@ -174,17 +126,14 @@ counterpart would be allowed. For instance, we can't allow:
 
   if F3 (Ifc'Class(Some_Obj)) then
 
-The call to F3 here would call the abstract Empty and Length, because the tag
-indeterminant call to Empty would use the tag of its specific type (as there
-is no other controlling tag to use). That we cannot allow.
+The above is not legal because the Pre'Class expression is illegal, even
+after any substitutions for NT per paragraph 18/4 (of which there are
+none in this case).  That is good, because the call to F3 here would
+call the abstract Empty and Length, because the tag indeterminant call
+to Empty would use the tag of its specific type (as there is no other
+controlling tag to use). That we cannot allow.
 
-Rechecking legality rules for defaults and pre/post on a call is a new concept;
-we don't do that currently, and it would seem to be a major headache to
-implement.
-
-Thus I lean toward not fixing the problem at all. The code can be made legal
-by explicitly forcing the calls to be dispatching -- and any other solution
-looks worlds worse. Specifically:
+Here is another case:
 
   package Pkg5 is
     type Ifc is interface;
@@ -195,26 +144,38 @@ looks worlds worse. Specifically:
       with Pre'Class => F1 (Ifc'Class(Y));
   end Pkg5;
 
+This one is legal, since we are making a dispatching call on F1, whether or
+not we make the substitution of "NT" for Ifc.
+
 ---
 
-Another troublesome example:
+Another example:
 
    package Pkg6 is
-      type AT is abstract null record;
-   
-      function F1 (X : At) return Boolean is abstract;
+      type Abs_T is abstract tagged null record;
 
-      function F2 (Y : At) return Boolean 
+      function F1 (X : Abs_T) return Boolean is abstract;
+
+      function F2 (Y : Abs_T) return Boolean
          with Pre'Class => F1 (Y);
-      
+
    end Pkg6;
 
-   O : At'Class := ...;
+The above is illegal, because the corresponding expression for Abs_T is
+illegal, and is checked because F2 is not abstract.  If the above *were*
+legal, we could end up with the following problem:
 
-   if F2(At(O)) then
-       ... -- OK, but the precondition calls F1 for AT.
-       
-This is illegal by 3.9.3(7), including after the above modification.
+   O : Abs_T'Class := ...;
+
+   if F2(Abs_T(O)) then
+       ... -- This would be bad if it were legal, because would call
+           -- the abstract F1
+
+But this isn't allowed because the corresponding expression for Abs_T itself
+is illegal (courtesy of 3.9.3(7)).
+
+[Author's note: We don't seem to define a "corresponding expression" for
+Type_Invariant'Class -- should we?]
 
 !ASIS
 
@@ -222,6 +183,8 @@ No ASIS effect.
 
 !ACATS test
 
+An ACATS B-Test should be created to check the examples (if they aren't
+already covered).
 
 !appendix
 
@@ -441,21 +404,21 @@ with special cases (because we'll never remember all of them).
 From: Randy Brukardt
 Sent: Wednesday, June 17, 2015  12:15 AM
 
-Steve wrote: 
+Steve wrote:
 
-> In some internal discussions at AdaCore, we've been looking 
+> In some internal discussions at AdaCore, we've been looking
 > at this example:
-> 
+>
 >   package Pkg is
 >     type Ifc is interface;
-> 
+>
 >     function F1 (X : Ifc) return Boolean is abstract;
-> 
+>
 >     function F2 (Y : Ifc) return Boolean is abstract
 >       with Pre'Class => F1 (Y);
 >   end;
-> 
-> and the question is whether the call to F1 violates the rule 
+>
+> and the question is whether the call to F1 violates the rule
 > against non-dispatching calls to abstract subprograms.
 
 In writing this up, I find that there doesn't seem to be any sensible way to
@@ -466,18 +429,18 @@ rejected by Ada 95 compilers -- probably it's required by an ACATS test. Do
 we really find this so important to cause implementors to do a lot of work??
 
 ...
-> Tuck also suggested that an another case where we might 
-> consider the status of the usual "no non-dispatching calls to 
-> abstract subprograms" rule is a default expression for a 
+> Tuck also suggested that an another case where we might
+> consider the status of the usual "no non-dispatching calls to
+> abstract subprograms" rule is a default expression for a
 > controlling formal parameter of an abstract subprogram, as in
-> 
+>
 >    package Pkg2 is
 >     type T is interface;
-> 
+>
 >     function Empty return T is abstract;
 >     procedure Init(X : out T; Value : T := Empty) is abstract;
 >    end;
-> 
+>
 > . Is the call to Empty currently legal? Do we want it to be legal?
 
 The answer is clearly No, and every compiler I tried this on agrees.
