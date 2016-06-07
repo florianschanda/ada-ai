@@ -1,4 +1,4 @@
-!standard 6.1.2(0)                                  15-06-17    AI12-0079-1/02
+!standard 6.1.2(0)                                  16-06-05    AI12-0079-1/03
 !class Amendment 13-06-28
 !status work item 13-06-28
 !status received 13-06-14
@@ -121,9 +121,11 @@ Add the following section:
 
 6.1.2 The Global and Global'Class Aspects
 
-For a noninstance subprogram, a generic subprogram, an entry, a package,
-or a generic package, the following language-defined aspect may be
-specified with an aspect_specification (see 13.1.1):
+For a program unit, for a formal package, formal subprogram, formal
+object of an anonymous access-to-subprogram type, and for a named
+access-to-subprogram type or composite type (including a formal type),
+the following language-defined representation aspect may be specified
+with an aspect_specification (see 13.1.1):
 
 Global
 
@@ -131,58 +133,91 @@ Global
    is as follows:
 
     global_aspect_definition ::=
-      global_set |
-      (global_mode => global_set {, global_mode => global_set})
+        primitive_global_aspect_definition
+      | /global_/attribute_reference
+      | global_aspect_definition & /global_/attribute_reference
+
+    primitive_global_aspect_definition ::=
+        global_set | (global_mode => global_set{, global_mode => global_set})
 
     global_mode ::= Input | In_Out | Output
 
-    global_set ::= global_name |
-       (global_name, global_name{, global_name}) | ALL | SYNCHRONIZED | NULL
+    global_set ::=
+         global_name
+       | (global_name{, global_name})
+       | ALL | SYNCHRONIZED | NULL
 
-    global_name ::= variable_name | package_name | access_subtype_mark
+    global_name ::=
+        /variable_/name | /package_/name | /access_/subtype_mark
+      | ACCESS subtype_mark
 
-   This aspect specifies the set of variables global to a callable entity
-   that are potentially read or updated as part of the execution of a
-   call on the entity. If not specified, the aspect defaults to the
-   Global aspect for the nearest enclosing package or generic package.
-   If not specified for a library package or generic package, the aspect
-   defaults to "Global => null" for a library package or generic package
-   that is declared Pure, and to "Global => (In_Out => all)" otherwise.
+   A /global_/attribute_reference is an attribute_reference with attribute
+   designator "Global."
 
-For a dispatching subprogram, a package, or a generic package, the
-following language-defined aspect may be specified with an
-aspect_specification (see 13.1.1):
+   The Global aspect identifies the set of variables global to a callable
+   entity that are potentially read or updated as part of the execution
+   of a call on the entity. If not specified, the aspect defaults to the
+   Global aspect for the nearest enclosing program unit. If not
+   specified for a library unit, the aspect defaults to "Global => null"
+   for a non-generic library unit that is declared Pure, and to "Global
+   => (In_Out => all)" otherwise.
+
+For a dispatching subprogram or a tagged type, the following language-defined
+aspect may be specified with an aspect_specification (see 13.1.1):
 
 Global'Class
 
    The syntax for the aspect_definition used to define a Global'Class
    aspect is the same as that defined above for global_aspect_definition.
-   This aspect specifies an upper bound on the set of variables global to a
-   dispatching operation that can be read or updated as a result of a
-   dispatching call on the operation. If not specified, the aspect
-   defaults to the Global'Class aspect for the nearest enclosing package
-   or generic package.  If not specified for a library package or generic
-   package, the aspect defaults to "Global'Class => null" for a library
-   package or generic package that is declared Pure, and to "Global'Class
-   => (In_Out => all)" otherwise.
+   This aspect identifies an upper bound on the
+   set of variables global to a dispatching operation that can be read
+   or updated as a result of a dispatching call on the operation. If not
+   specified, the aspect defaults to the Global aspect for the
+   nearest enclosing program unit.
 
     Name Resolution Rules
 
-A global_name shall statically denote a variable, a package, or an
-access-to-variable subtype that is visible at the point of the aspect
-specification.
+A global_name that does not have the reserved word ACCESS shall resolve
+to statically denote a variable, a package, or an access-to-variable
+subtype. The subtype_mark of a global_name that has the reserved word
+ACCESS shall resolve to denote a subtype.
 
     Static Semantics
 
-A global_aspect_definition defines the set of global variables that can
-be read or written by a callable entity. The form of
-global_aspect_definition comprising only "global_set" is equivalent to
-"(Input => global_set)".  If a given global_mode does not appear in a
-given global_aspect_definition, it is as though the aspect definition
+A global_aspect_definition defines the Global or Global'Class aspect of
+some entity.  The Global aspect identifies the sets of global variables
+that can be read, written, or modified as a side-effect of some
+operation. The Global'Class aspect associated with a tagged
+type T (or one of its dispatching operations) represents a restriction on
+the Global aspect on any descendant of type T (or its corresponding
+operation).
+
+The Global aspect for a callable entity defines the global variables
+that might be referenced as part of a call on the entity. The Global
+aspect for a composite type identifies the global variables that might
+be referenced during default initialization, adjustment as part of
+assignment, or finalization of an object of the type. The Global aspect
+for an access-to-subprogram object (or type) identifies the global
+variables that might be referenced when calling via the object (or any
+object of that type).  In the following we talk in terms of operations;
+the rules apply to all of these kinds of entities.
+
+The sets of global variables associated with a Global aspect can be
+defined explicitly with a primitive_global_aspect_definition or can be
+defined by combining with the sets specified for other entities by
+referring to their Global attribute. The form of
+primitive_global_aspect_definition comprising only "global_set" is
+equivalent to "(Input => global_set)".  If a given global_mode does not
+appear in a given primitive_global_aspect_definition, it is as though it
 included "global_mode => null".  The Input and In_Out global_modes
-together identify the set of global variables than can be read by the
-callable entity.  The In_Out and Output global_modes together identify
-the set of global variables that can be updated by the callable entity.
+together identify the set of global variables that can be read as a side
+effect of an operation.  The In_Out and Output global_modes together
+identify the set of global variables that can be updated as a side
+effect of an operation.  The overall set of variables associated with
+each global_mode include all variables identified for the mode in the
+primitive_global_aspect_definition, if any, plus all variables
+associated with the given mode for the entities identified by the
+prefixes of the /global_/attribute_reference's, if any.
 
 A global_set identifies a *global variable set* as follows:
 
@@ -191,32 +226,36 @@ A global_set identifies a *global variable set* as follows:
    * "synchronized" identifies the set of all global variables that are
      either of a protected type, a task type, an atomic type, or a record
      or array all of whose components are "synchronized" in this sense;
-   * (global_name, global_name{, global_name}) identifies the union of the
-     sets of variables identified by the individual global_name's.
-   * for the three forms of global_name:
-
-     * variable_name identifies the specified global variable;
-     * package_name identifies the set of all variables declared within
-       the package of the same accessibility level as the package;
-     * access_subtype_mark identifies the set of objects that can be designated
-       by values of the given access-to-variable type;
+   * "(global_name{, global_name})" identifies the union of the
+     sets of variables identified by the global_name's in the list.
+   * for the four forms of global_name:
+     * /variable_/name identifies the specified global variable;
+     * /package_/name identifies the set of all variables declared within
+       the declarative region of the package having the same accessibility
+       level as the package;
+     * /access_/subtype_mark identifies the set of (aliased) variables that
+       can be designated by values of the given access-to-variable type;
+     * ACCESS subtype_mark identifies the set of (aliased) variables that
+       can be designated by values of an access-to-variable type with a
+       designated subtype statically matching the given subtype_mark.
 
     Legality Rules
 
-Within a global_aspect_definition, a given global_mode shall be
-specified at most once. Similarly, within a global_aspect_definition, a
-given entity shall be named at most once by a global_name, and the
-reserved words ALL and SYNCHRONIZED shall appear at most once.
+Within a primitive_global_aspect_definition, a given global_mode shall
+be specified at most once. Similarly, within a
+primitive_global_aspect_definition, a given entity shall be named at
+most once by a global_name, and the reserved words ALL and SYNCHRONIZED
+shall appear at most once.
 
-If a callable entity has a Global aspect other than (In_Out => all),
-then it shall read only those variables global to the entity that are
-within the *global variable set* identified by either the Input or
-In_Out global_modes, and it shall update only those variables global to
-the entity that are within the *global variable set* identified by
-either the In_Out or Output global_modes. This includes any calls within
-the body of the callable entity, presuming those calls read and update
-all global variables permitted by their Global aspect (or Global'Class
-aspect, if a dispatching call).
+If an entity has a Global aspect other than (In_Out => all), then the
+associated operation(s) shall read only those variables global to the
+entity that are within the *global variable set* associated with either
+the Input or In_Out global_modes, and the operation(s) shall update only
+those variables global to the entity that are within the *global
+variable set* associated with either the In_Out or Output global_modes.
+This includes any calls occurring during the execution of the operation,
+presuming those calls read and update all global variables permitted by
+their Global aspect (or Global'Class aspect, if a dispatching call).
 
 For a subprogram that is a dispatching operation of a tagged type T, the
 Input and In_Out modes of its Global aspect shall identify a subset of
@@ -224,7 +263,26 @@ the variables identified by the Input and In_Out modes of the
 Global'Class aspect of a corresponding dispatching subprogram of any
 ancestor of T. Similarly, the In_Out and Output modes of its Global
 aspect shall identify a subset of the variables identified by the In_Out
-and Output modes of such Global'Class aspects.
+and Output modes of such Global'Class aspects. A corresponding rule applies
+to the Global aspect of a tagged type T relative to the Global'Class aspect
+of any ancestor of T.
+
+For a prefix S that statically denotes a subprogram (including a formal
+subprogram), formal object of an anonymous access-to-subprogram type, or a type
+(including a formal type):
+
+S'Global   Identifies the global variable set for each of the three
+           global_modes, for the given subprogram, object, or type;
+           a reference to this attribute may only appear within
+           a global_aspect_definition.
+
+Modify 13.1.1(4/3)
+
+  aspect_definition ::= name | expression | identifier{
+                      | global_aspect_definition}
+
+
+[Author's TBD: annotating the language-defined packages]
 
 !discussion
 
@@ -248,8 +306,8 @@ postcondition that X.C = X.C'Old and X.D = X.D'Old and ... but that can
 be a maintenance issue as the names and numbers of subcomponents
 changes, and only works for types that have an appropriate "=" operator.
 It might be useful to have another aspect that indicated which
-components of an in-out parameter might be updated, with all others
-presumably being preserved (e.g. Updated => (X.A, X.B)).
+components of an in-out parameter might be modified, with all others
+presumably being preserved (e.g. Modified => (X.A, X.B)).
 
 Note that SPARK has a "Refined_Global" aspect which can be specified on
 the body of a subprogram, to specify a more restricted set of globals
@@ -268,6 +326,27 @@ at a later point if it was felt to be important.
         with Global => (In_Out => Random);
           --  Update state of Random package
    end Random;
+
+The Random package presumably has hidden state, which is represented by the name
+of the package itself in a global_aspect_definition.
+
+   generic
+      type T is private;
+      with function Hash(X : T) return Hash_Code;
+   package Sets is
+      type Set(Capacity : Positive) is private
+        with Global => T'Global;
+
+      procedure Insert(S : in out Set; X : T)
+        with Global => Hash'Global & T'Global;
+
+      ...
+   end Sets;
+
+The Sets package only updates global variables via its formal
+parameters. The default initialization, adjustment, and finalization of
+a Set indirectly uses the corresponding operations of T.  Insert uses
+Hash and T's assignment operation.
 
 !ASIS
 
@@ -742,5 +821,21 @@ possibly other useful packages (probably not for the I/O packages). Perhaps that
 should be a separate AI or AIs due to the size.
 
 Enough comments for tonight.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, June 5, 2016  4:26 PM
+
+I made some significant updates, to some degree following Randy's approach for
+Nonblocking.  Nonblocking and Global are quite similar in various ways, as they
+essentially represent side effects of operations.  It might be nice if they
+could somehow share more wording.  Biggest change was to add a 'Global attribute
+for use in generics (similar to Randy's use of the 'Nonblocking attribute), and
+to define the meaning of 'Global on a composite type, being the globals
+referenced during the initialization, adjustment, and finalization operations of
+the type.
+
+[Version /03 of this AI was attached - Ed.]
 
 ****************************************************************
