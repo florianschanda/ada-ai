@@ -1,0 +1,200 @@
+!standard 6.1.1(35.1/4)                                    16-06-06  AI12-0193-1/01
+!standard 9.5.2(24)
+!class binding interpretation 16-06-06
+!status work item 16-06-06
+!status received 16-01-29
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Postcondition failure for a task entry
+!summary
+
+An exception raised by a postcondition check for an entry is raised inside
+of the accept statement as well as at the call site.
+
+!question
+
+6.1.1(35.1/4) says in part: "For a call to a task entry, the postcondition
+check is performed before the end of the rendezvous; ..."
+
+What happens if this check fails? Obviously, Assertion_Error is raised at the
+point of the check. Where is the exception propagated?
+
+9.5.2(24) says: "When an exception is propagated from the
+handled_sequence_of_statements of an accept_statement, the same exception is
+also raised by the execution of the corresponding entry_call_statement."
+
+Clearly, a postcondition check is not in the handled_sequence_of_statement.
+Indeed, formally, it's checked at the call site (an entry_call_statement in
+this case) - the wording is "upon successful return". So, from that, the
+exception should be raised at the call site, but not in the accept statement.
+
+However, the "before the end of the rendezvous" wording implies that the
+check is inside of the accept statement, so it would be weird if it wasn't
+raised there.
+
+Is it propagated to the accept statement? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 9.5.2(24):
+
+For the execution of an accept_statement, the entry_index, if any, is first
+evaluated and converted to the entry index subtype; this index value identifies
+which entry of the family is to be accepted. Further execution of the
+accept_statement is then blocked until a caller of the corresponding entry is
+selected (see 9.5.3), whereupon the handled_sequence_of_statements, if any, of
+the accept_statement is executed, with the formal parameters associated with
+the corresponding actual parameters of the selected entry call. Upon
+completion of the handled_sequence_of_statements, the accept_statement
+completes and is left. When an exception is propagated from the
+handled_sequence_of_statements of an accept_statement {or from a postcondition
+check}, the same exception is also raised by the execution of the corresponding
+entry_call_statement. 
+
+[Editor's notelet: I don't think the above is a good idea, but it's what
+everyone asked for in e-mail. See below for thoughts.]
+
+!discussion
+
+[Editor's free association follows:]
+
+This is the entire definition of a "rendezvous". There doesn't seem to be any
+possibility in the above wording of anything happening
+after the handled_sequence_of_statements but before the accept statement is
+left. This wording doesn't seem to deal with copy-back parameters and checks,
+either.
+
+6.4(10/2) says that copy-back happens after the "subprogram is left", and
+as you can see from above, that ends the rendezvous. So it seems clear that
+any exceptions raised by copy-back are not part of the rendezvous (and don't
+get duplicated inside of the accept_statement).
+
+This seems to mean that any out parameter predicate checks, and the vast
+majority of type invariant checks, occur outside of the rendezvous. (They're
+associated with the parameter passing.) This also means that a type
+invariant cannot be modeled as an implicit postcondition, as it gets evaluated
+in a different place. Yikes! (We'd have to have wording to force these things
+inside of the rendezvous.)
+
+This makes it weird that postconditions are evaluated *inside* the rendezvous,
+as all other assertions are evaluated *outside* of the rendezvous (assuming that
+type invariant and predicate checks belong to parameter passing). Moreover,
+6.1.1(36/3) also states that the exception is raised at the point of the call,
+and can't be handled elsewhere.
+
+It's pretty clear to me that all of the wording of the Standard says that the
+exception is only raised at the point of the call, and nowhere else. It's hard
+(impossible??) to make a consistent set of changes that would have any other
+effect. One could patch up 9.5.2(24) as I did above, but calling out
+postcondition checks (as opposed to all assertions or some other larger set)
+seems like a "wart" at best. Changing postconditions into type invariants or
+vice-versa would change where Assertion_Error would be raised.
+
+Implementation-wise, the problem seems to be that type invariants are outside
+of the rendezvous, even though the main implementation strategy is to put them
+into the body. (This seems to be the main reason for having postconditions
+raise inside of the accept statement.)
+
+I can't even begin to think of how to get type invariants to occur within
+the rendezvous while the rest of parameter passing checks are outside.
+
+It's clear the consistent thing to do is to raise assertion errors only at the
+call site, period, as 6.1.1(36/3) implies. In that case, "before the end of
+the rendezvous" only seems to be talking about exclusion and nothing else. 
+But that's 100% opposed to the e-mailed opinions.
+
+So at this point I give up and leave the entire ARG to discuss this. As it
+stands, I'm completely against this AI (even though I wrote it).
+
+[End of editor's free association.]
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test should be created.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Friday, January 29, 2016  9:09 PM
+
+6.1.1(35.1/4) says in part: "For a call to a task entry, the postcondition
+check is performed before the end of the rendezvous; ..."
+
+What happens if this check fails? Obviously, Assertion_Error is raised at the
+point of the check. But then what? Is the exception propagated to the caller
+as well? (Or, if the check is at the call site, is it propagated to the accept
+statement as well?)
+
+9.5.2(24) says: "When an exception is propagated from the
+handled_sequence_of_statements of an accept_statement, the same exception is
+also raised by the execution of the corresponding entry_call_statement."
+
+Clearly, a postcondition check is not in the handled_sequence_of_statement.
+Indeed, formally, it's checked at the call site (an entry_call_statement in
+this case) - the wording is "upon successful return". So, from that, the
+exception should be raised at the call site, but not in the accept statement.
+
+But wait: the "end of the rendezvous" wording (plus practical
+considerations) says that it is evaluated inside of the accept statement (but
+surely not as part of the handled_sequence_of_statements -- those have already
+been left in order for us to have "successful return".
+
+I have to think that the intent is that the exception is raised in both places
+(as one would expect for an exception raised "before the end of the
+rendezvous"). But the actual wording seems to provide no way to deal with
+exceptions that are raised after the completion of the sequence of statements
+but before leaving the accept statement.
+
+Something seems wrong here.
+
+P.S. Ain't it great to try to write test objectives for this text? One asks
+questions that never would get asked otherwise. Bob must be thrilled. :-)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, January 29, 2016  9:41 PM
+
+I agree that the exception should be raised in both caller and acceptor, and
+there is no way to handle it inside the accept statement itself.  Nothing
+seems wrong with that...
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Saturday, January 30, 2016  5:59 AM
+
+I am all in favor of the "is raised in both places" position.
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Saturday, January 30, 2016  7:40 AM
+
+Indeed, that is what one would expect.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Saturday, January 30, 2016  8:04 AM
+
+Indeed.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Saturday, January 30, 2016  8:17 AM
+
++1 Nothing else would be consistent. It's just a matter of how to
+express it.
+
+****************************************************************
