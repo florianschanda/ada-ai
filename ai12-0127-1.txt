@@ -1,15 +1,15 @@
-!standard A.3.4                                     14-08-21    AI12-0127-1/01
+!standard A.3.4                                     16-06-06    AI12-0127-1/02
 !class Amendment 14-08-21
 !status work item 14-08-21
 !status received 14-07-14
 !priority Medium
-!difficulty Easy
+!difficulty Hard
 !subject Partial aggregate notation
 
 !summary
 
-A notation for updating part of a record type is defined (where the remainder of
-the type is unchanged).
+A notation for updating part of a composite type is defined (where the
+remainder of the type is unchanged).
 
 !problem
 
@@ -56,35 +56,221 @@ was over the top.]
 
 !proposal
 
-A partial aggregate has the syntax:
-
-    (expression with delta record_component_association_list);
-
-The expected type for the expression is the type of the aggregate.
-
-No components are required for a partial aggregate, but any components that are
-part of the record type can be given. [This will require redoing the definition
-of "needed" in 4.3.1(9), but I think the rest of the rules work without change.]
-We need some rule to deal with the case where one or more discriminants are
-given in the association list; in such a case, components dependent on that
-discriminant would have to be "needed". (An alternative would be to disallow
-changing discriminants at all in a partial aggregate, but that sounds like it
-would be limiting.
-
-The dynamic semantics is that the given components are evaluated as usual, and
-any components not given come from the object denoted by the expression.
-
-
-[Note: I've made no attempt to define these for array types. That would be
-natural, but it would be harder to reuse the existing wording for array
-components, especially as positional components don't even have association
-syntax. There's no close analog in the language today as there is for records.
-Probably much of 4.3.3 would have to be rewritten to support using these in
-partial aggregates.]
+(See wording.)
 
 !wording
 
-** TBD: this would be a new aggregate subclause (A.3.4).
+Replace 4.3(2):
+  aggregate ::= record_aggregate | extension_aggregate | array_aggregate
+
+with:
+  aggregate ::= record_aggregate    |
+                extension_aggregate |
+                array_aggregate     |
+                delta_aggregate
+
+Replace 4.3(4):
+  An aggregate shall not be of a class-wide type.
+
+with:
+  A record aggregate or extension aggregate shall not be of a class-wide
+  type.
+
+[Author's note: We re-factor the definition of named_array_aggregate so we
+can re-use it later.]
+
+Replace 4.3.3(3):
+  named_array_aggregate ::=
+    (array_component_association {, array_component_association})
+
+with:
+  named_array_aggregate ::= ( array_component_association_list )
+
+  array_component_association_list ::=
+    array_component_association {, array_component_association}
+
+Add a new subclause:
+
+4.3.4 Delta Aggregates
+
+A (record, array, multidimensional) delta aggregate yields a
+composite value resulting from copying another value of the same type and
+then subsequently assigning to some (but typically not all) components of
+the copy.
+
+Syntax
+
+  delta_aggregate ::= (expression with delta delta_aggregate_association)
+
+  delta_aggregate_association ::=
+    record_component_association_list                 |
+    array_component_association_list                  |
+    multidimensional_array_component_association_list
+
+  multidimensional_array_component_association_list ::=
+    multidimensional_array_component_association
+    {, multidimensional_array_component_association}
+
+  multidimensional_array_component_association ::=
+    index_tuple_list => expression
+
+  index_tuple_list ::= index_tuple { | index_tuple }
+
+  index_tuple ::= ( expression {, expression} )
+
+Name Resolution Rules
+
+The type of a delta aggregate is the same as the type of the expression in
+delta_aggregate.
+
+The expected type for expression in a delta_aggregate depends on which form
+of delta_aggregate_association is used: a record type for
+record_component_association_list, and an array type for
+array_component_association_list or
+multidimensional_array_component_association_list.
+
+For record delta aggregates, the expected type and applicable index
+constraint of the expression in each record_component_association is
+defined as for a record_component_association occurring within a record
+aggregate.
+
+For array delta aggregates, the expected type for each discrete_choice in
+an array_component_association is the index type of type of the delta
+aggregate. For a multidimensional delta aggregate, the expected type for
+each expression in index_tuple is the corresponding index type of the type
+of the delta aggregate.
+
+The expected type and applicable index constraint of the expression in
+array_component_association or multidimensional_array_component_association
+is defined as for an array_component_association occurring within an array
+aggregate of the type of the delta aggregate.
+
+Legality rules
+
+For a record delta aggregate, the record_component_association_list shall
+not be null record, the record_component_association shall not use the box
+symbol <>, and the component_choice_list shall not use others.
+
+For a record delta aggregate, each component_selector_name of each
+component_choice_list shall denote a distinct non discriminant component of
+the type of the delta aggregate.
+
+The types of components in record_component_associations follow the same
+rules as they do for record aggregates (see 4.3.1).
+
+For an array delta aggregate, the array_component_association shall not use
+the box symbol <>, and the discrete_choice shall not be others.
+
+For an array delta aggregate, the dimensionality of the type of the delta
+aggregate shall be 1; for a multidimensional delta aggregate the
+dimensionality of the type of the delta aggregate shall more than 1.
+
+For a multidimensional delta aggregate, the length of each
+index_tuple shall equal the dimensionality of the type of the delta
+aggregate.
+
+For a delta aggregate the expression in a record_component_association, a
+array_component_association, or a
+multidimensional_array_component_association shall not be of a limited
+type.
+
+Dynamic Semantics
+
+The evaluation of a delta aggregate begins with evaluating the expression
+of the delta aggregate and using that value to create and initialize the
+aggregate's anonymous object [following the same rules as for initializing
+the object denoted by 'Old (see 6.1.1) except in the case where the
+anonymous object is built in place (see 7.6)]. Next, for each component for
+which an expression is provided, the expression is evaluated and assigned
+to that component of the object [just as is done for a component of a
+record_aggregate or an array aggregate]. In the case of an array component,
+the associated index expression for each dimension is also evaluated and
+used in determining the target component just as in any array indexing
+operation. As with any aggregate, evaluation of a delta aggregate then
+denotes the associated anonymous object.
+
+Ramification: As with 'Old, this means that the underlying tag (if any)
+associated with the delta aggregate is that of the expression in
+delta_aggregate and not that of the nominal type of the expression in
+delta_aggregate.
+
+To be honest: the anonymous object associated with the evaluation of a
+delta aggregate begins its life as a variable, not a constant (Ada RM 3.3
+notwithstanding). This must be the case because the object is initialized
+and then subsequently modified. After evaluation of the delta aggregate is
+complete, the object is a constant object. This is similar to the way that
+an extended return statement can provide a variable view of an object that
+will eventually be a constant object after the function returns its result
+via "build in place".
+
+For a record delta aggregate, the order of the subsequent assignments is
+unspecified. For a delta aggregate of a (one-dimensional or
+multi-dimensional) array type, the subsequent assignments (including all
+associated expression evaluations) are performed in the order in which the
+array_component_association_list or
+multidimensional_array_component_association_list is given; within a single
+array_component_association, in the order of the discrete_choice_list; and
+within the range of a single discrete_choice, in ascending order.
+
+The expressions within an index_tuple are evaluated in an arbitrary order.
+For each assignment to a component, the the target component name
+(including the evaluation of any index expressions) and expression to be
+assigned are evaluated in an arbitrary order.
+
+Examples
+
+  Post => X = (X'Old with delta Foo => 12, Bar | Baz => 42)
+  --  Use in a postcondition.
+
+  N := (Merge (A, B) with delta Relevant => True)
+  --  Expression can be more than just an a simple object reference.
+
+  R := ((R with delta F1 => False) with delta F2 => True);
+  --  These aggregates can be nested arbitrarily.
+
+  function Translate (P : Point'Class; X, Y : Float) return Point'Class
+  is (P with delta X => P.X + X,
+                   Y => P.Y + Y);
+  --  Delta updates can be classwide.
+
+  Post => V = (V'Old with delta A .. B => 42, V'First => 0);
+  --  Example of an array delta aggregate.
+
+  A1 := ((1, 2, 3) with delta F (X) => Y);
+  --  Combining an aggregate with a delta aggregate
+
+  A2 := ((True => 1, False => 2) with delta
+           (for all I in Integer range X .. Y => G (I)) => 3,
+           (R with delta Field => True).Field           => 4);
+  --  When the index type is Boolean, this can get very interesting. Also
+  --  note that we can access components of a delta aggregate.
+
+  Null_Node_Attributes : constant V_Attributes :=
+    (Null_Attributes with delta Is_Null_Node    => True,
+                                Is_Program_Node => True);
+  --  This is an example from the SPARK 2014 source code, where we define a
+  --  similar (but slightly different) constant to a huge record in a
+  --  compact way.
+
+  A := (A with delta (1, 1, 1) | (2, 2, 2) => 1);
+  --  Simple example of a multidimensional array delta aggregate.
+
+  R : constant Partially_Limited := (Constructor with delta
+                                       Non_Limited_Field => 123);
+  --  Example where we update non-limited components of a record with at
+  --  least one limited component.
+
+  function F (R : T) return Int is
+     function Do_Dispatch (R : T) return Int is (Dispatching_Op (T'Class (R)));
+  begin
+     return Do_Dispatch (R with delta X => 1);
+  end F;
+  -- Calls the same procedure as Do_Dispatch (R) since the underlying tag
+  -- will not have changed.
+
+Add after 7.5(2.10/3):
+
+* the expression of a delta_aggregate (see 4.3.4)
 
 !discussion
 
@@ -96,6 +282,90 @@ We believe it is better to use aggregate syntax for this, as we certainly want
 aggregate semantics relative to temporaries, build-in-place, limited types,
 resolution, and the like to apply. Additionally, by using aggregate notation,
 we can reuse some of the existing definitions for aggregate elements.
+
+---
+
+Ranges in multidimensional updates
+----------------------------------
+
+This is a optional proposal to allow more helpful (but slightly more complex)
+multidimensional delta aggregates. It is presented as a modification to the
+above !wording section.
+
+
+4.3.4 Delta Aggregates
+
+Syntax
+
+-- Change index_tuple to use discrete_choice_list instead of expression:
+
+  index_tuple ::= ( discrete_choice_list {, discrete_choice_list} )
+
+Name Resulution Rules
+
+--  Change 5th paragraph into:
+
+For array delta aggregates, the expected type for each discrete_choice in
+an array_component_association is the index type of type of the delta
+aggregate. For a multidimensional delta aggregate, the expected type for
+each discrete_choice in index_tuple is the corresponding index type of the
+type of the delta aggregate.
+
+Legality Rules
+
+--  Change the 4th paragraph (yes, this adds back "others").
+
+For an array delta aggregate, the array_component_association shall not use
+the box symbol <>. For an array or multidimensional delta aggregate the
+discrete_choice shall not be others.
+
+Dynamic Semantics
+
+--  Change 5th paragraph into:
+
+The discrete_choices within an index_tuple are evaluated in an arbitrary
+order. For each assignment to a component, the the target component name
+(including the evaluation of any index expressions) and expression to be
+assigned are evaluated in an arbitrary order.
+
+--  Add a 6th paragraph:
+
+For a multidimensional delta aggregate the expression is assigned to any
+combination of indicies that any of the discrete_choice_lists cover (see
+3.8.1). [You can think of this as nested iteration. For a 2D array we
+iterate over all values covered by the first discrete_choice_list, and
+inside this loop we iterate over all values covered by the second.]
+
+Examples
+
+--  Add the following example:
+
+   procedure Censor (P           : in out Picture_T;
+                     Left, Right : X_Coord;
+                     Top, Bottom : Y_Coord)
+   with Pre => Left in P'Range (1) and Right in P'Range (1) and
+               Left in P'Range (2) and Right in P'Range (2),
+        Post => (P'Old with delta (Left .. Right, Top .. Bottom) => Black);
+
+   -- Example of a 2D delta aggregate using ranges, which is equivalent to
+   -- this much more verbose contract:
+   --   Post => (for all X in X_Coord range P'First (1) .. P'Last (1) =>
+   --             (for all Y in Y_Coord range P'First (2) .. P'Last (2) =>
+   --               (if X in L .. R and Y in T .. B
+   --                then P (X) (Y) = Black
+   --                else P (X) (Y) = P'Old (X) (Y))));
+
+   P := (Old_Picture with delta (P'First(1) | P'Last(1), P'Range(2)) => Black,
+                                (P'Range(1), P'First(2) | P'Last(2)) => Black);
+   --  Draw a 1px black border around a picture
+
+Discriminants
+-------------
+Should we allow discriminants in record updates? The would have to be
+listed first, and require any variant section to be completely updated.
+
+I think no (at least initially) since handling resized arrays and
+disappearing components sounds super awkward.
 
 !examples
 
@@ -622,5 +892,89 @@ For a multi-dimensional array update expression of type ``T`` the following are 
      value is assigned to the component of the result object indexed by
      the given index values. Each array component expression is
      evaluated once for each associated ``index_expression_list``.
+
+****************************************************************
+
+From: Florian Schanda
+Sent: Monday, June 6, 2016  8:38 AM
+
+This AI is part of my (overdue) Pisa homework. I have worked on this with the
+help of Steve. It should be concrete enough so that we have something to
+discuss.
+
+[This is version /02 of the AI - Ed.]
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, June 6, 2016  12:14 PM
+
+> A (record, array, multidimensional) delta aggregate yields a composite 
+> value resulting from copying another value of the same type and then 
+> subsequently assigning to some (but typically not all) components of 
+> the copy.
+
+I like this feature.  I don't much like the keyword "delta"; seems contrived.
+But I suppose I won't complain too loudly about that.  "update" is probably
+way too incompatible. Unless we (again) try to go the "unreserved keyword"
+route.
+E.g.:
+
+    (X update with ...)
+
+>   index_tuple ::= ( expression {, expression} )
+
+There seems to be a syntactic ambiguity here.  Is this:
+
+    X := (X with delta (1) => Y);
+
+an array delta aggregate or a multidimensional delta aggregate?
+Seems like you want:
+
+    index_tuple ::= ( expression, expression {, expression} )
+
+> ** Name Resolution Rules **
+> 
+> The type of a delta aggregate is the same as the type of the 
+> expression in delta_aggregate.
+
+I think you want the type to come from context, like other aggregates.
+Then that type becomes the expected type for the expression.
+
+> For an array delta aggregate, the dimensionality of the type of the 
+> delta aggregate shall be 1; for a multidimensional delta aggregate the 
+> dimensionality of the type of the delta aggregate shall more than 1.
+
+Here's a place where the above-mentioned ambiguity comes into play.
+
+> Ranges in multidimensional updates
+> ----------------------------------
+> 
+> This is a proposal to allow more helpful (but slightly more complex) 
+> multidimensional delta aggregates. It is presented as a modification 
+> to the above !wording section.
+
+I'd leave this functionality out.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 6, 2016  11:42 PM
+
+> This AI is part of my (overdue) Pisa homework. I have worked 
+> on this with the help of Steve. It should be concrete enough 
+> so that we have something to discuss.
+
+I suppose we should know better than to pair the new guy with Steve; Steve
+makes me work more than anyone else to construct a complete AI out of pieces.
+
+Anyway, I reformatted the submission to make it fit the standard AI format;
+the discussion is light and the name of the new feature switches back and
+forth between "partial aggregate" (the name in the first draft) and "delta
+aggregate" (the name in the second draft). Issues that can be fixed, but
+probably don't matter if there are major problems with this (not that I see
+any).
+
+          Randy Brukardt, ARG Editor.
 
 ****************************************************************
