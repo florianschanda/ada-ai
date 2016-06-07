@@ -1,0 +1,422 @@
+!standard A(3/4)                                 16-06-07   AI12-0196-1/01
+!standard A.18(5)
+!class Amendment 16-06-07
+!status work item 16-06-07
+!status received 16-06-05
+!priority Low
+!difficulty Hard
+!subject Concurrent access to Ada container libraries
+
+!summary
+
+Parallel processing of containers
+
+!problem
+
+With the advent of multi-core computers, the performance of certain algorithms
+and data structures can be improved. The Ada standard containers are such data
+structures that could be involved in lengthy processing, and could be candidates for
+parallelism. Unfortunately, Ada currently says that for concurrent calls,
+the language-defined subprograms are only reentrant if the parameters of the
+call are nonoverlapping.
+Most container calls involve a controlling parameter of the container type,
+yet the call on the container may only be affecting a subset of the elements in the
+container, and may not affect state that is global to all of the elements being
+modified. Other calls only read elements of the container without modification.
+It seems it should be possible to apply parallelism to such cases so long as
+each independent thread operates on a unique, nonoverlapping set of elements
+from the container.
+
+!proposal
+
+We propose to allow operations that obtain cursors or reference objects
+to be concurrently callable, and to specify that cursors and reference types
+only overlap with the element they designate.
+
+!wording
+
+Add after A 2
+"Certain language-defined subprograms are defined to be concurrently callable.
+A *concurrently callable* subprogram supports reentrancy of concurrent calls.
+
+A 3(4) "The implementation shall ensure
+that each language-defined subprogram is reentrant in the sense that
+concurrent calls on any language-defined subprogram perform as specified,
+so long as {either the subprogram is concurrently callable or} all objects
+that are denoted by parameters that could be passed
+by reference or designated by parameters of an access type are nonoverlapping. "
+
+Reason: We relax the reentrancy rules for concurrently callable subprograms,
+to allow parallel processing.
+
+A.18 (2/2) "A cursor referencing an element in a container is considered to be
+ overlapping {only} with the {element}[container object itself]."
+
+A.18 (2.a/2) "Reason: The last sentence is intended to clarify that operations
+ that just use a cursor are on the same footing as operations that use
+ {the element}[a container] in terms of the reentrancy rules of Annex A. "
+
+A.18 (2.b/4) Add "Ramification: A cursor is not considered to overlap with
+ the associated container, thus parallel operations involving a set of cursors
+ each operating on mutually exclusive sets of elements from the same container
+ are expected to work."
+
+A.18 (5.o/2)
+ "Thus, it is only necessary for a user to protect a container if a single
+  container needs to be used by multiple tasks {and the operations applied to
+  the container are not otherwise specified to allow such concurrent usage}."
+
+A.18.2 (125) Append "To_Cursor is concurrently callable."
+
+Similarly add "xxx is concurrently callable" to all container subprograms that
+are used to obtain a cursor or reference, or manipulate a cursor
+ (eg. First, Next, Previous, Last, etc)
+
+A.18.6 (147.1) Append "An object of a Constant_Reference_Type
+  is considered to be overlapping only with the object designated by Element."
+A.18.6 (147.1) Append "An object of a Reference_Type
+  is considered to be overlapping only with the object designated by Element."
+
+Similarly apply the above cursor and reference modifications to the other
+containers.
+
+!discussion
+
+The needs of parallel programs are quite different than those of general
+concurrent programs. The goal is to achieve performance rather than
+satisfy needs for access from multiple threads of execution. Parallel
+programs typically apply a divide and conquer strategy to reduce a bigger
+problem into smaller ones that can be handed out to separate cores of a
+multicore processor. By this very nature, the smaller pieces of work tend to
+be separate independent work items. A good example of such a problem is
+container iteration, where similar processing needs to be applied to all the
+elements of the container.
+
+The Ada standard container libraries do not support such concurrent access,
+even though implementations exist that provide this support. This level of
+support should be standardized so that parallel programs can be portable
+across different compiler implementations.
+
+The first obstacle is that the standard says that a language-defined
+subprogram call is only reentrant if all the parameters of the call
+are nonoverlapping with respect to other active calls.
+
+The standard also says that a cursor for a container is to be treated as
+though it overlaps with the container object.
+
+To iterate through a container in parallel however, multiple concurrent
+cursor objects are needed, so that each can be assigned to process separate
+portions of the container elements. To allow this to happen we relax the
+above overlapping rule to say that a cursor is treated only as though it
+overlaps with the element in the container that it designates. So song as
+cursor operations are not applied to two or more cursors designating the same
+element of the container, concurrent calls to separate cursors of the same
+container object are possible.
+
+This still leaves us with the problem of obtaining the multiple cursors in
+the first place, since all such calls typically involve a parameter that
+is the container associated with the cursor to be generated, and thus
+are considered to be overlapping calls that are not reentrant if the calls
+are applied to the same container object.
+
+To allow cursors (or reference types) to be generated concurrently, we define
+the term "concurrently callable", which can be applied to language-defined
+calls. Any language-defined call that is specified to be "concurrently callable"
+requires the implementation to support concurrent calls for that subprogram.
+It is expected in the usual case that no special locking or handling will be
+needed to satisfy this requirement.
+
+We then say that all language-defined container subprograms that obtain cursors
+or reference types (eg. First, Next, Previous, Last, Reference, Constant_Reference,
+To_Cursor) are concurrently callable.
+
+This allows parallel processing of the container libraries. All other rules
+involving tampering and parameter overlapping still apply, which means that
+insertion or deletion of elements into or from the container are not allowed
+while parallel operations to that container are occurring concurrently.
+
+Calls such as Replace_Element cannot be made concurrently because of the
+tampering rules, but updates to a container can be performed concurrently,
+using variable indexing, since the update to the container does not involve
+a language-defined call.
+
+Containers that allow random access such as vectors are ideally suited for
+parallel processing, but other containers such as Doubly_Linked_Lists can
+still be processed in parallel. For those cases, it can be worthwhile
+if the amount of time needed to iterate through the container is small
+relative to the amount of time needed to process the elements in the container.
+
+In this case, one thread of control can be used to sequentially iterate through
+the entire container, while other threads of execution can be started as the
+iterating thread reaches the next chunk of iterations to be processed in
+parallel. These parallel threads then iterate through their respective chunks
+applying the processing in parallel.
+
+!examples
+
+As an example of usage for a Vector container, consider the problem of
+adding two vectors together to produce a result vector.
+Suppose a user defined parallelism library call exists with the following profile;
+
+   procedure Parallel_Loop
+     (From    : Natural;
+      To      : Natural;
+      Process : not null access procedure (Start, Finish : Natural))
+
+   Where From and To identify the full range of iteration for the loop,
+   and Process identifies a user supplied routine to process a separate
+   "chunk" of loop iterations.
+
+   The following code fragment should compile and execute to generate
+   the expected results.
+
+   declare
+      N : constant := 1_000_000;
+
+      subtype Loop_Index is Natural range 1 .. N;
+
+      package Integer_Vectors is new
+        Ada.Containers.Vectors (Index_Type   => Loop_Index,
+                                Element_Type => Integer);
+
+      Vector1, Vector2 : constant Integer_Vectors.Vector :=
+        Integer_Vectors.To_Vector (New_Item => 1,
+                                   Length   => Containers.Count_Type (N));
+
+      Result : Integer_Vectors.Vector :=
+        Integer_Vectors.To_Vector (Length => Containers.Count_Type (N));
+
+      procedure Process (Start, Finish : Parallel.Loop_Index) is
+      begin
+         for I in Start .. Finish loop
+            Result (I) := Vector1 (I) + Vector2 (I);
+         end loop;
+      end Process;
+   begin
+      Parallel_Loop (From    => 1,
+                     To      => N,
+                     Process => Process'Access);
+   end;
+
+As an example of processing a Doubly_Linked_List in parallel, consider
+the problem of applying the same update to all elements in a linked list.
+
+For this example, assume a different user defined library exists with the
+following profile;
+
+   generic
+      type Cursor   is private;
+   procedure Generic_Parallel_Loop
+     (From       : Cursor;     -- First Cursor of the container
+      Iterations : Natural;
+      Get_Cursor : not null access
+        function (Position : Cursor;
+                  Offset : Positive) return Cursor;
+      Process    : not null access
+        procedure (Iterations : Iteration_Count;
+                   Work_Item  : in out Cursor));
+
+ From is passed a cursor corresponding to the first element in the container.
+ Iterations identifes the number of elements in the container.
+ The Get_Cursor function is a user supplied function that generates a
+ new cursor as an offset from an existing cursor.
+ The Process parameter identifies the user supplied processing that is to
+ be applied to each element in the container.
+
+   declare
+      package Integer_Lists is new
+        Containers.Doubly_Linked_Lists (Element_Type => Integer);
+
+      procedure Parallel_Loop is new
+         Generic_Parallel_Loop (Cursor => Integer_Lists.Cursor);
+
+      function Get_Cursor (Position : Integer_Lists.Cursor;
+                           Offset   : Natural) return Integer_Lists.Cursor
+      is
+         New_Position : Integer_Lists.Cursor := Position;
+      begin
+         for I in 1 .. Offset loop
+            New_Position := Integer_Lists.Next (New_Position);
+         end loop;
+
+         return New_Position;
+      end Get_Cursor;
+
+      Integer_List : Integer_Lists.List;
+
+      procedure Process
+        (Iterations : Containers.Count_Type;
+         Work_Item  : in out Integer_Lists.Cursor) is
+      begin
+         for I in 1 .. Iterations loop
+            Integer_List (Work_Item) := Integer_List (Work_Item) + 1;
+            Integer_Lists.Next (Work_Item);
+         end loop;
+      end Process;
+
+   begin
+
+      List1.Append (New_Item => 1,
+                    Count    => Containers.Count_Type (N));
+
+      Parallel_Loop (From           => Integer.First,
+                     Iterations     => N,
+                     Get_Cursor     => Get_Cursor'Access,
+                     Process        => Process'Access);
+   end;
+
+!ASIS
+
+No impact.
+
+!ACATS test
+
+An ACATS C-Test can be constructed to check that parallel access works,
+but the probability of causing a problem is low.
+
+!appendix
+
+From: Brad Moore
+Sent: Thursday, June 2, 2016  1:49 AM
+
+My task was to look specifically at referencing separate elements of a container
+in parallel. The example to consider is adding two Vectors element by element to
+produce a third result vector.
+
+I tried this with the GNAT implementation of Ada.Containers.Vectors, and found
+that the issue shows itself during finalization of the container, as the
+tampering counts get messed up which concurrent access, and should be zero when
+the Vector is finalized but are not.
+
+I found I could correct this issue, by wrapping the updates of these tampering
+checks with lock-free atomic primitives.
+
+Using a lock free compare and swap operation, provides the needed safety, while
+introducing minimal overhead.
+
+It this the sort of solution we are looking for?
+
+Another idea would be to have a way to disable the tampering checks altogether
+such as via an aspect or pragma.
+
+Eg. pragma Suppress (Tamper_Check).
+
+This would have the benefit of providing a faster implementation of containers,
+which I recall was a concern raised in the past, but at the expense of safety.
+This would also likely result in eliminating the finalization bug mentioned
+above for concurrent access, since there would be no tampering flags to get
+messed up, and otherwise the concurrent access seems to work fine for the
+problem at hand.
+
+Perhaps both solutions would be needed, the first provides better guarantees
+that the tamper checks are working properly, for concurrent usage, and the
+second allows more efficient processing when tampering is known not to occur in
+the users code?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 2, 2016  6:35 PM
+
+I don't think the exact implementation is particularly relevant (other than to
+provide a proof of concept). I trust implementers to figure that sort of thing
+out. Especially as the Standard has no such thing as "tampering counts"; they
+themselves are an implementation artifact.
+
+What we do need, however, is to figure out what rules need to be changed in the
+Standard in order to provide the needed operations. Which operations are those
+exactly? Making everything task-safe is clearly too expensive (and seems like
+overkill to me).
+
+> Another idea would be to have a way to disable the tampering checks
+> altogether such as via an aspect or pragma.
+>
+> Eg. pragma Suppress (Tamper_Check).
+
+That idea was suggested long ago, supposedly is implemented in GNAT (I say
+"supposedly" only because I've never had any reason to try it), and is currently
+assigned to Bob Duff to write up. Ergo, it's hardly novel here, and probably
+should only be mentioned in your write-up for completeness. (If Bob never
+follows through, we can revisit it.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, June 2, 2016  9:43 PM
+
+> That idea was suggested long ago, supposedly is implemented in GNAT (I
+> say "supposedly" only because I've never had any reason to try it),
+> and is currently assigned to Bob Duff to write up.
+
+Yes it is implemented.  The relevant Suppress identifiers are:
+
+   Container_Checks
+      -- controls all sorts of run-time checks on containers, including
+      -- tampering
+   Tampering_Check
+      -- controls only the tampering check
+
+If you suppress either one, the tampering checks are omitted.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, June 3, 2016 10:28 AM
+
+Wow. That makes quite a difference!
+
+(About 10 times faster for adding two Vectors of 100_000_000 integers for the
+sequential case)
+
+I also notice that the just released GNAT GPL version also fixed the problems I
+was seeing with vector finalization for the parallel case caused by corruption
+of the tampering counts.
+
+I think these suppress pragmas were not available in last years GPL release.
+
+Interesting, when I try to parallelize this, with tampering checks enabled, it
+actually takes quite a bit longer than sequential. 1 min 6 seconds instead of 40
+seconds. I believe this is because of all the locking needed to make the
+tampering checks work correctly. (It appears GNAT is using lock free mechanisms
+similar to the approach I described, but there is overhead with using these
+locks when there is enough contention for the locks.
+
+With tampering checks disabled however, and 4 cores, I see 4 times faster than
+sequential. The run took 1 second instead of 4 seconds. (or 66 times faster for
+the parallel case, when tampering checks are enabled. )
+
+So it seems to me that the approach described in AI12-0139-1 of creating a copy
+of the entire Ada libraries under a Ada.Protected parent package is unnecessary,
+(at least to allow parallel usage of the containers) But we need the Suppress
+pragmas to make parallelizing the containers worthwhile. Assuming Bob will
+eventually write that part up, I will focus on a writeup that just says that the
+containers should work for parallel processing.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, June 3, 2016  10:36 AM
+
+...
+> (About 10 times faster for adding two Vectors of 100_000_000 integers
+> for the sequential case) ...
+> With tampering checks disabled however, and 4 cores, I see 4 times
+> faster than sequential.
+> The run took 1 second instead of 4 seconds. (or 66 times faster for
+> the parallel case, when tampering checks are enabled. )
+
+Glad to hear that!
+
+> So it seems to me that the approach described in AI12-0139-1 of
+> creating a copy of the entire Ada libraries under a Ada.Protected
+> parent package is unnecessary, (at least to allow parallel usage of
+> the
+> containers) But we need the Suppress pragmas to make parallelizing the
+> containers worthwhile. Assuming Bob will eventually write that part
+> up, I will focus on a writeup that just says that the containers
+> should work for parallel processing.
+
+Sounds good.
+
+****************************************************************
+
