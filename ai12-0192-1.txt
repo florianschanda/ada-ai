@@ -1,0 +1,178 @@
+!standard 3.3.1(8.1/2)                                16-06-06  AI12-0192-1/01
+!class binding interpretation 16-06-06
+!status work item 16-06-06
+!status received 16-05-31
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject "requires late initialization" and protected types
+!summary
+
+Components of a protected type (including the type of a single protected
+object) require late initialization if their initialization includes
+(implicitly) the current instance of the type.
+
+!question
+
+Consider:
+
+    type T is ... ;
+
+    protected type PR is
+       ...
+    private
+       function Make_T return T;
+       T_Comp : T := Make_T;
+       ... <other components> ...
+    end PR;
+
+    protected body PR is
+       ...
+       function Make_T return T is ...
+    end PR;
+
+    PR_Obj : PR;
+
+The default initialization of PR_Obj.T_Comp includes a call to Make_T. Inside
+Make_T, we can read any of the components of the target protected object.
+Thus, it would be better if the T_Comp component's initialization occurred
+after the initialization of any other components. We have the "requires late
+initialization" rules to handle similar cases. Should they be extended to
+cover this case? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Replace 3.3.1(8.1/2):
+   A component of an object is said to *require late initialization* if it
+   has an access discriminant value constrained by a per-object expression,
+   or if it has an initialization expression that includes a name denoting
+   the current instance of the type or denoting an access discriminant.
+with:
+   A component of an object is said to *require late initialization* if it
+   has an access discriminant value constrained by a per-object expression,
+   or if it has an initialization expression that includes a name denoting an
+   access discriminant, or a reference to the current instance of the type
+   either by name or implicitly as the target object of a call.
+
+!discussion
+
+These rules prevent most (but not all) access to uninitialized components.
+It makes sense for them to be extended to this case as well.
+
+This is inconsistent (runtime incompatible); most of the time it would prevent
+bugs.
+
+[Editor's note: But when it doesn't prevent bugs, it could turn legal, correct,
+portable Ada 2012 code erroneous. This would be really rare, but erroneous!!!
+See my e-mail of June 6th in the !appendix for an example. Ugh.]
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test is needed to check this.
+
+!appendix
+
+From: Steve Baird
+Sent: Tuesday, May 31, 2016  2:55 PM
+
+The "requires late initialization" rules were added in order to make it harder
+(but admittedly not impossible) to access a component of an object before that
+component has been initialized.
+
+We might want to extend those rules to apply to another construct.
+
+Consider (thanks to Ed S. for the original example):
+
+    type T is ... ;
+
+    protected type PR is
+       ...
+    private
+       function Make_T return T;
+       T_Comp : T := Make_T;
+       ... <other components> ...
+    end PR;
+
+    protected body PR is
+       ...
+       function Make_T return T is ...
+    end PR;
+
+    PR_Obj : PR;
+
+The default initialization of PR_Obj.T_Comp includes a call to Make_T. Inside
+Make_T, we can read any of the components of the target protected object.
+Thus, it would be better if the T_Comp component's initialization occurred
+after the initialization of any other components.
+
+Tucker wrote (in an internal AdaCore discussion):
+> I think this part of the definition of "requires late initialization" should
+> be modified:
+>
+>   "... or if it has an initialization expression that includes a
+>    name denoting the current instance of the type or denoting an access
+>    discriminant."
+>
+> perhaps to the following:
+>
+>   "... or if it has an initialization expression that includes a
+>    name denoting an access discriminant, or a reference to the current
+>    instance of the type either by name or implicitly as the target object of
+>    a call."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 6, 2016 8:37 PM
+
+In writing this up, it occurs to me that this is inconsistent (runtime
+incompatible), in that the order that components are initialized could change.
+In the vast majority of cases, this would fix bugs (remove
+implementation-dependencies), but it's possible for this change to *introduce*
+a bug that wasn't previously there.
+
+For instance, consider the following type:
+
+    protected type Gack is
+       ...
+    private
+       function Make_T2 return T2;
+       T1_Comp : T1(Gack'Access);
+       T2_Comp : T2 := Make_T2;
+    end Gack;
+
+The T1_Comp component "requires late initialization" by the existing Ada 2012
+rules. The T2_Comp component would now "require late initialization" by the
+proposed new rule. 3.3.1(20.4/3) says that components that require late
+initialization are initialized in textual order (to avoid
+implementation-dependencies and allow a work-around from problematic cases).
+
+Thus, Ada 2012 requires T1_Comp to be initialized last, with T2_Comp
+initialized before it. OTOH, with this new rule, Ada would require T2_Comp
+to be initialized last, with T1_Comp to be initialized before it.
+
+If, in fact, the initialization of T1_Comp had to be last (because it
+referenced T2_Comp), then the introduction of this new rule would break this
+code (making it erroneous - ugh!). The fix is trivial (swap the two
+components), but finding the error would be difficult as nothing predictable
+need happen for erroneous code.
+
+This is risk is small, but this is the worst kind of possible incompatibility
+(making correct, portable, legal code erroneous!). This is especially annoying
+as this change would usually fix, not cause, bugs.
+
+We could make the new rule apply only if the PT does not have any "old-style"
+requires late initialization components -- that would usually be the case --
+but that seems like a bizarre wart. I don't know what to think there - it's
+hard to accept making any correct, legal Ada code silently erroneous.
+
+****************************************************************
+
