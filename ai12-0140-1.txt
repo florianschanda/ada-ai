@@ -1,4 +1,4 @@
-!standard 3.4(7/3)                                 15-01-22  AI12-0140-1/02
+!standard 3.4(7/3)                                 16-06-04  AI12-0140-1/03
 !standard 3.4(8/2)
 !class binding interpretation 14-10-13
 !status work item 14-10-13
@@ -9,12 +9,13 @@
 !subject Access to unconstrained partial view when full view is constrained
 !summary
 
-The first subtype of a private type always statically matches the first
-subtype of the full view of the type.
+The view of a designated subtype is determined by where the access type is
+used rather than by where the access type is declared, except for access-to-
+incomplete-view-from-limited-view-of-package.
 
 !question
 
-I have a following code which is accepted by GNAT and ICCAda, but
+I have the following code which is accepted by GNAT and ICCAda, but
 rejected by Janus/Ada:
 
 with Ada.Unchecked_Deallocation;
@@ -43,7 +44,7 @@ In File C:\work\unconstrained-constrained\unc.ads at line 10
 The full view of My_String is constrained, while My_String_Access designates
 the partial view of My_String, which is unconstrained.
 
-The question is: Is the example code legal or not? (Yes.)
+The question is: Is the example code legal? (Yes.)
 
 !recommendation
 
@@ -53,70 +54,67 @@ The question is: Is the example code legal or not? (Yes.)
 
 Add after 3.2(7):
 
-AARM Ramification: "Null constraint" includes the cases of no explicit constraint,
-as well as unknown discriminants and unconstrained array type declarations
-(which are explicit ways to declare no constraint).
+   AARM Ramification: "Null constraint" includes the cases of no explicit
+   constraint, as well as unknown discriminants and unconstrained array
+   type declarations (which are explicit ways to declare no constraint).
 
-Add to 4.9.1(2/3):
+[Author's note: This AARM note seems somewhat useful to provide, though no
+longer really relates to the content of this AI.]
 
-A subtype of a private type P that has a null constraint statically matches
-the first subtype of the full type of P.
+For context, here are 7.3.1(3/1,4/1,5/1):
+
+   For a composite type, the characteristics (see 7.3) of the type are
+   determined in part by the characteristics of its component types. At
+   the place where the composite type is declared, the only
+   characteristics of component types used are those characteristics
+   visible at that place. If later immediately within the declarative
+   region in which the composite type is declared additional
+   characteristics become visible for a component type, then any
+   corresponding characteristics become visible for the composite type.
+   Any additional predefined operators are implicitly declared at that
+   place. If there is no such place, then additional predefined
+   operators are not declared at all, but they still exist.
+
+   The corresponding rule applies to a type defined by a
+   derived_type_definition, if there is a place immediately within the
+   declarative region in which the type is declared where additional
+   characteristics of its parent type become visible.
+
+   Redundant:[For example, an array type whose component type is limited
+   private becomes nonlimited if the full view of the component type is
+   nonlimited and visible at some later place immediately within the
+   declarative region in which the array type is declared. In such a
+   case, the predefined "=" operator is implicitly declared at that
+   place, and assignment is allowed after that place.]
+
+Add after 7.3.1(5/1):
+
+   The characteristics of the designated subtype of an access type
+   follow a somewhat different rule. The view of the designated subtype
+   of (a view of) an access type at a given place is determined by the
+   view of the designated subtype that is visible at that place, rather
+   than the view at the place where the access type is declared, except
+   in the following case:
+
+      * the designated subtype at the place where the access type is
+        declared denotes an incomplete view, and
+
+      * the incomplete view is part of a limited view of a package.
+
+   In this case, the designated subtype of (a view of) the access type
+   retains this incomplete view at all places other than those within
+   the scope of a _nonlimited_with_clause_ for the package in which the
+   (full) type is declared; within such a scope the more general rule
+   applies.
 
 !discussion
 
-The vendor error message refers to 12.5.4(3):
-For a formal access-to-object type, the designated subtypes of the formal and
-actual types shall statically match. 
+The earlier version of this AI restricted itself to private types, but
+the more general approach suggested here seems appropriate. My belief
+is that most compilers (but apparently not the Janus compiler) already
+implement this interpretation.
 
-The text of the vendor error message (and the associated question) is wrong,
-as 3.7(26) says that "Any subtype of a type with unknown discriminants is an
-unconstrained and indefinite type." (This is repeated in 3.2(9) and 3.3(22/3).)
-So the private type My_String is unconstrained. Similarly, the full type
-My_String is unconstrained.
-
-However, it is unclear if the formal and actual types do in fact statically
-match in this case.
-
-First, it is true that My_String_Access designates a different view (and thus
-subtype) than the subtype denoted by My_String. The view designated by an access
-type does not change during the lifetime of the type. Thus we need to determine
-if the partial view and full view statically match in this case.
-
-[Editor's note: That's definitely true for incomplete views (see 3.10.1(2.2-2.6/3)).
-I can't find as clear an indication for partial views, but it would be nonsense
-for incomplete views to work completely differently than partial views. Most
-properties are "characteristics" of the type anyway; here we're concerned about
-matching of subtypes.]
-
-The important part of 4.9.1(2/3) is "A subtype statically matches another
-subtype of the same type if they have statically matching constraints..." (the
-rest is about predicates and access types, neither of which apply here). There
-is no exception for unconstrained subtypes here, so we have to match the
-constraints even in that case.
-
-Statically matching constraints is defined directly above. Clearly, none of the
-bullets 4.9.1(1.2-1.4/2) apply. Does 4.9.1(1.1/2)? (Careful: "null constraint"
-has nothing to do with "null exclusion"s.) A "null constraint" is understood to
-be the the lack of an explicit constraint. Again, it's clear that an unknown
-discriminant is not nothing; it's an explicit not-a-constraint.
-
-But wait! 3.2(7/2) gives a definition for "null constraint" (in parens, and
-oddly IMHO): "(the case of a null constraint that specifies no restriction is
-also included)". So does an unknown discriminant "specify no restriction"??
-
-Surely, an unknown discriminant specifies something. Indeed, it specifies
-fewer restrictions than giving no constraint at all (as private types
-have to be completed with definite types unless unknown discriminants appear).
-So one could make a pedantic argument that a null constraint does not include
-no constraint at all, as even that puts requirements on the full types.
-
-Still, the Dewar rule would suggest that 3.2(7/2) needs to apply to unknown
-discriminants. After all, having the partial view not statically matching
-the full view of the same type would be annoying. We should at least add
-an AARM note explaining this case.
-
-However, this explanation leaves the author wondering. What if we had tried
-the example implied by the subject of this AI? That is:
+Here are some examples:
 
 package UNC2 is
    type My_String (<>) is limited private; -- "null constraint"
@@ -127,16 +125,12 @@ private
      Ada.Unchecked_Deallocation (My_String, My_String_Access);
 end UNC2;
 
-Now none of the 4 bullets in 4.9.1(1-1.4/2) are true (even assuming that
-unknown discriminants are a null constraint); the full view has an
-explicit constraint and the partial view has none. Ergo, the partial
-view and the full view don't statically match, and thus the instantiation
-should be illegal.
-
-However, every compiler that we tested this code on accepted it. (Even the
-compiler in the original question -- go figure! Perhaps there is an ACATS
-test requiring this to work.) There doesn't seem to be any justification for
-this. We can make this more explicit by writing out the subtypes:
+Above is a case where many characteristics of the designated subtype
+differ depending on the view. This new rule ensures that the view of
+the designated type to use is for the instantiation is the one visible
+at that place, rather than the one visible where the access type was
+declared. Note that every compiler that we tested this code on accepted
+it.
 
 package UNC3 is
    type My_String (<>) is limited private; -- "null constraint"
@@ -149,21 +143,9 @@ private
      Ada.Unchecked_Deallocation (My_String_F, My_String_Access);
 end UNC3;
 
-Here, there is no possible reason (given the current wording) for My_String_P
-and My_String_F to statically match: constraints are not a "characteristic"
-that appear for a private type.
-
-After all, this is essentially the same as
-   type An_Array is array (Positive range <>) of Integer;
-   subtype An_Array_P is An_Array;
-   subtype Con_An_Array is An_Array(1..10);
-   subtype An_Array_F is Con_An_Array;
-and we *know* An_Array_P and An_Array_F don't statically match.
-
-To fix this, we have to use the narrowest possible rule, because we surely
-don't want to allow anything beyond the minimum necessary. Thus, we've
-added a sentence saying that the subtype of a private type that has a
-null constraint always matches the first subtype of the full type.
+Here again, the designated subtype's characteristics are determined by
+the place where the access type is used, rather than where the access
+type is declared.
 
 !ASIS
 
@@ -413,13 +395,13 @@ a dereference of an access-to-incomplete type.
 From: Bob Duff
 Sent: Friday, June 26, 2015  8:12 PM
 
-> The *designated subtype* of (a view of) an access type at a given 
-> point is determined by the view of the designated subtype that is 
-> visible at that point, except in the case where the designated subtype 
-> denoted an incomplete view at the point of the declaration of the 
-> access type, and the incomplete view was part of a limited view of a 
-> package.  In that case, the designated subtype of (a view of) the 
-> access type remains this incomplete view at all points that are not 
+> The *designated subtype* of (a view of) an access type at a given
+> point is determined by the view of the designated subtype that is
+> visible at that point, except in the case where the designated subtype
+> denoted an incomplete view at the point of the declaration of the
+> access type, and the incomplete view was part of a limited view of a
+> package.  In that case, the designated subtype of (a view of) the
+> access type remains this incomplete view at all points that are not
 > within the scope of a nonlimited with clause for the package in which the
 > type is declared.  Within the scope of such a nonlimited with clause, the
 > more general rule applies.
@@ -443,11 +425,11 @@ From: Bob Duff
 Sent: Wednesday, July 8, 2015  9:10 PM
 
 > > "place".
-> 
-> You mentioned this when we were discussing AI12-0003-1 (January 31, 
-> 2015); I researched it and found that there were 20 normative 
-> references to "at the place of" and more than 18 normative references 
-> to "at the point of" (I stopped counting at that point, er place ;-). 
+>
+> You mentioned this when we were discussing AI12-0003-1 (January 31,
+> 2015); I researched it and found that there were 20 normative
+> references to "at the place of" and more than 18 normative references
+> to "at the point of" (I stopped counting at that point, er place ;-).
 > As such, either is fine, and there doesn't seem to be anything to recommend
 > either.
 
@@ -460,15 +442,15 @@ wrong.  I shall attempt to remember to quit harping on this point.
 From: Randy Brukardt
 Sent: Wednesday, July 8, 2015  7:51 PM
 
-> The *designated subtype* of (a view of) an access type at a given 
-> point is determined by the view of the designated subtype that is 
-> visible at that point, except in the case where the designated subtype 
-> denoted an incomplete view at the point of the declaration of the 
-> access type, and the incomplete view was part of a limited view of a 
-> package.  In that case, the designated subtype of (a view of) the 
-> access type remains this incomplete view at all points that are not 
-> within the scope of a nonlimited with clause for the package in which 
-> the type is declared.  Within the scope of such a nonlimited with 
+> The *designated subtype* of (a view of) an access type at a given
+> point is determined by the view of the designated subtype that is
+> visible at that point, except in the case where the designated subtype
+> denoted an incomplete view at the point of the declaration of the
+> access type, and the incomplete view was part of a limited view of a
+> package.  In that case, the designated subtype of (a view of) the
+> access type remains this incomplete view at all points that are not
+> within the scope of a nonlimited with clause for the package in which
+> the type is declared.  Within the scope of such a nonlimited with
 > clause, the more general rule applies.
 
 I think this would make more sense if it talked about the "view of the
@@ -498,20 +480,20 @@ a problem there (it could be FUD).
 From: Tucker Taft
 Sent: Wednesday, July 8, 2015  8:09 PM
 
-> I think this would make more sense if it talked about the "view of the 
-> designated subtype", since the designated subtype itself is surely 
-> determined solely by the declaration (as defined in 3.10(10)). And it 
-> seems to be a tautology that the designated subtype is determined by 
-> the view of the designated subtype (duh!), which is what it currently 
+> I think this would make more sense if it talked about the "view of the
+> designated subtype", since the designated subtype itself is surely
+> determined solely by the declaration (as defined in 3.10(10)). And it
+> seems to be a tautology that the designated subtype is determined by
+> the view of the designated subtype (duh!), which is what it currently
 > says. Maybe it would be better to start:
 >
->     The view of the designated subtype of (a view of) an access type 
+>     The view of the designated subtype of (a view of) an access type
 >     at a given point is the view of the designated
 >     subtype that is visible at that point, except in the case ...
 
 Yes, that seems like a useful fix.
 
-> I think we have to be clearer than "visible at that point"; I'm not 
+> I think we have to be clearer than "visible at that point"; I'm not
 > sure what kind of visibility you're talking about here.
 
 I don't see the ambiguity.  When you say "visible at a point" (or place)
@@ -519,12 +501,12 @@ that means exactly one thing, which is defined in in 8.3(14), saying that
 "a declaration is visible everywhere within its scope, except where hidden
 from *all* visibility."
 
-> I'd also worry that this sort of rule would introduce a ripple effect 
-> (after all, the reason that we have the complex incomplete rules is to 
-> avoid a ripple effect). Since this is intended to fix issues with 
-> static matching (coming from confusion about what view an access type 
-> uses), one could potentially get a ripple effect anywhere that static 
-> matching is required on a designated partial view. When we get a full 
+> I'd also worry that this sort of rule would introduce a ripple effect
+> (after all, the reason that we have the complex incomplete rules is to
+> avoid a ripple effect). Since this is intended to fix issues with
+> static matching (coming from confusion about what view an access type
+> uses), one could potentially get a ripple effect anywhere that static
+> matching is required on a designated partial view. When we get a full
 > proposal for this wording, I'll try to see if there is a problem there (it could be FUD).
 
 I don't believe this should be a concern.  It is only the
@@ -539,12 +521,12 @@ From: Randy Brukardt
 Sent: Wednesday, July 8, 2015  8:52 PM
 
 ...
-> > I think we have to be clearer than "visible at that point"; I'm not 
+> > I think we have to be clearer than "visible at that point"; I'm not
 > > sure what kind of visibility you're talking about here.
-> 
-> I don't see the ambiguity.  When you say "visible at a point" 
-> (or place) that means exactly one thing, which is defined in 
-> in 8.3(14), saying that "a declaration is visible everywhere 
+>
+> I don't see the ambiguity.  When you say "visible at a point"
+> (or place) that means exactly one thing, which is defined in
+> in 8.3(14), saying that "a declaration is visible everywhere
 > within its scope, except where hidden from *all* visibility."
 
 Whenever I read "visible", I think "directly visible". And then spend some time
@@ -554,20 +536,20 @@ meaning of "visible". But I agree its consistent with the RM wording, so it's
 probably just me that is confused (every time, even though I've been doing this
 for decades and vaguely know that it doesn't mean what it seems to mean).
 
-> > I'd also worry that this sort of rule would introduce a ripple effect 
-> > (after all, the reason that we have the complex incomplete rules is to 
-> > avoid a ripple effect). Since this is intended to fix issues with 
-> > static matching (coming from confusion about what view an access type 
-> > uses), one could potentially get a ripple effect anywhere that static 
-> > matching is required on a designated partial view. When we get a full 
+> > I'd also worry that this sort of rule would introduce a ripple effect
+> > (after all, the reason that we have the complex incomplete rules is to
+> > avoid a ripple effect). Since this is intended to fix issues with
+> > static matching (coming from confusion about what view an access type
+> > uses), one could potentially get a ripple effect anywhere that static
+> > matching is required on a designated partial view. When we get a full
 > > proposal for this wording, I'll try to see if there is a problem there (it
 > > could be FUD).
-> 
-> I don't believe this should be a concern.  It is only the 
-> incomplete-in-limited-view types that are affected by the 
-> presence of "with" clauses (and hence susceptible to "ripple" 
-> effects), and we make a special exception for those.  All 
-> others require being inside the scope of the full type to 
+>
+> I don't believe this should be a concern.  It is only the
+> incomplete-in-limited-view types that are affected by the
+> presence of "with" clauses (and hence susceptible to "ripple"
+> effects), and we make a special exception for those.  All
+> others require being inside the scope of the full type to
 > have any additional visibility.
 
 You might be right. My thought was that the "scope" of something includes units
@@ -587,6 +569,17 @@ Sent: Wednesday, July 8, 2015  9:15 PM
 I have the same problem.  Ada 83 had "direct visibility" and "visibility by
 selection".  Tucker renamed the latter to just plain "visibility".
 I see why that makes sense, but it still trips me up from time to time.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, June 4, 2016  7:58 PM
+
+Here is a re-write of AI12-0140, to make a more general statement that the view
+of the designated subtype of an access type is determined by the place where the
+access type is *used* rather than where the access type is declared, except for
+the weird rules for access-to-incomplete-view-from-limited-view-of-package.
+[This is version /03 of the AI - Ed.]
 
 ****************************************************************
 
