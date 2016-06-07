@@ -1,5 +1,5 @@
-!standard A.18.2(97.1/3)                              15-10-13  AI12-0111-1/02
-!class binding interpretation 14-05-15
+!standard A.18.2(97.1/3)                              16-06-04  AI12-0111-1/03
+!class Amendment 16-06-06
 !status work item 14-05-15
 !status received 14-02-08
 !priority Medium
@@ -8,9 +8,17 @@
 !subject Tampering considered too expensive
 !summary
 
-** TBD.
+Add a generic child package Stable for each Container type, which
+provides a *stabilized view* of an underlying regular container.
+Such stable containers have no operations that change their shape, and
+the stabilization "lock" on the underlying regular container need only
+be set once when the view is created, and released when the view goes
+away.
 
-!question
+Restrict "tampering with elements" checks to containers of elements
+of an indefinite type.
+
+!problem
 
 The performance of the standard containers is way less efficient than the C++
 containers. The primary cause of this is tampering checks, and specifically,
@@ -18,27 +26,305 @@ the cost of setting up and tearing down the tampering state.
 
 In a loop, this overhead can be considerable.
 
-Is there anything that the standard can do to reduce this overhead?
+The standard should be improved to reduce this overhead.
 
-[Probably not. But implementations can eliminate most of it with some work.
-- Editor.]
+!proposal
 
-!recommendation
+We propose to eliminate the requirement for per-reference tampering
+checks by providing a mechanism to "stabilize" a container against
+tampering. This can be used by the iterator expansion and elsewhere.
+When a container is stabilized, we could provide a different mechanism
+for indexing which would fail, or not be available, if the iterator were
+not stabilized. We propose the notion of a Stable_XXX handle to the
+container as a whole, which would be a separate type with cheaper
+indexing operations.
 
-We could eliminate the requirement for per-reference tampering checks by
-providing a mechanism to "lock" a container against tampering.  
-This could be used by the iterator expansion and elsewhere.  When such
-a lock is in force, we could provide a different mechanism for indexing
-which would fail, or not be available, if the iterator were not locked.
-Perhaps the notion of a Locked_Reference to the container as a whole
-could be used, which would be a separate type with cheaper indexing
-operations.
+This can also be a way to get read-only references which could be passed
+to multiple tasks. That is you could safely pass a read-only stable
+reference to multiple tasks.
 
-This might also be a way to get read-only references which could be
-passed to multiple tasks. That is you would extract a read-only locked
-reference, and then pass it to multiple tasks.
+We propose to define a generic child "Stable" of each of the various
+Container packages, removing operations that tamper with cursors.  Below
+we provide such a package for Vectors.  The stable vector has an access
+discriminant called "Base," which if non-null, refers to an underlying
+unstable vector which is automatically stabilized as long as the stable
+vector exists (hence the stabilized vector needs to be controlled so that
+when it goes away, it automatically releases the stabilization "lock" on
+the underlying vector).
+
+If the Base is null, then the stable vector is not based
+on some other vector, but it still cannot grow and shrink, and hence
+will be forever empty if not given an explicit initial value (by
+calling To_Vector or Copy, presumably).
+
+Assignment is a bit of a tricky issue.  We require the lengths to match
+if the target is a stabilized vector.  Note that regular ":=" will not
+work generally, because the access discriminants won't match.  However,
+all stabilized vectors with Base => null would be freely interassignable.
+
+Two essential properties of stable containers is that they have no tampering
+checks, and can be iterated by multiple tasks in parallel.
+
+Note that we propose to reclassify Merge as tampering with cursors,
+and to restrict "tampering with elements" to apply only to containers with
+indefinite elements.
 
 !wording
+
+Modify 18.2(92/2) (and similar paragraphs elsewhere):
+
+  * it inserts or deletes elements of V, that is, it calls the Insert,
+    Insert_Space, Clear, Delete, or Set_Length procedures{,or Merge
+    procedure of an instance of Generic_Sorting,} with V as a parameter;
+    or
+
+Delete 18.2(95/2-97/2) (and similar paragraphs except for Indefinite_*) talking
+about tampering with elements.
+
+Insert new section after A.18.2 (or in a separate area at the end of
+A.18 to avoid using 4-component numbers):
+
+  A.18.2.1 The Generic Package Containers.Vectors.Stable
+
+   The following language-defined generic package is a child of the
+   Vectors container, and provides a type Stable.Vector that represents
+   a /stable/ vector, which is one that cannot grow and shrink.  Such a
+   vector can be created by calling the To_Vector or Copy functions, or
+   by establishing a /stabilized view/ of a regular Vector. While a
+   stabilized view exists, no operations that tamper with cursors are
+   permitted on the underlying regular Vector.
+
+   The operations of this package are equivalent to those for regular
+   Vectors, except that no tampering checks are performed.  If a stable
+   vector is declared with the Base discriminant designating a
+   pre-existing regular vector, the stable vector represents a
+   stabilized view of the underlying regular vector, and any operation
+   on the stable vector is reflected on the underlying regular vector.
+   While a stabilized view exists, any operation that tampers with
+   cursors performed on the underlying vector is prohibited.  The
+   finalization of a stable vector that provides such a view removes
+   this restriction on the underlying regular vector Redundant[(though
+   some other restriction might exist due to other concurrent iterations
+   or stabilized views)].
+
+   If a stable vector is declared with the Base discriminant null, there
+   is no underlying regular vector, and operations on the stable vector
+   affect only the stable vector itself.  The initializing expression of
+   the stable vector, if any Redundant[(typically a call on To_Vector or
+   Copy)], determines the Length of the vector.  By default the Length
+   is zero.  The Length of a stable vector never changes after
+   initialization.
+
+[Author's note: Below, we have left in the original paragraph numbers
+from the Vector container because we thought they might be useful, and
+mostly because we are too lazy to remove them.]
+
+        generic
+        package Ada.Containers.Vectors.Stable is
+           pragma Preelaborate(Vectors.Stable);
+           pragma Remote_Types(Vectors.Stable);
+
+8/3        type Vector (Base : access Vectors.Vector) is tagged private
+              with Constant_Indexing => Constant_Reference,
+                   Variable_Indexing => Reference,
+                   Default_Iterator  => Iterate,
+                   Iterator_Element  => Element_Type;
+           pragma Preelaborable_Initialization(Vector);
+
+9/2        type Cursor is private;
+           pragma Preelaborable_Initialization(Cursor);
+
+10/2       Empty_Vector : constant Vector;
+
+11/2       No_Element : constant Cursor;
+
+11.1/3     function Has_Element (Position : Cursor) return Boolean;
+
+11.2/3     package Vector_Iterator_Interfaces is new
+               Ada.Iterator_Interfaces (Cursor, Has_Element);
+
+12/2       function "=" (Left, Right : Vector) return Boolean;
+
+13/2       function To_Vector (Length : Count_Type) return Vector;
+
+14/2       function To_Vector
+             (New_Item : Element_Type;
+              Length   : Count_Type) return Vector;
+
+15/2       function "&" (Left, Right : Vector) return Vector;
+
+16/2       function "&" (Left  : Vector;
+                         Right : Element_Type) return Vector;
+
+17/2       function "&" (Left  : Element_Type;
+                         Right : Vector) return Vector;
+
+18/2       function "&" (Left, Right  : Element_Type) return Vector;
+
+19/2       function Capacity (Container : Vector) return Count_Type;
+
+21/2       function Length (Container : Vector) return Count_Type;
+
+23/2       function Is_Empty (Container : Vector) return Boolean;
+
+25/2       function To_Cursor (Container : Vector;
+                               Index     : Extended_Index) return Cursor;
+
+26/2       function To_Index (Position  : Cursor) return Extended_Index;
+
+27/2       function Element (Container : Vector;
+                             Index     : Index_Type)
+              return Element_Type;
+
+28/2       function Element (Position : Cursor) return Element_Type;
+
+29/2       procedure Replace_Element (Container : in out Vector;
+                                      Index     : in     Index_Type;
+                                      New_Item  : in     Element_Type);
+
+30/2       procedure Replace_Element (Container : in out Vector;
+                                      Position  : in     Cursor;
+                                      New_item  : in     Element_Type);
+
+31/2       procedure Query_Element
+             (Container : in Vector;
+              Index     : in Index_Type;
+              Process   : not null access procedure
+                                            (Element : in Element_Type));
+
+32/2       procedure Query_Element
+             (Position : in Cursor;
+              Process  : not null access procedure (Element : in Element_Type));
+
+33/2       procedure Update_Element
+             (Container : in out Vector;
+              Index     : in     Index_Type;
+              Process   : not null access procedure
+                              (Element : in out Element_Type));
+
+34/2       procedure Update_Element
+             (Container : in out Vector;
+              Position  : in     Cursor;
+              Process   : not null access procedure
+                              (Element : in out Element_Type));
+
+34.1/3     type Constant_Reference_Type
+                 (Element : not null access constant Element_Type) is private
+              with Implicit_Dereference => Element;
+
+34.2/3     type Reference_Type
+         (Element : not null access Element_Type) is private
+              with Implicit_Dereference => Element;
+
+34.3/3     function Constant_Reference (Container : aliased in Vector;
+                                        Index     : in Index_Type)
+              return Constant_Reference_Type;
+
+34.4/3     function Reference (Container : aliased in out Vector;
+                               Index     : in Index_Type)
+              return Reference_Type;
+
+34.5/3     function Constant_Reference (Container : aliased in Vector;
+                                        Position  : in Cursor)
+              return Constant_Reference_Type;
+
+34.6/3     function Reference (Container : aliased in out Vector;
+                               Position  : in Cursor)
+              return Reference_Type;
+
+34.7/3     procedure Assign (Target : in out Vector;
+                             Source : in Vector)
+             with Pre => Length (Target) = Length (Source);
+
+           procedure Assign (Target : in out Vectors.Vector;
+                             Source : in Vector);
+
+34.8/3     function Copy (Source : Vector; Capacity : Count_Type := 0)
+              return Vector;
+
+54/2       procedure Reverse_Elements (Container : in out Vector);
+
+55/2       procedure Swap (Container : in out Vector;
+                           I, J      : in     Index_Type);
+
+56/2       procedure Swap (Container : in out Vector;
+                           I, J      : in     Cursor);
+
+57/2       function First_Index (Container : Vector) return Index_Type;
+
+58/2       function First (Container : Vector) return Cursor;
+
+59/2       function First_Element (Container : Vector)
+              return Element_Type;
+
+60/2       function Last_Index (Container : Vector) return Extended_Index;
+
+61/2       function Last (Container : Vector) return Cursor;
+
+62/2       function Last_Element (Container : Vector)
+              return Element_Type;
+
+63/2       function Next (Position : Cursor) return Cursor;
+
+64/2       procedure Next (Position : in out Cursor);
+
+65/2       function Previous (Position : Cursor) return Cursor;
+
+66/2       procedure Previous (Position : in out Cursor);
+
+67/2       function Find_Index (Container : Vector;
+                                Item      : Element_Type;
+                                Index     : Index_Type := Index_Type'First)
+              return Extended_Index;
+
+68/2       function Find (Container : Vector;
+                          Item      : Element_Type;
+                          Position  : Cursor := No_Element)
+              return Cursor;
+
+69/2       function Reverse_Find_Index (Container : Vector;
+                                        Item      : Element_Type;
+                                        Index     : Index_Type := Index_Type'Last)
+              return Extended_Index;
+
+70/2       function Reverse_Find (Container : Vector;
+                                  Item      : Element_Type;
+                                  Position  : Cursor := No_Element)
+              return Cursor;
+
+71/2       function Contains (Container : Vector;
+                              Item      : Element_Type) return Boolean;
+
+73/2       procedure  Iterate
+             (Container : in Vector;
+              Process   : not null access procedure (Position : in Cursor));
+
+74/2       procedure Reverse_Iterate
+             (Container : in Vector;
+              Process   : not null access procedure (Position : in Cursor));
+
+74.1/3     function Iterate (Container : in Vector)
+              return Vector_Iterator_Interfaces.Reversible_Iterator'Class;
+
+74.2/3     function Iterate (Container : in Vector; Start : in Cursor)
+              return Vector_Iterator_Interfaces.Reversible_Iterator'Class;
+
+75/2       generic
+              with function "<" (Left, Right : Element_Type)
+                 return Boolean is <>;
+           package Generic_Sorting is
+
+76/2          function Is_Sorted (Container : Vector) return Boolean;
+
+77/2          procedure Sort (Container : in out Vector);
+
+79/2       end Generic_Sorting;
+
+80/2    private
+
+81/2       ... -- not specified by the language
+
+82/2    end Ada.Containers.Vectors.Stable;
 
 ** TBD.
 
@@ -51,215 +337,13 @@ going off the rails because an element was deleted (which might cause an
 iterator to run into non-existent memory) or inserted (which might cause an
 iterator to go into an infinite loop).
 
-Tampering with elements was intended to prevent an element that is actively
-being used from disappearing or being replaced (which might change the "shape"
-of the element).
-
-For an example of the latter, consider:
-
-  package Pkg is
-     type Item is record
-         C : Character := 'R';
-         ...
-     end record;
-     package Item_Vector is new Ada.Containers.Vectors (Element_Type => Item,
-             Index_Type => Positive);
-
-     Item_List : Item_Vector.Vector;
-
-     procedure Process_Item (Obj : in out Item);
-  end Pkg;
-
-  package body Pkg is
-     procedure Process_Item (Obj : in out Item) is
-     begin
-        ...
-        -- Split Item:
-        Item_List.Append (Item'(C => Character'Pred(Obj.C), ...)); -- [1]
-        Obj.C := Character'Succ(Obj.C); -- [2]
-        ...
-     end Process_Item;
-  end Pkg;
-
-  with Pkg;
-  procedure Main is
-  begin
-      Pkg.Item_List.Append (Item'(C => 'M', ...));
-      Pkg.Item_List.Append (Item'(C => 'T', ...));
-      Pkg.Process_Item (Pkg.Item_List(2).all); -- [3]
-  end Main;
-
-The call at [3] uses the Variable_Indexing aspect and expands into
-
-      Pkg.Process_Item (Pkg.Item_List.Reference(2).Element.all);
-
-In this case, tampering with elements is prohibited until the call Process_Item
-returns. This means that the call at [1] fails a tampering check.
-
-This is important; if the Append call required an expansion of the vector, and
-the vectors' implementation uses a reallocation strategy (as in thes original
-reference implementation of unbounded vectors), then the element Item_List(2)
-will be copied to the new (larger) vector data area, and the original one will
-be freed.
-
-If the parameter Obj is passed by reference (as it must be if Item is a
-by-reference type, for example if it is tagged), then the parameter object no
-longer exists at the location referenced by the parameter, and the modification
-at [2] will occur into memory no longer owned by the container. This is classic
-use of a dangling pointer.
-
-The parameter Obj being passed by copy does not help. In that case, the
-modification at [2] will be OK, but the copy-back after the call will be to
-non-existent memory. Moreover, the problem occurs in the by-copy case even if
-the object is never touched after the tampering call.
-
-Note that at the point of the dereference, there is no problem. The problem
-happens later, AFTER the dereference, but while the reference object exists.
-
-Also note that this is a new problem to the containers; it does not happen with
-arrays. That's because arrays have no way to create or delete or replace
-elements. The set of elements is fixed for the entire life of an array object.
-We don't want the implicit use of Unchecked_Deallocation inside of the
-containers to leak out and cause new erroneous cases.
-
-Even when the parameters in question have mode "in", a version of the problem
-still exists, since no modification of the container is necessary to cause
-problems. While reading non-existent memory is less dangerous than writing it
-(as it can't corrupt the program directly), it still can cause the program to
-fault (for instance, if something in it used to modify memory elsewhere, or even
-directly if the memory was returned to the target OS). So the read at [2] has a
-risk of causing a program fault and thus would still be a problem if the
-tampering check did not exist.
-
-"Tampering with elements" also catches some other errors here as a side-effect.
-In particular, in implementation that "slide" vector elements when one is
-inserted or deleted, the object passed as a parameter may no longer have the
-data of the original element. That could cause various problems, especially if
-the "new" element has different discriminants than the original one.
-
----
-
-It appears that the performance problems cited by the questioner primarily are
-related to "tampering with elements", and specifically with the overhead of
-Reference and Constant_Reference, which use an implicit controlled object (at
-least in an all-Ada implementation) to manage the tampering state of the
-container.
-
-The performance of the actual tampering checks is not the problem, as those are
-simple integer compares; much smaller than the actual cost of the operation in
-most cases. It would be nice to be able to remove the overhead of those checks,
-but that would not make much difference.
-
-An Ada compiler could make the cost of Reference/Constant_Reference cheaper in a
-number of ways, but they all require cooperation from the front end.
-
-One possibility is for the compiler to replace the controlled object with an
-explicit modification of the container (essentially in-lining Finalize for the
-object). That would probably require a special mode for compiling the function,
-so it doesn't actually return an expensive controlled object.
-
-Perhaps a better solution is to use a simple tree transformation when the
-compiler can tell that there is no call (thus no possible tampering failure)
-before the finalization of the object that would be returned from Reference or
-Constant_Reference. If that's true, the call could be replaced by a call to a
-hidden, unsafe routine that simply returns a raw pointer (and which probably
-could be in-lined). All of the finalization overhead would disappear with the
-returned object. It's estimated that 90% of the calls to Reference could be
-transformed this way.
-
-Either of these would greatly reduce the overhead at the cost of some work.
-
----
-
-We used the same rules for all forms of containers. That was done mainly to make
-it easier to switch between kinds of containers. It also makes the language
-definition easier.
-
-However, the importance of "tampering with elements" varies based on the kind of
-container. Indefinite containers need the check the most, as almost any
-replacement of an element will free and allocate new memory. Unbounded
-containers need the check mostly for reallocation cases (as in the expansion of
-a vector), and when a node is "freed" (as when a map item is deleted).
-
-Bounded containers need the check least of all. If they are implemented as
-expected (with a fixed array backing them), then the actual element memory
-cannot disappear at all. An operation might move elements around, but the memory
-is not going anywhere. In that case, "tampering with elements" really can only
-detect whether the element accessed through the reference or parameter
-potentially has changed.
-
-Indeed, for a bounded container (only), dereferencing the result of Reference
-cannot cause erroneous execution unless the container is itself deallocated.
-Otherwise, it will always continue to point to the memory of an element (it just
-might not be the right element). Moreover, for containers other than vectors,
-implementations can further reduce trouble by waiting to reallocate elements as
-long as possible. That is, when inserting new elements, a previously used
-element should be used only if no other elements are available, and then the
-least recently used element should be reused. That makes it much more likely
-that any dangling references point at deleted elements (to which modifications
-are not going to cause any problems by themselves) as opposed to pointing at
-some other in-use element (to which modifications are likely to cause problems).
-
-Note that one can get erroneous execution in such cases by changing
-discriminants of known-to-be-constrained objects (such as formal parameters).
-But this is possible without involving any containers -- there is nothing new
-with this.
-
-As such, the "tamper with elements" check on Reference and especially
-Constant_Reference for bounded containers is not doing a lot of good. For
-containers with individual nodes (all but vectors), we can give implementation
-advice to use least-recently used allocation of nodes. For an implementation
-that follows such advice, the reuse of nodes while a reference exists is
-unlikely (it can happen of course if the container is near capacity), so the
-danger of modifying the wrong element is minimal. The danger mainly comes from
-data loss, where code continues to update an element that has been deleted. It's
-probably not worth the overhead for such cases. That's especially true for
-Constant_Reference (where no updating is allowed anyway).
-
-The case with the bounded vector is not as clear-cut. Deleting or inserting an
-element usually causes the others to "slide" over, invalidating all cursors and
-references. These now all point at the wrong element. Thus, while a reference
-will still access data, it will always be the wrong data. There is an argument
-that this is not significant, as the same thing can happen with a fixed array.
-That argument however seems to mainly be that fixed arrays are buggy, so bounded
-vectors should also be buggy. :-)
-
-As such, it is reasonable to eliminate the tampering check for Reference and
-Constant_Reference for bounded containers (other than the vector). That would
-make bounded containers slightly less safe than the unbounded form, but they
-also would be considerably faster.
-
-We could also eliminate the "tamper with elements" check from Query_Element for
-the bounded forms (which cannot modify its parameter, so it's essentially the
-same as Constant_Reference). It's not as clear as to whether eliminating it from
-Update_Element is worthwhile. The overhead of the check is much less than for
-Reference (as no controlled element is involved), but there is the possibility
-of the Process routine overwriting the wrong element if the parameter was passed
-by copy, even if the element wasn't touched after the tampering call. That's
-enough more dangerous (and Update_Element is used little enough) that it might
-make sense to retain the check for it.
-
-If we were to make some or all of the bounded containers different by
-eliminating their tampering check for Reference/Constant_Reference, there would
-clearly be an interoperability concern. Moving from a working bounded container
-to an unbounded one could cause some failures from tampering. (Going in the
-other direction would not cause any problems, of course.) It's hard to say how
-significant this is; most Reference/Constant_Reference calls are very-shortlived
-and couldn't tamper in any way. But there probably would be some longer-lived
-ones (via renaming or parameter passing) that could cause issues.
-
-To summarize, the primary reason for the "tamper with elements" check for
-Reference and Constant_Reference cannot happen for bounded forms. Thus, we can
-drop that check from Reference, Constant_Reference, and Query_Element for
-bounded containers other than vectors with little loss of safety, at least when
-combined with advice to allocate nodes in a LRU fashion.
-
-We could also drop the checks from bounded vectors, but the loss of safety would
-be considerably more.
-
-It's unclear if this is a good idea, or whether techniques to reduce the cost of
-the tampering check and (more importantly) the tampering state setup for all
-containers are a better place to spend effort.
+Tampering with elements was intended to prevent an element that is
+actively being used from disappearing or being replaced (which might
+change the "shape" of the element). We are proposing to restrict this
+concern to cases where the formal element type is indefinite, since for
+definite types, normal assignment can be used to replace objects, and
+access types will work safely across assignment to their designated
+objects.
 
 !ASIS
 
@@ -2175,11 +2259,11 @@ Sent: Wednesday, June 4, 2014  2:16 PM
 
 [From an administrative thread:]
 
->...AI 111 is on performance (rather than  strictly real-time), of 
->Containers, but I get the impression that  Randy isn’t too keen on 
->relaxing the safety checks, and I think it’s  too early to discuss 
->until there’s at least one implementation of the  Containers that 
->passes the ACATS tests (get it functionally correct  then think about 
+>...AI 111 is on performance (rather than  strictly real-time), of
+>Containers, but I get the impression that  Randy isn’t too keen on
+>relaxing the safety checks, and I think it’s  too early to discuss
+>until there’s at least one implementation of the  Containers that
+>passes the ACATS tests (get it functionally correct  then think about
 >tuning it).
 
 Good point.  But even then it will be premature to discuss in ARG.  The way to
@@ -2196,11 +2280,11 @@ be standardizing existing practice, rather than inventing, are right.
 From: Robert Dewar
 Sent: Wednesday, June 4, 2014  2:23 PM
 
-> Good point.  But even then it will be premature to discuss in ARG.  
-> The way to attack that problem is to hack on (some implementation of) 
-> containers, profile them, and experiment with possible language 
-> changes, possible compiler changes, etc.  Making language changes 
-> first, in the hopes that they might make containers efficient, won't 
+> Good point.  But even then it will be premature to discuss in ARG.
+> The way to attack that problem is to hack on (some implementation of)
+> containers, profile them, and experiment with possible language
+> changes, possible compiler changes, etc.  Making language changes
+> first, in the hopes that they might make containers efficient, won't
 > work -- too much guesswork.
 
 I agree. Let GNAT figure out how to make containers usable, we have an
@@ -2208,8 +2292,8 @@ enormous incentive to do that, many of our customers are seriously worried
 by the horrible performance compared to C++ and we have to do something about
 it.
 
-> The moral of the story is that the folks who say standards committees 
-> should be standardizing existing practice, rather than inventing, are 
+> The moral of the story is that the folks who say standards committees
+> should be standardizing existing practice, rather than inventing, are
 > right.
 
 Especially at this stage.
@@ -2259,14 +2343,14 @@ need for expensive run-time checks could be eliminated.
 From: Robert Dewar
 Sent: Saturday, October 18, 2014  8:25 AM
 
-> The discussion section of this AI shows an example of tampering with 
-> elements that the tampering checks detect, basically involving 
-> obtaining a reference to an element of a vector, and then using that 
-> reference to call a procedure which appends an item to container, 
-> which could cause the array to be increased in size, leaving the 
+> The discussion section of this AI shows an example of tampering with
+> elements that the tampering checks detect, basically involving
+> obtaining a reference to an element of a vector, and then using that
+> reference to call a procedure which appends an item to container,
+> which could cause the array to be increased in size, leaving the
 > original reference pointing to garbage.
 >
-> I'm wondering if it would be possible to catch this sort of error at 
+> I'm wondering if it would be possible to catch this sort of error at
 > compile time rather than at run time.
 
 VERY messy to have the compiler have to know this much about container
@@ -2278,14 +2362,14 @@ relevant check more general.
 From: Randy Brukardt
 Sent: Tuesday, May 26, 2015  3:55 PM
 
-> The discussion section of this AI shows an example of tampering with 
-> elements that the tampering checks detect, basically involving 
-> obtaining a reference to an element of a vector, and then using that 
-> reference to call a procedure which appends an item to container, 
-> which could cause the array to be increased in size, leaving the 
+> The discussion section of this AI shows an example of tampering with
+> elements that the tampering checks detect, basically involving
+> obtaining a reference to an element of a vector, and then using that
+> reference to call a procedure which appends an item to container,
+> which could cause the array to be increased in size, leaving the
 > original reference pointing to garbage.
-> 
-> I'm wondering if it would be possible to catch this sort of error at 
+>
+> I'm wondering if it would be possible to catch this sort of error at
 > compile time rather than at run time.
 
 I keep thinking about this, and wanted to write something up so I can stop
@@ -2326,5 +2410,81 @@ with cursors situations for regular iterators (it would prevent modifying the
 element in an iterator, which of course would be nonsense). So it would seem
 that would need to remain a run-time check. That's probably OK, the number of
 iterators in a program is far less than the number of calls to Reference.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Saturday, June 4, 2016  9:59 PM
+
+Here is a new version of AI-111 [Version /03 - Ed] that proposes defining a
+child package "Stable" for each container package, in which a "stable" container
+type is defined.  A stable container object has an access discriminant which can
+designate an underlying regular container, to provide a "stabilized view" of
+that container. While the stabilized view exists, no tampering of the underlying
+container is permitted.  A stable container type includes essentially all of the
+operations of the "regular" container type that do not change the "shape" of the
+container.
+
+This AI also proposes to eliminate the notion of "tampering with elements" for
+all but containers with elements having an indefinite type.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Sunday, June 5, 2016  9:41 AM
+
+After more thought, it seems we might consider making the Stable.Vector type
+limited, and require the Base discriminant to be non-null.  It is going to be
+build-in-place anyway, and ":=" won't be reliable so the Assign procedure will
+be needed in most cases, so there really isn't much benefit in making it
+non-limited and having the special case for Base=>null.  If we do this, then
+stable vectors created by functions like Copy or To_Vector will become the
+perfect candidates for use of co-extensions. ;-)
+
+For what it is worth, the "&" operators are other ways to create values of the
+Stable.Vector type, which wasn't mentioned in the write-up.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, June 7, 2016  5:31 PM
+
+> Here is a new version of AI-111 that proposes defining a child package
+> "Stable" for each container package, in which a "stable" container
+> type is defined.  A stable container object has an access discriminant
+> which can designate an underlying regular container, to provide a
+> "stabilized view"
+> of that container.  While the stabilized view exists, no tampering of
+> the underlying container is permitted.  A stable container type
+> includes essentially all of the operations of the "regular" container
+> type that do not change the "shape"
+> of the container.
+
+For the record, I changed this AI into the form of an Amendment, since adding
+dozens of Stable subpackages and removing a check seems way beyond a Binding
+Interpretation.
+
+> This AI also proposes to eliminate the notion of "tampering with
+> elements" for all but containers with elements having an indefinite
+> type.
+
+The way you did this is as follows:
+
+  Delete 18.2(95/2-97/2) (and similar paragraphs except for Indefinite_*)
+  talking about tampering with elements.
+
+The problem with this is that the Indefinite_* containers never talk about
+tampering with elements at all (the word "tampering" does not appear in A.18.11
+for Indefinite_Vectors, for instance). You have to *move* the existing wording
+to the indefinite clauses, you can't just delete it in the regular containers.
+
+[I also assume that you are replacing "tampering with elements" with "tampering
+with cursors" in the places where it currently says "tampering with elements",
+lest reallocation on growth not be allowed as an implementation strategy (that's
+the "canonical" implementation of a vector). If you're doing that, you need to
+say so somewhere.]
+
+Overall, I can't figure out how to get from your suggested change to your
+intended result.
 
 ***************************************************************
