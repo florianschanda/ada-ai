@@ -1,0 +1,238 @@
+!standard 7.3.2(21)                                    16-06-06  AI12-0191-1/01
+!standard 13.11.4(21/3)
+!standard 13.11.4(31/3)
+!class binding interpretation 15-06-04
+!status work item 15-06-04
+!status received 15-04-28
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Clarify "part" for type invariants
+!summary
+
+** TBD.
+
+!question
+
+The term "part" is used several times in the section on Type Invariants. Does
+this usage of "part" include the "parent part"? (No.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** Not a clue ** (We might want to try to clarify that this is a statically
+determined part [which is what we want here] rather than a dynamically determined
+part [which what the similar wording for finalization means]. This problem was
+discussed - and punted - in AI12-0167-1. - Editor.)
+
+!discussion
+
+If the programmer wants the invariant to be enforced on all descendants, she
+can use Type_Invariant'Class on the original type. Therefore, we want
+Type_Invariant to work differently.
+
+Also note that it is unusual to have a type extension in the same package as
+its parent. If, at a later point, the type extension is given its own package,
+we'd prefer that the invariant enforcement change as little as possible.
+
+!example
+
+with Derived; use Derived;
+procedure Testinv is
+    X : D;
+begin
+    Create (X);
+end Testinv;
+---
+package Derived is
+
+    type T is tagged private;
+    type D is tagged private;
+
+    procedure Create (X : out T);
+    procedure Create (X : out D);
+
+private
+
+    type T is tagged record
+       C : Integer;
+    end record
+      with Type_Invariant => T.C /= 0;
+
+    type D is new T with null record;
+
+end Derived;
+---
+package body Derived is
+
+    procedure Create (X : out T) is
+    begin
+       X.C := 1;
+    end Create;
+
+    procedure Create (X : out D) is
+    begin
+       X.C := 0; --  Parent part type-invariant failure on return? (No.)
+    end Create;
+
+end Derived;
+
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Tucker Taft
+Sent: Tuesday, May 31, 2016  2:13 PM
+
+The term "part" is used several times in the section on Type Invariants.  The 
+question is whether this always is meant to apply to the "parent part" (and
+for that matter, every ancestor part) of the object.  My view is that when the
+RM says "any part", we usually want it to mean precisely "any subcomponent, or
+the object as a whole."  The definition of "part" also talks about sets of
+subcomponents, and mentions it use in terms like the "parent part" and the
+"extension part."  But I think those usages only make sense when we are
+talking about untyped sets of things.  For a type invariant, clearly we are
+only talking about "typed" parts, and I don't believe the parent part has a
+type in the normal sense.  You can create a "typed view" of the parent part
+by a view conversion, but until you do that, the parent part is not an object,
+but rather just a collection of components.
+
+Below is an example that shows the issue.  The question is whether the call on
+Create for type D should fail on return, because the parent part doesn't
+satisfy its invariant:
+----
+
+with Derived; use Derived;
+procedure Testinv is
+    X : D;
+begin
+    Create (X);
+end Testinv;
+---
+package Derived is
+
+    type T is tagged private;
+    type D is tagged private;
+
+    procedure Create (X : out T);
+    procedure Create (X : out D);
+
+private
+
+    type T is tagged record
+       C : Integer;
+    end record
+      with Type_Invariant => T.C /= 0;
+
+    type D is new T with null record;
+
+end Derived;
+---
+package body Derived is
+
+    procedure Create (X : out T) is
+    begin
+       X.C := 1;
+    end Create;
+
+    procedure Create (X : out D) is
+    begin
+       X.C := 0; --  Parent part type-invariant failure on return?
+    end Create;
+
+end Derived;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May 31, 2016  6:48 PM
+
+> The term "part" is used several times in the section on Type 
+> Invariants.  The question is whether this always is meant to apply to 
+> the "parent part" (and for that matter, every ancestor part) of the 
+> object.  My view is that when the RM says "any part", we usually want 
+> it to mean precisely "any subcomponent, or the object as a whole."  
+> The definition of "part" also talks about sets of subcomponents, and 
+> mentions it use in terms like the "parent part" and the "extension 
+> part."  But I think those usages only make sense when we are talking 
+> about untyped sets of things.  For a type invariant, clearly we are 
+> only talking about "typed" parts, and I don't believe the parent part 
+> has a type in the normal sense.  You can create a "typed view" of the 
+> parent part by a view conversion, but until you do that, the parent 
+> part is not an object, but rather just a collection of components.
+
+As usual, it's probably better to figure out what we want and then decide
+whether the words say that, rather than try to figure out what the words
+actually say. We already know (at least those of us that have tried to write
+ACATS tests and objectives) that the wording of 7.3.2 is pretty fast-and-loose
+about what is and is not included. (Steve's notes about "parts" known
+dynamically vs. "parts" known statically are a big deal to this check being
+efficient, but the wording is interpreted 100% differently than the very
+similar wording for finalization.)
+
+And I think that it doesn't make much sense for the parent extension to get
+enforced separately for a type extension. If a programmer wants to ensure
+that an invariant is enforced on extensions, they can use a
+Type_Invariant'Class. Otherwise, as with all derived types, nothing gets
+inherited.
+
+> Below is an example that shows the issue.  The question is whether the 
+> call on Create for type D should fail on return, because the parent 
+> part doesn't satisfy its invariant:
+> ----
+> 
+> with Derived; use Derived;
+> procedure Testinv is
+>     X : D;
+> begin
+>     Create (X);
+> end Testinv;
+> ---
+> package Derived is
+> 
+>     type T is tagged private;
+>     type D is tagged private;
+> 
+>     procedure Create (X : out T);
+>     procedure Create (X : out D);
+> 
+> private
+> 
+>     type T is tagged record
+>        C : Integer;
+>     end record
+>       with Type_Invariant => T.C /= 0;
+> 
+>     type D is new T with null record;
+> 
+> end Derived;
+> ---
+> package body Derived is
+> 
+>     procedure Create (X : out T) is
+>     begin
+>        X.C := 1;
+>     end Create;
+> 
+>     procedure Create (X : out D) is
+>     begin
+>        X.C := 0; --  Parent part type-invariant failure on return?
+>     end Create;
+> 
+> end Derived;
+
+It's of course unusual to put a type and its extension into the same package,
+so the answer here isn't terrible critical. But it's probably best for the
+behavior to change as little as possible when these two types are inevitably
+split into separate packages.
+
+****************************************************************
