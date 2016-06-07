@@ -1,15 +1,21 @@
-!standard 5.5.2(2/3)                                  16-06-02  AI12-0189-1/01
+!standard 5.5.2(2/3)                                  16-06-06  AI12-0189-1/02
 !class Amendment 16-06-02
 !status work item 16-06-02
 !status received 16-05-06
 !priority Medium
 !difficulty Medium
-!subject Lambda loops
+!subject loop-body as anonymous procedure
 !summary
 
 ** TBD.
 
 !problem
+
+[Editor's note: Both Randy and Tucker wrote problem statements for this AI
+and since they're rather disjoint, I'm presenting both. The next author will
+have to reconcile them:]
+
+[Randy:]
 
 Currently, the way to create an iterator for some abstraction is to create an
 implementation of the iterator interface. This requires the invention of a
@@ -17,18 +23,27 @@ cursor type, and often the use of the Rosen technique (as the iterator object
 parameters of the iterator interface are of mode "in").
 
 But not all abstractions have natural cursors. Moreover, some have multiple
-items (key - value pairs are particularly common.
+items (key - value pairs are particularly common).
 
 Most of these abstractions (like Ada.Directories and
 Ada.Environment_Variables) already have closed iterators that do not expose
 cursors. If we could map to them, we could simplify many iterators without
 adding ridiculous amounts of new capabilities.
 
+[Tucker:]
+
+There are several language-defined operations that provide iteration by taking
+an access-to-procedure from the caller and calling back to the designated
+procedure once for each element of the iteration.  It would be nice if there
+were a convenient syntax for specifying the body for this call-back, without
+having to start a new declare-block and declare a named procedure only to pass
+the 'Access of it exactly once to the iteration operation.
+
 !proposal
 
-A loop body can be used to specify the implementation of a procedure to be
-passed as the actual for an access-to-subprogram parameter, when used in
-the context of a special kind of for-loop statement, whose
+A loop body can be used to specify the implementation of a procedure to
+be passed as the actual for an access-to-subprogram parameter, when used
+in the context of a special kind of for-loop statement, whose
 iterator_specification is given by a procedure_iterator:
 
    iterator_specification ::= procedure_iterator
@@ -39,51 +54,74 @@ iterator_specification is given by a procedure_iterator:
    iterator_parameter_specification ::=
        ( identifier {, identifier } ) | formal_part
 
-The body of the associated loop becomes the body of an anonymous procedure,
-whose formal parameter identifiers (and optionally subtypes, modes, etc.) are
-given by the iterator_parameter_specification.  The anonymous procedure is
-passed as the actual for an access-to-procedure parameter, in the place of the
-"<>" in the iterator_procedure_call:
+The body of the associated loop becomes the body of an anonymous
+procedure, whose formal parameter identifiers (and optionally subtypes,
+modes, etc.) are given by the iterator_parameter_specification.  The
+anonymous procedure is passed as the actual for an access-to-procedure
+parameter, in the place of the "<>" in the iterator_procedure_call:
 
    iterator_procedure_call ::= procedure_name [ actual_parameter_part_with_box ]
 
    actual_parameter_part_with_box ::=
      ( parameter_association_with_box { , parameter_association_with_box } )
 
-   parameter_association_with_box ::= parameter_associationEq
+   parameter_association_with_box ::= parameter_association
      | [ formal_parameter_selector_name => ] <>
 
 A parameter association with a <> may appear at most once in an
-iterator_procedure_call.
-In the absence of such an association, it is equivalent to the actual for the
-last parameter of the called procedure being specified as <>.
+iterator_procedure_call. In the absence of such an association, it is
+equivalent to the actual for the last parameter of the called procedure
+being specified as <>.
 
-Here is an example of iterating over the environment variables:
+An exit, return, goto, or other escape from such a loop will be implemented
+by an unhandlable exception, essentially the way asynchronous transfer of
+control is implemented.  This will be buried in the "de-sugaring" process, and
+can be done in an implementation-defined manner.  
 
-    for (Name, Val) of Ada.Environment_Variables.Iterate(<>) loop
-       --  or "Ada_Environment_Variables.Iterate" since "<>" is last param
+Implementation Note
 
-       Put_Line (Name & " => " & Val);
+If we want to define a portable mechanism for implementing this loop
+escape, either we specify use of asynchronous transfer of control, or we
+define a new kind of exception that is *not* handled by "others" but is
+instead only handleable when named explicitly.  This might be called a
+"private exception."  E.g., given a loop with an exit such as:
 
-    end loop;
+     for (Key, Elem) of My_Map.Iterate loop
+         Put_Line(Key_Type'Image(Key) & " => " &
+           Elem_Type'Image(Elem));
+         exit when Key = 42;
+     end loop;
 
-In order to use this capability to support keyed iteration for Ada.Containers,
-we should add additional iterators to the Map and Set containers (the Set
-containers in the enclosed generic) like:
+after being "de-sugared" the code for the loop might be:
 
-   procedure Iterate
-     (Container : in out Map;
-      Process   : not null access procedure (Key     : in Key_Type;
-                                             Element : in out Element_Type));
+   declare
+      Exit_Loop : private exception;
+      
+      procedure Loop_Body(Key : Key_Type; Elem : Elem_Type) is
+      begin
+         Put_Line(Key_Type'Image(Key) & " => " &
+           Elem_Type'Image(Elem));
+         if Key = 42 then
+            raise Exit_Loop;
+         end if;
+      end Loop_Body;
+   begin
+      My_Map.Iterate(Loop_Body'Access);
+   exception
+      when Exit_Loop =>
+         null;
+   end;
 
-   procedure Constant_Iterate
-     (Container : in Map;
-      Process   : not null access procedure (Key     : in Key_Type;
-                                             Element : in Element_Type));
+An exception declared as "private" would not be caught by a "when
+others" inside the Iterate procedure, and since there is no way to name
+this locally declared private exception elsewhere, we know the only
+handler is the one provided by the de-sugaring.  Multiple private
+exceptions could be declared if there are multiple ways the loop body is
+escaped (e.g. an exit, a goto, and a return).
 
-   procedure Iterate
-     (Container : in Map;
-      Process   : not null access procedure (Key     : in Key_Type));
+But as mentioned above, we can allow the implementation to support escaping
+a loop anyway it sees fit, so long as it can't be hindered by the
+Iterate procedure.     
 
 !wording
 
@@ -93,6 +131,61 @@ containers in the enclosed generic) like:
 
 This proposal is more general than the proposals in AI12-0009-1 and
 AI12-0188-1. If adopted, those AIs should be killed (given No Action status).
+
+Here is an example of iterating over the environment variables:
+
+    for (Name, Val) of Ada.Environment_Variables.Iterate(<>) loop
+       --  or "Ada_Environment_Variables.Iterate" since "<>" is last param
+
+       Put_Line (Name & " => " & Val);
+
+    end loop;
+    
+We could add iterators to appropriate Container types that took an
+access-to-procedure with two parameters, namely Key and Value, to produce
+a container-element iterator that also makes the Keys available.  E.g.:
+ 
+   generic
+      ...
+   package Maps is
+     ...
+     procedure Iterate
+      (Container : in Map;
+       Process   : not null access procedure
+                 (Key : in Key_Type; Element : in Element_Type));
+     ...
+   end Maps
+               
+   package My_Maps is new Maps(My_Key_Type, My_Element_Type, ...);
+   ...
+   My_Map : My_Maps.Map;          
+   ...
+   for (Key, Value) of My_Map.Iterate loop
+      Put_Line (My_Key_Type'Image (Key) & " => " &
+         My_Element_Type'Image (Value));
+   end loop;
+
+We could also provide a Var_Iterate which provided read/write access to
+the Element:
+
+     procedure Var_Iterate
+      (Container : in out Map;
+       Process   : not null access procedure
+                 (Key : in Key_Type; Element : in out Element_Type));
+
+
+    ...
+    
+    for (Key, Element) of My_Map.Var_Iterate loop
+       if Key in Blah then
+          Element.X := Z;
+       end if;
+       ...
+    end loop;
+    
+Note that this approach eliminates the need for creating References for
+each element of the map, since we are using the normal semantics of
+in-out parameters to provide access to the appropriate element.
 
 !ASIS
 
@@ -1052,5 +1145,57 @@ in tiny changes to the existing parallel; that's lipstick on a pig when it comes
 to ease of programming.
 
 Anyway, my 10 cents worth.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Sunday, June 5, 2016  9:26 PM
+
+Here is the beginnings of an AI for "loop-body procedures."  The !proposal
+section has some "near" wording, but there is no official "wording" section.
+But hopefully it provides enough to allow reasonable discussion, and perhaps
+to contrast with other approaches to providing "generators" or equivalent in
+Ada.
+
+As explained in an earlier note, a "loop-body procedure" is a procedure
+defined by the text of a loop body.  Such a loop-body procedure is used with
+a special form of for-loop where the formal parameters act as the "loop
+variables" and the call on the iterating procedure has a "<>" to indicate
+where the loop-body-procedure should be "plugged in" to the call.  This
+grew out of a discussion at the ARG meeting in Vermont in October 2015. 
+Look at an example in the AI to understand the usefulness of this...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, June 7, 2016  12:08 AM
+
+I'd already created an empty AI for this, and had written the following
+Problem Statement:
+
+Currently, the way to create an iterator for some abstraction is to create an
+implementation of the iterator interface. This requires the invention of a
+cursor type, and often the use of the Rosen technique (as the iterator object
+parameters of the iterator interface are of mode "in").
+
+But not all abstractions have natural cursors. Moreover, some have multiple
+items (key - value pairs are particularly common).
+
+Most of these abstractions (like Ada.Directories and
+Ada.Environment_Variables) already have closed iterators that do not expose
+cursors. If we could map to them, we could simplify many iterators without
+adding ridiculous amounts of new capabilities.
+
+---
+
+I like mine a bit better, because it motivates the "why" a bit better than "it
+would be nice". (And it also allows for the notion that we could consider some
+other way to solve the underlying problem, but that those are more complex.)
+
+For now, I put both problem statements in, someone will need to reconcile them
+down the line. I also included my one-line discussion, which notes that
+AI12-0009-1 and AI12-0188-1 are both unnecessary if this capability is
+provided. (Which makes a nice lead-in for your examples, which illustrate that
+exactly.)
 
 ****************************************************************
