@@ -1,0 +1,463 @@
+!standard 6.9(0)                                  15-06-03  AI12-0161-1/01
+!class Amendment 16-06-07
+!status work item 16-06-07
+!status received 16-06-07
+!priority Low
+!difficulty Hard
+!subject Generator Functions
+
+!problem
+
+The expression of computation often works on streams of data. It is often
+necessary to express computation of streams as incremental routines, working on
+chunks of data. But expressing algorithms in an incremental fashion is difficult:
+It implies manually keeping and maintaining the state of your algorithm, saving
+it on exit, and restoring it on re-entry.
+
+Generators, often called resumable functions, or Iterators in C#, offer a way
+to write such incremental code in a straightforward procedural way, by giving
+you the possibility to resume a function after it has returned a result.
+
+This resumable return capability is generally called "yield" in other
+languages, so we will use the same terminology in this AI.
+
+!proposal
+
+We propose introducing a new kind of subprogram, called a generator. This new
+kind of subprogram would not be instantly called, but instead return a
+generator object. This generator object would be iterable, automatically (via a
+for-loop iteration), or manually, via the use of built-in attributes on the
+generator object.
+
+A subprogram of the generator kind would be subject to the following constraints:
+
+1. Use a yield clause instead of a return clause. The subprogram_specification
+   rule would then become:
+
+subprogram_specification ::=
+      ( "procedure" defining_program_unit_name [ formal_part ] )
+      | ( "function" defining_designator [ formal_part ] "return" subtype_mark )
+      | ( "function" defining_designator [ formal_part ] "yield" subtype_mark )
+
+3. Have to contain at least one yield statement. The grammar of the yield
+   statement would be the following:
+
+   yield_statement ::= "yield" expression ";"
+
+4. Can contain return statements, as long as they have no expressions, in order
+   to allow the user to terminate the execution early.
+
+Given a yielded type T, the result of calling a generator subprogram would be
+of type T'Generator. This type is built-in in order to allow implementation
+Freedom. It’s a limited and definite type specific to T, so that given to types
+T and U T’Generator is incompatible with U’Generator.
+
+There are two ways of using the resulting generator object:
+
+- The first is to use two built-in attributes of the type:
+  - 'Next will consume and return the next element in the generator. It would
+    resume the generator and execute until the next yield point, and get back
+    the result of the yield.
+  - 'Terminated will return whether the generator has terminated executing or
+    not.
+
+- The second is to iterate on it via the same for .. of loop that was
+  introduced in the 2012 version of Ada. This would be equivalent to using the
+  underlying attributes to conduct the iteration.
+
+If an exception is raised in the generator while it is executing, subsequently
+to a call to the ‘Next attribute, the generator is finalized, and the exception
+is propagated into the caller of the ‘Next attribute.
+
+When the generator has terminated:
+
+- A flag is set in the generator object, so that users can check it before
+   calling next again.
+- In the eventuality that the user still calls 'Next, a specific exception
+  should be raised. This exception would be an instance of
+  Ada.IO_Exceptions.End_Error, because it seems to fit the meaning of the
+  context.
+
+The prefered method of iterating is to check the ‘Terminated attribute, but we
+need the exception so the behavior is defined in case a user doesn’t check the
+‘Terminated attribute correctly.
+
+If the generator is finalized before it has terminated, we have no choice but
+to raise an exception into the generator in order to finalize all the
+corresponding stack frames and variables.
+
+Here is an example of what a prime number generator might look like:
+
+   function Prime_Numbers yield Integer is
+      I : Integer;
+   begin
+      loop
+         if Is_Prime (I) then
+            yield I;
+         end if;
+         I := I + 1;
+      end loop;
+   end Even;
+
+   --  Direct iteration via for-loop
+
+   for Number of Prime_Numbers loop
+       Put_Line (Integer'Image (Number));
+   end loop;
+
+   --  Or, without the iteration syntax sugar
+
+  declare
+     _Gen_ : Integer'Generator := Prime_Numbers;
+         --  "_Gen_" is a name that won't conflict with user names
+  begin
+     while not _Gen_'Terminated loop
+        declare
+           Number : constant := _Gen_'Next;
+        begin
+           ... one or more uses of "Number" ...
+        end;
+     end loop;
+  end;
+
+   --  Without using 'Terminated, but relying on the built-in Stop_Iteration
+   --  exception instead
+
+  declare
+ 	_Gen_ : Integer'Generator := Prime_Numbers;
+     	--  "_Gen_" is a name that won't conflict with user names
+  begin
+      loop
+    	declare
+       	   Number : constant Integer := _Gen_'Next;
+    	begin
+       	   ... one or more uses of "Number" ...
+    	end;
+     end loop;
+  exception
+     when Stop_Iteration => null;
+  end;
+
+While the example doesn’t exploit this, it shall be possible to pass parameters
+to a generator. However, out and in out parameters don’t make much sense in the
+context of a generator. The following rules are proposed:
+
+IN OUT and OUT parameters are disallowed for generator subprograms.
+All parameters that are allowed to be passed by copy should be passed by copy.
+Byref types remain passed by reference.
+
+!implementation note
+
+While it might be possible to implement a limited version of this feature using
+only code rewritings and the existing runtime support, the recommended approach
+is a mix of both:
+
+1. Expose a runtime capability for context switching, eg. saving the state of
+   the stack, registers, and other local information, and restoring it.
+2. Do simple expansion phases to expand from the high-level generator code to a
+   version using the runtime support.
+
+In that scheme, the following code, that we exposed in the proposal section:
+
+   function Prime_Numbers yield Integer is
+      I : Integer;
+   begin
+      loop
+         if Is_Prime (I) then
+            yield I;
+         end if;
+         I := I + 1;
+      end loop;
+   end Even;
+
+could be expanded to this code:
+
+   package Int_Generators_Impl is new Generators (Integer);
+
+   type Is_Prime_Generator is new Int_Generators_Impl.Object
+   with null record;
+
+   overriding procedure Generate
+     (D          : in out Is_Prime_Generator;
+      Context : Int_Generators_Impl.Context)
+   is
+      I : Integer := 0;
+   begin
+      loop
+         if Is_Prime (I) then
+            Context.Yield (I);
+         end if;
+         I := I + 1;
+      end loop;
+   end Generate;
+
+Note that this code is already working code, using a runtime library that was
+developed on top of a portable stack switching library called PCL.
+
+Not shown would be the code wrapping the implementation specific generator
+object into a Ada.Containers.Generators object and calling the appropriate
+operation when an item is requested.
+
+# Semantics of the generator object
+
+- Given a type T, the type T’Generator is a type specific to T and it’s
+  subtypes. It means that given this code:
+
+    type T is private;
+    subtype T2 is T;
+
+T’Generator and T2’Generator are equivalent.
+
+- The type T’Generator is equivalent to a limited definite type whose
+  declaration could be:
+
+  type T'Generator is limited private;
+
+  function Next(Gen : in out T'Generator) return T;
+  function Terminated(Gen : in T'Generator) return Boolean;
+
+!discussion
+
+# Type of the object returned by a generator:
+
+A delicate point of design is the type of the generator objects. We decided for
+a built-in opaque type with attributes rather than a library type, for the
+following reasons:
+
+1. Using a library type would imply a generic type, so every generator use
+   would imply a generic instantiation, which is unnecessary boilerplate and is
+   detrimental to the feature.
+2. Using a built-in opaque type gives more freedom in terms of implementation.
+
+There are some arguments in favor of using a library type too:
+
+1. Less language support is necessary, which is always good.
+
+2. Generators must probably have by-reference semantics, since copying a
+   generator's state might introduce too many corner cases. Using controlled
+   objects for that seems like a good fit, and they also solve the problem of
+   managing the data inside the generator, and freeing it when necessary.
+
+3. This allows deriving from Ada 2012 iterator interfaces so that iteration
+   on generators, which is a wanted feature, is straightforward to use and
+   implement.
+
+# Custom syntax
+
+This AI includes some new syntax to the Ada language. It is possible to
+implement most of the features necessary for generators as a library, so we
+could imagine different levels of new syntax:
+
+- It might be possible to specify that a subprogram is a generator via an aspect
+  rather than via the yield clause.
+
+- Similarly, it might be possible to replace the yield statement by a procedure
+  call, like in the expanded code example.
+
+- Finally, we could imagine using a library type rather than a built-in type
+  for generator types.
+
+However, we think that a custom syntax has the benefit of making clear that
+something new is going on in terms of control flow, whereas it might be
+confusing in the other case. Also, generic library types will have the drawback
+of more unnecessary boilerplate.
+
+On the other hand, it could be argued that the syntax reusing the function
+keyword is not explicit enough for Ada, because then the exact kind of the
+subprogram is determined by whether it has a return or a yield clause. If
+that's a concern, a possible syntax could be:
+
+subprogram_specification ::=
+      ( "procedure" defining_program_unit_name [ formal_part ] )
+      | ( "function" defining_designator [ formal_part ] "return" subtype_mark )
+      | ( "generator" defining_designator [ formal_part ] "yield" subtype_mark )
+
+Which would lead to generators of the form:
+
+    generator Prime_Numbers yield Integer;
+
+# Comparison with the Loop Body procedure AI
+
+Loop body procedure does provide something akin to yield in a limited fashion,
+but does not provide the full semantics of yield: What you can do with a
+generator that you cannot do with the loop body procedure is to actually pass
+around a generator object and iterate on it at any point you want, something
+that you cannot do with the loop body procedure because the scope of the
+exposed variables is that of the called procedure.
+
+Take the example of a generator that yields tokens:
+
+   type Token is private;
+
+   function Tokenize (T : Text) yield Token is
+      T : Token;
+   begin
+      loop
+         -- Tokenizing logic not shown.
+         yield Token;
+      end loop;
+   end Tokenize;
+
+   procedure Parse (Tokens : Token'Generator) return Node is
+      T : Token := Tokens'Next;
+   begin
+      if T = "function" then
+         return Parse_Function (Tokens);
+      elsif T = "if" then
+         return Parse_If_St (Tokens);
+      elsif ...
+      end if;
+   end;
+
+   procedure Parse_Function (Tokens : Token'Generator) return Fn_Node is
+      Name     : Node;
+      Ret_Type : Node;
+      T        : Token;
+   begin
+      Name := Parse_Name (Tokens);
+      T := Tokens’Next;
+      pragma Assert(T = "return");
+      Ret_Type := Parse_Name (Tokens);
+   end Parse_Function;
+
+    ...
+
+   Token_Stream : Token'Generator := Tokenize (Text);
+   Parse (Token_Stream);
+
+Here, the tokens will be computed on demand when the Next primitive on the
+Token_Generator object is called. You don't have to express your parser in such
+a way that a Parse procedure is called at every token, that has to maintain
+parsing state. You can pass the Token_Generator object to any procedure,
+including dispatching procedure, or procedures defined in other modules.
+
+You cannot do this with the loop body procedure, or with lambdas in general.
+
+- On the other hand, generators don't provide the ability described in the loop
+  body procedure AI, to modify elements in place in a collection for example,
+  except if you pass references/pointers.
+
+- It also doesn't allow iterating over several elements per iteration, like the
+  Key, Value example. This is a nice plus of the loop body procedure proposal,
+  however this could also be provided by a more general feature allowing
+  destructuring of simple data types - which is out of scope for this AI.
+
+# Runtime support vs. rewriting into sequential code
+
+An approach entirely based on rewriting user code into code using callbacks
+would be problematic when combining separate compilation, and generators being
+passed around by subprograms, or more generally in presence of dispatching
+programs returning generators.
+
+    package A is
+       function Foo return Int_Generators.Generator;
+    end A;
+
+    package B is
+       procedure Bar (G : Int_Generators.Generator);
+    end B;
+
+Since here, the actual implementation wrapped by the generator object might
+vary, rewriting will not be possible in every case.
+
+Forcing the users to have a specific type for every generator instance, rather
+than allowing a general type depending on the yield type, would allow
+rewriting, but it would still be complicated to do separate compilation (akin
+to generic expansion), and abstraction would be lost along the way (no
+possibility to to have ad-hoc polymorphism on different generators having the
+same yield type)
+
+# Syntax sugar for recursive generators
+
+A classic use case of generators is to make lazy traversal of trees. With the
+current version of the proposal, this might be done this way:
+
+    type Node is record       -- Declaration simplified for example purpose
+       Children : Node_Array;
+    end record;
+
+    function Traverse (Root : Node) yield Node is
+    begin
+       for Child of Root.Children loop
+          for Element of Traverse (Child) loop
+              yield Element;
+          end loop;
+          yield Child;
+       end loop;
+    end Traverse;
+
+Here we see that we have to manually iterate on the results of the inner
+recursive call to the generator. Some languages have syntax sugar for that,
+that would allow to pass the control to the inner generator call, allowing a
+simpler body for traverse:
+
+    for Child of Root.Children loop
+       yield from Traverse (Child);
+    end loop;
+
+# Generators receiving values
+
+In some (not all) implementations of generators, generators are able to be
+passed values when their control is restored. It might be interesting to:
+
+1. Think about what such a feature might look like in Ada
+2. Try and conceive the initial feature in a way that allows extension to
+   support this at a later stage.
+
+This won't be covered in this proposal though, because it is thought that the
+feature as proposed is ambitious enough for an initial revision.
+
+# By-references parameters
+
+The rule is that some types should always be passed by reference, notably
+tagged types, task types, limited types ..
+
+The question is whether we should allow passing those as IN parameters to
+generator subprograms, knowing that a generator instance might escape the
+initial scope in which it has been defined, and hence reference invalid
+entities.
+
+On the one hand, disallowing them entirely seems a bit heavy handed. On the
+other hand, we have no easy way to prevent access to now invalid byref
+parameters.
+
+It is possible that by applying the same accessibility rules to byref
+parameters to generators than to access discriminants, we might get the right
+accessibility checks - to be discussed.
+
+!ASIS
+
+** TBD.
+
+!ACATS test
+
+An massive set of ACATS B-Test and C-Tests are needed to check that the
+new capabilities are supported.
+
+!appendix
+
+From: Tucker Taft
+Sent: Tuesday, June 7, 2016  3:15 PM
+
+This is from one of our engineers, Raphaël Amiard, who will be an observer at 
+the upcoming ARG meeting in Pisa. [This is version /01 of this AI.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, June 7, 2016  8:24 PM
+
+Looks way too complex to me.
+
+I don't see any discussion of how this interacts with finalization/task
+termination. The accessibility notes are scary by themselves, and finalization
+seems worse.
+
+Can a generator be passed to a different task (via entry parameters)? If so,
+what happens and why? (I.e. consider a local controlled object, like a lock.)
+If not, how come? How would such a prohibition be enforced without breaking
+the contract model?
+
+This looks like an ARG full employment act. ;-)
+
+****************************************************************
