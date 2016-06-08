@@ -1,0 +1,578 @@
+!standard 6.1.1(22.1/4)                                16-06-07  AI12-0198-1/01
+!class binding interpretation 16-06-07
+!status work item 16-06-07
+!status received 16-01-28
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Potentially unevaluated components of array aggregates
+!summary
+
+A component of an array aggregate which belong to a nonstatic or null range
+of index values is "potentially unevaluated".
+
+!question
+
+We have rules for "potentially unevaluated" expressions in order to prevent
+issues with evaluating prefixes to Old attributes that are undefined.
+
+For instance:
+   with Post => (if Some_Num /= 0 then F(N / Some_Num)'Old > 0);
+
+If Some_Num is zero upon entry to the subprogram, the 'Old rules would require
+evaluating F(N / 0), which obviously won't work even though the value
+will never be used. The "potentially unevaluated" rules eliminate this problem
+by making the above illegal.
+
+However, there is a similar case for aggregates:
+
+   with Post => Array_Type'(1 .. N => F(10 / N)'Old) =
+                Array_Type'(1 .. N => F(10 / N));
+
+If N has the value 0 upon entry, the Old attribute's prefix will raise an
+exception, even though the array component will never be used (these aggregates
+are null arrays).
+
+Should these also be fixed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add after 6.1.1(21.1/4):
+
+  * the expression of an array_component_association, if the associated choice
+    is a subtype_indication or range that defines a nonstatic or null range, or
+    is an others choice and the applicable index constraint is nonstatic or
+    null;
+
+[Editor's note: I put this after 21.1/4 as that's where the last insertion
+went, there doesn't seem to be any intentional order here (like the order
+that these constructs are defined in the RM), and by putting it here, I don't
+have to move punctuation and "or"s.]
+
+!discussion
+
+It has been noted that the "potentially unevaluated" rules aren't strictly
+necessary, as the evaluation of these Old prefixes is well-defined (just
+not helpful).
+
+In general, the use of 'Old with a nonstatic prefix in an array aggregate
+is unlikely to get the results the programming is expecting. Consider:
+
+   Cnt : Natural := 0;
+   function Counter return Natural is
+   begin
+      Cnt := Cnt + 1;
+      return Cnt;
+   end Counter;
+
+   (1..5 => Counter)
+      -- gives (1, 2, 3, 4, 5) [or some other permutation thereof], while
+   (1..5 => Counter'Old)
+      -- gives (1, 1, 1, 1, 1)
+
+This sort of construction is not uncommon in Ada, as the preferred alternative
+   (for I in 1 .. 5 => I);
+was just added in AI12-0061-1 (and thus no one has yet had a chance to use it).
+
+This rule could cause an incompatibility, but only for aggregates for which
+components of Prefix'Old and Prefix usually would give different results (as
+discussed above).
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Randy Brukardt
+Sent: Thursday, January 28, 2016  11:44 PM
+
+I've been working tonight on the detailed objectives for the Old attribute.
+(Or is that "ye Olde attribute" ;-)
+
+I just noticed that that the existing rule in 6.1.1(27/3), "The prefix of an Old
+attribute_reference shall not contain ... a use of an entity declared within the
+postcondition expression but not within prefix itself ..." applies to the array
+index parameters added by AI12-0061-1. In particular, this wording was intended
+to ban:
+
+    procedure Foo1 (P : in out Integer)
+       with Post => (for all I in 1 .. 10 => Arr(I)'Old > 10); -- Illegal
+
+but of course the same sort of issue applies to an array aggregate:
+
+    procedure Foo2 (P : in out Integer)
+       with Post => String'(for all I in 1 .. 10 => Arr(I)'Old) > "ABCD"; -- Should be illegal, and I think it is.
+
+The wording looks like it covers this, so this is mainly a problem for
+implementers. I put an objective on my list to be activated when we get to that
+point, so that at least the need for a test will be remembers.
+
+However, I remembered that earlier in the clause, AI12-0032-1 had added
+quantified expressions to the list of things that are "potentially unevaluated".
+The following example was given to explain this:
+
+    procedure Foo3 (P : in out Integer)
+       with Post => (for all I in 1 .. P => Func'Old > 10);
+                                -- Illegal by 6.1.1(22.1/4) and 6.1.1(27/3)
+
+This is illegal, because we don't know how many times to evaluate Func at the
+start of the body of Foo3 (when these things are evaluated); that depends on the
+value of P passed back, which of course would require predicting the future. (We
+do allow this if the prefix statically denotes an object, because then we only
+need one copy, all of the values necessarily being the same.)
+
+As you've probably guessed by now, the same thing can be done with an array
+aggregate:
+
+    procedure Foo4 (P : in out Integer)
+       with Post => String'(for all I in 1 .. P => Func'Old) > "ABCD"; -- Doesn't trigger any existing rules.
+
+Again we don't know how many times to evaluate Func (essentially, how many
+constants to make).
+
+Ouch! I just realized in writing this example that it already exists in Ada
+2012; we don't need the index to make this problem happen:
+
+    procedure Foo5 (P : in out Integer)
+       with Post => String'(1 .. P => Func'Old) > "ABCD"; -- Doesn't trigger any existing rules.
+
+How does this work?? How CAN it work?? We don't have any rule that considers the
+expressions of an array aggregate as "potentially unevaluated", but there
+probably ought to be.
+
+If the index range is static, then it can be implemented, but it could be
+nasty:
+
+    procedure Foo5 (P : in out Integer)
+       with Post => String'(1 .. Positive'Last => Func'Old) > "ABCD";
+
+This would declare Positive'Last copies of Func, probably not a good idea. :-)
+Still, probably should allow this; the compiler's capacity limits are always an
+excuse for not compiling the silly expression.
+
+Anyway, it seems to me that the list of 6.1.1(20-24/3) needs another bullet:
+
+  * the expression of an array_component_association, if the associated choice
+    is a nonstatic expression or is a subtype_indication or range that defines a
+    nonstatic range, or is an others choice and the applicable index constraint
+    is nonstatic;
+
+(I borrowed most of this wording from 4.3.3; we only have to worry about
+aggregates that are otherwise legal, so we only need to worry about aggregates
+with explicit choices of some sort -- purely positional aggregate always have a
+static number of components. I left out null ranges, because in that we *know*
+that the item is unevaluated, and there doesn't seem to be any reason to worry
+about that.)
+
+Thoughts??
+
+***************************************************************
+
+From: Steve Baird
+Sent: Friday, January 29, 2016  12:01 PM
+
+> but of course the same sort of issue applies to an array aggregate:
+>
+>      procedure Foo2 (P : in out Integer)
+>         with Post => String'(for all I in 1 .. 10 => Arr(I)'Old) >
+> "ABCD"; -- Should be illegal, and I think it is.
+>
+
+Right. The wording for AI12-0050 was also written with this case in mind and
+doesn't need to be modified for AI12-0061.
+
+> The wording looks like it covers this, so this is mainly a problem for
+> implementers. I put an objective on my list to be activated when we
+> get to that point, so that at least the need for a test will be remembers.
+>
+> However, I remembered that earlier in the clause, AI12-0032-1 had
+> added quantified expressions to the list of things that are
+> "potentially unevaluated". The following example was given to explain this:
+>
+>      procedure Foo3 (P : in out Integer)
+>         with Post => (for all I in 1 .. P => Func'Old > 10); --
+> Illegal by
+> 6.1.1(22.1/4) and 6.1.1(27/3)
+>
+> This is illegal, because we don't know how many times to evaluate Func
+> at the start of the body of Foo3 (when these things are evaluated);
+> that depends on the value of P passed back, which of course would
+> require predicting the future. (We do allow this if the prefix
+> statically denotes an object, because then we only need one copy, all
+> of the values necessarily being the same.)
+
+I agree that this is illegal, but I think you are confused about the rationale
+for this rule.
+
+The number of times one static occurrence of the expression "Func'Old" would be
+evaluated has no bearing on the number of implicit constants that are declared
+at the start of the body of Foo3.
+
+Note that this is a dynamic semantics question.
+
+I think you have correctly identified an issue with the definition of
+"potentially unevaluated", but that's unrelated to dynamic semantics.
+
+> As you've probably guessed by now, the same thing can be done with an
+> array aggregate:
+>
+>      procedure Foo4 (P : in out Integer)
+>         with Post => String'(for all I in 1 .. P => Func'Old) >
+> "ABCD"; -- Doesn't trigger any existing rules.
+>
+> Again we don't know how many times to evaluate Func (essentially, how
+> many constants to make).
+
+And again we don't care, except that static semantics cares about the
+distinction between possibly-zero and guaranteed-to-be-nonzero (i.e., the
+"potentially unevaluated" rule).
+
+> Ouch! I just realized in writing this example that it already exists
+> in Ada 2012; we don't need the index to make this problem happen:
+>
+>      procedure Foo5 (P : in out Integer)
+>         with Post => String'(1 .. P => Func'Old) > "ABCD"; -- Doesn't
+> trigger any existing rules.
+>
+> How does this work?? How CAN it work?? We don't have any rule that
+> considers the expressions of an array aggregate as "potentially
+> unevaluated", but there probably ought to be.
+
+It works because only one Func'Old constant is implicitly declared and the value
+of that one constant is used more than once.
+
+> If the index range is static, then it can be implemented, but it could
+> be nasty:
+>
+>      procedure Foo5 (P : in out Integer)
+>         with Post => String'(1 .. Positive'Last => Func'Old) > "ABCD";
+>
+> This would declare Positive'Last copies of Func, probably not a good idea.
+> :-)
+> Still, probably should allow this; the compiler's capacity limits are
+> always an excuse for not compiling the silly expression.
+
+You are mixing a nonexistent (IMO) problem with dynamic semantics and a real
+(IMO) problem with the definition of "potentially unevaluated".
+
+> Anyway, it seems to me that the list of 6.1.1(20-24/3ta) needs another bullet:
+>
+>    * the expression of an array_component_association, if the
+> associated choice is a nonstatic expression or is
+>      a subtype_indication or range that defines a nonstatic range, or
+> is an others choice and the applicable index
+>      constraint is nonstatic;
+>
+> (I borrowed most of this wording from 4.3.3; we only have to worry
+> about aggregates that are otherwise legal, so we only need to worry
+> about aggregates with explicit choices of some sort -- purely
+> positional aggregate always have a static number of components. I left
+> out null ranges, because in that we *know* that the item is
+> unevaluated, and there doesn't seem to be any reason to worry about
+> that.)
+>
+> Thoughts??
+
+The specific wording suggested looks good. The accompanying discussion is, IMO,
+confused.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, January 29, 2016  12:38 PM
+
+> The specific wording suggested looks good.
+
+There is a separate question of whether the cure is worse than the disease.
+
+I agree with Randy that the current definition of "potentially unevaluated" is
+inconsistent, but it also seems worth noting that just leaving things as they
+stand is a viable option.
+
+There are no *definitional* problems associated with the current definition
+(just as there would be no definitional problems if the entire "potentially
+unevaluated" rule were removed).
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Friday, January 29, 2016  1:06 PM
+
+Wouldn't the wording also need to cover cases of enclosing aggregates?
+That is, when a choice of an enclosing association is nonstatic, etc.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, January 29, 2016  1:46 PM
+
+RM says:
+    An expression is potentially unevaluated if it occurs within ....
+
+Note that it does not say "immediately within".
+
+Doesn't that address the issue?
+
+****************************************************************
+
+From: Gary Dismukes
+Sent: Friday, January 29, 2016  2:14 PM
+
+Yep.  I neglected to reread the outer wording when looking at the proposed new
+bullet.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 29, 2016  1:31 PM
+
+> I agree that this is illegal, but I think you are confused about the
+> rationale for this rule.
+
+That could be, there is no rationale given in the AI. I had to guess one.
+
+> The number of times one static occurrence of the expression "Func'Old"
+> would be evaluated has no bearing on the number of implicit constants
+> that are declared at the start of the body of Foo3.
+
+That would imply that Func'Old is dangerous in this sort of context, as the
+results would vary a lot. See below.
+
+> Note that this is a dynamic semantics question.
+>
+> I think you have correctly identified an issue with the definition of
+> "potentially unevaluated", but that's unrelated to dynamic semantics.
+
+OK.
+
+...
+> > Ouch! I just realized in writing this example that it already exists
+> > in Ada 2012; we don't need the index to make this problem happen:
+> >
+> >      procedure Foo5 (P : in out Integer)
+> >         with Post => String'(1 .. P => Func'Old) > "ABCD";
+> -- Doesn't trigger any existing rules.
+> >
+> > How does this work?? How CAN it work?? We don't have any rule that
+> > considers the expressions of an array aggregate as "potentially
+> > unevaluated", but there probably ought to be.
+>
+> It works because only one Func'Old constant is implicitly declared and
+> the value of that one constant is used more than once.
+
+That's not "working" in my view. The result would be completely different than
+you would get with just a call:
+
+Cnt : Natural := 0;
+function Counter return Natural is
+begin
+   Cnt := Cnt + 1;
+   return Cnt;
+end Counter;
+
+    (1..5 => Counter) gives (1, 2, 3, 4, 5) [or some other permutation thereof]
+    (1..5 => Counter'Old) gives (1, 1, 1, 1, 1)
+
+This is a construction I use frequently. In Ada 2020, I'd certainly use
+    (for I in 1 .. 5 => I)
+instead, but I'm not currently writing Ada 2020! (It's really too bad that we
+didn't add this feature in Ada 2012, since it fits well with the things we did
+do.)
+
+> You are mixing a nonexistent (IMO) problem with dynamic semantics and
+> a real (IMO) problem with the definition of "potentially unevaluated".
+>
+> > Anyway, it seems to me that the list of 6.1.1(20-24/3ta)
+> > needs another bullet:
+> >
+> >    * the expression of an array_component_association, if the
+> >      associated choice is a nonstatic expression or is
+> >      a subtype_indication or range that defines a nonstatic range, or
+> >      is an others choice and the applicable index
+> >      constraint is nonstatic;
+> >
+> > (I borrowed most of this wording from 4.3.3; we only have to worry
+> > about aggregates that are otherwise legal, so we only need to worry
+> > about aggregates with explicit choices of some sort -- purely
+> > positional aggregate always have a static number of components. I
+> > left out null ranges, because in that we *know* that the item is
+> > unevaluated, and there doesn't seem to be any reason to worry about
+> > that.)
+> >
+> > Thoughts??
+>
+> The specific wording suggested looks good. The accompanying discussion
+> is, IMO, confused.
+
+And later:
+
+>There is a separate question of whether the cure is worse than the disease.
+>
+>I agree with Randy that the current definition of "potentially unevaluated"
+>is inconsistent, but it also seems worth noting that just leaving
+>things as they stand is a viable option.
+>
+>There are no *definitional* problems associated with the current
+>definition (just as there would be no definitional problems if the
+>entire "potentially unevaluated" rule were removed).
+
+Considering that the effect of Func'Old in such a context is so far from what a
+programmer (including me, obviously) would expect, making it illegal would
+prevent as many bugs as it would cause. One would be forced to rewrite:
+
+Array_Type'(1..P => Counter'Old)
+
+into:
+
+Array_Type'(1..P => Counter)'Old
+
+which would actually give the expected semantics. That seems like a good thing.
+
+I'm well aware that the semantics of 'Old is often not what one would expect,
+but I fail to see how the typical Ada programmer is going to be aware of that.
+(For instance, A(I)'Old is not necessarily the same as A(I'Old); one has to be
+very careful where the 'Old is placed.) That's the real purpose of the
+"potentially unevaluated rules, IMHO -- to get rid of the worst offenders. It's
+too bad that we can't ban dynamic 'Old in any array aggregate, but I have to
+agree that we don't want to make more of an incompatibility than necessary.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, January 29, 2016  6:27 PM
+
+>   I left out null ranges, because
+> in that we*know*  that the item is unevaluated, and there doesn't seem
+> to be any reason to worry about that.)
+
+You mean we'll disallow (1 .. N => Foo'Old), where N is a variable, because N
+might be zero, but we'll allow
+    (1 .. Pkg1.Static_Constant - Pkg2.Other_Static_Constant => Foo'Old) in the
+case where the two constants have a difference of zero?
+
+That seems peculiar.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 29, 2016  7:02 PM
+
+I didn't see anything *potentially* unevaluated about such a case, and it
+simplified the wording somewhat (it's too complicated as it is). It seemed weird
+either way (to specifically include null ranges or to exclude them). The thing
+that is weird is the aggregate rules treating a static null range as if it is
+dynamic.
+
+Besides, if the difference between those two constants is positive, then the
+expression is clearly legal (it's still misleading, but we're not going to try
+to fix that). I hate having Legality Rules depend on the values of something.
+
+I do suppose it means that the rules would have to avoid creating a temporary
+constant in the static null range case. (That's what I thought happened, but you
+proved that I was wrong.) If that's too complicated, then I suppose we'll have
+to hair up the wording more to include the null range case. If we do avoid the
+temporary, we ought to do something similar for static conditions in if
+expressions and similar cases. It's weird to have:
+
+          (if Tracing then Trace_Glob'Old else Func(P)'Old)
+
+be illegal if Tracing is a static constant - either Func(P)'Old is evaluated or
+it isn't -- there's never any doubt.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 29, 2016  7:24 PM
+
+...
+> I do suppose it means that the rules would have to avoid creating a
+> temporary constant in the static null range case.
+
+Steve pointed out privately that we already have the concept of statically
+unevaluated that is essentially right for this purpose.
+
+We'd have to add this case to "statically unevaluated" in 4.9:
+
+* the expression of an array_component_association if the associated choice is a
+  subtype_indication or range that defines a static null range;
+
+[Editor's note: the rules of aggregates say this has to be a single choice.]
+
+And then in 6.1.1(26/4):
+
+Each X'Old in a postcondition expression that is enabled {and does not appear in
+a statically unevaluated (see 4.9) expression} denotes a constant that ...
+
+And finally, we'd have exclude statically unevaluated from potentially
+unevaluated in 6.1.1(20/3):
+
+An expression is potentially unevaluated if it {is not part of a statically
+unevaluated expression} and it occurs within:
+
+That would make my example of:
+
+           Post => (if Tracing then Trace_Glob'Old else Func(P)'Old) /= ...;
+
+legal, and Func(P)'Old would not be evaluated on entry to the subprogram if
+Tracing is True.
+
+The only downside I can see is additional implementation complexity, but that
+doesn't seem particularly bad assuming that one has a predicate for a statically
+unevaluated subexpression (which I would expect would be needed to implement
+static expressions properly). The upside is that it further reduces the cases of
+'Old that are illegal but pose no understanding problem nor any implementation
+impossibility. No one likes nagging mysterious errors in their reasonable (to
+them) expressions.
+
+P.S. I think Steve suggested this as a joke - he enjoyed getting "statically
+unevaluated" and "potentially unevaluated" in the same sentence. Sorry, Steve, I
+like the idea. ;-) And I don't think it is particularly confusing; both ideas
+are quite intuitive.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, January 29, 2016  7:42 PM
+
+> And finally, we'd have exclude statically unevaluated from potentially
+> unevaluated in 6.1.1(20/3):
+
+If we have terms Maybe_Blah and Definitely_Blah, then the latter should always
+imply the former. Let's not do violence to the definitions.
+
+To do something like what you've described, I'd let the terms keep their
+intuitive meanings and than specify in the legality rule that an occurrence of
+Foo'Old cannot occur in a potentially unevaluated expression which is not
+statically unevaluated.
+
+I'm not endorsing this; just saying that if we are going to do this then let's
+keep the definitions clean.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, January 29, 2016  8:00 PM
+
+Yes, you're right. Better to hair up the Legality Rule (which is where the
+problem is) and not the definitions.
+
+Specifically, don't change 6.1.1(20/3), and instead change 6.1.1(27/3) to:
+
+The prefix of an Old attribute_reference that is potentially unevaluated {but
+not a portion of a statically unevaluated expression} shall statically denote an
+entity.
+
+This is just a bit clunky as "statically unevaluated" only is defined for the
+top-level expression, while "potentially unevaluated" includes any contents.
+We're always *so* consistent in the RM.
+
+****************************************************************
+
