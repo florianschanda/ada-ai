@@ -1,4 +1,4 @@
-!standard A.16(3/2)                             16-06-06    AI12-0009-1/05
+!standard A.16(3/2)                             16-06-07    AI12-0009-1/06
 !standard A.16(36.1/3)
 !standard A.16(98/2)
 !standard A.16(112.1/3)
@@ -373,7 +373,26 @@ be supported. Since the existing iteration support for Ada.Directories did
 not support reverse iteration, it was felt that there would be insufficient
 need for this capability for generalized loop iteration.
 
-A similar approach is applied to Ada.Environment_Variables.
+The overall approach taken for Ada.Environment_Variables is similar to the one
+taken for Ada.Directories except that the type Name_Value_Pair_Type was made
+to be a tagged type to improve usability by allowing object prefix notation.
+
+for Pair of Ada.Environment_Variables.Environment loops
+    Put_Line (Pair.Name & "=" & Pair.Value); end loop;
+
+rather than;
+
+for Pair of Ada.Environment_Variables.Environment loops
+    Put_Line (Ada.Environment_Variables.Name (Pair) & "=" &
+              Ada.Environment_Variables.Value (Pair)); end loop;
+
+Making Name_Value_Pair_Type tagged however, meant having to declare the type in
+a nested package, to avoid problems with having the call Current_Variable
+dispatching on more than one type, which is illegal.
+
+It would have been nice to do the same for Directory_Entry_Type, and make it a
+tagged type but that type already existed and changing that to be a tagged type
+would likely break backwards incompatibility in some way.
 
 !ACATS test
 
@@ -2024,6 +2043,133 @@ In 112/3:
 >The type Directory_Listing need finalization.
 
 This should be "needs finalization".
+
+****************************************************************
+
+From: Brad Moore
+Sent: Monday, June 6, 2016  9:53 PM
+
+> A couple of comments (I'll fix these in the posted draft, so you 
+> (Brad) don't have to):
+
+Thanks, I also realized I forgot to mention why I made Name_Value_Pair_Type
+a tagged type, and thought it would be worth mentioning. Would it be possible
+to have you attach the following to replace the last sentence of the
+Discussion section, or should I resubmit?
+
+"A similar approach is applied to Ada.Environment_Variables, except that the
+type Name_Value_Pair_Type was made to be a tagged type to improve usability by
+allowing object prefix notation.
+
+for Pair of Ada.Environment_Variables.Environment loops
+    Put_Line (Pair.Name & "=" & Pair.Value); end loop;
+
+rather than;
+
+for Pair of Ada.Environment_Variables.Environment loops
+    Put_Line (Ada.Environment_Variables.Name (Pair) & "=" &
+              Ada.Environment_Variables.Value (Pair)); end loop;
+
+Making Name_Value_Pair_Type tagged however, meant having to declare the type
+in a nested package, to avoid problems with having the call Current_Variable
+dispatching on more than one type, which is illegal.
+
+It would have been nice to do the same for Directory_Entry_Type, and make it
+a tagged type but that type already existed and changing that to be a tagged
+type would likely break backwards incompatibility in some way."
+
+>>   type Directory_Listing is tagged limited private
+>>      with Preelaborable_Initialization,
+>>           Constant_Indexing => Current_Entry,
+>>           Default_Iterator => Iterate,
+>>           Iterator_Element => Directory_Entry_Type;
+>
+> Preelaborable_Initialization is not an aspect; it is view-specific 
+> which doesn't map well to aspects. We tried and punted on it for Ada 
+> 2012. Perhaps we should try again to make it an aspect (separate AI, 
+> of course), but it certainly isn't one now. So you have to use the pragma. As in:
+>
+>    type Directory_Listing is tagged limited private
+>       with Constant_Indexing => Current_Entry,
+>            Default_Iterator => Iterate,
+>            Iterator_Element => Directory_Entry_Type;
+>    pragma Preelaborable_Initialization (Directory_Listing);
+>
+> There's some other places like that.
+
+I forgot about that, but I note that the code did compile, so apparently GNAT
+supports this already. I think it seems warranted in cases like this to have
+it as an aspect, if for readability sake if nothing else.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 6, 2016  11:16 PM
+
+> Thanks, I also realized I forgot to mention why I made 
+> Name_Value_Pair_Type a tagged type, and thought it would be worth 
+> mentioning. Would it be possible to have you attach the following to 
+> replace the last sentence of the Discussion section, or should I 
+> resubmit?
+
+I can put this wording in, but where does it go? It doesn't seem to fit with
+any of the existing discussion.
+ 
+...
+> >    type Directory_Listing is tagged limited private
+> >       with Constant_Indexing => Current_Entry,
+> >            Default_Iterator => Iterate,
+> >            Iterator_Element => Directory_Entry_Type;
+> >    pragma Preelaborable_Initialization (Directory_Listing);
+> >
+> > There's some other places like that.
+> 
+> I forgot about that, but I note that the code did compile, so 
+> apparently GNAT supports this already.
+
+Hopefully not in "pedantic" mode. :-)
+
+> I think it seems
+> warranted in cases like this to have it as an aspect, if for 
+> readability sake if nothing else.
+
+Sure, that seems great. But it's not a (sub)type-related aspect semantically,
+as those have the same value for all views. (PI can be false for a partial
+view and true for the full view, and both have to work as expected for
+compatibility.) Abandoning that means that visibility begins to matter about
+(sub)type-related aspects, which means lots of new rules (and likely new bugs).
+
+One can imagine someone adding exceptions all over the Standard for PI (as the
+only view-specific type-related aspect), but I'm not volunteering for that.
+
+Or I suppose one could say something like "Notwithstanding what this Standard
+says elsewhere, the properties of aspect Preelaborable_Initialization are
+exactly as specified here; no other rules for type-related aspects apply." And
+then write everything that you need. I ain't signing up to do that, either.
+
+(Steve volunteered to try for Ada 2012, but the full group told him not to
+bother, given that it was too close to the final date. Maybe you can talk him
+into trying again??)
+
+Anyway, find someone to propose an AI (with wording!!!), and I'll be happy to
+tear it to shreds^H^H^H^H^Hput it on the agenda.
+
+In the meantime, use the pragma in any AIs proposed.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, June 7, 2016  7:52 AM
+
+> I can put this wording in, but where does it go? It doesn't seem to 
+> fit with any of the existing discussion.
+>
+
+I was thinking at the very end of the discussion, to replace the last sentence.
+But perhaps it should start off differently. Something like;
+
+"The overall approach taken for Ada.Environment_Variables is similar to the one
+taken for Ada.Directories except that..."
 
 ****************************************************************
 
