@@ -1131,3 +1131,157 @@ No.  Resolution rules should be weak.
 > proposed change.
 
 ****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, June 8, 2016  5:58 AM
+
+> It strikes me that there needs to be a Legality Rule that prevents a 
+> record from having array components and vice versa
+
+We already have name resolution rules like
+
+    4.3.1 - The expected type for a record_aggregate shall be a single
+   record type or record extension.
+
+    4.3.2 - The expected type for an extension_aggregate shall be a
+    single type that is a record extension.
+
+    4.3.3 - The expected type for an array_aggregate (that is not a
+    subaggregate) shall be a single array type
+
+Would it be more consistent to have name resolution rules (as opposed to
+legality rules) which specify that the expected type of a delta_aggregate
+is a single record type or record extension if the
+delta_aggregate_association is a record_component_association_list and
+a single array type otherwise ?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, June 8, 2016  6:05 AM
+
+I think you might have it backwards.  The expected type for an aggregate comes
+first, then you indicate what is allowed inside.  There is a fundamental rule
+with aggregates that you don't look "inside" until you know what is the type
+of the aggregate.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, June 8, 2016  6:05 AM
+
+> Would it be more consistent to have name resolution rules (as opposed 
+> to legality rules) which specify that the expected type of a 
+> delta_aggregate is a single record type or record extension if the 
+> delta_aggregate_association is a record_component_association_list and 
+> a single array type otherwise ?
+
+Maybe have separate syntax rules for delta_record_aggregate and
+delta_array_aggregate.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Saturday, June 11, 2016  9:20 PM
+
+> Sure, but it *still* doesn't look like a loop.
+[Editor's note: The above is from a thread filed in AI12-0189-1.]
+
+The last thing I remember Jeff say before we headed back to our rooms after
+dinner last night was something about having pleasant dreams about generators.
+...  Thanks Jeff....
+
+So here it is 3am, my thoughts returned to this email, and I am thinking this
+is related to generators, which might be worth capturing if we are to discuss
+tomorrow.
+
+I think the Java idea could be adapted to syntax that looks more like a loop,
+and it strikes me that the mechanism being used can be considered as a
+generator approach.
+
+Before I describe, first some examples of what it might look like.
+
+The above example
+
+   Total : Integer := 0;
+
+    for I of Iterate(1, N).Parallel.Sum(Total) loop
+       Total := Total + I;
+   end loop;
+
+Iterate(1,N) is a library call to a generator that creates a single "stream"
+value that includes the start, end, and a result value (of type Integer) of
+the iteration
+
+Parallel is another library call that produces a generator and takes a
+"stream" value and splits it into several substream values of "Chunks" of
+iterations. The number of chunks is likely determined based on the number of
+available cores. To get a sequential loop, from the above, you could just
+delete the .Parallel.
+
+Sum is an instantiation of a  "stream" collector library call that calls the
+input generator produced by Parallel, to retrieve chunks, then produces in
+parallel for each generator value, which is an integer. The parameter of Sum
+(ie Total) is a external variable that is updated by the overall result. It
+also happens to be the name of a in out parameter that is passed into a
+callback that is represented by the loop body.
+
+The loop body in fact is updating the local copy of the partial sum, and the
+reduction occurs inside the Sum collector procedure, which updates the real
+result.
+
+The collector generic itself is can be a generic procedure that has two generic
+formals, the identity value for the reduction, and the reducer function.
+
+procedure Add is new Collector(Result_Type => Integer, Reduce => "+",
+Identity => 0); Add could be a set of preinstantiated collectors that are
+available for common use, but the programmer could create user-defined
+collectors as well.
+
+The callback probably takes also as parameters the start and end range of the
+iteration, but the syntactic sugar of this loop syntax, hides that.
+
+Now consider some other examples.
+
+  -- Iterating through a map container by keys.
+  for Pair of Container.Keys  loop
+         Put_Line(Key_Type'Image(Pair.Key) & " => " &
+           Elem_Type'Image(Pair.Elem));
+   end loop;
+
+Keys is a function that produces a generator for the name value pairs of the
+container
+
+
+  -- Iterating through a map container to produce parallel sum of elements.
+
+  Total : Integer := 0;
+
+  for Element of Container.Elements.Parallel.Sum(Total)  loop
+         Total := Total + Element;
+   end loop;
+
+Elements is a function that produces a generator whose value is an element of
+the container, rather than a name value pair.
+
+-- Ada Environment variables.
+
+    for Pair of Ada.Environment_Variables.Iterate loop
+       Put_Line (Pair.Name & " => " & Pair.Value);
+    end loop;
+
+In this case, we'd probably need to define a Name_Value_Pair_Type and probably
+a new Iterate subprogram that works with this type.
+
+
+Anyway, please keep in mind it is 4am, I should probably know better to
+compose emails at this time, as this might seem like a half-baked mess in the
+morning. But it strikes me that this might be a nice mixture of ideas from
+Tuck's loop body syntax, the generator proposal, and what Ive been thinking
+of lately as an alternative.
+
+The Java stream approach seems to be very flexible and powerful for
+expression, but the Ada take on this would be better for Ada if it can make
+it mechanism look more like a loop. 
+
+****************************************************************
