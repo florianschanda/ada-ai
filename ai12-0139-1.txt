@@ -1,4 +1,4 @@
-!standard A(3/4)                             15-10-14   AI12-0139-1/02
+!standard A(3/4)                             16-06-09   AI12-0139-1/03
 !standard A.18(5)
 !class Amendment 14-10-13
 !status work item 14-10-13
@@ -40,7 +40,8 @@ In addition, the package Ada.Safe is predefined. It contains
 duplicates of all child units of the package Ada listed above. Syntax
 and semantics of all declarations and specifications are identical,
 except for the different root of the unit hierarchy and the behaviour in the
-presence of concurrency as specified in this clause.
+presence of concurrency as specified in this clause or as specified for
+specific packages in this International Standard.
 
 In addition to the semantics of package Ada and its child units, the
 effects of concurrent invocations of all subprograms, protected
@@ -64,7 +65,43 @@ implied by atomic changes to shared resources.
 
 Implementation should provide for mutual exclusion at a high degree of
 granularity. 
+
+<<< Note to ARG: the following is a prototyping of a more specific
+semantics for a given package.  I randomly chose Hashed_Maps.>>
+
+<<< Note to ARG: Semi-unrelated RM observation: Several of the present
+container packages contain dynamic semantics under the heading of
+static semantics. E.g. A.18.24 (7/3). Which I why I did not bother
+distinguishing either, but I did leave out the heading of "static
+semantics" present in other packages.
+
+Add a package
+
+A.18.X The Generic Package Ada.Safe.Containers.Hashed_Maps
+
+The language-defined generic package Ada.Safe.Containers.Hashed_Maps
+provides a map with the same operations as the package
+Containers.Hashed_Maps (see A.18.5), with the added semantics that
+concurrent operations are synchronized so that modifying accesses
+preclude any concurrent accesses. Concurrent reads are non-blocking.
  
+The declaration of the generic library package
+Safe.Containers.Hashed_Maps has the same contents and semantics as
+Containers.Hashed_Maps except:
+
+No tampering checks are performed. 
+AARM note: the intent is that tampering is prevented by the 
+synchronization rules.
+
+Any operation that modifies a map, cursor or iterator instance blocks
+while any other operation on the same map instance or any cursor or
+iterator instance obtained for the same map instance is executed or
+while iterator instances other than the one operated upon or obtained
+for other map instances exist. All operations on the same map
+instance or any cursor or iterator instance block while an operation
+executes that modifies the same map instance or any cursor or iterator
+instance obtained for the same map instance.
+
 !discussion
 
 To mandate that the existing library shall be thread-safe is
@@ -141,6 +178,15 @@ compatibly later on. Also I do not see why the rest of the library
 should not also work correctly for concurrent calls.  End of Note.
 ------
 
+At the Oct'15 meeting, the ARG wanted to see what a specific prototype
+of a package could be with a more refined synchronization requirement.
+This version (3 of June'16) contains such a package. The rules are
+intended to allow concurrent reads, but prevent writes concurrent to
+reads on the same data structures. In the process, tampering
+situations were (hopefully) eliminated. We can have tampering back if
+the rule about iterator instances is rewritten to the simpler "do not
+access shared data concurrently"-model (as opposed ot the transaction
+model now put into the semantics to also deal with tampering).
 
 !examples
   
@@ -1328,3 +1374,78 @@ comments about
  - the alternative of making selected units thread-safe
 
 ***************************************************************
+
+From: Erhard Ploedereder
+Sent: Wednesday, June 8, 2016  8:53 PM
+Delivered:  Thursday, June 16, 2016  8:37 PM -- it was caught in the spam filter
+[It helps to send updates *before* the meeting agenda deadline, when the editor
+is in the office to ensure that they get posted and distributed - Editor.]
+
+This is V3 of AI-12-0139, Thread-safe libraries or, at least, containers
+[this is version /03 of the AI - Editor].
+
+It includes V2, the version not seen in Burlington, plus the wording of a
+prototype of a package with more explicit and more refined synchronization
+properties, since that was my homework assignment.
+
+I chose Hashed_Maps and created
+  Safe.Containers.Hashed_Maps
+with a Read-Write-Lock scheme. You find the package wording at the end of
+the !wording section.
+
+I have one question: I suspect that the set of "tampering" operations is the
+set of all "modifying" accesses to maps, cursors and iterators.
+True or false? i.e., are there modifying ops that are not tampering?
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, July 11, 2016  8:30 PM
+
+Not sure if Erhard ever got proper answers to his questions in this draft, so
+here they are... 
+
+Erhard Ploedereder wrote:
+
+> I have one question: I suspect that the set of "tampering" 
+> operations is the set of all "modifying" accesses to maps, cursors and 
+> iterators.
+> True or false? i.e., are there modifying ops that are not tampering?
+
+Tampering covers modification of the container (that is, insert, delete, etc.)
+but not modification of the data of an element IN the container. Specifically,
+tampering allows writing the contents of an element (otherwise, one couldn't
+write a loop that changes all elements of a container, a capability that seems
+important). 
+
+I suspect that means that tampering isn't enough for concurrency purposes, but
+I do think it is a proper subset (so the rules given in your proposal are
+fine).
+
+Aside: I think we would need a better definition of "modifying access" for the
+purposes of these rules; remember that the language has to be written without
+regard to the possible implementation of the bodies of these packages. I would
+probably define "modifying access" as tamper-with-elements plus writing an
+element via Reference, Replace, or Update_Element. (Of course, Tucker wants to
+get rid of tamper-with-elements in general, so it gets more complex if one has
+to effectively put that back for this case.)
+
+In the AI, you have:
+<<< Note to ARG: Semi-unrelated RM observation: Several of the present
+container packages contain dynamic semantics under the heading of static
+semantics. E.g. A.18.24 (7/3). Which I why I did not bother distinguishing
+either, but I did leave out the heading of "static semantics" present in other
+packages.
+
+This is a well-known bug in the RM -- ALL language-defined packages have their
+semantics defined in a Static Semantics section (even though 95% of that is
+really Dynamic Semantics). We've discussed this several times, and each time
+decided to continue to follow the (argubly wrong) precedent rather than
+spending months trying to fix it by separating Static and Dynamic semantics
+for packages. (Such a fix would be a lot of work, and it would provide exactly
+no benefit to Ada users or implementers. Only true pedants would care.) So the
+text in this case should all be under Static Semantics, even though that is of
+course nonsense.
+
+***************************************************************
+
