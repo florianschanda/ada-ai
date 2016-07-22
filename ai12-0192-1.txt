@@ -1,5 +1,7 @@
-!standard 3.3.1(8.1/2)                                16-06-06  AI12-0192-1/01
+!standard 3.3.1(8.1/2)                                16-07-21  AI12-0192-1/02
 !class binding interpretation 16-06-06
+!status Amendment 1-2012 16-07-21
+!status ARG Approved 8-0-3  16-06-11
 !status work item 16-06-06
 !status received 16-05-31
 !priority Low
@@ -52,11 +54,14 @@ Replace 3.3.1(8.1/2):
    or if it has an initialization expression that includes a name denoting
    the current instance of the type or denoting an access discriminant.
 with:
-   A component of an object is said to *require late initialization* if it
-   has an access discriminant value constrained by a per-object expression,
-   or if it has an initialization expression that includes a name denoting an
-   access discriminant, or a reference to the current instance of the type
-   either by name or implicitly as the target object of a call.
+   A component of an object is said to *require late initialization* if:
+      * it has an access discriminant value constrained by a per-object
+        expression;
+      * it has an initialization expression that includes a name denoting an
+        access discriminant; or
+      * it has an initialization expression that includes a reference to the
+        current instance of the type either by name or implicitly as the
+        target object of a call. 
 
 !discussion
 
@@ -64,11 +69,76 @@ These rules prevent most (but not all) access to uninitialized components.
 It makes sense for them to be extended to this case as well.
 
 This is inconsistent (runtime incompatible); most of the time it would prevent
-bugs.
+bugs or be neutral.
 
-[Editor's note: But when it doesn't prevent bugs, it could turn legal, correct,
-portable Ada 2012 code erroneous. This would be really rare, but erroneous!!!
-See my e-mail of June 6th in the !appendix for an example. Ugh.]
+However, it is possible (but very unlikely) for this change to make legal, correct,
+portable Ada 2012 code erroneous. For instance, consider the following type:
+
+    protected type Gack is
+       ...
+    private
+       function Make_T2 return T2;
+       T1_Comp : T1(Gack'Access);
+       T2_Comp : T2 := Make_T2;
+    end Gack;
+
+The T1_Comp component "requires late initialization" by the existing Ada 2012
+rules. The T2_Comp component would now "require late initialization" by the
+proposed new rule. 3.3.1(20.4/3) says that components that require late
+initialization are initialized in textual order (to avoid
+implementation-dependencies and allow a work-around from problematic cases).
+
+Thus, Ada 2012 requires T1_Comp to be initialized last, with T2_Comp
+initialized before it. OTOH, with this new rule, Ada would require T2_Comp
+to be initialized last, with T1_Comp to be initialized before it.
+
+If, in fact, the implementation of type Gack deepends on the initialization
+of T1_Comp being last (because it referenced T2_Comp), then the introduction
+of this new rule would break this code (making it erroneous). The fix is
+trivial (swap the two components), but finding the error would be difficult as
+nothing predictable need happen for erroneous code.
+
+The reason that most of us consider this acceptable is simply that it is very
+unlikely: it requires four unlikely events -- (1) that a protected object
+contain a component that currently requires late initialization; (2) that the
+same protected object contain another component that will require late
+initialization under this rule (that is, is initialized by a function call of
+the PO itself); (3) that the components are in the "wrong" order (the existing
+"required late initialization" component is not last); and (4) the existing
+"required late initialization" depends somehow on the other components of the
+type (and the other components do not). This seems unlikely enough that it
+probably has never happened in Ada code.
+
+More generally, one could have code that depends on the order of evaluation
+of components chosen by a particular Ada implementation. This rule probably
+will change the order of evaluation, and thus could break existing code.
+However, this sort of code may not work on another Ada implementation,
+including the next version of the same implementation, so this rule change
+doesn't change the situation appreciably in the more likely case. (That is
+still not very likely, as it requires a protected type with multiple components
+where the initialization of one of them depends on the value of one or more
+of the others.)
+
+In most cases, this rule will not have any effect, and in the unusual case that
+it does have some effect, its most likely to fix bugs, not cause them.
+
+!corrigendum 3.3.1(8.1/2)
+
+@drepl
+A component of an object is said to
+@i<require late initialization> if it has an access discriminant value
+constrained by a per-object expression, or if it has an initialization
+expression that includes a name denoting the current instance of the type
+or denoting an access discriminant.
+@dby
+A component of an object is said to @i<require late initialization> if:
+@xbullet<it has an access discriminant value constrained by a per-object
+expression;>
+@xbullet<it has an initialization expression that includes a name denoting an
+access discriminant; or>
+@xbullet<it has an initialization expression that includes a reference to the
+current instance of the type either by name or implicitly as the
+target object of a call.>
 
 !ASIS
 
