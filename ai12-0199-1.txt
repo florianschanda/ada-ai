@@ -1,0 +1,193 @@
+!standard 7.3.2(5/4)                                   16-07-21  AI12-0199-1/01
+!class binding interpretation 16-07-21
+!status work item 16-07-21
+!status received 16-06-11
+!priority Low
+!difficulty Hard
+!qualifier Omission
+!subject Abstract subprogram calls in class-wide invariant expressions
+!summary
+
+** TBD:
+
+!question
+
+Consider:
+
+  package Pkg is
+    type Ifc is interface
+       with Type_Invariant'Class => F1 (Ifc);
+
+    function F1 (X : Ifc) return Boolean is abstract;
+  end Pkg;
+
+Does the call to F1 violate the rule against non-dispatching calls to abstract
+subprograms?
+  (No, because aspect re-interpreted using notional, non-abstract descendant)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 7.3.2(5/4):
+
+Within an invariant expression, the identifier of the first subtype of the
+associated type denotes the current instance of the type. Within an invariant
+expression for the Type_Invariant aspect of a type T, the type of this current
+instance is T. Within an invariant expression for the Type_Invariant'Class
+aspect of a type T, the type of this current instance is interpreted as though
+it had a (notional) {nonabstract} type NT that is a visible formal derived
+type whose ancestor type is T. The effect of this interpretation is that the
+only operations that can be applied to this current instance are those defined
+for such a formal derived type.
+
+** TBD: We don't have any rules like 6.1.1(18-18.2/4) for type invariants; we
+never define the "corresponding expression". We may need to do that, as
+components are directly visible in this expression as well as the type itself.
+
+And we do need a rule like 6.1.1(18.2/4), as class-wide type invariants can be
+specified on and apply to abstract types. Thus, the Bairdian example can be
+constructed for this case as well:
+
+      package Pkg2 is
+         type T is tagged null record
+            with Type_Invariant'Class => Is_OK (X); -- OK.
+         function Is_Ok (X : T) return Boolean;
+         procedure Proc (X : in out T);
+      end Pkg2;
+
+A call on Proc will make invariant checks on the value of X.
+
+      with Pkg2;
+      package Pkg3 is
+         type NT is abstract new Pkg2.T null record;
+         -- inherits Type_Invariant'Class => Is_OK (X); -- Illegal.
+         function Is_Ok (X : NT) return Boolean is abstract;
+         -- inherits Proc.
+      end Pkg3;
+
+A call on the (concrete) inherited Proc will try to make invariant checks,
+which will call the abstract Is_OK. That won't work.
+Note that a statically bound call on Pkg3.Proc can be created by type
+converting an object of a descendant type of NT to type NT.
+
+?? Perhaps the rule would need to be contingent on the existence of
+concrete routines of the type with the class-wide invariant in the package
+specification? Else any class-wide invariant of an interface would be illegal,
+which we surely don't want. Nor would we want the typical case of all abstract
+routines being illegal. So maybe the new rule ought to be written in terms of
+any concrete subprograms with parameters of the type being illegal in the
+package spec. But is that enough? There are lots of weird invariant checks that
+occur outside of the package (type conversions for one). Glad I'm not writing
+this AI.
+
+** End TBD. (Perhaps move this to the discussion??)
+
+!discussion
+
+** TBD.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS B-Test should be created to check the examples (if they aren't
+already covered).
+
+!appendix
+
+From: Randy Brukardt
+Sent: Thursday, July 21, 2016  8:04 PM
+
+In creating the mostly empty template for this AI from the type invariant part
+of AI12-0170-1, I have some rather pithy thoughts on the problem that I thought
+I would share, in large part because we probably need some Bairdian examples in
+order to chose a rule (Luckily, this AI isn't assigned to me, so I don't have
+to come up with a rule.)
+
+The basic problem is that we have two conflicting requirements:
+
+(1) We want to be able to specify class-wide type invariants on abstract
+(tagged) types. Otherwise, it wouldn't be possible to define an invariant for
+an interface, and we definitely wanted to do that enough that we have a
+separate AI for the purpose.
+
+This would look like:
+
+  package Pkg is
+    type Ifc is interface
+       with Type_Invariant'Class => F1 (Ifc); -- Better be legal.
+
+    function F1 (X : Ifc) return Boolean is abstract;
+  end Pkg;
+
+(2) But it cannot be the case that an actual class-wide type invariant check
+calls an abstract function (for obvious reasons).
+
+I can show the problem for the second by using a modification of Steve's
+original precondition example:
+
+      package Pkg2 is
+         type T is tagged null record
+            with Type_Invariant'Class => Is_OK (X); -- OK.
+         function Is_Ok (X : T) return Boolean;
+         procedure Proc (X : in out T);
+      end Pkg2;
+
+A call on Proc will make invariant checks on the value of X.
+
+      with Pkg2;
+      package Pkg3 is
+         type NT is abstract new Pkg2.T null record;
+         -- inherits Type_Invariant'Class => Is_OK (X); -- ??
+         function Is_Ok (X : NT) return Boolean is abstract;
+         -- inherits Proc.
+      end Pkg3;
+
+A call like:
+
+    Pkg3.Proc (Pkg3.NT(Obj));
+
+is legal and raises no exceptions if Obj has a concrete type that is
+descended from type NT. But in this case, we will make a class-wide type
+invariant check that will call Pkg3.Is_OK, which is abstract. Bang!
+
+(Note that abstract subprograms can only be written on abstract types in this
+case, so we do have some limits.)
+
+The straighforward version of the 6.1.1(18.2/4) rule would be something like:
+A non-abstract type T is illegal if corresponding expression for a
+Type_Invariant'Class or Post'Class aspect would be illegal.
+
+But that doesn't fix the bug (NT is abstract in the example above). And
+dropping "non-abstract" runs afoul of (1) above: it would make all invariants
+of interfaces illegal.
+
+It seems easy enough to craft a rule to plug this particular bug:
+   If the corresponding class-wide invariant expression for an abstract type
+   T contains a call to an abstract routine, then there cannot be any
+   non-abstract subprograms in the immediately enclosing scope (including in
+   nested scopes) that have a parameter with a part of T.
+
+But that has issues:
+* It only covers one possible way for a type invariant check to be triggered.
+  There are 21 paragraphs regarding such checks! I especially worry about the
+  view conversion checks.
+
+* It doesn't cover any future issues, like 6.1.1(18.2/4) does. If we discover
+  an example of a problem with accessibility of a coextension, 6.1.1(18.2/4)
+  will cover it, as it just talks about the legality of the expression. The
+  above only covers calling abstract routines.
+
+Luckily, I don't have to solve this problem, Tucker does. ;-) And I'm sure
+Steve can cook up some juicy new problems.
+
+At least type invariants are much less useful than the 3 P's, so any loss of
+functionality will hardly be noticed.
+
+****************************************************************
+
