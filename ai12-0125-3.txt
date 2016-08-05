@@ -1,4 +1,4 @@
-!standard 5.2.1(0)                                 16-08-04  AI12-0125-3/04
+!standard 5.2.1(0)                                 16-08-05  AI12-0125-3/05
 !standard 2.2(9)
 !standard 3.3(21.1/3)
 !standard 4.1(2/3)
@@ -130,10 +130,10 @@ Add a new subclause:
     Board(1, 1) := @ + 1;  -- An abbreviation for Board(1, 1) := Board(1, 1) + 1;
                            -- (Board is declared in 3.6.1)
 
-    Long_Ago : Date := Yesterday; -- See 3.8
-    Long_Ago := (Year  => @.Year - 1,
-                 Month => (if @.Month = January then January else Month_Name'Pred(@.Month)),
-                 Day   => (if @.Day = 1 then 28 else @.Day - 1));
+    Last_Month : Date := Yesterday; -- See 3.8
+    Last_Month := (Year  => (if @.Month = January then @.Year-1 else @.Year),
+                   Month => (if @.Month = January then December else Month_Name'Pred(@.Month)),
+                   Day   => @.Day);
        -- A target_name can be used multiple times and as a prefix if needed.
 
 
@@ -436,10 +436,10 @@ being replaced by the qualified expression @i<S>'(@i<P>).
 @xcode<Board(1, 1) := @@ + 1;  -- @ft<@i<An abbreviation for Board(1, 1) := Board(1, 1) + 1;>>
                        -- @ft<@i<(Board is declared in 3.6.1).>>>
 
-@xcode<Long_Ago : Date := Yesterday; -- @ft<@i<See 3.8.>>
-Long_Ago := (Year  =@> @@.Year - 1,
-             Month =@> (@b<if> @@.Month = January @b<then> January @b<else> Month_Name'Pred(@.Month)),
-             Day   =@> (@b<if> @@.Day = 1 @b<then> 28 @b<else> @@.Day - 1));
+@xcode<Last_Month : Date := Yesterday; -- @ft<@i<See 3.8.>>
+Last_Month := (Year  =@> (@b<if> @@.Month = January @b<then> @@.Year - 1 @b<else> @@.Year),
+               Month =@> (@b<if> @@.Month = January @b<then> December @b<else> Month_Name'Pred(@@.Month)),
+               Day   =@> @@.Day);
    -- @ft<@i<A target_name can be used multiple times and as a prefix if needed.>>>
 
 !corrigendum 8.6(9/4)
@@ -2685,5 +2685,140 @@ given that the first sentence is formally defined in 8.6 (that was already in
 the AI), the first half of the second sentence is given in 3.3, and the
 second half of the second sentence is given in the Static Semantics
 equivalence.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, August  5, 2016  9:30 AM
+
+> Examples
+>
+>     Board(1, 1) := @ + 1;  -- An abbreviation for Board(1, 1) := 
+> Board(1, 1)
+> + 1;
+>                            -- (Board is declared in 3.6.1).
+>
+>     Long_Ago : Date := Yesterday; -- See 3.8
+>     Long_Ago := (Year  => @.Year - 1,
+
+You need to add a comment here to explain the goal of this -- not obvious on a
+first reading.  In fact not clear after several readings.  Are you going to
+the prior year, month, and day?  What if it is January 1st?  Don't you want
+to subtract two from Year then?
+
+>                  Month => (if @.Month = January then January else Month_Name'Pred(@.Month)),
+
+I presume you mean "(if @.Month = January then December else ...)"
+
+>                  Day   => (if @.Day = 1 then 28 else @.Day - 1));
+>        -- A target_name can be used multiple times and as a prefix if needed.
+>
+> If you have an improvement, please suggest it (there's not many 
+> exciting types declared in chapter 3 or 4).
+
+Your "Long_Ago" example is interesting but inscrutable at the moment.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August  5, 2016  3:22 PM
+
+...
+> You need to add a comment here to explain the goal of this -- not 
+> obvious on a first reading.
+
+The goal is to provide an example - it doesn't do anything meaningful.
+
+...
+> > If you have an improvement, please suggest it (there's not many 
+> > exciting types declared in chapter 3 or 4).
+> 
+> Your "Long_Ago" example is interesting but inscrutable at the moment.
+
+There's a reason I asked for suggestions!! :-)
+
+The original idea was just to subtract a year:
+
+   Last_Year := (Year => @.Year-1, Month => @.Month, Day => @.Day);
+
+But that probably would be better done with a delta aggregate (and we haven't
+approved those yet):
+
+   Last_Year := (@ with delta Year => @.Year-1);
+
+or just directly as:
+
+   Last_Year.Year := @ - 1;
+
+which is of course the first example all over again.
+
+So I changed the basic idea to subtracting a year, month, and day. But led to
+deciding what to do with the underflow (if already the first month or day;
+don't have to worry about that for the year since "Yesterday" is never going
+to have a year near the lower bound). Properly dealing with that requires
+carrying results and isn't practical in a one-liner (it's a complex series of
+nested ifs). So I just punted.
+
+I also wanted to complicate the target, but that also complicated the
+example:
+
+    Dates : array (1 .. 10) of Date := (others => Yesterday);
+    for Idx in Dates'Range loop
+        case Idx mod 3 is
+            when 0 => -- Subtract a year:
+		    Dates(Idx) := (Year => @.Year-1, Month => @.Month, Day => @.Day);
+            when 1 => -- Subtract a month:
+		    Dates(Idx) := (Year  => (if @.Month = January then @.Year-1 else @.Year),
+                               Month => (if @.Month = January then December else Month_Name'Pred(@.Month)),
+                               Day   => @.Day);
+            when 2 => -- Subtract a day:
+                -- Left as an exercise for the reader!!!
+        end case;
+    end loop;
+
+Humm. Maybe "Subtract a month" is just complex enough for this problem, not
+so simple that there is a better solution and not so complex as to drive one
+nuts. So maybe we should use:
+
+     Last_Month := (Year  => (if @.Month = January then @.Year-1 else @.Year),
+                    Month => (if @.Month = January then December else Month_Name'Pred(@.Month)),
+                    Day   => @.Day);
+
+Or maybe:
+
+    Dates : array (1 .. 10) of Date := ...;
+    -- Subtract a month from each:
+    for Idx in Dates'Range loop
+       Dates(Idx) := (Year  => (if @.Month = January then @.Year-1 else @.Year),
+                      Month => (if @.Month = January then December else Month_Name'Pred(@.Month)),
+                      Day   => @.Day);
+    end loop;
+
+Thoughts??
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, August  5, 2016  4:07 PM
+
+> ... Humm. Maybe "Subtract a month" is just complex enough for this 
+> problem, not so simple that there is a better solution and not so 
+> complex as to drive one nuts. So maybe we should use:
+>
+>      Last_Month := (Year  => (if @.Month = January then @.Year-1 else 
+> @.Year),
+>                     Month => (if @.Month = January then December else 
+> Month_Name'Pred(@.Month)),
+>                     Day   => @.Day);
+
+This seems about right, modulo formatting ;-).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, August  5, 2016  7:16 PM
+
+OK, I'll go with that (and the formatting was fine when I wrote it ;-),
+modulo comments from others.
 
 ****************************************************************
