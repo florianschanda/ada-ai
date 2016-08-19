@@ -1,4 +1,10 @@
-!standard 2.1(4.1/2)                               16-08-15    AI12-0004-1/02
+!standard 2.1(4.1/2)                               16-08-18    AI12-0004-1/03
+!standard 2.3(4/3)
+!standard A.3.2(4/3)
+!standard A.3.2(32.5/3)
+!standard A.3.5(18/3)
+!standard A.3.5(51/3)
+
 !class binding interpretation 15-06-13
 !status work item 11-11-08
 !status received 11-06-20
@@ -7,7 +13,8 @@
 !subject Normalization and allowed characters for identifiers
 !summary
 
-Ada identifiers that are not in Normalization Form KC are illegal.
+Ada identifiers that contain characters that are not allowed in Normalization
+Form KC are illegal.
 
 Ada text not in Normalization Form C is implementation-defined.
 
@@ -59,17 +66,17 @@ format; it eliminates ambiguities and security issues potentially caused by
 source using unusual sequences of characters. Note that WC3 recommends that
 all Internet content be in Normalization Form C. We don't require this as
 there is a potentially significant cost to checking, and some implementations
-may need to be interoperable with tools that product unnormalized text.
+may need to be interoperable with tools that produce unnormalized text.
 
 [Editor's note: I considered making this Implementation Advice, but that
 seemed to defy sensible wording without using Bob's hated word - "reject".
-And the above seemed like enough anyway.]
+And the above seemed to be enough anyway.]
 
 Add after 2.3(4/3):
 
 Legality Rules
 
-An identifier shall only contain characters that might be allowed in
+An identifier shall only contain characters that may be present in
 Normalization Form KC (as defined by Clause 21 of ISO/IEC 10646:2011).
 
 AARM Implementation Note:
@@ -85,25 +92,65 @@ Versions for older Unicode versions can be found on this site as well;
 start at http://www.unicode.org/Public/ and find the appropriate version
 number.
 
-[Author's question: Should we include an Is_NFKC operation in
-Ada.(Wide_)*Characters.Handling? We've made all of the other identifier
-operations available at runtime.]
+Add at the end of A.3.2(4/3):
+
+    function Is_NFKC              (Item : in Character) return Boolean;
+
+Add after A.3.2(32.5/3):
+
+Is_NFKC
+    True if Item could be present in a string normalized to Normalization
+    Form KC (as defined by Clause 21 of ISO/IEC 10646:2011); this includes
+    all characters except those with positions 160, 168, 170, 175, 178, 179,
+    180, 181, 184, 185, 186, 188, 189, and 190.
+
+Add after A.3.5(18/3):
+
+    function Is_NFKC              (Item : in Wide_Character) return Boolean;
+
+Add after A.3.5(51/3):
+
+    function Is_NFKC              (Item : in Wide_Character) return Boolean;
+
+        Returns True if the Wide_Character designated by Item could be present
+        in a string normalized to Normalization Form KC (as defined by Clause
+        21 of ISO/IEC 10646:2011).
+
+    AARM Reason: Wide_Characters for which this function returns False are not
+    allowed in identifiers (see 2.3) even if they are categorized as letters or
+    digits.
+
+    AARM Implementation Note: This function returns False if the Unicode property
+    NFKC Quick Check (NFKC_QC in the files) has the value No. See the AARM
+    Implementation Notes in 2.3 for the source of this property.
+
+    AARM Discussion: A string for which Is_NFKC is true for every character
+    may still not be in Normalization Form KC, as Is_NFKC returns true for
+    characters that are dependent on characters around them whether they are
+    removed by normalization. Ada does not provide a full normalization
+    operation (it is complex and expensive).
 
 !discussion
 
 For the first question, it's clear that non-identifier text should not be
-subject to normalization form KC. Indeed, both TR31 and TR15 are quite clear
-that KC should only be applied to limited text (like identifiers), not the
-entire program. (TR31 directly mentions string literals and comments.)
-
-Normalization form KC merges characters based on their basic properties;
-normalization form C just puts characters into their minimal canonical format.
-(Minimal here means that characters that can be written as a sequence or as
-a single character are written as the single character.)
+subject to Normalization Form KC (NFKC). NFKC merges characters based on
+their basic properties, ignoring their visual appearance; normalization form
+C (NFC) just puts characters into their minimal canonical format. (Minimal
+here means that characters that can be written as a sequence
+or as a single character are written as the single character.) NFC never
+changes the visual appearance of a character; NKFC eliminate visual variants
+of a character such as subscripting, superscripting, positional variants, and
+more.
 
 Identifier text needs strong normalization so that it can be compared using
 simple case folding. Other text, which does not need to use case folding,
-should not be modified in that way.
+should not be modified (or rejected) in that way.
+
+Indeed, both TR31 and TR15 are quite clear that NFKC should only be applied
+to limited text (like identifiers), not entire programs or documents. (TR15
+says that Normalization Form KC "must not be blindly applied to arbitrary
+text"; TR31 mentions that string literals and comments should be handled
+separately from identifiers.)
 
 Also, we do not want the set of identifiers allowed by Ada to be dependent on
 the implementation, so we don't want the normalization of identifiers to be
@@ -112,17 +159,21 @@ that the best solution is to define that all identifiers are normalized (that
 is, identifiers that are not normalized are illegal).
 
 The current situation is that Ada implementations might treat some characters
-differently in identifiers. This could be a significant portability problem,
-one that is unnecessary. Thus we adopt a rule that identifiers need to be
-in Normalization Form KC.
+differently in identifiers. (In particular, an implementation that normalized
+all incoming text into Normalization Form KC would convert m² [which is not
+a legal identifier] into m2 [which IS a legal identifier] before lexical
+analysis.) This could be a significant portability problem, one that is
+unnecessary. Thus we adopt a rule that identifiers need to be in Normalization
+Form KC.
 
-Normalizing text is a very expensive and slow operation (it involves an up to 3x
-expansion, decomposing characters into their canonical parts, ordering those
-parts, and then recomposing them). This is not an operation we want to use
-frequently [or implement - author]. Luckily, Unicode has a short-cut available,
-the "Quick_Check" properties (one set for each of the four normalization sets
-available). These are relatively large tables, but it provides a simple answer
-for each code point. It is simple to scan the text and determine the result.
+However, normalizing text is a very expensive and slow operation (it involves
+n up to 3x expansion, decomposing characters into their canonical parts,
+ordering those parts, and then recomposing them). This is not an operation we
+want to use frequently [or implement!! - author]. Luckily, Unicode has a
+short-cut available, the "Quick_Check" properties (one set for each of the four
+normalization forms available). These are relatively large tables, but it
+provides a simple answer for each code point. It is simple to scan the text and
+determine the result.
 
 But as usual, here Unicode giveth and Unicode taketh-away. For Normalization
 Form D, the Quick_Check consists of Yes and No values; if a No is encountered,
@@ -132,12 +183,13 @@ Quick_Check is a three state value: Yes, No, and Maybe. In the Maybe case, an
 implementation is supposed to normalize the string and see if it changes.
 
 Since normalization is very expensive, we don't do that. We rather say
-"might be in NFKC", thus allowing all of the Maybe characters. For Unicode 9.0
-(current as of this writing), there are only 110 code points that are Maybe in
-the NFC_QC and NFKC_QC tables. (These are mostly combining code points.) All
-of the remaining code points are Yes or No. (No meaning of course that they can't
-appear in normalized text.) There are 1120 No code points
-for NFC_QC and a whopping 4792 for NFKC_QC (again, for Unicode 9.0).
+"may be present in NFKC", thus allowing all of the Maybe characters. For
+Unicode 9.0 (current as of this writing), there are only 110 code points that
+are Maybe in he NFC_QC and NFKC_QC tables. (These are mostly combining code
+points.) All of the remaining code points are Yes or No. (No meaning of course
+that they can't appear in normalized text.) There are 1120 No code points for
+NFC_QC and a whopping 4792 for NFKC_QC (again, for Unicode 9.0). (Many of these
+code points aren't letters or numbers and can't appear in identifiers anyway.)
 
 (These tables can be found at
 http://www.unicode.org/Public/UCD/latest/ucd/DerivedNormalizationProps.txt;
@@ -147,13 +199,14 @@ A detailed discussion of Unicode normalization can be found in
 Unicode Annex 15 (current link as of this writing is
 http://www.unicode.org/reports/tr15/tr15.html). It's a lot more readable than
 the actual Unicode standard text [which I made the mistake of trying to
-understand - Author].
+understand - Author]. Additionally, it is directly referenced from Section 21
+of 10646:2011, including it by reference.
 
 We do retain the rule that Ada source code needs to be normalized in order
 to be portable; we just use the much weaker Normalization Form C (NFC).
 WC3 recommends that all Internet content be normalized to NFC; that
 eliminates duplication and security issues that otherwise might arise.
-It seems sensible to recommend (but not require) the same of Ada.
+It seems sensible to recommend (but not require) the same of Ada source.
 
 ===
 
@@ -163,27 +216,33 @@ recommendation of the experts in this field, and we should come as close to
 those recommendations as possible. (But don't forget AI05-0227-1 about case
 folding and upper case conversions -- we should not undo those corrections.)
 
-We, however, don't change to using XId_Start and XID_Continue for two reasons.
-First, compabilitity is very important to Ada; using these classes would require
-a number of modifications in order to be compatible. (For instance, underscore
-is included in XId_Continue.) Moreover, it would require a lot of detailed
-analysis to figure out how the identifiers allowed by these classes differ from
-those allowed by Ada 2005 and Ada 2012. While identifiers with non-Latin-1
-characters aren't very common, they do exist. Secondly, the XId_Start and
-XId_Continue classes are very similar to the classes that Ada already uses for
-identifiers; they mainly are created from the same sets of characters that Ada
-already uses. Thus we have a situation where there is more risk of
-incompatibility than there is useful differences.
+We, however, don't change to using XId_Start and XID_Continue for several
+reasons. First, compabilitity is very important to Ada; using these classes
+would require a number of modifications in order to be compatible. (For
+instance, underscore is included in XId_Continue.) In addition, we would need
+to be careful not to undo the corrections made by AI05-0227-1 about case
+folding and upper case conversion.
 
-Additionally, Unicode has now made most properties "stable" unless there is
+Secondly, it would require a lot of detailed analysis to figure out how the
+identifiers allowed by these classes differ from those allowed by Ada 2005 and
+Ada 2012. While identifiers with non-Latin-1 characters aren't very common,
+they do exist. This would also make this change less portable.
+
+Thirdly, the XId_Start and XId_Continue classes are very similar to the
+classes that Ada already uses for identifiers; they mainly are created from
+the same sets of characters that Ada already uses. Thus we have a situation
+where there is more risk of incompatibility than there is useful differences.
+
+Finally, Unicode has now made most properties "stable" unless there is
 a clear mistake (they claim to have only found 6 so far), so the worries
-about change to the existing classifications is reduced without making any
-changes.
+about change to the existing classifications are reduced without making any
+changes to Ada (so long as most implementation are using Unicode versions
+newer than 5.2).
 
 If these classes had existed in Unicode 4.0, we surely would have used them,
 but the Unicode people were very confused about identifiers at that time (and
-we copied some of that confusion, sadly). TR31 straightened out that situation,
-but somewhat too late for Ada to use.
+we copied much of that confusion, sadly). Recent versions of TR31 straightened
+out that situation, but somewhat too late for Ada to use.
 
 It should be noted that we're actually not that far from the current TR31
 recommendations. Our rules are essentially the same as "Filtered
@@ -199,6 +258,8 @@ simple case folding, so we had to figure out one.)
 ACATS B-Test(s) should be written to check that characters in NFC but not
 in NFKC are not allowed in identifiers, even if they otherwise have the
 correct character classes.
+
+ACATS C-Test(s) should be written to test the Is_NKFC functions.
 
 !ASIS
 
@@ -304,7 +365,8 @@ now on this specific topic.]
 I agree with this.
 
 >In any case, it would seem that an Ada compiler, due to Ada’s case
->insensitivity, must at the very least treat the identifier ª as identical to the identifiers A and a.
+>insensitivity, must at the very least treat the identifier ª as identical to
+>the identifiers A and a.
 
 Now I've lost you. If the compiler implements the normalization, then it will
 never see ª in an identifier. Otherwise, the letter (if not normalized) is
@@ -501,5 +563,271 @@ are done for a given phase or stage, and you move on. I do not wish to cause a
 delay in releasing Ada 2012. I still appreciate your consideration at some
 point, as well as WG9's desire to have Ada becoming an ever better language
 without breaking what people may already be using.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, August 16, 2016  1:55 AM
+
+Having spent the last 3 1/2 hours trying to understand Unicode identifier and
+normalization rules, I think I've finally got an acceptable update for this AI
+(as discussed in Pisa). I've attached the result (warning, it is in UTF-8 format
+as there are a bunch of Unicode characters in the text and !appendix).
+
+I'd appreciate a quick review, as I don't know how long I'm going to remember
+the Unicode details (I tried to write everything significant down, but if I
+missed anything, it's likely I'll forget it soon).
+
+The summary is:
+
+Ada identifiers that contain characters that are not allowed in Normalization
+Form KC are illegal.
+
+Ada text not in Normalization Form C is implementation-defined.
+
+I tried to explain the reasons for these choices (mostly to avoid implementation
+burden). The unusual wording of the first item is necessary, as Unicode has
+characters that *might* be allowed, and we want to allow those so no one has to
+implement a full normalization algorithm. (That would be unspeakable, the string
+could expand up to 3x bigger.)
+
+P.S. I just noticed that the !summary in the AI uses an obsolete version of the
+wording. Mentally substitute the above, I'll fix it.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, August 16, 2016  10:43 AM
+
+Minor typo in an AARM Reason:
+
+> ... interoperable with tools that produc[t]{e} unnormalized text.
+
+The wording what "might be allowed" is pretty weird, in 2.3(4/3):
+
+"An identifier shall only contain characters that might be allowed in
+Normalization Form KC (as defined by Clause 21 of ISO/IEC 10646:2011)."
+
+I see your explanation, but "might be allowed" is really hard to interpret.
+
+I could see "... that may be accepted ...," and that at least links to the
+"Maybe" notion in the standard.
+
+It does seem worth adding an Is_NFKC if it plays such an important role.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, August 16, 2016  9:10 AM
+
+> The wording what "might be allowed" is pretty weird, in 2.3(4/3):
+>
+> "An identifier shall only contain characters that might be allowed in
+> Normalization Form KC (as defined by Clause 21 of ISO/IEC
+> 10646:2011)."
+>
+> I see your explanation, but "might be allowed" is really hard to
+> interpret.
+
+Sure. I would have preferred to exactly say what's meant, but the inability to
+reference Unicode makes that painful at best.
+
+> I could see "... that may be accepted ...," and that at least links to
+> the "Maybe" notion in the standard.
+
+I always try to avoid "may" because it is so easy to use "may not" (which is not
+allowed).
+
+But I don't quite see how "accepted" works here. The full sentence with your
+change is:
+
+An identifier shall only contain characters that may be accepted in
+Normalization Form KC (as defined by Clause 21 of ISO/IEC 10646:2011).
+
+Normalization is a conversion, and the input can have any Unicode characters.
+It's the *output* of normalization that has a limited character set. When I said
+"allowed", I meant "allowed in text normalized by Normalization Form KC".
+
+The existing text of 2.1(4.1/3) isn't very clear on this point, either. "in
+Normalization Form KC" really means "in text that has been normalized by
+Normalization Form KC". I tried to use the same (sloppy) meaning in the new
+wording, but perhaps we should clarify both??
+
+I'll hold off changing anything here until I hear a better idea.
+
+> It does seem worth adding an Is_NFKC if it plays such an important
+> role.
+
+OK.
+
+And thanks for the quick response.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, August 16, 2016  9:41 PM
+
+> But I don't quite see how "accepted" works here. The full sentence
+> with your change is:
+>
+> An identifier shall only contain characters that may be accepted in
+> Normalization Form KC (as defined by Clause 21 of ISO/IEC 10646:2011).
+
+How about:
+
+"An identifier shall only container characters that may be present in
+Normalization Form KC ..."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, August 16, 2016  11:38 PM
+
+That seems good. Sometimes I don't know how you do it. Thanks.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, August 18, 2016  7:11 PM
+
+...
+> How about:
+>
+> "An identifier shall only container characters that may be present in
+> Normalization Form KC ..."
+
+I just noticed the typo in the above. Funny how one sees what they expect.
+
+And of course that allowed me to muse on what the above actually means.
+Maybe a "container character" is one of "aceinort"? So 'z' isn't allowed in an
+identifier? <Grin>
+
+Back to real work...
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Wednesday, August 17, 2016  2:54 AM
+
+> "An identifier shall only contain characters that might be allowed in
+> Normalization Form KC (as defined by Clause 21 of ISO/IEC
+> 10646:2011)."
+
+> I'll hold off changing anything here until I hear a better idea.
+Reverse the proposition:
+
+"An identifier shall only contain characters that are not forbidden in
+Normalization Form KC (as defined by Clause 21 of ISO/IEC 10646:2011)."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, August 16, 2016  10:21 PM
+
+I wrote:
+> The summary is:
+>
+> Ada identifiers that contain characters that are not allowed in
+> Normalization Form KC are illegal.
+
+In researching my response to Tuck, I reread the beginning of TR15. A short
+summary of the difference between the two Normalization Forms (which I added to
+the AI) is:
+
+NFKC merges characters based on their basic properties, ignoring their visual
+appearance; normalization form C (NFC) just puts characters into their minimal
+canonical format. (Minimal here means that characters that can be written as a
+sequence or as a single character are written as the single character.) NFC
+never changes the visual appearance of a character; NKFC eliminate visual
+variants of a character such as subscripting, superscripting, positional
+variants, and more.
+
+I have to wonder if eliminating positional variants (the obvious example being
+the two forms of lower case sigma in Greek (see 7.5 in the Ada 2005 Rationale
+for an example) would be bad in Ada identifiers. The special form for ending a
+word is not allowed in NFKC, and thus would not be allowed in an Ada identifier.
+
+We could do that by making the Legality Rule only reject characters not in NFC;
+case folding will cause the alternative forms to compare the same so that case
+insensitivity would be preserved.
+
+The case that we were mainly worried about of m² being treated the same as m2
+isn't possible here; the problem case was where an implementation automatically
+normalized all program text (or just potential identifier text) with NFKC. Since
+NFKC changes superscript 2 into regular 2, that would make m² a legal
+identifier on that implementation and the same as m2. However, NFC doesn't
+change the superscript 2; and that character has character class Number, Other.
+A quick look at your RM will show that such a character is not allowed in an
+identifier, so there is no problem (with the implementation-definedness
+removed).
+
+It's hard to know if there are any other problems with this; most characters
+that are different probably aren't allowed in identifiers anyway. The
+font-specific characters (like Mathematical Sans Serif Captial A) would be
+allowed in identifiers in this scenario, and they'd be *different* from the
+similar regular characters (indeed, they have no case folding at all, which
+seems weird -- maybe there's something about those characters - 1D400 .. 1D7FF
+that I don't understand - there's some extra "<font>" entries in their
+definition).
+
+Anyway, the question is whether making use of positional variants in Ada
+identifiers illegal is a problem. If so, we need to consider some other rule.
+Otherwise, the rule I have should be fine.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, August 17, 2016  6:02 AM
+
+> ... Anyway, the question is whether making use of positional variants
+> in Ada identifiers illegal is a problem. If so, we need to consider
+> some other rule. Otherwise, the rule I have should be fine.
+
+German S has a similar situation, I believe.  Erhard?  I would presume that
+currently most program identifiers do not expect positional variants to work,
+but who knows in the future?
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Wednesday, August 17, 2016  8:32 AM
+
+> German S has a similar situation, I believe.  Erhard?  I would presume
+> that currently most program identifiers do not expect positional
+> variants to work, but who knows in the future?
+
+Indeed (I guess - I did not follow the normalization issues). It is the "scharfe
+S" ("ß" - which might not show correctly on your screen now), used only in
+lower-case. The upper-case equivalent is "SS". Replacement in lower case,
+extremely rarely used in the real word, is "sz".
+
+Its similarity to "b" or "B" in appearance gives rise to many jokes, e.g. when
+you ask for a "Scheibe Brot" (a slice of bread) and you mix up the "b" and the
+"ß". I won't elaborate.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, August 18, 2016  6:02 PM
+
+This isn't involved for this rule, as no letters in Latin-1 are rejected (that
+is, have the NFKC_QC property = No). The only Latin-1 characters that would be
+rejected aren't allowed in identifiers anyway (macron, superscript numbers,
+etc.).
+
+Greek seems to be the highest profile language involved; some non-latin-1
+"Latin" characters, mostly ligatures, are also rejected. And then characters for
+languages like Bengali, Tibetian, Gurumukhi, and Devanagari.
+
+I was hoping to get a comment from John, who's responsible for the Greek
+examples I've seen. But I haven't been able to find them (I thought they were in
+a Rationale version, but definitely not).
+
+Anyway, it seems best to leave the rule as proposed until we get some feedback
+from someone that cares about Greek identifiers (or one of the other languages
+involved). It probably would be easier to make a special exception for a handful
+of characters after the fact (less incompatible) than to use a series of
+increasingly tight rules. Especially as it would be best to get as close as
+possible to the Unicode rules and properties.
 
 ****************************************************************
