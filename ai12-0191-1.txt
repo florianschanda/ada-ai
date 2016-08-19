@@ -237,3 +237,68 @@ behavior to change as little as possible when these two types are inevitably
 split into separate packages.
 
 ****************************************************************
+
+From: Steve Baird
+Sent: Friday, August 19, 2016  2:24 PM
+
+Pisa minutes say:
+
+   Steve volunteers to help find out what GNAT does on cases of “parts”
+   that are only dynamically known for type invariant checks.
+
+No checks for these guys. For the following example (with all assertions
+enabled) compiled with the GNAT compiler,
+
+  procedure Type_Invariant_Breaker is
+
+   type Root is tagged null record;
+
+    package Pkg is
+       type Has_Invariant is private;
+
+       procedure Oops (X : in out Root'Class);
+       procedure Rely_On_Incoming_Invariant (Y : Has_Invariant);
+    private
+       type Has_Invariant is record Lo, Hi : Integer := 0; end record
+	with Type_Invariant => (Has_Invariant.Lo <= Has_Invariant.Hi);
+    end Pkg;
+
+    type Ext is new Root with
+      record Field : Pkg.Has_Invariant; end record;
+
+    package body Pkg is
+       procedure Break_It (Xx : out Has_Invariant) is
+       begin
+	 Xx := (Lo => 1, Hi => 0);
+       end;
+
+       procedure Oops (X : in out Root'Class) is
+       begin
+	 if X in Ext'Class then
+	    Break_It (Ext (X).Field);
+	 end if;
+       end;
+
+       procedure Rely_On_Incoming_Invariant (Y : Has_Invariant) is
+       begin
+	 pragma Assert (Y.Lo <= Y.Hi);
+       end;
+    end Pkg;
+
+    Ext_Var : Ext;
+  begin
+    Pkg.Oops (Ext_Var);
+    Pkg.Rely_On_Incoming_Invariant (Ext_Var.Field);
+  end;
+
+we fail the assertion in Rely_On_Incoming_Invariant, which means that the
+preceding call to Oops didn't fail any checks. I believe this implementation
+is correct and should not be changed. The problem here is that the RM wording
+doesn't make this clear (which is the topic of this AI).
+
+The other interpretation (i.e., the one where the call to Oops would be
+required to fail an invariant check) would be better in some sense but I don't
+know how to implement it without introducing distributed overhead and a lot
+more implementation complexity than than this feature would be worth.
+
+***************************************************************
