@@ -1,4 +1,4 @@
-!standard 7.3.3(0)                                    16-06-02  AI12-0187-1/01
+!standard 7.3.3(0)                                    16-08-31  AI12-0187-1/02
 !class Amendment 16-06-02
 !status work item 16-06-02
 !status received 16-06-02
@@ -21,9 +21,9 @@ of this description, we'll call these "stable properties" of the type.
 original idea was "usually invariant properties", which is both too long and
 "invariant" already has a meaning. "Immutable" and "constant" also have been
 used, plus all of those need the prefix "usually" to weaken them. "Stable"
-doesn't seem to suffer from either of these problem; my car's oil may be
-stable, but I still change it periodically. Anyway, better names are surely
-welcome.]
+doesn't seem to suffer from either of these problems; my car's oil may be
+stable, but I still change it periodically. Anyway, the exact name isn't
+critical.]
 
 For instance, for I/O, the open status of a file and the mode of a file are 
 stable properties (only being changed by a few routines: Open, Create, Close,
@@ -50,54 +50,94 @@ This works, but has a number of disadvantages:
   on a routine);
 * The postconditions get cluttered with information that is not central to
   the routine's purpose (indeed, the ARG required the author to remove the
-  stable properties from proposed postconditions for the containers libraries);
+  stable properties from proposed postconditions for the containers
+  libraries);
 * This can require a lot of extra text, harming readability.
 
 !proposal
 
 [Author's note: This is pseudo-wording; I've described it fairly formally so
-that the rules are clear. It probably needs wordsmithing.]
+that the rules are clear. It wobbles back-and-forth from formal wording style
+to an informal description. It definitely will need formal wording (especially
+for the definition of the aspects and the syntax of the "not" lists.)]
 
-Add a type aspect Stable_Properties.
+Add a type and subprogram aspect Stable_Properties.
 
-This aspect can be given on a partial view or on a full type with no partial view.
-(It's not allowed on formal types, since it is only meaningful for primitive
-subprograms.)
+This aspect can be given on a partial view or on a full type with no partial
+view, and on primitive subprograms. (It's not allowed on formal types, since
+it is only meaningful for primitive subprograms.) The intent is that the
+subprogram version be used to override the type version when necessary; it
+is very useful as a stand-alone aspect (it makes more sense to just modify
+the postcondition in that case).
 
-The value of the aspect is a list of function names. The named functions must
-be property functions.
+For a type, the value of the aspect is a list of function names. The named
+functions must be property functions. For a primitive subprogram, the value
+of the aspect is either a list of function names, or a list of items, each being
+"not" followed by a function name; again all of the functions need to be property
+names.
+
+    AARM Ramification: For a subprogram, the functions all have "not" or none
+    do; mixing "not" functions with regular functions is not allowed.
+
+    AARM Reason: The aspect Stable_Properties for a subprogram provides a way
+    to override the properties inherited from a type.
 
 A *property function* of a type T is a function with a single parameter, that
 is a primitive operation of T or a function whose parameter is class-wide and
 covers T. The return type of a property function is nonlimited.
 
 The *stable property functions" of a type T are those denoted in the aspect
-Stable_Properties.
+Stable_Properties for T.
+
+For a primitive subprogram S, any property functions mentioned after "not" for
+the Stable_Property aspect of S shall be a stable property function of a type
+for which S is primitive.
+
+The *stable property functions for type T" for a primitive subprogram S of T are:
+   * if S has an aspect Stable_Properties specified that does not include "not",
+     those functions denoted in the aspect Stable_Properties for S;
+   * if S has an aspect Stable_Properties specified that includes "not",
+     those functions denoted in the aspect Stable_Properties for T, excluding
+     those denoted in the aspect Stable_Properties for S;
+   * if does not have an aspect Stable_Properties, those functions denoted in
+     the aspect Stable_Properties for T, if any.
+
+   AARM Discussion: A primitive subprogram can be primitive for more than one
+   type, and thus there can be more than one such set of stable properties
+   for a subprogram. This is likely to be very rare, so we try to ignore the
+   possibility in the rules.
 
 For every primitive subprogram S of a type T that is not a stable property
-function of T and whose the (explicit) postcondition
-does not mention one of the stable property functions of T, the actual
-postcondition of S includes expressions of the form F(P) = F(P)'Old, all
-"and"ed with each other and any explicit postcondition, where F is each stable
-property function of type T, and P is each parameter of S that has type T.
+function of T, the actual postcondition of S includes expressions of the form
+F(P) = F(P)'Old, all "and"ed with each other and any explicit postcondition,
+where F is each stable property function of S for type T that does not occur
+in the explicit postcondition of S, and P is each parameter of S that has type T.
 
-AARM Ramification: Any mention of any single property function will cause all of
-the properties to be excluded from the postcondition. In that case, the
-postcondition ought mention appropriate rules for all of the properties.
+   AARM Ramification: There is one F(P) = F(P)'Old subexpression for every
+   combination of stable expression function of type T and parameter of type T.
+   For instance, if there is three stable property functions for type T and two
+   parameters of type T, then there are six such subexpressions appended to the
+   postcondition.
 
-There is one F(P) = F(P)'Old subexpression for every combination of stable
-expression function of type T and parameter of type T. For instance, if there
-is three stable property functions and two parameters of type T, then there
-are six such subexpressions appended to the postcondition.
+   The resulting postcondition is evaluated as described in 6.1.1. One hopes
+   that compilers can be smart enough to prove that many of these
+   postconditions cannot fail, but that is not required here.
+   End AARM Ramification.
 
-The resulting postcondition is evaluated as described in 6.1.1. One hopes that
-compilers can be smart enough to prove that many of these postconditions cannot
-fail, but that is not required here.
-End AARM Ramification.
+For tagged types and their primitive subprograms, there is a similar aspect
+Stable_Properties'Class. These aspects works exactly like the equivalent
+Stable_Properties aspects, except that they modify the class-wide postcondition
+rather than the specific postcondition. Redundant[Unlike most class-wide
+aspects, Stable_Properties'Class is not inherited by descendant types and
+subprograms, but the enhanced class-wide postconditions are inherited in the
+normal manner.]
 
-There ought to be a similar aspect Stable_Properties'Class. This is the same
-except that it is inherited by extensions (and thus applies to primitives of
-those extensions).
+   AARM Discussion: Since class-wide postconditions are inherited by
+   descendants, we don't need the stable property functions to be inherited;
+   if they were, we'd be duplicating the checks, which we don't want. And
+   we don't want to duplicate any of the rules about class-wide postconditions,
+   so we just say that the modified postconditions is what those rules apply
+   to.
 
 !wording
 
@@ -108,19 +148,21 @@ those extensions).
 A Bairdian free association on this topic:
 
 (1) The question of whether all of these properties should be treated as a set
-or individually is answered here by treating them as a set. I did that because
-in almost every example I looked at, there was some relationship between the
-properties. Not all of the properties make sense in all cases.
+or individually is answered here by treating them individually.
 
-For instance, for I/O, Mode doesn't make sense is Is_Open is False. Thus,
+The original idea was to treat them as a set, as in most examples, here was
+some relationship between the properties. Not all of the properties make sense
+in all cases.
+
+For instance, for I/O, Mode doesn't make sense if Is_Open is False. Thus,
 if Is_Open appears in a postcondition, we don't want Mode to automatically
 appear in it. Similarly, the color of a window may not be well-defined if is 
 not visible.
 
-I considered making this a user choice (perhaps by separating the function 
-names by "and" and "or" in order to indicate grouped and separate properties),
-but that seemed to add complexity and I didn't find many instances where
-separate properties would really work.
+However, others thought that would be too inflexible. Rather, we decided to
+use a default-and-override pattern, with Stable_Properties being possible on
+individual subprogram. An example of how it would be used is given for
+procedure Close in the !example below.
 
 (2) I considered allowing more parameters on a property function, so long as
 they can be specified by literals or global objects. However, that made the
@@ -136,16 +178,17 @@ elementary types. Since the semantics of 'Old are well-defined for nonlimited
 types, and composite types like complex numbers seem likely to be useful here,
 I didn't make any such restrictions. If the result type is controlled, the
 effects might be weird, but that's the user's problem. (If that hurts, don't
-do that.)
+do that! :-)
 
 (4) I went with the simple rule for postconditions: any mention of any
 stable property function in the postcondition turns off the automatic
-stable property conditions. I could have used a more detailed rule requiring
-the stable property function to have a parameter of the type from the
-subprogram in question, and even treated the properties differently if there
-are multiple such parameters. While that would get better results in a few
-cases, it would have been pretty complex and I have been trying to make this
-as simple as possible to make it tractable.
+stable property condition for that functions. I could have used a more detailed
+rule requiring the stable property function to have a parameter of the type
+from the subprogram in question, and even treated the properties differently
+if there are multiple such parameters. While that would get better results in
+a few cases, it would have been pretty complex and I have been trying to make
+this as simple as possible to make it tractable. Moreover, one can always
+explicitly include the checks in the explicit postcondition.
 
 I excluded the postconditions of the stable properties functions themselves
 for the obvious reason: otherwise, we'd have infinite recursion (or extra,
@@ -160,12 +203,12 @@ it didn't know about (quite possibly leading to surprise Assertion_Errors).
 The easiest way to see this is to assume that someone decided to enhance
 Text_IO with preconditions and postconditions and stable properties for
 Is_Open and Mode. If stable properties applied to all parameters of the
-type (and not just primitives), then existing routines that Open and Close
-file parameters would fail with Assertion_Error!
+type (and not just primitives), then existing user-written routines that
+Open and Close file parameters would fail with Assertion_Error!
 
 It might make sense to extend that rule to cover class-wide routines with
-parameters of T'Class in the package with the declaration of T, but surely
-no further.
+parameters of T'Class in the package with the declaration of T. That is
+messy enough that I didn't do it.
 
 (6) One could imagine a similar feature for preconditions. However, predicates
 already support that need, with the exception of existing code where
@@ -175,6 +218,19 @@ that require subtype conformance, like renaming and 'Access for subprograms,
 would fail.] Since new Ada features are mainly used in new code anyway,
 (which can and should use predicates), it seems unlikely to be useful enough
 to define.
+
+(7) I understand this idea is related to the idea found within the program
+verification community of "frame conditions". Such conditions help set
+the "frame", the set of objects potentially modified by an operation.
+We could call the aspect "Frame_Conditions" with suitable changes in
+terminology. But that doesn't make the meaning very clear (unless, of
+course, you are used to program verification terminology). Moreover, the
+initial ARG response was that "stable properties" seemed like an appropriate
+description. Thus we're sticking with that term.
+
+(8) The real key to this feature is how well this works in practice, for
+packages like the containers. It will be used in AI12-0112-1, so we should
+have some fully worked out examples.
 
 !example
 
@@ -201,13 +257,21 @@ Using this feature, Text_IO could be written something like:
           with Pre => (not Is_Open(File) or else raise Status_Error),
                Post => Is_Open(File) = True and then
                        Ada.Text_IO.Mode(File) = Mode;
-             -- No implicit postcondition here, a stable property function
-             -- is named.
+             -- No implicit postcondition here, both stable property functions
+             -- are named.
 
 [Author's note: Those who will complain about writing Is_Open = True (and you
 know who you are ;-), I wrote it this way to emphasize that the postcondition
 is describing the value of the function Is_Open in addition to the property
 that the function represents. A fine distinction.]
+
+       ...
+
+       procedure Close (File : in out File_Type)
+          with Stable_Properties => not Mode,
+               Post => Is_Open(File) = False;
+             -- No implicit postcondition here, Mode was explicitly removed,
+             -- and Is_Open is used in the postcondition.
 
        ...
 
