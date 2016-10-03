@@ -1,4 +1,4 @@
-!standard A.18.2(97.1/3)                              16-06-04  AI12-0111-1/03
+!standard A.18.2(97.1/3)                              16-10-02  AI12-0111-1/04
 !class Amendment 16-06-06
 !status work item 14-05-15
 !status received 14-02-08
@@ -8,8 +8,8 @@
 !subject Tampering considered too expensive
 !summary
 
-Add a generic child package Stable for each Container type, which
-provides a *stabilized view* of an underlying regular container.
+Add a nested package Stable within each Container package, which
+provides a *stabilized view* of an underlying regular (unstable) container.
 Such stable containers have no operations that change their shape, and
 the stabilization "lock" on the underlying regular container need only
 be set once when the view is created, and released when the view goes
@@ -43,24 +43,15 @@ This can also be a way to get read-only references which could be passed
 to multiple tasks. That is you could safely pass a read-only stable
 reference to multiple tasks.
 
-We propose to define a generic child "Stable" of each of the various
-Container packages, removing operations that tamper with cursors.  Below
-we provide such a package for Vectors.  The stable vector has an access
-discriminant called "Base," which if non-null, refers to an underlying
-unstable vector which is automatically stabilized as long as the stable
-vector exists (hence the stabilized vector needs to be controlled so that
-when it goes away, it automatically releases the stabilization "lock" on
-the underlying vector).
-
-If the Base is null, then the stable vector is not based
-on some other vector, but it still cannot grow and shrink, and hence
-will be forever empty if not given an explicit initial value (by
-calling To_Vector or Copy, presumably).
-
-Assignment is a bit of a tricky issue.  We require the lengths to match
-if the target is a stabilized vector.  Note that regular ":=" will not
-work generally, because the access discriminants won't match.  However,
-all stabilized vectors with Base => null would be freely interassignable.
+We propose to define a nested package "Stable" within each of the
+various Container packages, removing operations that tamper with
+cursors. Below we provide a Stable subpackage for Vectors. The stable
+vector is of a limited type, and has a non-null access discriminant
+called "Base," with no default, which refers to an underlying unstable
+vector which is automatically stabilized as long as the stable vector
+exists (hence the stabilized vector needs to be controlled so that when
+it goes away, it automatically releases the stabilization "lock" on the
+underlying vector).
 
 Two essential properties of stable containers is that they have no tampering
 checks, and can be iterated by multiple tasks in parallel.
@@ -84,10 +75,10 @@ about tampering with elements.
 Insert new section after A.18.2 (or in a separate area at the end of
 A.18 to avoid using 4-component numbers):
 
-  A.18.2.1 The Generic Package Containers.Vectors.Stable
+  A.18.2.1 The Nested Package Containers.Vectors.Stable
 
-   The following language-defined generic package is a child of the
-   Vectors container, and provides a type Stable.Vector that represents
+   The nested package Vectors.Stable
+   provides a type Stable.Vector that represents
    a /stable/ vector, which is one that cannot grow and shrink.  Such a
    vector can be created by calling the To_Vector or Copy functions, or
    by establishing a /stabilized view/ of a regular Vector. While a
@@ -107,24 +98,23 @@ A.18 to avoid using 4-component numbers):
    some other restriction might exist due to other concurrent iterations
    or stabilized views)].
 
-   If a stable vector is declared with the Base discriminant null, there
-   is no underlying regular vector, and operations on the stable vector
-   affect only the stable vector itself.  The initializing expression of
-   the stable vector, if any Redundant[(typically a call on To_Vector or
-   Copy)], determines the Length of the vector.  By default the Length
-   is zero.  The Length of a stable vector never changes after
+   If a stable vector is declared without specifying Base, the object must
+   be initialized. The initializing expression of
+   the stable vector, Redundant[(typically a call on To_Vector or
+   Copy)], determines the Length of the vector. By default the Length
+   is zero. The Length of a stable vector never changes after
    initialization.
 
 [Author's note: Below, we have left in the original paragraph numbers
 from the Vector container because we thought they might be useful, and
 mostly because we are too lazy to remove them.]
 
-        generic
-        package Ada.Containers.Vectors.Stable is
-           pragma Preelaborate(Vectors.Stable);
-           pragma Remote_Types(Vectors.Stable);
+        ...  --  enclosing package Ada.Containers.Vectors
 
-8/3        type Vector (Base : access Vectors.Vector) is tagged private
+        package Stable is
+
+8/3        type Vector (Base : not null access Vectors.Vector) is
+              tagged limited private
               with Constant_Indexing => Constant_Reference,
                    Variable_Indexing => Reference,
                    Default_Iterator  => Iterate,
@@ -239,7 +229,10 @@ mostly because we are too lazy to remove them.]
            procedure Assign (Target : in out Vectors.Vector;
                              Source : in Vector);
 
-34.8/3     function Copy (Source : Vector; Capacity : Count_Type := 0)
+34.8/3     function Copy (Source : Vector)
+              return Vector;
+
+           function Copy (Source : Vectors.Vector)
               return Vector;
 
 54/2       procedure Reverse_Elements (Container : in out Vector);
@@ -324,9 +317,26 @@ mostly because we are too lazy to remove them.]
 
 81/2       ... -- not specified by the language
 
-82/2    end Ada.Containers.Vectors.Stable;
+82/2    end Stable;
 
-** TBD.
+     private
+        ...  --  not specified by the language
+     end Ada.Containers.Vectors;
+
+Upon creation, an object of type Stable.Vector marks the vector
+designated by the Base discriminant (the /base/ vector) to disallow
+tampering with cursors as long as the stable view of the base vector
+exists.
+
+The operations of the Stable subpackage correspond to the operations of
+the enclosing generic package Vectors that do not tamper with cursors.
+For functions that create a new vector, such as To_Vector or Copy, the
+Stable version of these first create a base object of the Vectors.Vector
+type, and then create a stable vector designating that base object.
+[Redundant: If one of these functions is used to initialize a stable
+vector object, the return object is built in place.]  The other
+operations of the Stable subpackage perform the corresponding operation
+on the vector designated by the Base discriminant.
 
 !discussion
 
@@ -344,6 +354,9 @@ concern to cases where the formal element type is indefinite, since for
 definite types, normal assignment can be used to replace objects, and
 access types will work safely across assignment to their designated
 objects.
+
+We make the stable vector type a limited type because normal assignment
+would almost certainly fail due to a mismatch of the access discriminant.
 
 !ASIS
 
@@ -2604,3 +2617,228 @@ on container operations. Might be worth trying with the latest GNAT container
 implementations.
 
 ***************************************************************
+
+From: Tucker Taft
+Sent: Sunday, October 2, 2016  9:10 PM
+
+Here is an update on the stable containers AI. [This is version /04 - Editor.]
+I don't believe Raphael had time to prototype this.
+
+Major changes -- made this into a subpackage, and made the Base discriminant
+"not null" with no default.  Began describing the semantics of the operations
+of the package, perhaps most importantly, To_Vector and Copy.  Also added a
+version of Copy that takes an unstable vector as its parameter.  Eliminated
+the Capacity parameter to Copy, as that doesn't make much sense for a stable
+vector.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Monday, October 3, 2016  3:21 PM
+
+I was in holidays for two weeks - I'll try not to take vacations just before
+an ARG meeting in the future ;) - but I'm well on my way prototyping stable
+vectors, I hope to have some results for the ARG !
+
+I do have some questions though:
+
+       type Vector (Base : not null access Vectors.Vector) is
+         tagged limited private
+           with Constant_Indexing => Constant_Reference,
+           Variable_Indexing => Reference,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Element_Type;
+
+Why do you need the Base to be an access discriminant ? The rationale may be
+obvious, it is not mentioned in the AI, but to my mind it mostly causes
+problems in the implementation. How do you plan to define Empty_Vector,
+knowing that Base can't be null, and that you cannot use Vectors.Empty_Vector
+because it will appear later ?
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  3:35 PM
+
+> Why do you need the Base to be an access discriminant ? The rationale 
+> may be obvious, it is not mentioned in the AI, but to my mind it 
+> mostly causes problems in the implementation.
+
+Without an access discriminant, I can't imagine how the user will specify which
+unstable vector the stable vector will control.
+
+> ... How do you plan to define Empty_Vector, knowing that Base can't be null,
+> and that you cannot use Vectors.Empty_Vector because it will appear later ?
+
+Good point.  We probably have to make Empty_Vector into a parameterless
+function, now that this is a nested package.  E.g.:
+
+    function Empty_Vector return Vector is
+    begin
+       return Result : Vector(Base => new Vectors.Vector'(Empty_Vector));
+    end Empty_Vector;
+
+The result would be "built in place" at the point of call.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Monday, October 3, 2016  3:56 PM
+
+> Without an access discriminant, I can't imagine how the user will specify
+> which unstable vector the stable vector will control. 
+
+Via a constructor function ? That would be a better option I think, make the
+type completely private, and have one/several constructor functions if you
+need to enable the user to construct them directly.
+
+Also what do you mean by user ? To my mind a stable container can only be
+constructed via functions on the container itself, something like:
+
+function Stable_View (Self : Vector) return Stable.Vector;
+
+
+>>... How do you plan to define Empty_Vector, knowing that Base can't be null, 
+>>and that you cannot use Vectors.Empty_Vector because it will appear later ? 
+
+>Good point.  We probably have to make Empty_Vector into a parameterless
+>function, now that this is a nested package.  E.g.: 
+>
+>   function Empty_Vector return Vector is 
+>   begin 
+>      return Result : Vector(Base => new Vectors.Vector'(Empty_Vector)); 
+>   end Empty_Vector; 
+>
+>The result would be "built in place" at the point of call. 
+
+I think this is a bit kludgey, I'd like to be sure that the access
+discriminant is needed first.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  4:18 PM
+
+> Via a constructor function ? That would be a better option I think, 
+> make the type completely private, and have one/several constructor 
+> functions if you need to enable the user to construct them directly.
+
+Not quite sure how that would work from an accessibility point of view.
+Remember that we are taking an existing object, and creating a wrapper around
+it. Using an access discriminant the only requirement is that the existing
+object be aliased, and since Vector is a tagged type, when passed as a
+parameter it is always aliased.
+
+> Also what do you mean by user ? To my mind a stable container can only 
+> be constructed via functions on the container itself, something like:
+>
+> function Stable_View (Self : Vector) return Stable.Vector;
+
+That is not the model proposed by this AI.  Instead, you write:
+
+    X : aliased My_Vectors.Vector;
+
+    ...
+
+    declare
+       Stable_X : My_Vectors.Stable.Vector(Base => X'Access);
+       ...
+
+>>> ... How do you plan to define Empty_Vector, knowing that Base can't 
+>>> be null, and that you cannot use Vectors.Empty_Vector because it will appear later ?
+>>
+>> Good point.  We probably have to make Empty_Vector into a 
+>> parameterless function, now that this is a nested package.  E.g.:
+>>
+>>    function Empty_Vector return Vector is
+>>    begin
+>>       return Result : Vector(Base => new Vectors.Vector'(Empty_Vector));
+>>    end Empty_Vector;
+>>
+>> The result would be "built in place" at the point of call.
+>
+> I think this is a bit kludgey, I'd like to be sure that the access 
+> discriminant is needed first.
+
+This situation is in some sense exactly what access discriminants were
+designed for. It seems odd not to use them since they are the most natural
+solution for this sort of wrapper.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Monday, October 3, 2016  4:24 PM
+
+> Good point.  We probably have to make Empty_Vector into a 
+> parameterless function, now that this is a nested package.  E.g.:
+> 
+>     function Empty_Vector return Vector is
+
+Functions are better anyway, because they can be overloaded.
+It's annoying when the compiler complains, "Which Empty_Vector did you mean?"
+"The one of the right type, of course, YA BIG DUMMY!!"  ;-)
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Monday, October 3, 2016  4:29 PM
+
+Ok, thank you for the precisions, that makes sense. I'll go for the
+Empty_Vector function then.
+
+***************************************************************
+
+From: Edmond Schonberg
+Sent: Monday, October 3, 2016  5:05 PM
+
+> Ok, thank you for the precisions, that makes sense. I'll go for the
+> Empty_Vector function then.
+
+Not the precisions again :-)!
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  4:42 PM
+
+...
+> Functions are better anyway, because they can be overloaded.
+> It's annoying when the compiler complains, "Which Empty_Vector did you 
+> mean?"  "The one of the right type, of course, YA BIG DUMMY!!"  ;-)
+
+There'd be no major problem in allowing constants to be overloaded (the
+profile is obvious, just like it is for enumeration literals). (Having
+variables overloaded would be a bit weird, but not a difficult problem
+either.) It's unfortunate that Ichbiah didn't take the model to that obvious
+point, because most of the issues with maintenance problems come from
+non-overloadable entities.
+
+I researched this once in the past (I think in the context of the
+"integrated package" proposal) and concluded that it wouldn't cause real
+issues (mostly, it would make illegal programs legal, which hardly could be
+a problem). But there is a lot of FUD when it comes to visibility, and I fully
+understand. Plus it would be fairly complex in terms of language wording, so I
+don't suppose there would be enough support to try again.
+
+(Similarly, there is no problem with allowing untagged types in the private
+part of a protected object [no other unit has visibility, so the usual
+problems of where operators become visible in the visible view are moot].
+Another thing that there is no will to change. I'd rather fix these annoyances,
+which would make Ada better for everyone, rather than spend time on
+limited-use features. YMMV.)
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  5:41 PM
+
+> Here is an update on the stable containers AI.
+
+In the third paragraph of A.18.2.1, there is a Redundant section which ends
+(but does not start) with a paren. I put a starting paren at the start of the
+Redundant text (that's what was in the previous version). Perhaps you meant to
+delete both parens instead? (A closing paren with no opening paren does not
+work.)
+
+***************************************************************
+
