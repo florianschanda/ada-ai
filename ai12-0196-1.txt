@@ -1,4 +1,4 @@
-!standard A(3/4)                                 16-06-07   AI12-0196-1/01
+!standard A(3/4)                                 16-09-23   AI12-0196-1/02
 !standard A.18(5)
 !class Amendment 16-06-07
 !status work item 16-06-07
@@ -15,8 +15,8 @@ Parallel processing of containers
 
 With the advent of multi-core computers, the performance of certain algorithms
 and data structures can be improved. The Ada standard containers are such data
-structures that could be involved in lengthy processing, and could be candidates for
-parallelism. Unfortunately, Ada currently says that for concurrent calls,
+structures that could be involved in lengthy processing and could be candidates
+for parallelism. Unfortunately, Ada currently says that for concurrent calls,
 the language-defined subprograms are only reentrant if the parameters of the
 call are nonoverlapping.
 Most container calls involve a controlling parameter of the container type,
@@ -29,32 +29,29 @@ from the container.
 
 !proposal
 
-We propose to allow operations that obtain cursors or reference objects
-to be concurrently callable, and to specify that cursors and reference types
-only overlap with the element they designate.
+We propose to allow certain operations that manipulate or examine cursors
+(ie. Next, Previous, and Element) to be reentrant if the calls only accept
+a Cursor as a parameter. This is achieved by specifying that cursors only
+overlap with the element they designate. For Vector
+containers, we also specify that To_Cursor is Reentrant.
 
 !wording
 
-Add after A 2
-"Certain language-defined subprograms are defined to be concurrently callable.
-A *concurrently callable* subprogram supports reentrancy of concurrent calls.
+Apply the following modifiations
 
-A 3(4) "The implementation shall ensure
-that each language-defined subprogram is reentrant in the sense that
-concurrent calls on any language-defined subprogram perform as specified,
-so long as {either the subprogram is concurrently callable or} all objects
-that are denoted by parameters that could be passed
-by reference or designated by parameters of an access type are nonoverlapping. "
-
-Reason: We relax the reentrancy rules for concurrently callable subprograms,
-to allow parallel processing.
+A 3(4) "The implementation shall ensure that each language-defined subprogram
+is reentrant in the sense that concurrent calls on any language-defined
+subprogram{s (possibly the same)} perform as specified, so long as all objects
+that are denoted by parameters that could be passed by reference or designated
+by parameters of an access type are nonoverlapping."
 
 A.18 (2/2) "A cursor referencing an element in a container is considered to be
- overlapping {only} with the {element}[container object itself]."
+ overlapping {only} with the {element}[container] object itself."
 
 A.18 (2.a/2) "Reason: The last sentence is intended to clarify that operations
- that just use a cursor are on the same footing as operations that use
- {the element}[a container] in terms of the reentrancy rules of Annex A. "
+ that just use a cursor are {reentrant if the cursor objects designate
+ different elements of the container}[on the same footing as operations that
+ use a container] in terms of the reentrancy rules of Annex A. "
 
 A.18 (2.b/4) Add "Ramification: A cursor is not considered to overlap with
  the associated container, thus parallel operations involving a set of cursors
@@ -63,14 +60,18 @@ A.18 (2.b/4) Add "Ramification: A cursor is not considered to overlap with
 
 A.18 (5.o/2)
  "Thus, it is only necessary for a user to protect a container if a single
-  container needs to be used by multiple tasks {and the operations applied to
-  the container are not otherwise specified to allow such concurrent usage}."
+  container needs to be used by multiple tasks {and concurrent calls to
+  the container are not reentrant}."
 
-A.18.2 (125) Append "To_Cursor is concurrently callable."
+A.18.2 (125) Append "To_Cursor is reentrant."
 
-Similarly add "xxx is concurrently callable" to all container subprograms that
-are used to obtain a cursor or reference, or manipulate a cursor
- (eg. First, Next, Previous, Last, etc)
+Add
+A.18.2 (125.1) "Ramification: Without the preceding rule, To_Cursor would not
+be considered reentrant for concurrent calls on the same container object
+by the reentrancy rules in A.3, since the container object of the concurrent
+calls would overlap with itself. We want this to be
+reentrant to allow parallel processing of Vectors to allow the Vector elements
+to be split into separate "chunks" of processing.
 
 A.18.6 (147.1) Append "An object of a Constant_Reference_Type
   is considered to be overlapping only with the object designated by Element."
@@ -111,34 +112,24 @@ above overlapping rule to say that a cursor is treated only as though it
 overlaps with the element in the container that it designates. So song as
 cursor operations are not applied to two or more cursors designating the same
 element of the container, concurrent calls to separate cursors of the same
-container object are possible.
+container object are possible. This allows various cursor manipulation
+subprograms (eg. next, previous, and Elemen), to be executed concurrently in
+parallel, since they only accept a single parameter.
 
-This still leaves us with the problem of obtaining the multiple cursors in
-the first place, since all such calls typically involve a parameter that
-is the container associated with the cursor to be generated, and thus
-are considered to be overlapping calls that are not reentrant if the calls
-are applied to the same container object.
+For Vector containers, this still leaves us with the problem of obtaining the
+multiple cursors in the first place, since one normally would want to directly
+obtain the initial cursor for each chunk of the vector. The To_Cursor
+subprogram however has a parameter that is the container associated with the
+cursor to be generated, and thus still is considered to be an overlapping call
+that is not reentrant if concurrent calls are applied to the same container
+object.
 
-To allow cursors (or reference types) to be generated concurrently, we define
-the term "concurrently callable", which can be applied to language-defined
-calls. Any language-defined call that is specified to be "concurrently callable"
-requires the implementation to support concurrent calls for that subprogram.
-It is expected in the usual case that no special locking or handling will be
-needed to satisfy this requirement.
-
-We then say that all language-defined container subprograms that obtain cursors
-or reference types (eg. First, Next, Previous, Last, Reference, Constant_Reference,
-To_Cursor) are concurrently callable.
-
-This allows parallel processing of the container libraries. All other rules
-involving tampering and parameter overlapping still apply, which means that
-insertion or deletion of elements into or from the container are not allowed
-while parallel operations to that container are occurring concurrently.
-
-Calls such as Replace_Element cannot be made concurrently because of the
-tampering rules, but updates to a container can be performed concurrently,
-using variable indexing, since the update to the container does not involve
-a language-defined call.
+To_Cursor however, is trivial to implement as a reentrant routine since it only
+needs to contruct an object that designates the container and contains an
+index to the vector. To_Cursor has no side effects, and is thus what we might
+call a pure function, if the language defined such a thing. We specify in the
+wording that this subprogram is reentrant to ensure that it can be safely
+called.
 
 Containers that allow random access such as vectors are ideally suited for
 parallel processing, but other containers such as Doubly_Linked_Lists can
@@ -151,6 +142,28 @@ the entire container, while other threads of execution can be started as the
 iterating thread reaches the next chunk of iterations to be processed in
 parallel. These parallel threads then iterate through their respective chunks
 applying the processing in parallel.
+
+Since Next, Previous, and Element are all that is needed for this type of
+parallel processing, which are now all defined to be reentrant, no container
+specific wording is needed for these types of containers.
+
+This AI provides the bare minimum to allow parallel processing of the container
+libraries. All other rules involving tampering and parameter overlapping still
+apply, which means that insertion, deletion, or replacing elements into or from
+the container are not allowed while parallel operations to that container are
+occurring concurrently.
+
+Calls such as Replace_Element cannot be made concurrently because of the
+tampering rules. Many of the container library calls could be
+made reentrant without requiring locking, particularly if tampering checks are
+suppressed.
+
+A full parallelism solution is needed for parallel loops and container
+iteration and usage, but that is expected to be covered by a different AI or
+set of AIs that deal with other issues such as eliminating data races.
+
+This AI just allows some basic parallelism to occur with minimal impact to
+the standard.
 
 !examples
 
@@ -420,3 +433,153 @@ Sounds good.
 
 ****************************************************************
 
+From: Brad Moore
+Sent: Friday, September 23, 2016  7:35 PM
+
+Here is my homework for ai12-0196-1. [This is version /02 of the AI - Editor.]
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, September 26, 2016  8:09 AM
+
+Looks good.
+
+Are things like First reentrant?  Do we need to say so?
+
+> overlaps with the element in the container that it designates. So song 
+> as
+                                                                    ^^^^ "So long as"
+
+> cursor operations are not applied to two or more cursors designating 
+> the same
+
+>       Parallel_Loop (From           => Integer.First,
+
+Integer_List.First
+
+****************************************************************
+
+From: Brad Moore
+Sent: Monday, September 26, 2016  10:05 AM
+
+> Are things like First reentrant?  Do we need to say so?
+
+First/Last is not reentrant since it has a Container parameter, and also
+because it is not needed for parallelism. For Vectors, To_Cursor would be used
+to generate all the cursors from index values. Length would be called before
+the parallelism to determine the chunk boundaries. For the other containers,
+First (or Last) is used to obtain the initial cursor, but that is done
+sequentially before the parallelism starts, and is not called again.
+
+To add some basic parallelism capabilities to the containers, we only need
+Next, Previous, Element, and To_Cursor to be reentrant.
+
+We would really like calls like Replace to be reentrant as well, but I'm
+thinking we would want to rely on the capabilities of another AI, such as
+the Global aspects, to make this possible. I suppose we could just say that
+Replace is reentrant, but it might be tricky to explain why or how it is.
+
+I think it would probably be good to mention this, probably as an AARM note
+or ramification.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  9:12 PM
+
+Question: Is "reentrant" sufficiently defined to use it in the way that it is
+used in A.18.2(125) here: "To_Cursor is reentrant."
+
+A 3(4) sort of defines it, but I don't see how that definition is sufficient
+to apply it as a subprogram requirement. After all, it says that all
+language-defined subprograms are reentrant, so that would make the above
+statement the null statement. I'm pretty sure that's not what we want.
+
+My presumption from the meeting is that we were going to define the term
+"reentrant subprogram" in some meaningful way and then we could apply that
+to To_Cursor and any other subprograms that need it.
+
+Perhaps an alternative would be to say that "for the purposes of determining
+whether To_Cursor is required to be reenterant, the Container parameter is
+considered to not overlap with any other object Redundant[even with itself]".
+Since this seems to be the only place where you need to override the default
+meaning of A 3(4).
+
+---
+
+I have to wonder if it would be better to define that all language-defined
+functions with Global = null (what Brad mentions as a "pure function") are
+fully reenterant. Then apply Global = null to To_Cursor and the other functions
+in question. Maybe too radical.
+
+---
+
+OTOH, the decscription of To_Cursor is pretty simplistic. It says:
+
+  To_Cursor however, is trivial to implement as a reentrant routine since it
+  only needs to contruct an object that designates the container and contains
+  an index to the vector. To_Cursor has no side effects, and is thus what we
+  might call a pure function, if the language defined such a thing. We specify
+  in the wording that this subprogram is reentrant to ensure that it can be
+  safely called.
+
+This assumes a very particular implementation of both cursors and To_Cursor.
+
+First of all, a vector cursor needs to have some sort of reference to the
+element, but it doesn't necessarily need to be the index of the element. It
+could use a pointer at the element instead (Matt and I had a long discussion
+on this point). This implementation would necessarily make To_Index more
+expensive, but that could be implemented with an address calculation, and it
+certainly would make element access by cursor cheaper. That's especially true
+if the implementation choose a chunked allocation implementation rather than
+allocating one large glob. (That would still meet the O(n) requirements if the
+chunk size were fixed and it used a two-level index. Such an implementation
+would be optimized for Vector expansion, which might be valuable in some
+circumstances.) Also note that if both of these things are true, creating a
+cursor will require reading data from the container object.
+
+Similarly, the Janus/Ada cursors will include serial numbers used to detect
+dangling cursors. Those serial numbers will need to be initialized from the
+matching element in the vector -- so again To_Cursor will need to read the
+container object. (Indeed, that is true for all cursor operations that create
+a new cursor, including Next and Previous.)
+
+We definitely don't want to prevent implementations like either of these. So
+we need to be careful about what assumptions we make about the implementation.
+(I could imagine To_Cursor having a side-effect; luckily neither of these
+implementations do. It might be OK to ban such things, but we have to remember
+that we're adding additional constraints on implementations, and ensure that
+we're not throwing out the baby with the bathwater.)
+
+At the very least, the discussion of To_Cursor shouldn't refer to any
+particular implementation model, but rather discuss the abstract properties of
+a cursor.
+
+---
+
+Since Next, Previous, and Element are all that is needed for this type of
+parallel processing, which are now all defined to be reentrant, no container
+specific wording is needed for these types of containers.
+
+???
+
+This statement seems like nonsense. You seem to have left out a bunch of steps!
+
+You ought to explain why Next, et. al. are "now defined to be reentrant", since
+there is no wording that does that and the logic needed to figure that out is
+not obvious. (That is, say something about cursors no longer being overlapping,
+so these functions are now required to be reenterant. The normative wording is
+all about overlapping, after all.)
+
+---
+
+
+Typos: paragraph 5 of the discussion: "(eg. next, previous, and Elemen)," the
+capitalization is wrong and a T is missing.
+
+Bob had two typos as well.
+
+I updated the AI fixing these typos after posting your original version.
+
+****************************************************************
