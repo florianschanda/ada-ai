@@ -1,4 +1,4 @@
-!standard 4.3(2)                                    16-09-29    AI12-0127-1/04
+!standard 4.3(2)                                    16-10-05    AI12-0127-1/05
 !standard 4.3(4)
 !standard 4.3.3(3)
 !standard 4.3.4(0)
@@ -103,33 +103,39 @@ some (but typically not all) components of the copy.
 
 Syntax
 
-  delta_aggregate ::= (*base_*expression with delta delta_aggregate_association)
+  delta_aggregate ::= record_delta_aggregate |
+                      array_delta_aggregate
 
-  delta_aggregate_association ::=
-    record_component_association_list |
-    array_component_association_list
+  record_delta_aggregate ::=
+    (*base_*expression with delta record_component_association_list)
+
+  array_delta_aggregate ::=
+    (*base_*expression with delta array_component_association_list)
 
 Name Resolution Rules
 
-The expected type for a delta_aggregate shall be a single array type, record
-type, or record extension. The expected type for the *base_*expression 
-is the type of the enclosing delta_aggregate.
+The expected type for a record_delta_aggregate shall be a record type,
+or record extension.
 
-The expected type for expression in a delta_aggregate depends on which form
-of delta_aggregate_association is used: a record type for
-record_component_association_list, and a one-dimensional array type for
-array_component_association_list.
+The expected type for an array_delta_aggregate shall be a single array
+type.
 
-For record delta aggregates, the expected type and applicable index constraint
-of the expression in each record_component_association is defined as for a
-record_component_association occurring within a record aggregate.
+The expected type for the *base_*expression of any delta aggregate is
+the type of the enclosing delta_aggregate.
 
-For array delta aggregates, the expected type for each discrete_choice in an
-array_component_association is the index type of type of the delta aggregate.
+For a record_delta_aggregate, the expected type and applicable index
+constraint of the expression in each record_component_association is
+defined as for a record_component_association occurring within a
+record aggregate.
+
+For an array_delta_aggregates, the expected type for each
+discrete_choice in an array_component_association is the index type of
+type of the delta aggregate.
 
 The expected type and applicable index constraint of the expression in
-array_component_association is defined as for an array_component_association
-occurring within an array aggregate of the type of the delta aggregate.
+array_component_association is defined as for an
+array_component_association occurring within an array aggregate of the
+type of the delta aggregate.
 
 Legality rules
 
@@ -147,33 +153,40 @@ rules as they do for record aggregates (see 4.3.1).
 For an array delta aggregate, the array_component_association shall not use
 the box symbol <>, and the discrete_choice shall not be others.
 
-For an array delta aggregate, the dimensionality of the type of the delta
-aggregate shall be 1.
+For an array delta aggregate, the dimensionality of the type of the
+delta aggregate shall be 1.
 
-For a delta aggregate the expression in a record_component_association or a
-array_component_association shall not be of a limited type.
+For a delta aggregate the expression in a
+record_component_association, or a array_component_association shall
+not be of a limited type.
+
+AARM Note: The *base_*expression may be of a limited type (for example
+a record with limited components), the above rule only makes sure we
+do not assign to such a limited component.
 
 Dynamic Semantics
 
 The evaluation of a delta aggregate begins with evaluating the expression
 of the delta aggregate and using that value to create and initialize the
-aggregate's anonymous object [following the same rules as for initializing
-the object denoted by 'Old (see 6.1.1) except in the case where the
-anonymous object is built in place (see 7.6)]. Next, for each component for
-which an expression is provided, the expression is evaluated and assigned
-to that component of the object [just as is done for a component of a
-record_aggregate or an array aggregate]. In the case of an array component,
-the associated index expression for each dimension is also evaluated and
-used in determining the target component just as in any array indexing
-operation. As with any aggregate, evaluation of a delta aggregate then
-denotes the associated anonymous object.
+aggregate's anonymous object.
+
+AARM Note: This follows the same rules as for initializing the object
+denoted by 'Old (see 6.1.1) except in the case where the anonymous
+object is built in place (see 7.6).
+
+Next, for each component for which an expression is provided, the
+expression is evaluated and assigned to that component of the object.
+In the case of an array component, the associated index expression is
+also evaluated and used in determining the target component just as in
+any array indexing operation. As with any aggregate, evaluation of a
+delta aggregate then denotes the associated anonymous object.
 
 AARM Ramification: As with 'Old, this means that the underlying tag (if any)
 associated with the delta aggregate is that of the expression in
 delta_aggregate and not that of the nominal type of the expression in
 delta_aggregate.
 
-AARM To be honest: the anonymous object associated with the evaluation of a
+AARM To Be Honest: the anonymous object associated with the evaluation of a
 delta aggregate begins its life as a variable, not a constant (Ada RM 3.3
 notwithstanding). This must be the case because the object is initialized
 and then subsequently modified. After evaluation of the delta aggregate is
@@ -182,57 +195,75 @@ an extended return statement can provide a variable view of an object that
 will eventually be a constant object after the function returns its result
 via "build in place".
 
-For a record delta aggregate, the order of the subsequent assignments is
-unspecified. For an array delta aggregate, the subsequent assignments
-(including all associated expression evaluations) are performed in the
-order in which the array_component_association_list is given; within a
-single array_component_association, in the order of the discrete_choice_list;
-and within the range of a single discrete_choice, in ascending order.
+For a record delta aggregate, the order of the subsequent assignments
+is unspecified. For an array delta aggregate, the subsequent
+assignments (including all associated expression evaluations) are
+performed in the order in which the array_component_association_list
+is given; within a single array_component_association, in the order of
+the discrete_choice_list; and within the range of a single
+discrete_choice, in ascending order.
 
 Examples
 
+Simple use in a postcondition:
+
   Post => D = (D'Old with delta Day => 12)
-  --  Use in a postcondition.
+  --  see 3.8 for type Date
+
+  Post => V = (V'Old with delta A .. B => 42.0, V'First => 0.0);
+  --  see 3.6 for type Vector
+
+The base expression can be non-trivial:
 
   N := (Min_Cell (L) with delta Value => 42);
-  --  Expression can be more than just an a simple object reference.
+  --  see 6.1 for declaration of Min_Cell
+
+  A1 := ((1, 2, 3) with delta Integer (Random * 3.0) => 14.2);
+  --  see 3.6 for declaration of type Vector
+  --  see 6.1 for declaration of Random
 
   R := ((D with delta Day => 12) with delta Day => 42);
-  --  These aggregates can be nested arbitrarily.
+  --  see 3.8 for type Date
+
+The base expression may also be class-wide:
 
   function Translate (P : Point'Class; X, Y : Float) return Point'Class
   is (P with delta X => P.X + X,
                    Y => P.Y + Y);
-  --  Delta updates can be classwide.
-
-  Post => V = (V'Old with delta A .. B => 42, V'First => 0);
-  --  Example of an array delta aggregate.
-
-  A1 := ((1, 2, 3) with delta Integer (Random * 3.0) => Y);
-  --  Combining an aggregate with a delta aggregate
+  --  see 3.9 for declaration of type Point
 
 Add after 7.5(2.10/3):
 
-* the expression of a delta_aggregate (see 4.3.4)
+* the *base_*expression of a record_delta_aggregate  (see 4.3.4)
+
+Ramification: Note this does not permit the *base_*expression of an
+array_delta_aggregate to be of limited type as this is a useless
+construct (you would not be able to update anything).
 
 !discussion
 
 SPARK 2014 defines an attribute Update for this purpose. Using this
 attribute, the call in the question can be expressed as:
-   Foo (R'Update(Color => Black));
+   Foo (R'Update (Color => Black));
 
 We believe it is better to use aggregate syntax for this, as we certainly want
 aggregate semantics relative to temporaries, build-in-place, limited types,
 resolution, and the like to apply. Additionally, by using aggregate notation,
 we can reuse some of the existing definitions for aggregate elements.
 
+Multi-dimensional array aggregates
+----------------------------------
+
+This will be a separate AI.
+
 Discriminants
 -------------
-Should we allow discriminants in record updates? The would have to be
-listed first, and require any variant section to be completely updated.
+Should we allow discriminants in record updates?
 
-I think no (at least initially) since handling resized arrays and
-disappearing components sounds super awkward.
+We decided "No".
+
+The would have to be listed first, and require any variant section to
+be completely updated.
 
 !examples
 
@@ -245,6 +276,8 @@ The postcondition example can be written as:
    procedure Foo (Fighters : in out Rec)
       with Post => (Fighters.Colour = Black and
                     Fighters = (Fighters'Old with delta Shape => Trapazoid));
+
+Also see examples in the !wording section.
 
 !ASIS
 
@@ -1403,3 +1436,54 @@ acceptable. I don't have much hope of fixing Heave Beard but I don't plan to
 let anyone else get away with it consistently.
 
 ****************************************************************
+
+From: Florian Schanda
+Sent: Wednesday, October 5, 2016  6:10 AM
+
+Homework (attempt 2) for AI12-0127-1 (delta aggregates) [This is version /05
+of the AI - Editor.]
+
+And again, with comments from the mailing list applied.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, October 5, 2016  12:12 PM
+
+A few minor points.
+
+> A (record, array) delta aggregate yields a composite value resulting 
+> from copying another value of the same type
+
+This is informal introductory text, so I'd suggest replacing "copying"
+with "starting with" because the type of the aggregate can be limited.
+We don't want to suggest that we are copying limited values.
+
+>
+> The expected type for a record_delta_aggregate shall be a record type, 
+> or record extension.
+>
+> The expected type for an array_delta_aggregate shall be a single array 
+> type.
+
+Why is the word "single" missing in the record case?
+Note that the analogous rule in 4.3.1 says "shall be a single record type
+or record extension".
+
+> For an array_delta_aggregates, the expected type for each 
+> discrete_choice in an array_component_association is the index type of 
+> type of the delta aggregate.
+
+Only a language lawyer would care about this one, but ...
+
+A name resolution rule shouldn't depend on a legality rule.
+So strictly speaking this should really say something like "the first index
+type" even though
+    a) later on a legality rule will impose a requirement that that
+       the array type's dimensionality is 1; and
+    b) the text is clearer to the casual reader as it stands and
+       would probably require a clarifying note after this
+       "correction".
+
+****************************************************************
+
