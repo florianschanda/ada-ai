@@ -1,4 +1,4 @@
-!standard 5.5.2(2/3)                                  16-06-06  AI12-0189-1/02
+!standard 5.5.2(2/3)                                  16-10-04  AI12-0189-1/03
 !class Amendment 16-06-02
 !status work item 16-06-02
 !status received 16-05-06
@@ -7,37 +7,36 @@
 !subject loop-body as anonymous procedure
 !summary
 
-** TBD.
+Provide an iterator syntax which results in creating an
+access-to-procedure value designating a loop-body procedure, and passing
+that access value to a named procedure for iteration.  This enables a
+convenient user-defined iteration mechanism that does not require
+defining a separate cursor-based iterator abstraction.
 
 !problem
 
-[Editor's note: Both Randy and Tucker wrote problem statements for this AI
-and since they're rather disjoint, I'm presenting both. The next author will
-have to reconcile them:]
+There are several language-defined operations that provide iteration by
+taking an access-to-procedure from the caller and calling back to the
+designated procedure once for each element of the iteration.  It would
+be nice if there were a convenient syntax for specifying the body for
+this call-back, without having to start a new declare-block and declare
+a named procedure only to pass the 'Access of it exactly once to the
+iteration operation.
 
-[Randy:]
-
-Currently, the way to create an iterator for some abstraction is to create an
-implementation of the iterator interface. This requires the invention of a
-cursor type, and often the use of the Rosen technique (as the iterator object
-parameters of the iterator interface are of mode "in").
-
-But not all abstractions have natural cursors. Moreover, some have multiple
+Currently the only way to create a user-defined iterator for some
+abstraction that can be used with a "for ... loop" is to create an
+implementation of the iterator interface. This requires the invention of
+a cursor type, and often the use of the Rosen technique (as the iterator
+object parameters of the iterator interface are of mode "in"). But not
+all abstractions have natural cursors. Moreover, some have multiple
 items (key - value pairs are particularly common).
 
-Most of these abstractions (like Ada.Directories and
-Ada.Environment_Variables) already have closed iterators that do not expose
-cursors. If we could map to them, we could simplify many iterators without
-adding ridiculous amounts of new capabilities.
-
-[Tucker:]
-
-There are several language-defined operations that provide iteration by taking
-an access-to-procedure from the caller and calling back to the designated
-procedure once for each element of the iteration.  It would be nice if there
-were a convenient syntax for specifying the body for this call-back, without
-having to start a new declare-block and declare a named procedure only to pass
-the 'Access of it exactly once to the iteration operation.
+Providing support for the access-to-procedure approach with "for ...
+loop" could provide a useful alternative for abstractions where the
+cursor approach doesn't work as well.  Some of these abstractions (like
+Ada.Directories and Ada.Environment_Variables) already have closed
+iterators that do not expose cursors. If we could support them, we could
+simplify many iterators without adding multiple complex constructs.
 
 !proposal
 
@@ -73,55 +72,26 @@ iterator_procedure_call. In the absence of such an association, it is
 equivalent to the actual for the last parameter of the called procedure
 being specified as <>.
 
-An exit, return, goto, or other escape from such a loop will be implemented
-by an unhandlable exception, essentially the way asynchronous transfer of
-control is implemented.  This will be buried in the "de-sugaring" process, and
-can be done in an implementation-defined manner.  
+An exit, return, goto, or other transfer of control out of the loop is
+allowed.  Such a transfer of control causes the named procedure to which
+the loop-body procedure is passed to be completed and left
+[Redundant(resulting in normal finalization)], followed by a transfer of
+control to the target of the original transfer of control that was
+within the loop.  The procedure calling the loop-body procedure must use
+finalization if it wants to perform any "last wishes" when the loop body
+procedure exits prematurely via a transfer of control.
 
 Implementation Note
 
-If we want to define a portable mechanism for implementing this loop
-escape, either we specify use of asynchronous transfer of control, or we
-define a new kind of exception that is *not* handled by "others" but is
-instead only handleable when named explicitly.  This might be called a
-"private exception."  E.g., given a loop with an exit such as:
-
-     for (Key, Elem) of My_Map.Iterate loop
-         Put_Line(Key_Type'Image(Key) & " => " &
-           Elem_Type'Image(Elem));
-         exit when Key = 42;
-     end loop;
-
-after being "de-sugared" the code for the loop might be:
-
-   declare
-      Exit_Loop : private exception;
-      
-      procedure Loop_Body(Key : Key_Type; Elem : Elem_Type) is
-      begin
-         Put_Line(Key_Type'Image(Key) & " => " &
-           Elem_Type'Image(Elem));
-         if Key = 42 then
-            raise Exit_Loop;
-         end if;
-      end Loop_Body;
-   begin
-      My_Map.Iterate(Loop_Body'Access);
-   exception
-      when Exit_Loop =>
-         null;
-   end;
-
-An exception declared as "private" would not be caught by a "when
-others" inside the Iterate procedure, and since there is no way to name
-this locally declared private exception elsewhere, we know the only
-handler is the one provided by the de-sugaring.  Multiple private
-exceptions could be declared if there are multiple ways the loop body is
-escaped (e.g. an exit, a goto, and a return).
-
-But as mentioned above, we can allow the implementation to support escaping
-a loop anyway it sees fit, so long as it can't be hindered by the
-Iterate procedure.     
+The implementation may use various techniques to implement this transfer
+of control out of the loop-body procedure.  Possibilities include the
+mechanism used to implement asynchronous transfer of control (ATC), an
+unhandleable exception, or some more direct use of the implementation's
+finalization mechanism.  One important simplification is that this
+transfer of control is not signaled by a separate task, but is rather
+caused by an action in the task executing the body designated by the
+access-to-procedure value.  That could presumably make it simpler and
+safer than ATC.
 
 !wording
 
@@ -186,6 +156,17 @@ the Element:
 Note that this approach eliminates the need for creating References for
 each element of the map, since we are using the normal semantics of
 in-out parameters to provide access to the appropriate element.
+
+We considered various implementation approaches for handling a transfer
+of control from the loop body, including the notion of a "private"
+exception which was not handled by "others."  We ultimately left it
+unspecified. Conceivably some future AI could try to define a portable
+mechanism, but this seems an unnecessary complication for this AI, and
+is almost certain to be less efficient than some implementation-specific
+approach, which can tap directly into the finalization mechanism used by
+the implementation.  We made it clear that the only way to specify "last
+wishes" for a routine calling a loop-body procedure was to use
+finalization.
 
 !ASIS
 
@@ -1197,5 +1178,74 @@ down the line. I also included my one-line discussion, which notes that
 AI12-0009-1 and AI12-0188-1 are both unnecessary if this capability is
 provided. (Which makes a nice lead-in for your examples, which illustrate that
 exactly.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 4, 2016  10:26 PM
+
+Here is an update.  I didn't make much of a change, except to decide that the
+transfer of control out of a loop body is permitted, the implementation has to
+support it, and the caller of a loop-body procedure has to use finalization if
+they have any "last wishes" they want honored if the loop-body procedures exits
+via a transfer of control.
+
+[This is version /03 of the AI - Editor.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 5, 2016  5:02 PM
+
+> Here is an update.  I didn't make much of a change, except to decide 
+> that the transfer of control out of a loop body is permitted, the 
+> implementation has to support it, and the caller of a loop-body 
+> procedure has to use finalization if they have any "last wishes"
+> they want honored if the loop-body procedures exits via a transfer of 
+> control.
+
+Having had months to think about it, I don't think the latter works.
+
+I would guess that approximately 0% of existing "access call-back" style
+iterators use finalization for last wishes. That's much more complex than
+using an others exception handler, so it tends to get used only in cases where
+a simple exception handler isn't enough (access locks, for instance, where
+leaving a lock behind is fatal to the application). The exception handler is
+likely to be faster, too, especially when it is not used. But probably well
+over half of such iterators need last wishes (led by Ada.Containers, which need
+to clear the tampering flag).
+
+It's bad enough that such a requirement would force implementers to go in and
+rewrite their existing implementations of language-defined routines.
+That's annoying, but we could live with it.
+
+The problem is that the same would be true for any user-defined (or worst of
+all, third-party-defined) iterators. There is nothing in the specification of
+an iterator that would tell you whether or not it is safe [handles it's last
+wishes via finalization]. And it's unlikely that any existing iterators would
+document how (or if) they handle last wishes. So I think such an unenforced
+requirement would be very error-prone (it would be an attractive hazard, in
+that it would look like a convenient way to write such a loop, but it wouldn't
+actually work right in marginal cases; such cases could even escape testing,
+leaving a time-bomb in a program).
+
+I think that any such scheme has to work for any existing "access call-back"
+iterator (that is, any subprogram that would have the correct profile), since
+they're already reasonably common (especially as the pattern is given and
+encouraged in the Ada RM, starting with Ada 2005). Expecting the implementation
+of such an iterator to use an unusual method of supporting "last wishes" is not
+realistic.
+
+Ergo, I believe that non-exception transfer of control out of the loop has to
+be banned by such a proposal. (That is, exit and return statements aren't
+allowed, and gotos are only allowed within the loop body - we have to support
+the latter so the "continue" statement we don't have works.) That closely
+matches what is allowed for the original version of these routines, and I can't
+find any reason to think that this literal "syntax sugar" should try to do any
+more. And (at least so far), all of the alternatives lead to madness. (As
+always, banning something now leaves the door open a crack to allow it in the
+future if it proves to be a major issue; allowing it now means we're stuck with
+it forever, even if it turns out to be a significant problem. With this sort of
+ease-of-use feature, I would prefer to be conservative.)
 
 ****************************************************************
