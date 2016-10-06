@@ -1,0 +1,1153 @@
+!standard 6.9(0)                                      16-10-05  AI12-0197-3/01
+!class Amendment 16-10-05
+!status work item 16-10-05
+!status received 16-10-05
+!priority Low
+!difficulty Hard
+!subject generator functions
+
+!problem
+
+The expression of computation often works on streams of data. It is often
+necessary to express computation of streams as incremental routines, working on
+chunks of data. But expressing algorithms in an incremental fashion is difficult:
+It implies manually keeping and maintaining the state of your algorithm, saving
+it on exit, and restoring it on re-entry.
+
+Generators, often called resumable functions, or Iterators in C#, offer a way
+to write such incremental code in a straightforward procedural way, by giving
+you the possibility to resume a function after it has returned.
+
+This resumable return capability is generally called "yield" in other
+languages, so we will use the same terminology in this AI.
+
+Ada offers a similar capability via the way of tasks and rendez-vous. However,
+tasks have certain properties that are not always desirable:
+
+1. Non-determinism. Tasks execution is preemptive and thus non-deterministic. It
+   means that any access to non-synchronized outer variables is non safe by
+   default.
+
+   Non determinism also implies that the resulting code and runtime are much
+   harder to certify and that it is harder to prove any properties about them.
+
+2. Synchronization overhead. This stems from point 1, but when you need a
+   deterministic synchronization point, you'll pay for it in performance.
+   Assorted is the general overhead of starting/stopping a task for short lived
+   iterators.
+
+!proposal
+
+We propose introducing a new kind of type, called a generator type. This new
+kind of type will have special attributes who allow incremental execution of the
+body. The body will be allowed to "yield" values via a new kind of statement,
+the yield statement. Here is an example of what such a type declaration would
+look like:
+
+    generator type Prime_Factory (Sieve_Size : Natural) yield Positive
+      with Post => Prime_Factory'Next'Result <= Sieve_Size;
+
+    generator body Prime_Factory (Sieve_Size : Natural) yield Positive is
+        Is_Composite : array (2 .. Sieve_Size) of Boolean
+          := (others => False);
+        Current : Integer range Is_Composite'Range := 2;
+
+        procedure Mark_Multiples (Prime : Positive) is
+            Multiple : Positive := Prime;
+        begin
+            while Multiple <= Sieve_Size - Prime loop
+              Multiple := Multiple + Prime;
+              Is_Composite (Multiple) := True;
+            end loop;
+        end Mark_Multiples;
+    begin
+        while Current <= Sieve_Size loop
+          if not Is_Composite (Current) then
+              Mark_Multiples (Prime => Current);
+              yield Current;
+          end if;
+          Current := Current + 1;
+        end loop;
+    end Prime_Factory;
+
+This type could then be instantiated and used in the following way:
+
+    P : Prime_Factory (1000);
+
+    while Not_Enough_Prime_Numbers loop
+       if P'Yielding then
+          Put_Line ("Next prime number is " & P'Next'Image);
+       end if;
+    end loop;
+
+As shown, clients interact with generator instances via the use of the 'Next and
+'Yielding attributes.
+
+'Next means
+   "run until reaching either a yield statement of the end of the generator
+    body; if the former, then execute the yield statement and return the given
+    result; if the latter then raise Program_Error". The type returned by the
+    'Next attribute is the type after the yield in the generator declaration.
+
+'Yielding means
+   "run until reaching either a yield statement or the end of the generator
+    body; return False if and only if a yield statement is reached (the yield
+    statement is not executed in this case)." In other words, 'Yielding
+    indicates whether it is ok to call Next.
+
+A generator type is subject to the following constraints:
+
+1. Have to contain at least one yield statement. The grammar of the yield
+   statement would be the following:
+
+   yield_statement ::= "yield" expression ";"
+
+2. Can contain return statements, as long as they have no expressions, in order
+   to allow the user to terminate the execution early.
+
+Another way of consuming the generator is via the for .. of loop:
+
+    P : Prime_Factory (1000);
+
+    for Prime_Number of P loop
+       Put_Line ("Next prime number is " & Prime_Number'Image)
+    end loop;
+
+This is syntax sugar that will be expanded to the former form.
+
+If an exception is raised in the generator while it is executing, subsequently
+to a call to the ‘Next attribute, the generator is finalized, and the exception
+is propagated into the caller of the ‘Next attribute.
+
+We also propose introducing a second kind of generator type, called an abstract
+generator type:
+
+    type Positive_Generator yield Positive;
+
+Abstract generator types are generator types for which we only know the yielded
+type, but not the implementation. This means that:
+
+1. Those types don't have a body.
+2. They're indefinite.
+3. Specific generator implementations, such as the one above, can be converted
+   to abstract generator types, provided the yielded subtype statically matches.
+4. 'Next and 'Yielding operations on instances/views of abstract generator types
+   are dispatching.
+
+Syntax
+
+We propose introducing two new keywords, "yield" and "generator".
+
+We propose introducing these new object declarations:
+
+generator_type_declaration ::=
+    "generator" "type" defining_identifier [known_discriminant_part]
+    "yield" subtype_indication
+
+generator_type_body ::=
+    "generator" "type" defining_identifier [known_discriminant_part]
+    "yield" subtype_indication "is"
+    declarative_part
+    "begin"
+    handled_sequence_of_statements
+    "end" [designator]
+
+abstract_generator_type ::=
+    "type" defining_identifier "yield" subtype_indication
+
+##implementation note
+
+While it might be possible to implement a limited version of this feature using
+only code rewritings and the existing runtime support, the recommended approach
+is a mix of both:
+
+1. Expose a runtime capability for context switching, eg. saving the state of
+   the stack, registers, and other local information, and restoring it.
+2. Do simple expansion phases to expand from the high-level generator code to a
+   version using the runtime support.
+
+In that scheme, the following code:
+
+   generator type Prime_Numbers yield Integer;
+
+   generator body Prime_Numbers yield Integer is
+      I : Integer := 0;
+   begin
+      loop
+         if Is_Prime (I) then
+            yield I;
+         end if;
+         I := I + 1;
+      end loop;
+   end Even;
+
+could be expanded to this code:
+
+   package Int_Generators_Impl is new Generators (Integer);
+
+   type Prime_Numbers_Generator is new Int_Generators_Impl.Object
+   with null record;
+
+   overriding procedure Generate
+     (D          : in out Prime_Numbers_Generator;
+      Context : Int_Generators_Impl.Context)
+   is
+      I : Integer := 0;
+   begin
+      loop
+         if Is_Prime (I) then
+            Context.Yield (I);
+         end if;
+         I := I + 1;
+      end loop;
+   end Generate;
+
+Note that this code is already working code, using a runtime library that was
+developed on top of a portable stack switching library called PCL.
+
+Not shown would be the code wrapping the implementation specific generator
+object into a Ada.Containers.Generators object and calling the appropriate
+operation when an item is requested.
+
+!wording
+
+** TBD.
+
+!discussion
+
+# Generator singletons
+
+Since generators are very much like tasks, we probably want to allow to declare
+singleton generators like that:
+
+    generator Foo yield Positive;
+    generator body Foo yield Positive is
+    begin
+        yield 12;
+    end Foo;
+
+# Omit declaration
+
+Although it is not allowed with tasks, in the interest of brevity/not repeating
+yourself, it has been considered that it should be possible to omit the
+declaration of a generator in some simple cases, as it is possible with
+subprograms. To keep it simple and non ambiguous, we propose to make
+declaration optional for singletons, but mandatory for types:
+
+    generator body Foo yield Positive is -- This is implicitly a singleton
+    begin
+        yield 12;
+    end Foo;
+
+    generator Foo yield Positive;
+    generator body Foo yield Positive is -- This is explicitly a singleton
+    begin
+        yield 12;
+    end Foo;
+
+    generator type Foo yield Positive;
+    generator body Foo yield Positive is --  This is explicitly a type
+    begin
+        yield 12;
+    end Foo;
+
+# Generators vs. passive tasks
+
+The benefits provided by generators can also be provided by a construct called
+passive tasks. Generally, a lot of use cases for generators are translatable in
+a way or another in terms of tasking, so we expect still a lot of the discussion
+will be around that issue.
+
+# Runtime support vs. rewriting into sequential code
+
+An approach entirely based on rewriting user code into code using callbacks
+would be problematic when combining separate compilation, and generators being
+passed around by subprograms, or more generally in presence of dispatching
+programs returning generators.
+
+    package A is
+        function Foo return Int_Generators.Generator;
+    end A;
+
+    package B is
+        procedure Bar (G : Int_Generators.Generator);
+    end B;
+
+Since here, the actual implementation wrapped by the generator object might
+vary, rewriting will not be possible in every case.
+
+Forcing the users to have a specific type for every generator instance, rather
+than allowing a general type depending on the yield type, would allow
+rewriting, but it would still be complicated to do separate compilation (akin
+to generic expansion), and abstraction would be lost along the way (no
+possibility to to have ad-hoc polymorphism on different generators having the
+same yield type)
+
+# Generators receiving values
+
+In some (not all) implementations of generators, generators are able to be
+passed values when their control is restored. It might be interesting to:
+
+1. Think about what such a feature might look like in Ada
+2. Try and conceive the initial feature in a way that allows extension to
+   support this at a later stage.
+
+This won't be covered in this proposal though, because it is thought that the
+feature as proposed is ambitious enough for an initial revision.
+
+!examples
+
+** TBD.
+
+!ASIS
+
+** TBD.
+
+!ACATS test
+
+An massive set of ACATS B-Test and C-Tests are needed to check that the
+new capabilities are supported.
+
+!appendix
+
+From: Steve Baird
+Sent: Wednesday, September 7, 2016  6:49 PM
+
+One of my homework items from Pisa was to propose alternative syntax for
+generators (AI12-0197). So here is my very informal proposal.
+
+After some very helpful discussions with Raphael and Florian, I think we need
+two forms of generator types, somewhat like the distinction between a task type
+and a task interface type.
+
+One form is tied to a specific implementation (i.e., it has a body) and uses
+syntax similar to the existing syntax for task types and protected types (but
+with a new keyword). All generator types of both forms are limited.
+
+An example of the first form:
+
+     generator type Prime_Factory (Sieve_Size : Natural) yield Positive
+       with Post => Prime_Factory'Next'Result <= Sieve_Size;
+
+     generator body Prime_Factory is
+        Is_Composite : array (2 .. Sieve_Size) of Boolean
+          := (others => False);
+        Current : Integer range Is_Composite'Range := 2;
+
+        procedure Mark_Multiples (Prime : Positive) is
+            Multiple : Positive := Prime;
+        begin
+            while Multiple <= Sieve_Size - Prime loop
+               Multiple := Multiple + Prime;
+               Is_Composite (Multiple) := True;
+            end loop;
+        end Mark_Multiples;
+     begin
+        while Current <= Sieve_Size loop
+           if not Is_Composite (Current) then
+              Mark_Multiples (Prime => Current);
+              yield Current;
+           end if;
+           Current := Current + 1;
+        end loop;
+     end Prime_Factory;
+
+Clients use 'Next and 'Yielding attributes.
+
+'Next means
+    "run until reaching either a yield statement of
+     the end of the generator body; if the former, then
+     execute the yield statement and return the given
+     result; if the latter then raise P_E".
+
+'Yielding is defined on these guys and means
+    "run until reaching either a yield statement or
+     the end of the generator body; return False if
+     and only if a yield statement is reached (the
+     yield statement is not executed in this case)."
+    In other words, 'Yielding indicates whether it is
+    ok to call Next.
+
+'Terminated was considered instead of 'Yielding (albeit with the opposite
+polarity), but it seemed odd that querying 'Terminated could have a side effect.
+
+A generator object executes/elaborates nothing until either 'Next or 'Terminated
+is queried. In particular, it does nothing during its default initialization
+(and there is nothing analogous to task activation for these guys).
+
+You can have extended yield statements:
+
+     yield X : T do
+         Counter := Counter + 1;
+         X.Field := Counter;
+     end yield;
+
+These are needed for the same reasons as extended return statements (notably,
+support for limited types). Yield statements are subject to the same
+restrictions as return statements with respect to limited types.
+
+Restrictions on the placement of a yield statement are less restrictive than
+those for accept statements; a yield statement may occur in a subprogram (but
+the subprogram must occur within a generator body; the expected type/subtype for
+the yield statement comes from the nearest enclosing generator body). P_E occurs
+if a yield statement is executed by somebody who shouldn't (one way this
+corner-case situation can arise is if a task is declared inside of a generator
+body).
+
+Then we have the second form,
+
+   type Positive_Generator yield Positive;
+
+which is sort of like a class-wide type (it is indefinite, and follows type
+conversion rules similar to the rules for converting between specific and
+class-wide tagged types). Such a type is characterized (completely?) by the
+subtype that it yields and its accessibility level. Such a type does not have a
+body. Type conversion between two generator types (of either sort - bodiless or
+not) requires statically matching subtypes, not just matching types.
+
+Incidentally, the accessibility level is why syntax like
+   Positive'Generator
+was rejected. That wouldn't capture the accessibility level. The accessibility
+level is needed for, for example, for preventing dangling references in the case
+of a function which returns a generator.
+
+A client might look like
+
+     function Next_With_Default (Gen : Positive_Generator)
+       return Natural is
+     begin
+       if Gen'Yielding then
+          return Gen'Next;
+       else
+          return 0;
+       end if;
+     end;
+
+We can flesh this proposal out if there is interest.
+
+What I view as the key ideas here are
+    1) two kinds of generator types: "concrete"
+         and "interface-ish".
+    2) syntax for concrete generator types follows
+       existing task/protected model.
+
+p.s. if you like any of the ideas in here, I probably got them from Raphael and
+Florian; the rest are mine.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, September 7, 2016  8:53 PM
+
+...
+> 'Yielding is defined on these guys and means
+>    "run until reaching either a yield statement or
+>     the end of the generator body; return False if
+>     and only if a yield statement is reached (the
+>     yield statement is not executed in this case)."
+>    In other words, 'Yielding indicates whether it is
+>    ok to call Next.
+
+This seems backwards.  Don't you mean return *True* if a yield statement is
+reached?
+
+> 'Terminated was considered instead of 'Yielding (albeit with the
+> opposite polarity), but it seemed odd that querying 'Terminated could
+> have a side effect.
+
+We have used phrases like "Has_Element" for iterators, so perhaps "Has_Next"
+might be used instead of "Yielding"?
+
+> A generator object executes/elaborates nothing until either 'Next or
+> 'Terminated is queried.
+
+Presumably you mean 'Yielding here.
+
+...
+> Then we have the second form,
+>
+>   type Positive_Generator yield Positive;
+
+It seems weird for the new reserved word "generator" not to appear somewhere
+here.
+
+Perhaps "generator interface Positive_Generator yield Positive;"?
+
+...
+> Incidentally, the accessibility level is why syntax like
+>   Positive'Generator
+> was rejected. That wouldn't capture the accessibility level.
+> The accessibility level is needed for, for example, for
+
+Three "for"s is at least one too many for this sentence! ;-)
+
+...
+> p.s. if you like any of the ideas in here, I probably got them from
+> Raphael and Florian; the rest are mine.
+
+I'll blame you all equally... ;-)
+
+In any case, interesting!
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Thursday, September 8, 2016  8:15 AM
+
+> One form is tied to a specific implementation (i.e., it has a body) and uses
+> syntax similar to the existing syntax for task types and protected types (but
+> with a new keyword).
+
+I don't think that generator can be a new keyword as it is already used by
+Ada.Numerics.Discrete_Random and Ada.Numerics.Float_Random.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, September 8, 2016  12:38 PM
+
+>> 'Yielding is defined on these guys and means
+>>    "run until reaching either a yield statement or
+>>     the end of the generator body; return False if
+>>     and only if a yield statement is reached (the
+>>     yield statement is not executed in this case)."
+>>    In other words, 'Yielding indicates whether it is
+>>    ok to call Next.
+>
+> This seems backwards.  Don't you mean return *True* if a yield
+> statement is reached?
+
+Right. For a while I was using 'Terminated and I forgot to reverse the polarity
+here.
+
+>> 'Terminated was considered instead of 'Yielding (albeit with the
+>> opposite polarity), but it seemed odd that querying 'Terminated could
+>> have a side effect.
+>
+> We have used phrases like "Has_Element" for iterators, so perhaps
+> "Has_Next" might be used instead of "Yielding"?
+
+I like it.
+
+>> A generator object executes/elaborates nothing until either 'Next or
+>> 'Terminated is queried.
+>
+> Presumably you mean 'Yielding here.
+
+Right. Another case where I botched the late Terminated-to-Yielding transition.
+
+>> Then we have the second form,
+>>
+>>   type Positive_Generator yield Positive;
+>
+> It seems weird for the new reserved word "generator" not to appear
+> somewhere here.
+>
+> Perhaps "generator interface Positive_Generator yield Positive;"?
+
+I agree, we'd like to see the word "generator" in there somewhere.
+
+I don't want to introduce generator interface types which are not interface
+types (analogous definitions have been a source of confusion in the past). If we
+can avoid that, then I like your syntax.
+
+>> Incidentally, the accessibility level is why syntax like
+>>   Positive'Generator
+>> was rejected. That wouldn't capture the accessibility level.
+>> The accessibility level is needed for, for example, for
+>
+> Three "for"s is at least one too many for this sentence! ;-)
+
+One, two, three, for?
+
+The Positive'Generator approach has other problems as well. Are
+Positive'Generator and Natural'Generator two different types or not? Either
+choice leads to problems; pick your poison. And then there is the "unbounded
+number of types" problem with T'Generator, T'Generator'Generator, etc.
+Type-valued attributes ('Base, 'Class) are idempotent and want to keep it that
+way.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, September 8, 2016  1:40 PM
+
+>> It seems weird for the new reserved word "generator" not to appear
+>> somewhere here.
+>>
+>> Perhaps "generator interface Positive_Generator yield Positive;"?
+>>
+>
+> I agree, we'd like to see the word "generator" in there somewhere.
+>
+> I don't want to introduce generator interface types which are not
+> interface types (analogous definitions have been a source of confusion
+> in the past). If we can avoid that, then I like your syntax.
+
+On the other hand, we could talk about "tagged interface" types vs. "generator
+interface" types, and not be too surprised that they follow different rules.
+
+A fundamental property of tagged interface types is that you essentially never
+see them without the "'Class" attribute, unless you are defining an abstract or
+null dispatching subprogram.  But I don't see the need to use 'Class with these,
+since you really don't have a type hierarchy.
+
+On the other hand, that does bring up the question of a "generator interface"
+that yields a class-wide type.  Would that be matched by a generator type that
+yields some specific type covered by the class-wide type?  E.g., given:
+
+    generator interface Expression_Gen yield Expression'Class;
+
+and
+
+    type Primary is new Expression with ...;
+
+and
+
+    generator type Primary_Gen(Tree : Expr_Tree) yield Primary;
+
+Would Primary_Gen(Blah) be acceptable for an Expression_Gen?
+
+An alternative here would be to define some kind of equivalence here between
+generator interfaces and tagged interfaces.  We would need to define some
+(pseudo) dispatching operations corresponding to 'Next and 'Has_Next, and claim
+that a generator interface is equivalent to the 'Class type for a tagged
+interface, but that gets kind of heavy.
+
+It would probably be worth coding up several examples with various alternative
+syntaxes, to see how the feel.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, September 8, 2016  3:04 PM
+
+> On the other hand, we could talk about "tagged interface" types vs.
+> "generator interface" types, and not be too surprised that they follow
+> different rules.
+
+I was hoping to avoid making any changes in 3.9.4 (the section on interface
+types). I think this approach would involve a lot of (admittedly small) changes
+in that section.
+
+But I agree that the approach you describe is preferable to having "interface
+types" and "generator interface types" (where a generator interface type is not
+an interface type).
+
+> On the other hand, that does bring up the question of a "generator interface"
+> that yields a class-wide type.  Would that be matched by a generator type that
+> yields some specific type covered by the class-wide type?
+
+Right, the rules for converting between generator types would need to be worked
+out. I expect the case you describe would be legal, but TBD.
+
+Generic formal generator types is a related area where some work would be
+needed.
+
+There are also questions about Pre and Post conditions and about separate
+subunits, just to name a couple.
+
+> An alternative here would be to define some kind of equivalence here between
+> generator interfaces and tagged interfaces.
+
+As an informal mental model, that seems like it might be useful.
+As a normative definition, I think it would probably lead to more problems than it is worth.
+
+>  We would need to define some (pseudo) dispatching operations
+> corresponding to 'Next and 'Has_Next, and claim that a generator interface is
+> equivalent to the 'Class type for a tagged interface, but that gets kind of
+> heavy.
+
+Too heavy IMO.
+
+Thanks for the thoughtful feedback,
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Friday, September 9, 2016  6:04 AM
+
+Great stuff Steve ! I like your syntax much better than the one I originally
+proposed so far. I think there are still some details to iron-out.
+
+>      generator type Prime_Factory (Sieve_Size : Natural) yield Positive
+>        with Post => Prime_Factory'Next'Result <= Sieve_Size;
+>
+> Then we have the second form,
+>
+>    type Positive_Generator yield Positive;
+
+What is missing from your proposal is, how do you go from the first form to the
+second. So, I have this Positive_Generator type declared somewhere, and I have
+this client as above. Can I use an instance of the Prime_Factory type and pass
+it to next with default ?
+
+1. If yes (which is what I would implicitly expect when reading your
+   proposal), then from what I can see, you have some of the same
+   problems that you'd have with the 'Generator approach: Is a generator
+   type yielding a Natural compatible with the Positive_Generator type ?
+
+2. If no, then you'd have to explicitly specify in the implementation
+   that it is deriving from Positive_Generator, which breaks the
+   modularity principle, and is annoying in practice: It means that you
+   cannot use a positive yielding generator implemented by somebody that
+   didn't know of your interface. Of course that can be worked around
+   with conversion rules (as it is done for other types). You also have
+   the "dummy type explosion" problem - Someday I'll count how many
+   "access all String" access types we have in GPS, but probably more
+   than 10 !
+
+I guess my tongue-in-cheek question is, do you really want to wait for Ada 2030
+to introduce anonymous generator types ? :) If Ada history is any indication,
+they end up being necessary every time.
+
+> The Positive'Generator approach has other problems as well.
+> Are Positive'Generator and Natural'Generator two different types or
+> not? Either choice leads to problems; pick your poison. And then there
+> is the "unbounded number of types"
+> problem with T'Generator, T'Generator'Generator, etc.
+> Type-valued attributes ('Base, 'Class) are idempotent and want to keep
+> it that way.
+
+I don't see how the "unbounded number of types" is a problem though.
+access access access String ? Is it because it's an attribute ?
+
+If that's the main differentiating problem, since your proposal is introducing a
+generator keyword, how about
+
+    generator of Positive
+
+denoting the interface type ?
+
+I still don't really buy the type equivalence problems, because I think any
+approach will have to tackle them at some point, be it at the correspondence
+between interface and implementation types, or in the conversion rules.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Friday, September 9, 2016  6:09 AM
+
+As I said, the word generator is already in use for random numbers.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, September 9, 2016  8:26 AM
+
+> 1. If yes (which is what I would implicitly expect when reading your
+>    proposal), then from what I can see, you have some of the same
+>    problems that you'd have with the 'Generator approach: Is a generator
+>    type yielding a Natural compatible with the Positive_Generator type ?
+>
+> 2. If no, then you'd have to explicitly specify in the implementation
+>    that it is deriving from Positive_Generator, which breaks the
+>    modularity principle, and is annoying in practice:
+
+I believe Steve was requiring only that the yielded subtypes match statically,
+which is a pretty well-defined requirement.  But then we might want to relax
+that a bit to allow for classwide types, and perhaps unconstrained discriminated
+types.  It turns out the matching rules required for "explicitly aliased"
+parameters might be just about right.  See RM 6.4.1(6,6.1,6.2):
+
+"If the formal parameter is an explicitly aliased parameter, [...]. Further, if
+the formal parameter subtype F is untagged: 6.1/3  the subtype F shall
+statically match the nominal subtype of the actual object; or 6.2/3  the subtype
+F shall be unconstrained, discriminated in its full view, and unconstrained in
+any partial view."
+
+> ... It means that you
+>    cannot use a positive yielding generator implemented by somebody that
+>    didn't know of your interface. Of course that can be worked around
+>    with conversion rules (as it is done for other types). You also have
+>    the "dummy type explosion" problem - Someday I'll count how many
+>    "access all String" access types we have in GPS, but probably more
+>    than 10 !
+
+I don't think we need to face these problems, if we use something close to
+6.1/6.2 above for untagged subtype matching.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, September 9, 2016  8:52 AM
+
+> As I said, the word generator is already in use for random numbers. ...
+
+There is always a spoiler in every group... ;-)
+
+New reserved words are always a challenge.  In a case-sensitive language, things
+aren't so bad if user identifiers generally start with an upper case letter, and
+reserved words are all in lower case.  But alas, that isn't Ada.
+
+Note that "Yield" is the name of a procedure in Ada.Dispatching (D.2.1), but
+changing that seems like somewhat less disruptive.
+
+If we somehow use the combination of "task" and "yield" then we can get by with
+only one new reserved word.  We could still use attributes (like 'Next and
+'Has_Next) to take care of the remaining functionality.  E.g.:
+
+    task type Int_Gen(First, Last : Integer) yield Integer;
+
+    task body Int_Gen yield Integer is
+    begin
+        for I in First .. Last loop
+            yield I;
+        end loop;
+    end Int_Gen;
+
+    R : Int_Gen(1, 10);
+
+...
+
+    while R'Has_Next loop
+       J := R'Next;
+       ...
+    end loop;
+
+or
+
+    for I in Int_Gen(3, 17) loop
+       ...
+    end loop;
+
+We could use an "abstract task type ... yield ..." as an interface-like thing:
+
+    abstract task type Int_Generator yield Integer;
+
+    procedure Foo(Generator : Int_Generator) is
+    begin
+       for I in Int_Generator loop
+          ...
+       end loop;
+    end Foo;
+
+And we could use "task One_Shot yield Integer is ..." as a one-shot generator,
+that produces a single sequence over its lifetime:
+
+    while One_Shot'Has_Next loop
+        Z := One_Shot'Next;
+        ...
+    end loop;
+
+You could pass One_Shot to the above "Foo" procedure:
+
+    Foo(One_Shot);
+
+or you could pass an instantiation of Int_Gen:
+
+    Foo(Int_Gen(2,22));
+
+or you could pass R:
+
+    Foo(R);
+
+****************************************************************
+
+From: Alan Burns
+Sent: Friday, September 9, 2016  9:26 AM
+
+But if you put task and yield together then, to many, the assumption will be
+that 'yield' means 'give up the processor' (allow pre-emption etc).
+
+Seems to me that a generator should generate!
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, September 9, 2016  1:24 PM
+
+> What is missing from your proposal is, how do you go from the first
+> form to the second.
+
+type conversion.
+
+> Is a generator
+>    type yielding a Natural compatible with the Positive_Generator type ?
+
+No. See Tuck's reply (which is better than what I was about to write before I
+saw it).
+
+> I don't see how the "unbounded number of types" is a problem though.
+> access access access String ? Is it because it's an attribute ?
+
+This has been mentioned as an implementation problem for some compilers in the
+(distant) past. I agree that it is not a big deal, but I'd still prefer to avoid
+the 'Generator approach and go with explicitly declared "generator interface"
+types of some sort (for other reasons already described, notably accessibility).
+
+----
+> New reserved words are always a challenge.
+
+I agree, but I don't think the solution here is to somehow use the reserved word
+"task". Sure, you can view a generator as some sort of a passive task which only
+executes on somebody else's thread of control, but I don't think we want to
+emphasize that presentation in the RM.
+
+A generator task type which is not a task type seems as bad as a generator
+interface type which is not an interface type (worse because the meaning of
+"task" in Ada has been well established since 1983).
+
+So perhaps
+    generator type Prime_Factory (Sieve_Size : Natural) yield Positive; becomes
+    sire type Prime_Factory (Sieve_Size : Natural) beget Positive; .
+
+----
+> But if you put task and yield together then, to many, the assumption
+> will be that 'yield' means 'give up the processor' (allow pre-emption etc).
+
+Yes, but Raphael's first choice
+    Yield_A_Value_While_Retaining_Control_Of_The_Processor
+seemed too verbose to me so I truncated it.
+
+More seriously, that does seem like another drawback of trying to present
+generators as some sort of task.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, September 9, 2016  1:41 PM
+
+>>> Then we have the second form,
+>>>
+>>>   type Positive_Generator yield Positive;
+>>
+>> It seems weird for the new reserved word "generator" not to appear
+>> somewhere here.
+>>
+>> Perhaps "generator interface Positive_Generator yield Positive;"?
+>>
+>
+> I agree, we'd like to see the word "generator" in there somewhere.
+>
+> I don't want to introduce generator interface types which are not
+> interface types (analogous definitions have been a source of confusion
+> in the past). If we can avoid that, then I like your syntax. ...
+
+Perhaps instead of "interface" we could call these *abstract* generator types.
+
+An abstract generator type has no body, and is matched by an instance of a
+non-abstract generator type if the yielded subtypes match (for the appropriate
+definition of "match").
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, September 9, 2016  2:00 PM
+
+> As I said, the word generator is already in use for random numbers. ...
+
+---
+> But if you put task and yield together then, to many, the assumption
+> will be that 'yield' means 'give up the processor' (allow pre-emption etc).
+>
+> Seems to me that a generator should generate! ...
+
+I can feel the term "coroutine" coming on.  Raphael originally wanted
+coroutines; perhaps our search for an appropriate reserved word will bring us
+back to that.
+
+     [abstract] COROUTINE [type] identifier [discriminant_part] YIELD subtype_mark;
+
+                COROUTINE body identifier YIELD subtype_mark is
+                      --   I think "YIELD" part should re-appear on the body
+                   ...
+                BEGIN
+                   ...
+                   YIELD expression;
+                   ...
+                END identifier;
+
+There might be some additional functionality provided if you have two coroutines
+talking with one another, but for simple use, it would have the same
+functionality we proposed for generators.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, September 9, 2016  2:11 PM
+
+> Perhaps instead of "interface" we could call these *abstract*
+> generator types.
+
+I like it.
+
+I'd have to think about whether an abstract generator type would be an abstract
+type, but it is certainly (definitely?) indefinite so it is pretty close in any
+case.
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Friday, September 9, 2016  2:17 PM
+
+>>Perhaps instead of "interface" we could call these *abstract* generator
+>>types.
+>
+>I like it.
+>
+>I'd have to think about whether an abstract generator type
+>would be an abstract type, but it is certainly (definitely?)
+>indefinite so it is pretty close in any case.
+
+I like it too ! I was thinking about "dispatching generator", because after all
+that's the important distinction for the user, but abstract sounds good.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Friday, September 9, 2016  2:17 PM
+
+> I can feel the term "coroutine" coming on.
+
+But isn't "coroutine" a more general term than what we want? That is, every
+generator is a coroutine but not every coroutine is a generator?
+
+But I agree it is worth considering, especially if you don't like my "sire"
+types which "beget" values. Oh well, back to the scrabble bag.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, September 9, 2016  2:31 PM
+
+>> I can feel the term "coroutine" coming on.
+>
+> But isn't "coroutine" a more general term than what we want? That is,
+> every generator is a coroutine but not every coroutine is a generator?
+
+Yes, that is why I alluded to some additional functionality which might exist
+when two such coroutines are interacting.  If we ultimately think we might have
+both, then we might want to use the term "coroutine" for both concepts, but with
+a coroutine designed primarily as a generator having some limitations, at least
+when called from a non-coroutine.
+
+> But I agree it is worth considering, especially if you don't like my
+> "sire" types which "beget"
+> values. Oh well, back to the scrabble bag.
+
+Right...
+
+****************************************************************
+
+From: Tullio Vardanega
+Sent: Friday, September 9, 2016  2:30 PM
+
+>> I can feel the term "coroutine" coming on.
+>
+> But isn't "coroutine" a more general term than what we want? That is,
+> every generator is a coroutine but not every coroutine is a generator?
+
+Yes, indeed. That sort of correspondence is certainly not bijective, which
+suggests that using the term "coroutine" we would expand beyond the intent.
+
+****************************************************************
+
+
+
+
+
+
+
+From: Raphael Amiard
+Sent: Wednesday, October 5, 2016  1:39 PM
+
+I did an updated version of the original AI, integrating Steve's suggestions.
+
+[This is version /01 of this alternative - Editor.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 5, 2016  9:57 PM
+
+> I did an updated version of the original AI, integrating Steve's
+> suggestions
+
+This is AI12-0197-3/01 (that is, the third alternative of the generator
+proposal).
+
+I find it interesting that you essentially finished Steve's homework for him
+(but thank you, because I probably wouldn't have had time to do it before the
+meeting). See my discussion with Florian (for AI12-0127-1) for my take on
+that. :-)
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, October 5, 2016  6:35 PM
+
+> 'Next means
+>     "run until reaching either a yield statement of the end of the
+> generator
+
+typo: first "of" => "or"
+
+====
+
+> 3. Specific generator implementations, such as the one above, can be converted
+>    to abstract generator types, provided the yielded subtype statically matches.
+
+There might also be accessibility conditions that have to be satisfied in some
+cases when converting to from a shorter-lived type to a longer-lived type, but
+presumably these would be handled the same way that the analogous issue is
+handled with conversions between specific and class-wide types.
+
+One way or another we don't want to allow
+
+     type Positive_Generator yield Positive;
+     type Ref is access Positive_Generator;
+     Ptr : Ref;
+
+     procedure P is
+         generator type Local_Generator is ...;
+
+         function F yield Local_Generator is ...;
+     begin
+         Ptr := new Local_Generator'(F);
+
+to execute successfully.
+
+The proposal doesn't talk about the detail of whether an explicit conversion is
+required vs. allowing the concrete-to-abstract conversion to be done implicitly,
+as for a specific-to-classwide conversion; if an explicit conversion is required
+that would solve this problem but it would also make these guys harder to use
+because "type conversion" isn't one of the constructs on the 7.5(2.1/5) list
+(the "aggregates, function calls, and their friends" list).
+
+It seems like following the existing model for conversions between class-wide
+and specific tagged types would be cleanest.
+
+====
+
+> We propose introducing these new object declarations:
+>
+> generator_type_declaration ::=
+
+Perhaps delete the word "object"?
+
+====
+
+> Note that this code is already working code, using a runtime library
+> that was developed on top of a portable stack switching library called PCL.
+
+Would this work in the build-in-place case (e.g., if the generated type is
+Some_Limited_Type'Class)?
+
+====
+
+Some questions we have discussed, but were not mentioned in the proposal (which
+is fine, except that I'm curious):
+
+    a) are yield statements allowed in nested subprograms (unlike accept
+       statements), with appropriate runtime checks to detect
+       "inappropriate" execution of a yield statement?
+    b) does an attempt to execute a yield statement during
+       the execution of another yield statement raise P_E?
+       (as we have discussed, I think it should).
+
+    c) are users are responsible for preventing unsynchronized access
+       (as with predefined container types)?
+
+****************************************************************
+
