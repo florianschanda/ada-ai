@@ -100,8 +100,8 @@ A.18 to avoid using 4-component numbers):
 
    If a stable vector is declared without specifying Base, the object must
    be initialized. The initializing expression of
-   the stable vector, Redundant[(typically a call on To_Vector or
-   Copy)], determines the Length of the vector. By default the Length
+   the stable vector, Redundant[typically a call on To_Vector or
+   Copy], determines the Length of the vector. By default the Length
    is zero. The Length of a stable vector never changes after
    initialization.
 
@@ -1310,7 +1310,10 @@ this morning, but this is not a direct reply.)
 
 > the cost is not the comparison, but the setting and reseting of the
 > tampering counter. Its management requires that references be somehow
-> controlled, so in an loop you are forced to create. initialize, and finalize an object with a controlled component. This makes simple loops (add the elements of a vector, say)  more than an order of magnitude slower that the naive array code.
+> controlled, so in an loop you are forced to create. initialize, and finalize
+> an object with a controlled component. This makes simple loops (add the
+> elements of a vector, say)  more than an order of magnitude slower that the
+> naive array code.
 
 It seems clear to me that anything involving controlled types for the cursor is
 going to be unusable. In particular, it is a really bad idea to require that
@@ -2842,3 +2845,532 @@ work.)
 
 ***************************************************************
 
+From: Tucker Taft
+Sent: Monday, October 3, 2016  8:50 PM
+
+Oops. I meant to remove both parens.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Monday, October 3, 2016  6:06 PM
+
+> Good point.  We probably have to make Empty_Vector into a 
+> parameterless function, now that this is a nested package. E.g.:
+>
+>    function Empty_Vector return Vector is
+>    begin
+>       return Result : Vector(Base => new Vectors.Vector'(Empty_Vector));
+>    end Empty_Vector;
+>
+> The result would be "built in place" at the point of call. 
+
+I don't understand though, are you thinking about actually allocating a new
+empty vector copy every time the users calls Stable.Empty_Vector?
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  8:58 PM
+
+Yes, although this is a "co-extension" so that its lifetime lasts only as
+long as the enclosing object -- it isn't necessarily on the heap -- it is
+allocated where the enclosing object is allocated.
+
+Note that for a limited type, you are obliged to create a new object every
+time you call a function.  You are not allowed to return a reference to or
+copy of an existing object of a limited type.  I suppose we could create a
+single underlying unstable empty vector and have all of the copies of
+Stable.Empty_Vector point at it, but it doesn't seem like a big deal, and I
+worry about multi-tasking issues associated with multiple wrappers all
+simultaneously setting the "no-tampering" flag on this shared unstable empty
+vector.
+
+In any case, I don't see many uses of Empty_Vector for a stable vector type.
+I could see using "Is_Empty" to see if a stable vector is empty, but since
+stable vectors aren't allowed to change in length, you would normally call
+"To_Vector(Length => whatever)" to create a stable vector of the desired
+length.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Monday, October 3, 2016  9:10 PM
+
+Is this implemented by GNAT though, or by any other Ada compiler ? That
+would need to be checked in my opinion, because however uncommon checking a
+stable vector against the empty vector would be, it could still happen in a
+time critical loop where I certainly would not expect an allocation to happen,
+with all associated cons (System call, context switch, unbounded time
+operation).
+
+If it is, I only have a theoretical objection against such a solution (the
+code is too complicated for what it does). If it is not, I also have a
+practical one :)
+
+The reason we're in this situation in the first place is that performance was
+not originally taken into consideration in the design of the containers. Let's
+not do the same mistake again.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  9:35 PM
+
+>> Yes, although this is a "co-extension" so that its lifetime lasts 
+>> only as long as the enclosing object -- it isn't necessarily on the 
+>> heap -- it is allocated where the enclosing object is allocated.
+>
+> Is this implemented by GNAT though, or by any other Ada compiler ? 
+> That would need to be checked in my opinion,
+
+This might justify GNAT fixing this, if they don't do it correctly now.   But
+see below -- simpler is to delete Empty_Vector from the package.
+
+> ... because however uncommon checking a stable vector against the 
+> empty vector would be, it could still happen in a time critical loop 
+> where I certainly would not expect an allocation to happen, with all 
+> associated cons (System call, context switch, unbounded time operation).
+
+If that is a real concern, I would suggest we omit "Empty_Vector" completely
+from the package.  The right way to check if a vector is empty is using
+"Is_Empty" and if you want to create a stable empty vector for some bizarre
+reason, in the absence of an Empty_Vector operation, you could do it using
+To_Vector() or Copy().
+
+> If it is, I only have a theoretical objection against such a solution 
+> (the code is too complicated for what it does). If it is not, I also 
+> have a practical one :)
+>
+> The reason we're in this situation in the first place is that 
+> performance was not originally taken into consideration in the design of the
+> containers.
+
+That is a little unfair, I would say.  There was an implementation of
+containers from day one of the design, and performance was a significant
+concern.  It may be that we just didn't understand the usage patterns, or the
+overall impact of tampering checks.  And as Randy likes to remind us, it is
+the implementation of references as controlled objects rather than tampering
+checks per se that can be the source of a lot of the overhead. 
+These kind of references didn't exist when containers were first designed.
+
+> ... Let's not do the same
+> mistake again.
+
+Agreed.  But on the other hand, let's not worry too much about performance
+implications of misusing the operations.  In any case, if we remove
+Empty_Vector from the package, I think we simplify the interface and
+eliminate a way that a naive user might waste a lot of energy creating an
+empty vector just to use it to compare against some other vector.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Monday, October 3, 2016  10:01 PM
+
+> If that is a real concern, I would suggest we omit "Empty_Vector" 
+> completely from the package.  The right way to check if a vector is 
+> empty is using "Is_Empty" and if you want to create a stable empty 
+> vector for some bizarre reason, in the absence of an Empty_Vector 
+> operation, you could do it using
+> To_Vector() or Copy().
+
+I think this is the best option indeed !
+
+> That is a little unfair, I would say.  There was an implementation of 
+> containers from day one of the design, and performance was a 
+> significant concern.  It may be that we just didn't understand the 
+> usage patterns, or the overall impact of tampering checks.  And as 
+> Randy likes to remind us, it is the implementation of references as 
+> controlled objects rather than tampering checks per se that can be the 
+> source of a lot of the overhead. These kind of references didn't exist when
+> containers were first designed.
+
+Yes, I'm sorry, my statement was overly broad, and I clearly don't know all
+the history.
+
+>> ... Let's not do the same
+>> mistake again.
+>
+> Agreed.  But on the other hand, let's not worry too much about 
+> performance implications of misusing the operations.  In any case, if 
+> we remove Empty_Vector from the package, I think we simplify the 
+> interface and eliminate a way that a naive user might waste a lot of 
+> energy creating an empty vector just to use it to compare against some other
+> vector.
+
+Agreed !
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  10:04 PM
+
+> >> Yes, although this is a "co-extension" so that its lifetime lasts 
+> >> only as long as the enclosing object -- it isn't necessarily on the 
+> >> heap -- it is allocated where the enclosing object is allocated.
+
+"coextension" (no hyphen). And yes, Raphael, it is a first-class part of
+the Ada language. It's either a great thing (Tucker), or the spawn of the
+devil (many of us). You can chose which group you belong to. ;-)
+
+Steve Baird got his reputation by interjecting in discussions about almost
+anything -- "what about a coextension"? Sadly, most of these turned out to be
+real issues. (I hate coextensions with a passion...)
+
+...
+> If that is a real concern, I would suggest we omit "Empty_Vector" 
+> completely from the package.
+
+That seems to be the correct solution. What possible purpose is there for
+avoiding the tampering checks on a known empty container? You can't do
+anything with such a container other than query its length (since you can't
+insert anything). The usual use for Empty_Vector and the like is an initial
+value for a container that will get added to, but that will never happen for
+a "stable" container.
+
+OTOH, I can't imagine why we would care how an operation that would never be
+used is implemented. Heck, it could permanently leak memory and send pinups to
+Ada mailing lists and no one other than a possible ACATS test would ever care.
+So this has to be one of the silliest tempest-in-a-teapots ARG discussions
+I've heard in a while.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Monday, October 3, 2016  10:28 PM
+
+> OTOH, I can't imagine why we would care how an operation that would 
+> never be used is implemented. Heck, it could permanently leak memory 
+> and send pinups to Ada mailing lists
+
+As the guy in charge of prototyping, challenge accepted !
+
+>   and no one other than a possible ACATS test would ever care. So this 
+> has to be one of the silliest tempest-in-a-teapots ARG discussions 
+> I've heard in a while.
+
+Well, I'll take pride in that if in nothing else :)
+
+On a more serious note, Stable vectors could be a generic container parameter
+to another generic package - I don't know, binary search for example - and
+that package could expect a constant object representing the empty container.
+
+Or even worse, and probably much more realistic, somebody could just be
+adapting code working on vectors that has special cases for empty containers.
+We're, after all, designing the API to be very similar, so that migration is
+easy, so that kind of mechanic migration is not out of the question.
+
+Anyway, I think it was pretty productive - we found the best solution, and one
+we apparently all agree on :)
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  10:28 PM
+
+Agreed.  Ignore the grump behind the curtain... ;-)  He'll be all sweetness
+and light by the time we get to Pittsburgh.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Tuesday, October 4, 2016  8:59 AM
+
+> That is not the model proposed by this AI.  Instead, you write:
+>
+>    X : aliased My_Vectors.Vector;
+>
+>    ...
+>
+>    declare
+>       Stable_X : My_Vectors.Stable.Vector(Base => X'Access);
+>       ... 
+
+I've made good progress with the implementation, to the point where I'm writing
+use cases, and looking back on it, this seems like a verbose way to declare a
+stable vector, since it's an operation you might want to do for every loop.
+
+What about having a shortcut primitive in Vector:
+
+for El of X.Stable loop
+end loop;
+
+?
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 4, 2016  10:05 AM
+
+> for El of X.Stable loop
+> end loop;
+
+Our expectation was that stable containers will be used automatically for
+these sorts of loops as part of the standard expansion of this "syntactic
+sugar," subject perhaps to adding an additional aspect specification (e.g.
+type Vector ... with Stable_Type => Stable.Vector).  To some degree, the idea
+of stable containers arises from the need to make loops that iterate over
+containers more efficient.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Tuesday, October 4, 2016  10:08 AM
+
+Ok, that makes sense, and is even better since it doesn't require any
+intervention from the user.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Tuesday, October 4, 2016  10:46 AM
+
+> Here is an update on the stable containers AI. I don’t believe Raphael had
+time to prototype this. 
+
+So, I’m more or less done prototyping this, will clean up the code and
+send it here when I’m done.
+
+The prototyped version provides the expected performance results.
+Running this program:
+
+with Vectors;
+with Ada.Text_IO; use Ada.Text_IO;
+with Ada.Calendar; use Ada.Calendar;
+
+procedure Main is
+   package V is new Vectors (Natural, Integer);
+   use V;
+   Vec : aliased Vector := Empty_Vector & 1 & 2 & 3 & 4;
+
+   T : Time;
+
+   Sum : Long_Long_Integer;
+begin
+
+   Put_Line ("Inserting elements into Vector ..");
+
+   for I in 1 .. 1_000_0000 loop
+      Vec.Append (I);
+   end loop;
+
+   Put_Line ("Iterating on regular vector ..");
+   T := Clock;
+   Sum := 0;
+
+   for El of Vec loop
+      El := El + 1;
+      Sum := Sum + Long_Long_Integer (El);   
+   end loop;
+
+   Put_Line ("SUM : " & Sum'Image);
+   Put_Line ("Time = " & Duration'Image (Clock - T));
+
+   Put_Line ("Iterating on stable vector ..");
+   T := Clock;   
+   Sum := 0;
+
+   declare
+      S : Stable.Vector (Vec'Access);
+   begin
+      for El of S loop
+         El := El + 1;
+         Sum := Sum + Long_Long_Integer (El);
+      end loop;
+   end;
+   Put_Line ("SUM : " & Sum'Image);
+
+   Put_Line ("Time = " & Duration'Image (Clock - T));
+end Main;
+
+Has the following output:
+
+Inserting elements into Vector ..
+Iterating on regular vector ..
+SUM :  50000015000014
+Time =  0.796831000
+Iterating on stable vector ..
+SUM :  50000025000018
+Time =  0.045607000
+
+Several things:
+
+I spoke with Hristian, the guy in charge of implementing
+co-extensions in GNAT. He told me that the implementation was not
+complete and could still leak memory. It is my understanding that every
+operation that creates a vector in the Stable package is supposed to
+rely on the co-extension mechanism for finalization of the underlying
+Vector. Since this is not completely working in GNAT, probably not
+working at all in other compilers (Randy your input would be welcome
+here), I’m wary of basing memory management of a feature fix on
+co-extensions.
+
+For future reference, Hristian is also positive that co-extensions as
+currently implemented in GNAT do not allocate the sub-object graph in
+place, instead making new calls.
+
+GNAT already has an ad-hoc expansion mechanism devised by Bob Duff
+that does more or less the same thing as stable for for .. of loops.
+I had to disable it in my package to see the performance difference.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 4, 2016  11:23 AM
+
+>     Here is an update on the stable containers AI. I don’t believe Raphael
+>     had time to prototype this.
+>
+> So, I’m more or less done prototyping this, will clean up the code and 
+> send it here when I’m done.
+
+Great!
+
+> The prototyped version provides the expected performance results.
+> Running this program:
+>
+> ...
+>
+> Has the following output:
+>
+> |Inserting elements into Vector .. Iterating on regular vector .. SUM 
+> |: 50000015000014 Time
+> = 0.796831000 Iterating on stable vector .. SUM : 50000025000018 Time 
+> = 0.045607000 |
+
+Nice!  But should I be worried that they result in different SUM values???
+
+>
+> Several things:
+>
+>  1.
+>
+>     I spoke with Hristian, the guy in charge of implementing
+>     co-extensions in GNAT. He told me that the implementation was not
+>     complete and could still leak memory. It is my understanding that every
+>     operation that creates a vector in the Stable package is supposed to
+>     rely on the co-extension mechanism for finalization of the underlying
+>     Vector. Since this is not completely working in GNAT, probably not
+>     working at all in other compilers (Randy your input would be welcome
+>     here), I’m wary of basing memory management of a feature fix on
+>     co-extensions.
+
+Since Stable containers will need to be controlled anyway (to turn off the
+no-tampering flag), we can resort to explicit allocate and free for the
+underlying vector, if we don't trust co-extensions.  The trick is to know
+whether the underlying vector should be deallocated as part of the
+finalization of the stable vector.  So you will need to add a flag to the
+stable vector which indicates this.  E.g. add a component:
+
+     Boolean : Deallocate_Vector_On_Finalization := False;
+
+It needs to default to False so a Stable.Vector without an explicit
+initialization will know not to deallocate the vector it refers to.
+
+>  2.
+>
+>     For future reference, Hristian is also positive that co-extensions as
+>     currently implemented in GNAT do not allocate the sub-object graph in
+>     place, instead making new calls.
+
+That doesn't surprise me.
+
+>  3.
+>
+>     GNAT already has an ad-hoc expansion mechanism devised by Bob Duff
+>     that does more or less the same thing as stable for for .. of loops.
+>     I had to disable it in my package to see the performance difference.
+
+Right.  That was the attempt to accomplish something similar without any
+language support.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Tuesday, October 4, 2016  11:26 AM
+
+> Salut Raphael.
+> Why does the summation differ in the two cases?
+
+Because I'm doing something idiotic, eg. incrementing every value of the
+vector by 1, both times over. Since it's the same underlying vector, the
+second summation is not the same. I added that to check which
+Reference_Type was used, will remove it now !
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Tuesday, October 4, 2016  11:27 AM
+
+...
+>  So you will need to add a 
+> flag to the stable vector which indicates this.  E.g. add a component:
+>
+>     Boolean : Deallocate_Vector_On_Finalization := False;
+>
+> It needs to default to False so a Stable.Vector without an explicit 
+> initialization will know not to deallocate the vector it refers to.
+
+Already implemented it like that, and realized at the end it should be
+handled by co-extensions :)
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 4, 2016  2:12 PM
+
+I'm confused. Why would you ever need to deallocate the underlying vector?
+I thought "stable" was just a wrapper around an *existing* vector. I wouldn't
+want "stable" to be creating/destroying regular vectors; that would seem to
+clobber any performance improvement.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 4, 2016  2:30 PM
+
+It is the functions that create stable vectors out of whole cloth, namely
+"To_Vector" and "Copy" (and for a little while also Empty_Vector).  These are
+useful if you want a vector that is stable for its entire life:
+
+    package Vecs is new Ada.Containers.Vector(Whatever);
+    ...
+    X : Vecs.Stable.Vector := Vecs.Stable.To_Vector(Length => 42);
+
+So Raphael was talking about functions that create (unstable) vectors as a
+side effect of creating a new stable vector. In the original proposal, we were
+using a "null" access discriminant for these, but that slows down all uses of
+every stable vector by first having to check whether the discriminant is null.
+This does impose a tiny bit of distributed overhead during finalization of a
+stable vector, to check this boolean flag, but that is almost certainly much
+less than the distributed overhead of checking for a null Base all over the
+place.
+
+***************************************************************
+
+From: Raphael Amiard
+Sent: Wednesday, October 5, 2016  1:42 PM
+
+Here is my homework for this AI.
+
+[Find this in the grab bag:
+  http://www.ada-auth.org/ai-files/grab_bag/stable-vectors.tgz]
+
+Conclusion from my point of view is that stable containers are pretty simple
+and understandable, and actually fix the problem they're designed for, so
+kudos !
+
+Seems to me like we still need to do the AI about using stable containers by
+default for for .. of iterations, for the work to be complete.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 5, 2016  2:54 PM
+
+Thanks Raphaël for putting this together so quickly. Probably will want to
+define a new aspect rather than somehow treating a nested package called
+Stable as something magical. 
+
+***************************************************************
