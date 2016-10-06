@@ -1,0 +1,658 @@
+!standard 8.5.4(5.2/2)                                    15-10-06  AI12-0204-1/01
+!standard 12.6(8.3/2)
+!standard 4.1.3(13.1/2)
+!standard 4.1.6(9/5)
+!class binding interpretation 16-10-06
+!status work item 16-10-06
+!status received 16-10-01
+!priority Medium
+!difficulty Medium
+!qualifier Omission
+!subject Renaming of a prefixed view
+!summary
+
+The prefix of a prefixed view that is renamed or passed as a formal subprogram
+must be able to be renamed as an object.
+
+The prefix of a prefixed view that has an implicit 'Access must be legal for
+'Access.
+
+A generalized_reference is illegal if the equivalent prefixed view is illegal.
+
+!question
+
+Consider:
+
+with Text_IO;
+procedure Dangling_Prefix is
+   package Pet_Maintenance is
+      type Cat_Id is (Mr_Biggles, Tigger, Smudge, Daisy, Jasper);
+      type T1 is tagged record
+        Id : Cat_Id; Kibble_Count : Natural;
+      end record;
+      procedure Feed_Kitty (X1 : T1);
+   end;
+   
+   package body Pet_Maintenance is
+      procedure Feed_Kitty (X1 : T1) is
+      begin
+         Text_IO.Put_Line
+           ("Fed " & X1.Id'Image & " serving of" &
+             X1.Kibble_Count'Image & " kibbles");
+      end;
+   end;
+
+   package Nuclear_Weapons_Management is
+      type Major_City is (London, Paris, New_York, Moscow, Mountain_View);
+      type T2 is tagged record
+          Target : Major_City; Missiles : Natural;
+        end record;
+      procedure Launch_Missiles (X2 : T2);
+   end;
+   
+   package body Nuclear_Weapons_Management is
+      procedure Launch_Missiles (X2 : T2) is
+      begin
+         Text_IO.Put_Line
+           ("Launched" & X2.Missiles'Image
+             & " missiles with target " & X2.Target'Image);
+      end;
+   end;
+
+   type T (Flag : Boolean := False) is
+      record
+	 case Flag is
+           when False => F1 : Pet_Maintenance.T1;
+           when True  => F2 : Nuclear_Weapons_Management.T2;
+	 end case;
+      end record;
+
+   Blofeld : T := (False, (Pet_Maintenance.Mr_Biggles, 100));
+
+   procedure Feed_A_Cat renames
+      Pet_Maintenance.T1'Class (Blofeld.F1).Feed_Kitty;
+begin
+   Feed_A_Cat;
+   Blofeld.F1 := (Pet_Maintenance.Daisy, 75);
+   Feed_A_Cat;
+   Blofeld := (True, (Nuclear_Weapons_Management.Mountain_View, 999));
+   Feed_A_Cat;
+end;
+
+The above code contains three dispatching calls to Pet_Maintenance.Feed_Kitty.
+The output generated when the example is executed after being compiled with
+a current compiler is
+
+    Fed MR_BIGGLES serving of 100 kibbles
+    Fed DAISY serving of 75 kibbles
+    Launched 999 missiles with target MOUNTAIN_VIEW
+
+This result seems problematical, even for Blofeld.
+
+Should this case be made illegal? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add after AARM 1.1.5(4.a): [This is an AARM note]
+
+   Language Design Principle
+
+   If we say that some construct C1 is equivalent to some other construct C2, then
+   there should be a language rule that says that C1 is illegal if C2 is illegal.
+   We don't want to infer Legality Rules from Static Semantics and especially
+   Dynamic Semantics rules.
+
+Modify 4.1.3(13.1/2):
+
+   For a subprogram whose first parameter is an access parameter, the
+   prefix of any prefixed view shall [denote an aliased view of an
+   object]{be a prefix which could legally be the prefix of an Access
+   attribute reference}.
+
+Add after 4.1.6(9/5):
+
+   A generalized_indexing is illegal if the equivalent prefixed view (see below)
+   is illegal.
+
+Add after 8.5.4(5.2/2):
+
+   If the callable_entity_name of a renaming is a prefixed view, the prefix of
+   that view shall denote an object for which renaming is allowed.
+
+   AARM Reason: The prefix in such a case is essentially renamed and passed to
+   any calls of the renamed subprogram. If the prefix isn't legal to rename, that
+   doesn't make sense (and allowing it might end up passing a nonexistent object
+   to some calls).
+
+Add after 12.6(8.3/2):
+
+   If the named default, if any, is a prefixed view, the prefix of
+   that view shall denote an object for which renaming is allowed (see 8.5.1).
+   Similarly, if the actual subprogram in an instantiation is a prefixed view,
+   the prefix of that view shall denote an object for which renaming is allowed.
+
+   AARM Reason: The prefix in such a case is essentially renamed at the point of
+   the instantiation and passed to any calls of the formal subprogram in the
+   generic. If the prefix isn't legal to rename, that doesn't make sense (and
+   allowing it might end up passing a nonexistent object to some calls).
+
+!discussion
+
+For things like object renamings and generic in out mode parameters, we have
+legality rules which prevent dangling references to discriminant-dependent
+components that may disappear. We do the same for container loops.
+
+On the other hand, we can pass a discriminant-dependent component by reference
+in a call and if the component ceases to exist during the execution of the call,
+that results in erroneous execution.
+
+So sometimes this sort of thing is (statically) illegal and sometimes it isn't.
+
+Generally, we impose a legality rule if a declaration (perhaps implicitly)
+generates a reference which needs to be valid for the entire lifetime of that
+declaration (not just during its elaboration). If the problem can only occur
+during the elaboration/execution of the construct in question, then we don't
+(and allow it to be erroneous).
+
+This case is the former, not the latter, so we add Legality Rules.
+
+---
+
+In discussing this issue, we noticed that a similar problem would happen for
+the implicit 'Access in a prefixed view. Since we want implicit uses of
+'Access to work the same as explicit uses, we need to extend the existing
+rule in 4.1.3(13.1/2) to cover other reasons that the access prefix might
+be illegal (specifically, discriminant-dependent components).
+
+We also noticed that 4.1.6 doesn't have the needed "pass-through" rule; if
+the equivalent prefixed view would be illegal, then the generalized reference
+should be illegal. (This is the actual language bug, since the prefixed
+view could have been illegal even without the other changes, and we should
+not be inferring legality from Dynamic Semantics rules -- which is where the
+equivalence is defined.]
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Steve Baird
+Sent: Saturday, October 1, 2016  9:40 PM
+
+For things like object renamings and generic in out mode parameters, we have
+legality rules which prevent dangling references to discriminant-dependent
+components that may disappear.
+
+On the other hand, we can pass a discriminant-dependent component by reference
+in a call and if the component ceases to exist during the execution of the call,
+that results in erroneous execution.
+
+So sometimes this sort of thing is (statically) illegal and sometimes it isn't.
+
+If a declaration (perhaps implicitly) generates a reference which needs to be
+valid for the entire lifetime of that declaration (not just during its
+elaboration) then we impose a legality rule.
+
+If you can only get yourself into trouble during the elaboration/execution of
+the construct in question, then we are more tolerant.
+
+Or at least that's one way to look at the distinction.
+
+So that brings us to prefixed views.
+
+The attached example contains three dispatching calls to
+Pet_Maintenance.Feed_Kitty. As far as I know, the GNAT compiler compiles this
+example correctly. The output generated when the example is executed is
+
+    Fed MR_BIGGLES serving of 100 kibbles
+    Fed DAISY serving of 75 kibbles
+    Launched 999 missiles with target MOUNTAIN_VIEW
+
+So somehow a call to Feed_Kitty caused missiles to be launched.
+As a resident of Mountain View, this seems disturbing to me.
+
+My recommendation:
+
+     This sort of renaming (and similarly, passing this sort of
+     discriminant-dependent prefixed view as a generic actual
+     parameter) should be illegal.
+
+     On the other hand, there is nothing wrong with something like
+        X.Discrim_Dependent_Component.Some_Procedure
+          (Some, More, Actuals);
+     which is simply equivalent to
+        Some_Procedure (X.Discrim_Dependent_Component,
+                        Some, More, Actuals);
+     so don't want to disallow that case.
+
+My second choice (if folks think erroneous execution in this case is ok):
+
+     Add at least an AARM note to 13.11.2(16/3) to clarify
+     the status of this case.
+
+Opinions?
+
+-----
+
+with Text_IO;
+procedure Dangling_Prefix is
+   package Pet_Maintenance is
+      type Cat_Id is (Mr_Biggles, Tigger, Smudge, Daisy, Jasper);
+      type T1 is tagged record
+        Id : Cat_Id; Kibble_Count : Natural;
+      end record;
+      procedure Feed_Kitty (X1 : T1);
+   end;
+   
+   package body Pet_Maintenance is
+      procedure Feed_Kitty (X1 : T1) is
+      begin
+         Text_IO.Put_Line
+           ("Fed " & X1.Id'Image & " serving of" &
+             X1.Kibble_Count'Image & " kibbles");
+      end;
+   end;
+
+   package Nuclear_Weapons_Management is
+      type Major_City is (London, Paris, New_York, Moscow, Mountain_View);
+      type T2 is tagged record
+          Target : Major_City; Missiles : Natural;
+        end record;
+      procedure Launch_Missiles (X2 : T2);
+   end;
+   
+   package body Nuclear_Weapons_Management is
+      procedure Launch_Missiles (X2 : T2) is
+      begin
+         Text_IO.Put_Line
+           ("Launched" & X2.Missiles'Image
+             & " missiles with target " & X2.Target'Image);
+      end;
+   end;
+
+   type T (Flag : Boolean := False) is
+      record
+	 case Flag is
+           when False => F1 : Pet_Maintenance.T1;
+           when True  => F2 : Nuclear_Weapons_Management.T2;
+	 end case;
+      end record;
+
+   X : T := (False, (Pet_Maintenance.Mr_Biggles, 100));
+
+   procedure Feed_A_Cat renames Pet_Maintenance.T1'Class (X.F1).Feed_Kitty;
+begin
+   Feed_A_Cat;
+   X.F1 := (Pet_Maintenance.Daisy, 75);
+   Feed_A_Cat;
+   X := (True, (Nuclear_Weapons_Management.Mountain_View, 999));
+   Feed_A_Cat;
+end;
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, October 2, 2016  12:35 AM
+
+...
+> So that brings us to prefixed views.
+> 
+> The attached example contains three dispatching calls to 
+> Pet_Maintenance.Feed_Kitty. As far as I know, the GNAT compiler 
+> compiles this example correctly.
+> The output generated when the example is executed is
+> 
+>     Fed MR_BIGGLES serving of 100 kibbles
+>     Fed DAISY serving of 75 kibbles
+>     Launched 999 missiles with target MOUNTAIN_VIEW
+> 
+> So somehow a call to Feed_Kitty caused missiles to be launched.
+> As a resident of Mountain View, this seems disturbing to me.
+
+I think this example has a bit of unusual coupling. ;-) Wouldn't expect a
+record that included both pet management and missle launching -- unless
+you're writing code for Blofeld. :-)
+
+> My recommendation:
+> 
+>      This sort of renaming (and similarly, passing this sort of
+>      discriminant-dependent prefixed view as a generic actual
+>      parameter) should be illegal.
+
+I suggested the following wording change to Steve privately when he asked me
+about this case:
+
+Add after 8.5.4(5.2/2):
+
+If the callable_entity_name of a renaming is a prefixed view, the prefix of
+that view shall not be an entity that cannot be renamed as an object.
+
+AARM Reason: The prefix in such a case is essentially renamed and passed to
+any calls of the renamed subprogram. If the prefix isn't legal to rename, that
+doesn't make sense (and allowing it might end up passing a nonexistent object
+to any calls).
+
+I suggest writing the rule this way so that future maintenance doesn't cause
+this rule and the Legality Rules in 8.5.1 to get out of sync. (The full
+wording is fairly complicated.)
+
+I'm in favor of adding a Legality Rule like this, as we already check cases
+like this for object renames, and this seems sufficiently similar. Renamed
+entities can be long-lived, and having them being a ticking time bomb seems
+bad. Especially as the needed rules already exist in object renamings. (This
+is similar to the rules that we added to the new forms of loops.)
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Sunday, October 2, 2016  12:27 PM
+
+> ... I suggested the following wording change to Steve privately when 
+> he asked me about this case:
+>
+> Add after 8.5.4(5.2/2):
+>
+> If the callable_entity_name of a renaming is a prefixed view, the 
+> prefix of that view shall not be an entity that cannot be renamed as an
+> object.
+
+Works for me.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Sunday, October 2, 2016  3:00 PM
+
+> Add after 8.5.4(5.2/2):
+>
+> If the callable_entity_name of a renaming is a prefixed view, the 
+> prefix of that view shall not be an entity that cannot be renamed as an
+> object.
+>
+> AARM Reason: The prefix in such a case is essentially renamed and 
+> passed to any calls of the renamed subprogram. If the prefix isn't 
+> legal to rename, that doesn't make sense (and allowing it might end up 
+> passing a nonexistent object to any calls).
+
+I don't think this addresses the case of passing a prefixed view as the
+ actual parameter corresponding to a generic formal subprogram (which is
+essentially equivalent to a subprogram renaming).
+
+It occurred to me later that there is also an interaction with
+6.4(10.12)
+
+   If the name or prefix of a subprogram call denotes a prefixed view
+   (see 4.1.3), the subprogram call is equivalent to a call on the
+   underlying subprogram, with the first actual parameter being provided
+   by the prefix of the prefixed view (or the Access attribute of this
+   prefix if the first formal parameter is an access parameter), and the
+   remaining actual parameters given by the actual_parameter_part, if
+   any.
+
+in the case where this implicit use of the Access attribute would, if
+explicit, be illegal.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Sunday, October 2, 2016  4:31 PM
+
+> The legality rules are the same for 'Access, as far as 
+> discriminant-dependent components (RM 3.10.2(26/3)), so I don't see 
+> the need for explicitly mentioning the implicit 'Access.
+
+By that reasoning, it sounds like 4.1.3(13.1/2)
+
+    For a subprogram whose first parameter is an access parameter, the
+    prefix of any prefixed view shall denote an aliased view of an
+    object.
+
+is a redundant ramification. Do you agree?
+
+Before answering, note that the only mention of the implicit 'Access
+attribute is in 6.4(10.12), which is a dynamic semantics rule. Inferring
+implicit legality rules from a dynamic semantics rule seems shaky to me.
+
+I think 4.1.3(13.1/2) should be replaced with something like
+
+   For a subprogram whose first parameter is an access parameter, the
+   prefix of any prefixed view shall be a prefix which could legally
+   be the prefix of an Access attribute reference.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Sunday, October 2, 2016  4:54 PM
+
+>> The legality rules are the same for 'Access, as far as 
+>> discriminant-dependent components (RM 3.10.2(26/3)), so I don't see 
+>> the need for explicitly mentioning the implicit 'Access.
+>
+> By that reasoning, it sounds like 4.1.3(13.1/2)
+>
+>    For a subprogram whose first parameter is an access parameter, the
+>    prefix of any prefixed view shall denote an aliased view of an
+>    object.
+>
+> is a redundant ramification. Do you agree?
+
+I suspect you missed my point, or I missed yours.  If we require the prefix
+of a prefixed view, when renamed, to satisfy the requirements of renaming,
+we don't need to mention the possibility of 'Access, since that would only
+incur the same check, namely that the object denoted by the object not be a
+discriminant-dependent component.
+
+> Before answering, note that the only mention of the implicit 'Access 
+> attribute is in 6.4(10.12), which is a dynamic semantics rule. 
+> Inferring implicit legality rules from a dynamic semantics rule seems 
+> shaky to me.
+
+Perhaps your point is that we should disallow discriminant-dependent components
+being used as the prefix in a prefixed view, even if you are immediately
+calling the prefixed view. But that seems similar to disallowing passing as a
+parameter a discriminant-dependent view.
+
+On the other hand, creating an access value, even for a presumably short-lived
+access parameter, requires this check, so shouldn't the check be required when
+there is an implicit 'Access. I could be convinced either way, given how this
+is a corner or a corner case. Probably consistency argues for making it illegal
+to create a prefixed view, if there is an implicit 'Access, if the prefix
+denotes a discriminant-dependent object.
+
+> I think 4.1.3(13.1/2) should be replaced with something like
+>
+>   For a subprogram whose first parameter is an access parameter, the
+>   prefix of any prefixed view shall be a prefix which could legally
+>   be the prefix of an Access attribute reference.
+
+Got it. Makes sense from a consistency point of view. I had missed your original
+point, and I think my response was a bit mysterious to you as well! ;-)
+
+***************************************************************
+
+From: Steve Baird
+Sent: Sunday, October 2, 2016  5:56 PM
+
+> On the other hand, creating an access value, even for a presumably 
+> short-lived access parameter, requires this check, so shouldn't the 
+> check be required when there is an implicit 'Access.
+
+Right. That was my point.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 4, 2016  12:54 PM
+
+> creating an access value, even for a presumably short-lived access 
+> parameter, requires this check, so shouldn't the check be required 
+> when there is an implicit 'Access.
+
+I agree with this position (the quote above is taken from a message in which
+Tuck was giving two different possible positions - I don't want to give the
+impression that Tuck agrees or disagrees with me on this point).
+
+The general idea is that an implicit 'Access shouldn't be legal if the same
+'Access would be illegal as the actual parameter in a call whose
+corresponding formal parameter is an access parameter.
+
+And, as has already been discussed, some prefixed views are defined in terms
+of implicit uses of 'Access (see 6.4(10.1/2)).
+
+In for a dime, in for a dollar ...
+
+4.1.6(17/3) says:
+   When a generalized_indexing is interpreted as a constant (or
+   variable) indexing, it is equivalent to a call on a prefixed view of
+   one of the functions named by the Constant_Indexing (or
+   Variable_Indexing) aspect of the type of the
+   indexable_container_object_prefix with the given
+   actual_parameter_part, and with the indexable_container_object_prefix
+   as the prefix of the prefixed view.
+
+So a general_indexing should be illegal if it is equivalent to a call on a
+prefixed view such that the prefixed view implicitly involves a 'Access with
+a prefix which would be an illegal prefix for an explicit 'Access attribute
+reference.
+
+In general when we say that some construct is syntactic shorthand which is
+equivalent to some other construct, I think we need to state that if the
+equivalent construct would be illegal then the shorthand form is illegal.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, October 4, 2016  1:26 PM
+
+> ... In general when we say that some construct is syntactic shorthand 
+> which is equivalent to some other construct, I think we need to state 
+> that if the equivalent construct would be illegal then the shorthand 
+> form is illegal.
+
+We could make this statement more generally in Chapter 1 somewhere, I suppose.
+We should at the very least enshrine it as a language design principle, but I
+think it is a bit more than that (i.e. is normative).
+
+***************************************************************
+
+From: Steve Baird
+Sent: Tuesday, October 4, 2016  1:50 PM
+
+I think this is a good idea, but we still probably ought to spell it out more
+explicitly in specific cases where we know of a possible violation (at least
+in the AARM).
+
+Stating this principle in chapter 1 and then saying nothing more seems
+unfriendly.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 4, 2016  2:17 PM
+
+I agree.
+
+To date, we've used normative rules when this subject comes up. I'd hate to
+have some places have explicit rules and other places rely on some far-off
+blanket rule. (Besides, it's hard to know what ACATS tests are needed for
+blanket rules; when there is an explicit rule, the need for a test is obvious.)
+
+So I think it should be a language design principle somewhere, with each
+individual place having its own rule.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Wednesday, October 5, 2016  8:07 AM
+
+I agree with Randy.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 6, 2016  6:59 PM
+
+...
+> >> Add after 8.5.4(5.2/2):
+> >>
+> >> If the callable_entity_name of a renaming is a prefixed view, the 
+> >> prefix of that view shall not be an entity that cannot be
+> renamed as an object.
+> 
+> Can we make this positive instead of a double negative, and perhaps 
+> borrow wording from 8.5.1:
+> 
+>    "... the prefix of that view shall denote an object for which 
+> renaming is allowed."
+
+OK with me.
+
+...
+> Good point.  For object renaming, the RM says:
+> 
+>     "... For a generic formal object of mode in out, the actual shall 
+> be a name that denotes a variable for which renaming is allowed (see 
+> 8.5.1)."
+> 
+> We should add to the legality rules in RM 12.6 something like:
+> 
+>     "The named default, if any, shall be a subprogram for which 
+> renaming is allowed (see 8.5.4).  Similarly, the actual subprogram in 
+> an instantiation shall be a subprogram for which renaming is allowed."
+
+I don't think this works. We explicitly duplicated the legality rules that
+matter to a generic (12.6(7, 8, 8.1, 8.2, 8.3) are all copies of rules in
+8.5.4), and I suspect that we didn't want to the others to apply. In
+particular, whether or not the renames-as-body rules apply would be confusing,
+and there's no reason for 8.5.4(5.1/2) or 8.5.4(6) to apply. (OTOH,
+8.5.4(5.2/2) probably should apply, so there is clearly some value to this
+approach. :-) Ah, 3.9.3(11/2) covers that. Nice to have rules scattered
+about.)
+
+So I just put a copy of the new rule here:
+
+Add after 12.6(8.3/2):
+
+If the named default, if any, is a prefixed view, the prefix of that view
+shall denote an object for which renaming is allowed (see 8.5.1). Similarly,
+if the actual subprogram in an instantiation is a prefixed view, the prefix
+of that view shall denote an object for which renaming is allowed.
+
+AARM Reason: The prefix in such a case is essentially renamed at the point of
+the instantiation and passed to any calls of the formal subprogram in the
+generic. If the prefix isn't legal to rename, that doesn't make sense (and
+allowing it might end up passing a nonexistent object to some calls).
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 5, 2016  7:32 PM
+
+> > We could make this statement more generally in Chapter 1 somewhere, I 
+> > suppose.
+> 
+> I think this is a good idea, ...
+
+The best place I can find for such a Language Design Principle is after 1.1.5(4.a).
+
+Something like:
+
+Language Design Principle
+
+If we say that some construct C1 is equivalent to some other construct C2, then
+there should be a language rule that says that C1 is illegal if C2 is illegal.
+We don't want to infer Legality Rules from Static Semantics and especially
+Dynamic Semantics rules.
+
+
+I don't believe we want a normative rule.
+
+***************************************************************
