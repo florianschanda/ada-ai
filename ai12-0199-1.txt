@@ -1,4 +1,4 @@
-!standard 7.3.2(5/4)                                   16-07-21  AI12-0199-1/01
+!standard 7.3.2(5/4)                                   16-10-05  AI12-0199-1/02
 !class binding interpretation 16-07-21
 !status work item 16-07-21
 !status received 16-06-11
@@ -8,7 +8,11 @@
 !subject Abstract subprogram calls in class-wide invariant expressions
 !summary
 
-** TBD:
+Do not apply class-wide type invariants to abstract types, to avoid
+various problems. Define the notion of a "corresponding expression" for
+a class-wide type invariant, replacing references to components as
+appropriate, taking into account rules for corresponding and specified
+discriminants.
 
 !question
 
@@ -33,23 +37,50 @@ subprograms?
 
 Modify 7.3.2(5/4):
 
-Within an invariant expression, the identifier of the first subtype of the
-associated type denotes the current instance of the type. Within an invariant
-expression for the Type_Invariant aspect of a type T, the type of this current
-instance is T. Within an invariant expression for the Type_Invariant'Class
-aspect of a type T, the type of this current instance is interpreted as though
-it had a (notional) {nonabstract} type NT that is a visible formal derived
-type whose ancestor type is T. The effect of this interpretation is that the
-only operations that can be applied to this current instance are those defined
-for such a formal derived type.
+  Within an invariant expression, the identifier of the first subtype of
+  the associated type denotes the current instance of the type. Within
+  an invariant expression for the Type_Invariant aspect of a type T, the
+  type of this current instance is T. Within an invariant expression for
+  the Type_Invariant'Class aspect of a type T, the type of this current
+  instance is interpreted as though it had a (notional) {nonabstract}
+  type NT that is a visible formal derived type whose ancestor type is
+  T. The effect of this interpretation is that the only operations that
+  can be applied to this current instance are those defined for such a
+  formal derived type.
 
-** TBD: We don't have any rules like 6.1.1(18-18.2/4) for type invariants; we
-never define the "corresponding expression". We may need to do that, as
-components are directly visible in this expression as well as the type itself.
+Modify 7.3.2(8):
+  If the Type_Invariant'Class aspect is specified for a tagged type T,
+  then [the invariant expression applies to all descendants of T] {then
+  a /corresponding expression/ also applies to each non-abstract
+  descendant T1 of T [(including T itself if it is non-abstract)]}. {The
+  corresponding expression is constructed from the associated expression
+  as follows:
 
-And we do need a rule like 6.1.1(18.2/4), as class-wide type invariants can be
-specified on and apply to abstract types. Thus, the Bairdian example can be
-constructed for this case as well:
+  * References to non-discriminant components of T (or to T itself) are
+    replaced with references to the corresponding components of T1 (or
+    to T1 as a whole).
+
+  * References to discriminants of T are replaced with references to the
+    corresponding discriminant of T1 (see 3.7), or to the specified
+    value for the discriminant, if the discriminant is specified by the
+    derived_type_definition for some type that is an ancestor of T1 and
+    a descendant of T (see 3.7).}
+
+!discussion
+
+For simplicity, we say that class-wide type invariants only apply to
+non-abstract types.  For an abstract type, no type invariant checks are
+performed, nor should the type invariant expression be presumed true.
+
+This AI provides rules for class-wide type invariants analogous to those
+for class-wide pre- and postconditions found in 6.1.1(18-18.2/4).  In
+particular, we define the "corresponding expression", taking into
+account components which are directly visible in this expression as well
+as the type name itself.
+
+We avoid the need for a rule like 6.1.1(18.2/4), by saying that
+class-wide type invariants do not apply to abstract types. Otherwise,
+the Bairdian example could be constructed for this case as well:
 
       package Pkg2 is
          type T is tagged null record
@@ -58,7 +89,8 @@ constructed for this case as well:
          procedure Proc (X : in out T);
       end Pkg2;
 
-A call on Proc will make invariant checks on the value of X.
+If we allowed class-wide type invariants to apply to abstract types,
+then a call on Proc would make invariant checks on the value of X.
 
       with Pkg2;
       package Pkg3 is
@@ -68,26 +100,14 @@ A call on Proc will make invariant checks on the value of X.
          -- inherits Proc.
       end Pkg3;
 
-A call on the (concrete) inherited Proc will try to make invariant checks,
-which will call the abstract Is_OK. That won't work.
+If the call on the (concrete) inherited Proc were required to make
+invariant checks, it would call the abstract Is_OK, which wouldn't work.
 Note that a statically bound call on Pkg3.Proc can be created by type
-converting an object of a descendant type of NT to type NT.
+converting an object of a type that is a descendant of NT to the type NT.
 
-?? Perhaps the rule would need to be contingent on the existence of
-concrete routines of the type with the class-wide invariant in the package
-specification? Else any class-wide invariant of an interface would be illegal,
-which we surely don't want. Nor would we want the typical case of all abstract
-routines being illegal. So maybe the new rule ought to be written in terms of
-any concrete subprograms with parameters of the type being illegal in the
-package spec. But is that enough? There are lots of weird invariant checks that
-occur outside of the package (type conversions for one). Glad I'm not writing
-this AI.
-
-** End TBD. (Perhaps move this to the discussion??)
-
-!discussion
-
-** TBD.
+This approach of not applying class-wide invariants to abstract types also
+eliminates problems associated with type conversions to or across
+abstract types, and so on.
 
 !ASIS
 
@@ -188,6 +208,17 @@ Steve can cook up some juicy new problems.
 
 At least type invariants are much less useful than the 3 P's, so any loss of
 functionality will hardly be noticed.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 5, 2016  12:12 AM
+
+Here is the first real version of AI2-0199, which was spun off from AI12-0170.
+[This is version /02 of the AI - Editor.] The main concern was how class-wide
+type invariants interacted with abstract subprograms. I took the simple way out
+-- class-wide type invariants don't apply to abstract types. They only apply to
+non-abstract descendants.
 
 ****************************************************************
 
