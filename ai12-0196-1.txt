@@ -1,4 +1,4 @@
-!standard A(3/4)                                 16-10-04   AI12-0196-1/04
+!standard A(3/4)                                 16-10-05   AI12-0196-1/05
 !standard A.18(5)
 !class Amendment 16-06-07
 !status work item 16-06-07
@@ -80,17 +80,42 @@ Append to A.18.2(125):
    reentrant to allow parallel processing of Vectors to allow the Vector
    elements to be split into separate "chunks" of processing.
 
-Append to A.18.6(147.1):
-   An object of a Constant_Reference_Type is considered to be overlapping only
-   with the object designated by Element.
+Append to A.18.2(133/3):
 
-Append to A.18.6(147.1):
-   An object of a Reference_Type is considered to be overlapping only with the
-   object designated by Element.
+   For the purposes of determining whether Replace_Element is required to be 
+   reenterant, the Container parameter is considered to not overlap with any
+   other object Redundant[even with itself], and the Index parameter is
+   considered to overlap with the element at position Index.
 
-Similarly apply the above cursor and reference modifications to the other
-containers. [Editor's note: This will have to be replaced by a list of
-paragraph numbers in the final AI.]
+Append to A.18.2(135/3):
+
+   For the purposes of determining whether Replace_Element is required to be 
+   reenterant, the Container parameter is considered to not overlap with any
+   other object Redundant[even with itself].
+
+Append to A.18.3(81/3):
+
+   For the purposes of determining whether Replace_Element is required to be 
+   reenterant, the Container parameter is considered to not overlap with any
+   other object Redundant[even with itself].
+
+Append to A.18.4(81/3):
+
+   For the purposes of determining whether Replace_Element is required to be 
+   reenterant, the Container parameter is considered to not overlap with any
+   other object Redundant[even with itself].
+
+Append to A.18.7(34/2):
+
+   For the purposes of determining whether Replace_Element is required to be 
+   reenterant, the Container parameter is considered to not overlap with any
+   other object Redundant[even with itself].
+
+Append to A.18.10(116/3):
+
+   For the purposes of determining whether Replace_Element is required to be 
+   reenterant, the Container parameter is considered to not overlap with any
+   other object Redundant[even with itself].
 
 !discussion
 
@@ -142,6 +167,25 @@ elementary types are passed by copy, according to 6.2(3/3). We do not believe
 that there is any implementation problem here, as To_Cursor should not need
 to write to the container or any other object.
 
+The above allows parallel iteration of the containers but does not allow
+the container to be updated in parallel. For that we need to also allow
+the Replace_Element subprograms to be called concurrently. The Replace_Element
+subprograms have the same issue as To_Cursor in that they have a parameter
+that is the container containing the element that is to be replaced, and
+would ordinarily be considered to not be reentrant if concurrent calls are
+applied to the same container object, since the container parameter would be
+overlapping. We address this with similar wording that was used for To_Cursor
+to declare that the container parameter does not overlap with anything.
+
+For Vector containers, there is a Replace_Element variant that takes an Index
+instead of a cursor for a parameter. For that call, we need to specify that
+Index is considered to overlap with the element at that Index in the container,
+as otherwise two concurrent calls to Replace_Element for the same Index value
+would not conflict (requiring some sort of locking).
+
+These changes allow Replace_Element for all the containers to safely be called
+concurrently, similarly to To_Cursor for Vector containers.
+
 Containers that allow random access such as vectors are ideally suited for
 parallel processing, but other containers such as Doubly_Linked_Lists can
 still be processed in parallel. For those cases, it can be worthwhile
@@ -154,28 +198,38 @@ iterating thread reaches the next chunk of iterations to be processed in
 parallel. These parallel threads then iterate through their respective chunks
 applying the processing in parallel.
 
-The subprograms Next, Previous, and Element are all that are needed for this
-type of parallel processing. These subprograms (for all the
+The subprograms Next, Previous, Element, and possibly Replace_Element are all
+that are needed for this type of parallel processing. With the exception of
+Replace_Element, these subprograms (for all the
 containers) have only a cursor parameter. Since they do not have a container
 parameter, and since cursors are considered to only overlap with the element
-they designate, these calls can be made concurrently as long as each of the 
-concurrent calls designates a different element in the container. Overlapping
-might be considered a problem for the cursor object itself, but for parallel
-iteration through a container, separate cursor objects are expected to be used,
-as each cursor is an independent cursor that processes a mutually exclusive
-set of elements of the container concurrently, so overlapping of cursor objects
-does not need to be prevented for parallel iteration.
+they designate, these calls can be made concurrently as long as each of the
+concurrent calls designates a different element in the
+container. Overlapping might be considered a problem for the
+cursor object itself, but for parallel iteration through a
+container, separate cursor objects are expected to be used,
+as each cursor is an independent cursor that processes a
+mutually exclusive set of elements of the container
+concurrently, so overlapping of cursor objects does not need
+to be prevented for parallel iteration.
 
 This AI provides the bare minimum to allow parallel processing of the container
 libraries. All other rules involving tampering and parameter overlapping still
-apply, which means that insertion, deletion, or replacing elements into or from
+apply, which means that insertion or deletion from
 the container are not allowed while parallel operations to that container are
 occurring concurrently.
 
-Calls such as Replace_Element cannot be made concurrently because of the
-tampering rules. Many of the container library calls could be
-made reentrant without requiring locking, particularly if tampering checks are
-suppressed.
+Note that for container updates, the only mechanism for parallel updates to
+the containers is via the Replace_Element calls. Other techniques such as use
+of Update_Element, or using generalized loop iteration (see 5.5.2) or
+user defined indexing (see 4.1.6) are not allowed, since they trigger tampering
+check processing that would cause failures unless these checks are suppressed.
+We would also have had to supply wording for these calls that mentioned that
+the container parameter did not overlap with anything, as we did for To_Cursor
+and the Replace_Element calls. Since Replace_Element provides a capability for
+parallel update of the containers, and because of the issues with the tampering
+checks of these other calls, it was decided to not support concurrent calls to
+these subprograms.
 
 A full parallelism solution is needed for parallel loops and container
 iteration and usage, but that is expected to be covered by a different AI or
@@ -281,7 +335,9 @@ following profile;
          Work_Item  : in out Integer_Lists.Cursor) is
       begin
          for I in 1 .. Iterations loop
-            Integer_List (Work_Item) := Integer_List (Work_Item) + 1;
+            Integer_List.Replace_Element (
+                  Work_Item,
+                  Integer_Lists.Element (Work_Item) + 1);
             Integer_Lists.Next (Work_Item);
          end loop;
       end Process;
@@ -784,5 +840,114 @@ only a cursor parameter. Since they do not have a container parameter, ...
 
 I also put all of the wording into more standard format, which gets rid of
 all of those quote marks. [This is version /04 of the AI - Editor.]
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, October 4, 2016  9:52 AM
+
+...
+> Hope this works!
+
+Looks good to me.
+
+...
+> I also put all of the wording into more standard format, which gets 
+> rid of all of those quote marks.
+
+This looks good also.
+Thanks.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, October 4, 2016  10:39 AM
+
+>>> Perhaps an alternative would be to say that "for the purposes of 
+>>> determining whether To_Cursor is required to be reenterant, the 
+>>> Container parameter is considered to not overlap with any other 
+>>> object Redundant[even with itself]". Since this seems to be the only 
+>>> place where you need to override the default meaning of A 3(4).
+
+I'm wondering if we should also apply this paragraph to the Replace_Element
+calls of all the containers. To do that though, we'd also have to say
+something about suppressing the tampering checks for these calls. This
+would allow us to update all the elements of a container in parallel
+however. Eg. Increment each element of an Integer Vector.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Tuesday, October 4, 2016  11:17 AM
+
+Nevermind that, as having to suppress tampering checks is messy.
+But we could apply to all the Update_Element calls. Those calls do not
+involve tampering checks. If you like, I could resubmit with the wording
+for that. 
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, October 4, 2016  2:09 PM
+
+There's two things here, and I suspect you have them confused.
+
+Replace_Element is a tampering with elements operation (since the
+discriminants/bounds/specific type can be changed with it) - so it makes a
+tampering check when it starts, but it does not change the tampering state of
+the container (which is the problematic operation). The latter isn'r necessary
+because no tampering can happen while the call is in progress, at least not
+without "overlapping calls", which is not required to work).
+
+OTOH, Update_Element (and Reference) are not tampering operations (since the
+discriminants/bounds/specific type cannot be changed with these), but these do
+change the tampering state of the container. That's because one could call
+(say) Insert on the container while doing the update (or using the reference),
+and that would cause problems.
+
+Tucker has proposed eliminating tampering with elements for definite
+containers, but that won't change the requirement for the tampering check for
+Update_Element (and Reference) -- it will just change it to "tampering with
+cursors".
+
+So I think your original thinking was correct (use Replace_Element here).
+
+****************************************************************
+
+From: Brad Moore
+Sent: Wednesday, October 5, 2016  2:05 AM
+
+This is an update to this AI. [This is version /05 of this AI - Editor.]
+
+It mostly provides wording to allow Replace_Element to be called concurrently
+for all the containers.
+
+I also added some more text to the discussion about how other mechanisms to
+update containers such as via Update_Element, or Generalized Loop Iteration,
+or User-Defined Indexing, or via calls to Reference are not supported, because
+these mechanisms cause issues with the tampering checks.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, October 5, 2016  8:51 PM
+
+> This is an update to this AI.
+
+Sadly, you started with an old version of the AI with all of the previously
+fixed typos and formatting issues. As such, I can't really tell what you did
+or did not change, other than the following. (A file compare says that the
+entire thing is different.)
+ 
+> It mostly provides wording to allow Replace_Element to be called 
+> concurrently for all the containers.
+> 
+> I also added some more text to the discussion about how other 
+> mechanisms to update containers such as via Update_Element, or 
+> Generalized Loop Iteration, or User-Defined Indexing, or via calls to 
+> Reference are not supported, because these mechanisms cause issues 
+> with the tampering checks.
+
+Hopefully, I didn't lose anything important. Sorry.
 
 ****************************************************************
