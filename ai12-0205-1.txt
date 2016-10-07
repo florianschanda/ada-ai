@@ -1,0 +1,1056 @@
+!standard 12.4 (6)                                    16-10-06  AI12-0205-1/01
+!standard 12.5 (2)
+!standard 12.7 (2)
+!class amendment 16-10-06
+!status work item 16-10-06
+!status received 16-10-06
+!priority Medium
+!difficulty Medium
+!subject Defaults for generic formal parameters
+
+!summary
+
+The syntax of generic formal type, package, and "in out" object parameters are
+modified to permit default expressions.
+
+!problem
+
+Ada 2012 does not have defaults for generic formal types or packages. While
+not a serious problem (users can always be forced to supply explicit values
+for all parameters), it is sometimes a nuisance and unnecessarily complicates
+some generic instantiations. Allowing more kinds of defaults for generic
+formal parameters can significantly ease the use of generic units.
+
+!proposal
+
+Defaults for generic formal types
+---------------------------------
+
+12.5(2) is modified to read
+
+  formal_type_declaration ::=
+    type defining_identifier [discriminant_part] is
+      formal_type_definition [or use default_subtype_mark];
+
+The optional "or use subtype_mark" defines a default type
+to be used if an instantiation does not explicitly provide an actual
+for that parameter. 12.3(7 and 10) are modified to include default_subtype_mark
+as an option for missing parameter associations. (Note: "default_" is in
+italics in default_subtype_mark.) The subtype denoted by default_subtype_mark
+must fulfill all the constraints/rules as if it occurred as a
+generic actual in a generic parameter association.
+
+
+Defaults for generic formal packages
+------------------------------------
+
+12.7 (2) is modified to read
+
+  formal_package_declaration ::=
+    with package defining_identifier is
+      new generic_package_name formal_actual_part [or use default_package_name];
+
+The optional "or use package_name" defines a default package
+to be used if an instantiation does not explicitly provide an actual
+for that parameter. 12.3(7 and 10) are modified to include default_package_name
+as an option for missing parameter associations. (Note: "default_package_" is
+in italics in default_package_name.) The package denoted by default_package_name must
+be an instantiation of the generic package denoted by generic_package_name
+such that it fulfils the constraints imposed by the formal_actual_part.
+
+
+Defaults for generic formal "in out" objects
+--------------------------------------------
+
+It is proposed to delete paragraph 12.4(6). This will allow generic formal
+"in out" objects to have default expressions.
+
+
+!discussion
+
+The basic idea behind these changes is to allow all types of generic
+parameters to have defaults. Currently, only subprograms and 'in' objects
+may have a default value. However, the benefits of default parameters can exist
+for any kind of parameter.
+
+All of these changes aim at making generic instantiations simpler to write,
+or rather, to give designers of generic units the means to design their
+units such that instantiations can be made simpler than today. It is often
+possible to supply reasonable default values for some of the entities to
+which the above proposal applies.
+
+The syntax for default types is hard to define. 'Or use' was selected because
+a default type is an alternative to specifying an actual type. We also
+considered using a new keyword ('default'), the assignment symbol (':='), and
+various other combinations of existing reserved words ("use", "until others",
+"else"). "Use" alone is unacceptable because adding a semicolon would make
+another syntactically legal program (and semantically legal program for
+packages). All of the others would be OK, but (except for "else") don't have
+the right flavor. For instance, ":=" seems to imply copying a type (which
+can't happen).
+
+[Editor's note: I used Bob Duff's suggestion of "or use" in this AI. I thought
+it read better than the other suggestions. It has the advantage of not being
+any of the syntax choices considered in the rejected 2002 edition of this AI,
+and we've already used "and" in the syntax for a purpose other than logical
+operations. "Or" is probably feeling left out. :-)]
+
+Defaults would have proven useful in the development of a library of container
+abstractions. A short discussion on comp.lang.ada revealed that several
+developers of container libraries have come across these issues and perceive
+them as shortcomings of Ada 95.
+
+
+!example
+
+An example for defaults for generic formal types
+------------------------------------------------
+
+Consider a list container with an operation returning the number of items
+currently in the list.
+
+generic
+   type Item_Type is private;
+   with function "=" (L, R : in Item_Type) return Boolean;
+package Lists is
+
+   type List is private;
+
+   procedure Append
+     (L    : in out List;
+      Item : in     Item_Type);
+
+   function Length
+     (L : in List)
+     return Natural;
+
+   -- ... other operations
+private
+
+   type Node;
+   type Link is access all Node;
+   type Node is
+     record
+        Data       : Item_Type;
+        Next, Prev : Link;
+     end record;
+
+   type List is new Ada.Finalization.Controlled with
+     record
+       N          : Natural := 0;
+       Head, Tail : Link;
+     end record;
+
+   -- ..  more stuff
+
+end Lists;
+
+All operations would maintain L.N, e.g. Append would add 1. When this was
+discussed on comp.lang.ada, some people argued that if one has lists of oranges
+and lists of apples, these should be counted using different types to avoid
+inadvertantly adding apple counts and orange counts. Hence the interface
+should be modified:
+
+generic
+   type Item_Type is private;
+   type Item_Count is range <>; --  Must include zero.
+   with function "=" (L, R : in Item_Type) return Boolean;
+package Lists is
+
+   --  ... as above, except:
+
+   function Length
+     (L : in List)
+     return Item_Count;
+
+private
+
+   type List is new Ada.Finalization.Controlled with
+     record
+       N          : Item_Count'Base := 0;
+       Head, Tail : Link;
+     end record;
+
+end Lists;
+
+Well, clearly not everybody agrees with that, and some people don't care, and
+some may say "well, Item_Count has that funny requirement that zero be included,
+so let's use Natural", so in a general container package, it might well make
+sense to provide a default (namely Natural) for the Item_Count type. With that,
+the generic package could cater for both styles, at no extra cost:
+
+generic
+   type Item_Type is private;
+   type Item_Count is range <> or use Natural; --  New syntax.
+   with function "=" (L, R : in Item_Type) return Boolean;
+package Lists is
+
+   ...
+
+end Lists;
+
+
+An example for defaults for generic formal packages
+---------------------------------------------------
+
+Consider a hash table container abstraction using a signature
+package for the key type:
+
+  generic
+     type Key_Type (<>) is private;
+     with function Hash (Key : in Key_Type) return Natural;
+     with function "=" (L, R : in Key_Type) return Boolean is <>;
+  package Hashable is
+     -- Signature package.
+  end Hashable;
+
+  generic
+     with package Keys is new Hashable (<>);
+     type Item_Type (<>) is private;
+     Initial_Default_Size : Positive := 23;
+  package Hash_Tables is
+
+     type Hash_Table is private;
+
+     procedure Insert
+       (Table : in out Hash_Table;
+        Key   : in     Keys.Key_Type;
+        Item  : in     Item_Type);
+
+     -- ... Other operations on hash tables
+
+  end Hash_Tables;
+
+Then, one could get a package for hash tables with strings as keys as
+follows:
+
+  with Hash_Support;
+  package String_Keys is
+     new Hashable (Key_Type => String, Hash => Hash_Support.Hash_String);
+
+  generic
+     with package Keys is new Hashable (<>) or use String_Keys; -- New syntax.
+     type Item_Type (<>) is private;
+     Initial_Default_Size : Positive := 23;
+  package String_Hash_Tables is
+     package Table is Hash_Tables (Keys, Item_Type, Initial_Default_Size);
+     -- Probably would use renames here to make the contents directly visible.
+  end String_Hash_Tables;
+
+with the same instantiations for finally getting concrete hash tables:
+
+  package My_Hash_Tables is
+    new String_Hash_Tables (Item_Type => My_Data);
+
+  package My_Other_Hash_Tables is
+    new String_Hash_Tables (Item_Type => My_Other_Data);
+
+
+An example for defaults for generic formal "in out" objects
+-----------------------------------------------------------
+
+The motivating example for default values for generic formal
+"in out" objects is the storage pool parameter often found in container
+libraries:
+
+  generic
+     type Item_Type is private;
+     with function "=" (L, R : in Item_Type) return Boolean is <>;
+     Pool : in out System.Storage.Root_Storage_Pool'Class;
+  package Lists is
+
+     type List is private;
+
+     --  Operations on lists...
+
+  private
+
+     type Node;
+     type Link is access all Node;
+     for Link'Storage_Pool use Pool;
+
+     type Node is
+       record
+          Data       : Item_Type;
+          Next, Prev : Link;
+       end record;
+
+     type List is new Ada.Finalization.Controlled with
+       record
+          Head, Tail : Link;
+       end record;
+
+  end Lists;
+
+Many users just don't care about storage pools (or even don't know what they
+are be good for). Advanced users, however, may well want to specify the pool
+in which the list should allocate its nodes, hence adding the pool as a generic
+formal parameter clearly makes sense. Unfortunately, it confuses less advanced
+users (and generally complicates instantiation in those cases where one really
+doesn't care).
+
+If one could provide a default value for "Pool", this confusion or complication
+could be avoided: we could simply declare the package as
+
+  generic
+     type Item_Type is private;
+     with function "=" (L, R : in Item_Type) return Boolean is <>;
+     Pool : in out System.Storage.Root_Storage_Pool'Class := The_Default_Pool;
+  package Lists is
+     ...
+
+[For this example, we won't define what "The_Default_Pool" actually might be.
+For many implementations, a possible declaration might be a pre-written pool
+that just uses the standard pool of some arbitrary access type.]
+
+With defaults for generic formal "in out" objects, an instantiation of this
+list package can be as simple as
+
+  package My_Lists is new Lists (My_Type);
+
+Inexperienced users or users that chose not to care about storage pools can
+use the package without extra hassles, while experienced or concerned users
+still have the possibility to provide their own storage pool.
+
+!ASIS
+
+** Unknown ASIS effect **
+
+!ACATS
+
+New ACATS B-Tests and C-Tests will be needed to test this feature.
+
+!appendix
+
+The initial /01 version of this AI was copied from AI95-00299-1, which was
+discussed and voted No Action in 2002. Since it was complete (the
+newly submitted proposal forgot "in out" parameters), already in AI format,
+and it was easy to change to use the best newly proposed syntax, it was
+a better starting point than the text proposal - Editor - October 6, 2016.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, September 26, 2016  3:38 PM
+
+Here is a draft proposal to allow defaults for all formal parameters to a
+generic unit. If we have time, we could discuss its merits and demerits at
+the ARG meeting in Pittsburgh, before devoting energy to formalizing it as
+an AI.
+
+----
+
+
+Default values for type and package formal parameters in generics
+=================================================================
+
+In recent years, designers of programming languages have somewhat given up on
+the "fully object oriented" approach, to move instead to a more static approach
+via the use of generics. One of the main reasons to do that is of course
+performance, since most calls can be resolved (and often inlined) by the
+compiler itself. Ada of course lends itself to this approach somewhat, but
+lacks a few capabilities as we will see in the following examples.
+
+example 1: default value for types
+----------------------------------
+
+Let's look at the standard vector package in the Ada runtime. Its profile is
+
+     generic
+        type Index_Type is range <>;
+        type Element_Type is private;
+        with function "=" (Left, Right : Element_Type) return Boolean is <>;
+     package Vectors is
+        ...
+     end Vectors;
+
+In a lot of cases, one would use a vector instead of a list simply because they
+are in general more efficient on modern CPUs and limit the number of calls to
+memory allocation. In such cases, the index type is irrelevant, and users will
+just want to use Integer for instance. That doesn't work because the Vectors
+package need a No_Index, which is a value outside the range of Index_Type. And
+for most users that makes the instantiation of the Vectors package more complex
+than it should be.
+
+If we had a way to specify a default value for the formal type parameters, the
+design of the library could have had:
+
+     generic
+        type Element_Type is private;
+        type Index_Type is range <> use Natural;     --  new syntax
+        with function "=" (Left, Right : Element_Type) return Boolean is <>;
+     package Vectors is
+        ...
+     end Vectors;
+
+     package Char_Vector is new Vectors (Character);
+
+Another example is an algorithm that finds an element in a vector. It
+receives the vector and the element to search. For instance:
+
+     generic
+        type T is private;
+        with package Vecs is new Vectors (T);
+        with function "=" (L, R : T) return Boolean is <>;
+     function Find (V : Vecs.Vector; E : T) return Vecs.Cursor;
+
+If T represents a Person, we would like to find the first person aged 42.  This
+cannot easily be done above, since the parameter E doesn't make sense.
+Instead, we want to do what various libraries call a projection. This is a
+mapping from type T to another type P, and the predicate then applies to P. So
+here the projection returns the person's age, and the equality is the standard
+equality on integers. The new profile is:
+
+     generic
+        type T is private;         --  a person for instance
+        type P is private use T;   --  the age for instance
+        with function "=" (E : T; Key : P) return Boolean is <>;
+        with function Project (E : T) return P is (E);
+     function Find (V : Vecs.Vector; E : P) return Vecs.Cursor;
+
+Here the default parameters mean that we can use the same implementation
+for the standard version that search the element itself, and for a version
+that uses projections.
+
+
+example 2: default values for packages
+--------------------------------------
+
+When designing a library like the standard containers in the Ada runtime, one
+would like to provide as much flexibility to the final user as possible.
+Unfortunately, this often means adding extra formal parameters that let users
+configure packages (perhaps via the use of signature packages for instance).
+
+Unfortunately, any such extra formal parameter makes the use of the library
+harder, since users have to provide values for the parameters, and thus need to
+understand what they are used for.
+
+Our second example aims at providing a storage pool to a list package, to let
+users control the memory allocation for nodes. The initial attempt is just to
+pass the storage pool itself as a formal parameter. But such parameters are
+always constant, and the pool needs to be read-write. So we need to pass an
+access.
+
+     generic
+        type Element_Type is private;
+        Pool : access Root_Storage_Pool'Class;
+     package Lists is
+        type Node is null record;
+        type Node_Access is access all Node;
+        for Node_Access'Storage_Pool use Pool.all;
+     end Lists;
+
+That works, but with several drawbacks: no default value for Pool, so users
+must provide one, and understand the semantics; there is dynamic dispatching
+here, which prevents inlining and is slower. In particular, the second point
+means that when using a default storage pool (like GNAT's
+System.Pool_Global.Global_Pool_Object), our package is less efficient than it
+would be if we did not have the Pool argument.  The flexibility has a cost.
+
+A better approach is to use a signature package, that includes both the pool
+and its type, so as to remove the dynamic dispatching. The code becomes:
+
+     generic
+        type Storage_Pool is new Root_Storage_Pool with private;
+        Pool : access Storage_Pool;
+     package Pools is
+     end Pools;
+
+     use System.Pool_Global;   --  GNAT specific
+     package Global_Pool is new Pools
+        (Unbounded_No_Reclaim_Pool, Global_Pool_Object'Access);
+
+     generic
+        type Element_Type is private;
+        with package Pool is new Pools (<>);
+     package Lists is
+        type Node is null record;
+        type Node_Access is access all Node;
+        for Node_Access'Storage_Pool use Pool.Pool.all;
+     end Lists;
+
+No more dynamic dispatching. But the user still has to pass a value for the
+formal Pool parameter, it would be nicer to have a syntax to indicate a valid
+default, as in:
+
+     generic
+        type Element_Type is private;
+        with package Pool is new Pools (<>) use Global_Pool;
+     package Lists is
+        type Node is null record;
+        type Node_Access is access all Node;
+        for Node_Access'Storage_Pool use Pool.Pool.all;
+     end Lists;
+
+
+example 3:
+----------
+
+Let's extend the use of signature packages in our containers library. These
+signature packages are a nice way to group type and operations on them for
+static resolution, as opposed to what tagged types do at runtime.
+
+While trying to merge code used for Ada.Containers.Vectors and
+Ada.Containers.Indefinite_Vectors, we realized that these two packages are
+almost exactly similar, except that the second needs to allocate some memory to
+store an access to the element in the vector, rather than the element itself.
+
+So we introduce one signature package that describes how elements are stored in
+a container:
+
+     generic
+        type Element_Type (<>) is private;
+        type Stored_Type is private;
+        with function To_Stored (E : Element_Type) return Stored_Type;
+     package Elements is
+     end Elements;
+
+with two possible implementations:
+
+     generic
+        type Element_Type is private;    --  definite
+     package Definite_Elements is
+        function Identity (E : Element_Type) return Element_Type is (E);
+        package Traits is new Elements
+           (Element_Type, Element_Type, Identity);
+     end Definite_Elements;
+
+     generic
+        type Element_Type (<>) is private;    --  indefinite
+     package Indefinite_Elements is
+        type Element_Access is access Element_Type;
+        function To_Stored (E : Element_Type) return Element_Access
+           is (new Element_Type'(E));
+        package Traits is new Elements
+           (Element_Type, Element_Access, To_Stored);
+     end Indefinite_Elements;
+
+and our simplified vectors package is
+
+     generic
+        type Element_Type (<>) is private;
+        with package E is new Elements
+           (Element_Type => Element_Type, others => <>);
+     package Vectors is
+        type Vec is array (Natural range <>) of E.Stored_Type;
+     end Vectors;
+
+These vectors, with the same implementation, can be used both for definite or
+indefinite elements, and even in cases we haven't imagined yet (the user could
+for instance have a package that implements something similar to C++'s
+small-string-optimization). But it is harder to instantiate, since we now need
+to instantiations:
+
+     package String_Elements is new Indefinite_Elements (String);
+     package String_Vectors is new Vectors (String, String_Elements);
+
+It would be nice if we could provide a slightly higher-level package that does
+this for us, as in the current Ada runtime:
+
+     package String_Vectors is new Vectors (String);
+
+where we could use default values for the formal parameters, as in:
+
+     generic
+        type Element_Type (<>) is private;
+        with package E is new Elements (Element_Type, others => <>)
+           use new Indefinite_Elements (Element_Type);
+     package Vectors is
+     end Vectors;
+
+The default value is no longer an existing package, but is the result of an
+instantiation of a generic package (which covers the worst case of indefinite
+elements).
+
+Proposal
+--------
+
+We propose to add a new syntax in the formal part of the generics, and alter the
+Ada grammar as follows:
+
+   formal_type_declaration ::=
+       formal_complete_type_declaration
+       | formal_incomplete_type_declaration
+
+   formal_complete_type_declaration ::=
+       'type' defining_identifier[discriminant_part] 'is' formal_type_definition
+          ['use' formal_type_default_value] [aspect_specification] ';'
+
+   formal_incomplete_type_declaration ::=
+       'type' definining_identifier[discriminant_part] ['is tagged']
+          ['use' formal_type_default_value] ';'
+
+   formal_type_default_value ::= identifier
+
+   formal_package_declaration ::=
+       'with package' defining_identifier 'is new' generic_package_name
+           formal_package_actual_part [ 'use' formal_package_default ] ';'
+
+   formal_package_default ::=
+       identifier
+       | 'new' generic_package_name formal_package_actual_part
+
+Semantics
+---------
+
+When no actual value is provided for a formal parameter, the default value
+applies.
+
+This default value is either:
+
+  - a name, which is searched in the scope of the declaration of the generic
+
+  - the instantiation of another generic package. It behaves as if the
+    instantiation occurred at the location of the formal parameter
+    declaration.
+
+Implementation
+--------------
+
+When the default value is a generic instantiation, it might result in a large
+number of instantiations. Implementations are encouraged, but not required, to
+share those instantiations when the types match to limit the impact on code
+side.
+
+Extensions
+----------
+
+This package leads to a number of possible extensions in the future (not part
+of this proposal).
+
+  - allow a limited set of expressions in formal_package_default. For
+    instance, it would be nice to allow an if-expression or case-expression
+    that can be resolved statically.
+    Looking back at the first example above, the default was to always use
+    the implementation for indefinite types. But this is not optimal when
+    implementation a vector of Integer for instance. So it would be nice
+    to allow something like:
+
+     generic
+        type Element_Type (<>) is private;
+        with package E is new Elements (Element_Type, others => <>)
+           use (if Element_Type'Is_Definite
+                then Definite_Elements (Element_Type)
+                else Indefinite_Elements (Element_Type));
+     package Vectors is
+     end Vectors;
+
+    We could also look at the 'Size of the type, or whether it is
+    controlled, or whether tasking is enabled,...
+
+  - a slightly different approach here is to have a default that is
+    directly associated with the type. An example is that of the Hash
+    function used in the standard library's hashed maps. We would like
+    to indicate that the default is provided by the type.
+    For instance:
+
+        generic
+           type T (<>) is private
+           with function Hash (Self : T) return Hash_Type;
+        package Hashable is
+        end Hashable;
+
+        type Hashable_String is new String
+           with Hashable => String_Hashable;   --  custom aspect
+        package String_Hashable is new Hashable
+           (String, Ada.Strings.Hash);
+
+        type Person is null record
+           with Hashable => Person_Hashable;
+        function Hash (P : Person) return Hash_Type;
+        function Person_Hashable is new Hashable
+           (Person, Hash);
+
+        generic
+           type Key (<>) is private;
+           type Element_Type (<>) is private;
+           with package Hash is new Hashable (Key, others => <>)
+              use Key'Hashable;    --  reference the aspect
+        package Hashed_Maps is
+           ...
+        end Hashed_Maps;
+
+    This provides simple instantiation of hashed maps, while providing
+    full control by the user as to which hash function to use. This is
+    extensible to user-defined types (which the earlier if-expression
+    did not provide).
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, September 26, 2016  4:19 PM
+
+I think it's missing defaults for generic formal objects of mode 'in out'.
+That could be useful if you want to pass in a storage pool, and have it
+default to some global pool.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Sunday, October 2, 2016  9:01 PM
+
+Of course, someone tried to do this for Ada 2005, and it didn't get adopted
+partly because people didn't like the proposed syntax. (There should be a
+lesson there for other people making proposals like this.) [Eventually, it
+was deemed not important enough.] The previous attempt (pretty detailed, but
+no formal wording) was AI95-00299. Might be best to start from the previous
+proposal if creating an AI, since it already exists.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Monday, October 3, 2016  5:03 AM
+
+It's seems reasonable what it's trying to achieve, but I really don't like the
+syntax, another use of "use" and one which doesn't intuitively indicate that a
+default is being supplied.
+How about aspect-like syntax "with Default_Type => ..." or
+"with Default_Package => ..." ?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  8:03 AM
+
+This is torturing the meaning of aspects a bit, in my view.  I don't like the
+"else use" from the old proposal, but "use" by itself in the new proposal
+seeems consistent with the way we use "use" in, for example, "for T'Read
+use T_Read."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  12:51 PM
+
+The previous proposal failed mainly because people didn't like any of the
+syntaxes proposed. (If you look at the last message in the !appendix, I tried
+6 different syntaxes.)
+
+"use" by itself doesn't work, because it is much too close to other, unrelated
+syntax:
+
+generic
+   type Item_Type is private;
+   type Item_Count is range <> use Natural;
+package Lists is
+
+But:
+
+generic
+   type Item_Type is private;
+   type Item_Count is range <>; use Natural;
+package Lists is
+
+is also legal syntax (luckily not legal semantically); and there two possible
+intents (as
+
+generic
+   type Item_Type is private;
+   type Item_Count is range <>; use type Natural;
+package Lists is
+
+is also legal and sensible), so having the compiler suggest that the semicolon
+is included by mistake isn't sufficient.
+
+I think we concluded that this only works syntactically with a new keyword (the
+other options look unintuitive at best), and then it was concluded that this
+wasn't important enough for a new keyword.
+
+(I know that the minutes don't talk about the syntax choice, but I have a very
+strong memory on this particular AI, since I was so disappointed that it
+failed. And that memory is completely about the syntax being icky.)
+
+Perhaps this calculus has changed (especially if Ada 2020 has other new
+keywords), or maybe someone can dream up some better syntax, but just
+proposing the exact same thing that failed last time seems like a waste of our
+time.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  12:56 PM
+
+> This is torturing the meaning of aspects a bit, in my view.
+
+We already have Default_Value and Default_Component_Value aspects. Jeff's idea
+seems similar to those, so it doesn't seem *that* tortured.
+
+As I noted in my other message, I'd rather try some very different syntax,
+because we already know that any of the six previous proposals are very
+unlikely to fly.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  2:27 PM
+
+>> This is torturing the meaning of aspects a bit, in my view.
+>
+> We already have Default_Value and Default_Component_Value aspects. 
+> Jeff's idea seems similar to those, so it doesn't seem *that* tortured.
+
+Good point, but it somehow still feels pretty different.  The presence of an
+aspect is now affecting the *syntax* you can use at the instantiation point.
+Whereas for Default_Value, it affects the run-time semantics, but not legality
+(except in some Baird-ian corner of corner cases, perhaps ;-).
+
+> As I noted in my other message, I'd rather try some very different 
+> syntax, because we already know that any of the six previous proposals 
+> are very unlikely to fly.
+
+Perhaps, though sometimes things can look better on a second iteration. So I
+don't always buy the argument that "we tried that before and it didn't work."
+But I agree it is worth being aware of earlier attempts, so you don't re-fight
+exactly the same battles.  I would always rather fight new battles...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  4:13 PM
+
+At the risk of beating a dead horse, I said: 
+
+...
+> "use" by itself doesn't work, because it is much too close to other, 
+> unrelated syntax:
+...
+
+Note that this effect is much, much worse for formal packages. Stealing part
+of an example from the AI:
+
+   generic
+      with package Pool is new Pools (<>) use Global_Pool;
+   package Some_Container is
+
+is only one character from:
+
+   generic
+      with package Pool is new Pools (<>); use Global_Pool;
+   package Some_Container is
+
+which is 100% legal and means something completely different.
+
+This is the sort of thing that we don't want more of in the Ada syntax.
+(Most existing cases of one character differences having different legal
+semantics are unavoidable, such as identifier differences, different literals,
+or different operations. This feels very different.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  4:30 PM
+
+We could use some other kind of separator, perhaps.
+For example, perhaps we could parenthesize the default specifications, e.g.:
+
+   generic
+       type Item_Count is range <> (use Natural);
+       type Pkg is new Gen(<>) (use Gen_1);
+       ...
+
+Clearly some creativity is needed!
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, October 3, 2016  4:31 PM
+
+> is only one character from:
+> 
+>    generic
+>       with package Pool is new Pools (<>); use Global_Pool;
+>    package Some_Container is
+> 
+> which is 100% legal and means something completely different.
+
+But I don't see how that can cause a run-time bug.  And if it doesn't cause
+run-time bugs, it's not a significant problem.
+
+I agree we should try to come up with the best syntax we can, but "We can't
+find the perfect syntax" is a pretty poor excuse not to fix a rather glaring
+inconsistency.
+
+    with package Pool is new Pools (<>) or use Global_Pool;
+    with package Pool is new Pools (<>) or else use Global_Pool;
+
+?
+
+I agree with Tuck that using aspects feels wrong, because it's inconsistent
+ -- other defaults use syntax.  But I'd rather use aspects than lose the
+feature. It's even more inconsistent that some kinds of generic formals can
+have defaults, but others can't.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  4:52 PM
+
+> > is only one character from:
+> > 
+> >    generic
+> >       with package Pool is new Pools (<>); use Global_Pool;
+> >    package Some_Container is
+> > 
+> > which is 100% legal and means something completely different.
+> 
+> But I don't see how that can cause a run-time bug.  And if it doesn't 
+> cause run-time bugs, it's not a significant problem.
+
+??? Nothing that happens at compile-time can be a significant problem? Why do
+we worry about ripple effects and the like???
+ 
+> I agree we should try to come up with the best syntax we can, but "We 
+> can't find the perfect syntax" is a pretty poor excuse not to fix a 
+> rather glaring inconsistency.
+
+Well, it was enough in 2002. Specifically, it was "we can't find appropriate
+syntax, and the feature isn't important enough to use kludgy syntax." Only 5
+out of 11 wanted to keep working on the AI at the time. I could see a more
+favorable vote because of the different members, but it's hard to imagine what
+changed that would get this idea passed as is.
+
+>     with package Pool is new Pools (<>) or use Global_Pool;
+>     with package Pool is new Pools (<>) or else use Global_Pool;
+> 
+> ?
+
+Well, I didn't try those (only without the "or").
+
+> I agree with Tuck that using aspects feels wrong, because it's 
+> inconsistent -- other defaults use syntax.  But I'd rather use aspects 
+> than lose the feature.  It's even more inconsistent that some kinds of 
+> generic formals can have defaults, but others can't.
+
+I agree, but this is something that should have been fixed in Ada 2005. It's
+hard to care anymore, since portable Ada has to be limited pretty much to Ada
+2005, and I don't know that will change soon. (And even if it does, it probably
+will only be to Ada 2012.) The more stuff that we layer on, the less likely
+that non-GNAT compilers ever implement any of it. (Outside of Janus/Ada, other
+implementers seem to take these versions as a lump, which is a sure-fire way
+never to get anywhere.)
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Monday, October 3, 2016  5:14 PM
+
+> I agree, but this is something that should have been fixed in Ada 
+> 2005. It's hard to care anymore, since portable Ada has to be limited 
+> pretty much to Ada 2005, and I don't know that will change soon. (And 
+> even if it does, it probably will only be to Ada 2012.) The more stuff 
+> that we layer on, the less likely that non-GNAT compilers ever 
+> implement any of it. (Outside of Janus/Ada, other implementers seem to 
+> take these versions as a lump, which is a sure-fire way never to get 
+> anywhere.)
+
+Iterated component associations, @ as an abbreviation for left-hand sides, and
+delta aggregates are mostly implemented in GNAT. Is this a waste of effort
+then, or detrimental to the success of the language?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  6:07 PM
+
+I could say that all of these are more important (and they are), but that
+would be weaseling.
+
+Clearly these are useful to GNAT's customers, so they're surely not a waste
+of effort. It's harder to say about the language, because that begs the
+question of *which* Ada language? The one that can be used without vendor
+lock-in, or the bleeding edge, or something else.
+
+So I'm frustrated about the lack of Ada compiler alternatives, and I worry 
+about loading up too much for anyone else to ever follow. (I'm getting about
+10% of each version implemented before the next one comes out. Not very
+useful.) Taking that frustration out on this proposal is kinda silly,
+considering the Global, generator, and parallel proposals that are on the
+table (each huge).
+
+And I'm frustrated to just rehash useful ideas that got nowhere years ago,
+when pretty much nothing has changed. At least come up with a new angle
+before rehashing.
+
+Anyway, venting my frustration does not help progress the Standard, so point
+taken.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 3, 2016  9:18 PM
+
+>> I agree with Tuck that using aspects feels wrong, because it's 
+>> inconsistent -- other defaults use syntax.  But I'd rather use 
+>> aspects than lose the feature.  It's even more inconsistent that some 
+>> kinds of generic formals can have defaults, but others can't.
+>
+> I agree, but this is something that should have been fixed in Ada 
+> 2005. It's hard to care anymore, since portable Ada has to be limited 
+> pretty much to Ada 2005, and I don't know that will change soon.
+
+Be that as it may, AdaCore has many customers who are using Ada2012 features,
+including with the latest Corrigendum fixes.  Our customers do like to know
+they are using a standardized language, even though AdaCore is the only vendor
+that has implemented these newer features. I suppose the fact that there is an
+open-source, free "GPL" version of the compiler helps them feel that even if
+AdaCore goes up in smoke, the compiler will live on.
+
+> ... The more stuff that we layer on, the less likely that non-GNAT 
+> compilers ever implement any of it.
+
+If we were truly worried about this, we would have stopped working on Ada long
+ago.  The fact that GNAT is the only Ada compiler keeping up with the language
+standard at the moment is not the end of the world.  If you look at other
+programming languages, it is not uncommon that there is one preeminent
+compiler/front end that really keeps up with the language standard, while the
+others lag behind but nevertheless serve some special niche of the market (e.g.
+high performance, open-source, educational version, etc.).
+
+In any case, we should try to apply these sort of "complexity" criteria
+uniformly. We shouldn't just use them to shoot down a proposal we don't happen
+to like.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, October 3, 2016  9:36 PM
+
+...
+> > ... The more stuff that we layer on, the less likely that non-GNAT 
+> > compilers ever implement any of it.
+> 
+> If we were truly worried about this, we would have stopped working on 
+> Ada long ago.
+
+That seems pretty extreme. Ada 2005 got implemented by a number of vendors, so
+it seems likely that more modest updates would have gotten implemented as well.
+Modest work surely is valuable; the question is when do we jump the shark?
+(Note that I am convinced that most of the changes in Ada 2012 are
+sufficiently for the good; the question mainly is going forward.)
+
+> ...  The fact that GNAT is the only Ada compiler keeping up with the 
+> language standard at the moment is not the end of the world.  If you 
+> look at other programming languages, it is not uncommon that there is 
+> one preeminent compiler/front end that really keeps up with the 
+> language standard, while the others lag behind but nevertheless serve 
+> some special niche of the market (e.g.
+> high performance, open-source, educational version, etc.).
+> 
+> In any case, we should try to apply these sort of "complexity" 
+> criteria uniformly.  We shouldn't just use them to shoot down a 
+> proposal we don't happen to like.
+
+I agree. Have you seen me support much other than the smallest fixes and stuff
+related to parallel processing lately??? I was musing the other day on whether
+I was becoming too obstructionistic, and part of that is the fear that we're
+moving Ada too fast.
+
+In any case, if someone came up with a syntax proposal for this that everyone
+could get behind, I wouldn't have concerns about this particular proposal. It
+*should* have been done in 2002, after all, and it's fairly small. I just
+don't want to see us adopt some junk syntax that we could have adopted in 2002
+ -- in which case the feature would be much more useable (and the containers
+probably would have been designed differently).
+
+****************************************************************
+
