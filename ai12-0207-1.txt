@@ -1,0 +1,300 @@
+!standard 6.3.1(13.1/3)                                    16-12-15  AI12-0207-1/01
+!class binding interpretation 16-12-15
+!status work item 16-12-15
+!status received 16-09-19
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Convention of anonymous access-to-subprogram types
+!summary
+
+The convention of an anonymous access-to-subprogram type in the
+profile of a protected operation is Ada.
+
+The convention of an anonymous access type used in a component
+of an array or record type is the convention of the array or record
+type. The convention of an anonymous access type used in a
+stand-alone object declaration is the convention of the stand-alone
+object.
+
+!question
+
+(1) RM 6.3.1(13.1/3) currently says:
+
+    The calling convention for an anonymous access-to-subprogram
+    parameter or anonymous access-to-subprogram result is protected if
+    the reserved word protected appears in its definition; otherwise, it
+    is the convention of the subprogram that contains the parameter.
+
+This seems to have the wrong effect if an access-to-subprogram type
+appears in the profile of a protected operation. For instance:
+
+    protected P is
+        procedure Do_Something
+          (What_To_Do : access procedure(X : in out Integer));
+        ...
+    end P;
+
+The above wording says that the convention of What_To_Do is protected.
+But that could be declared if it is desired. Shouldn't the convention
+be Ada? (Yes.)
+
+(2) 6.3.1(2/1) says that the default convention of any entity is Ada,
+unless the Standard says otherwise. Therefore, the convention of an
+anonymous access-to-subprogram type used as a component is always Ada.
+
+If such a component is in a record type that is specified to have
+convention C, that doesn't make any sense. Should anonymous
+access-to-subprogram type take their convention from the enclosing
+record type? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 6.3.1(13.1/3):
+
+    The calling convention for an anonymous access-to-subprogram
+    parameter or anonymous access-to-subprogram result is *protected* if
+    the reserved word /protected/ appears in its definition; otherwise, it
+    is the convention of the {entity}[subprogram] that has the parameter
+    or result, unless that entity has convention *protected*, *entry*, or
+    Intrinsic, in which case the convention is Ada.
+
+Add after B.1(19):
+
+  * T is an anonymous access type, and T is eligible for convention L,
+
+    AARM Reason: We say this so that the presence of an anonymous access
+    component does not necessarily prevent a type from being eligible for
+    convention L. We want the anonymous access type to take the convention
+    from the enclosing type, but if we only said that, the definition would
+    be circular (one can only portably apply the convention L to a record
+    type R if the components of R already have convention L; but the
+    anonymous components of R have to take the convention from R).
+    We include the part of about T being eligible for convention L so that
+    we don't force convention L on some type that is incompatible with it.
+
+[Editor's note: specifically, "eligible for convention L" means that T is
+only L-compatible if B.1(17/3) or B.1(18) are met. We can't say that
+above since we're not allowed to use paragraph numbers in the RM or AARM
+notes.]
+
+Add after B.1(22):
+
+If convention L is specified for a type T, for each component of T that
+has an anonymous access type, the convention of the anonymous access type is
+L. If convention L is specified for an object which has an anonymous access
+type, the convention of the anonymous access type is L. 
+
+
+!discussion
+
+(1) We want an access-to-subprogram to only be protected if it includes the
+keyword protected. If it doesn't, it should inherit the convention from
+the containing operation. But it shouldn't inherit that convention if it
+is protected, else the usual case of passing an Ada subprogram wouldn't
+be possible for protected operations and entries.
+
+We change the wording from "subprogram" to "entity" since this rule applies
+to all entities with a profile, meaning thaat it applies to entries as
+well as subprograms.
+
+(2) This issue applies to any anonymous access type used as a component
+type, as the convention of an anonymous access type cannot be separately
+specified. It should be the same as the enclosing type.
+
+A similar issue also applies to stand-alone object declarations that have
+an anonymous access type.
+
+The wording to fix this is complicated, as the rules currently say that
+convention can only be applied to an array or record type if the conventions
+of the components are appropriate (L-compatible). But we want to conventions
+of some components to come from the convention of the array or record.
+
+We accomplish this in two steps. First we say by fiat that anonymous access
+types are L-compatible (thus taking them out of consideration as to whether
+a convention can be specified for a type). Then we specify the convention
+of anonymous access types used as the type of components (and as the type
+of objects).
+
+---
+
+Both of these rules are formally incompatible. If some code depends on the
+convention of some anonymous access type being protected (question 1) or
+Ada (question 2), then that code will break with these rule changes. But it
+is much more likely to make these constructs useful in interfacing code.
+In particular, an implementation could have simply disallowed anonymous
+access types in interfacing code (other than as access parameters), which 
+doesn't seem helpful. These rules will make such uses portable.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+ACATS B-Tests (and possibly C-Tests) should be constructed to check the
+appropriate conventions are used.
+
+!appendix
+
+From: Tucker Taft
+Sent: Monday, September 19, 2016  2:37 PM
+
+It has been suggested that the calling convention for a component of an
+anonymous access-to-subprogram type should come from the enclosing composite
+type.  Currently they seem to default to Ada, which doesn't make a lot of
+sense if the record or array type is of convention C, for example.  This
+would also be more consistent with how formal parameters of an anonymous
+access-to-subprogram type work.
+
+Any objections to creating such an AI?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September 27, 2016  3:43 PM
+
+RM 6.3.1(13.1/3) currently says:
+
+    The calling convention for an anonymous access-to-subprogram
+    parameter or anonymous access-to-subprogram result is protected if
+    the reserved word protected appears in its definition; otherwise, it
+    is the convention of the subprogram that contains the parameter.
+
+It should really say:
+
+    The calling convention for an anonymous access-to-subprogram
+    parameter or anonymous access-to-subprogram result is protected if
+    the reserved word protected appears in its definition; otherwise, it
+    is the convention of the subprogram that contains the parameter,
+    unless the containing subprogram is itself protected, in which case the
+    convention is Ada.
+
+For example, given:
+
+    protected P is
+        procedure Do_Something
+          (What_To_Do : access procedure(X : in out Integer));
+        ...
+    end P;
+
+we clearly want the convention of What_To_Do to be Ada, not "protected."
+
+If we did want What_To_Do to be an access-to-protected procedure, there is
+syntax to accomplish that:
+
+    protected P is
+        procedure Do_Something
+          (What_To_Do : access protected procedure(X : in out Integer));
+        ...
+    end P;
+
+------
+
+While on the topic, we probably want to generalize paragraph 13.1 above to
+handle other places where parameter profiles appear, namely in
+access-to-subprogram definitions and entries.  Hence:
+
+    The calling convention for an anonymous access-to-subprogram
+    parameter or anonymous access-to-subprogram result is /protected/ if
+    the reserved word PROTECTED appears in its definition; otherwise, it
+    is the convention of the entity that has the parameter or result,
+    unless that entity has convention /protected/, /entry/, or Intrinsic,
+    in which case the convention is Ada.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 15, 2016  10:02 PM
+
+> It has been suggested that the calling convention for a component of 
+> an anonymous access-to-subprogram type should come from the enclosing 
+> composite type.  Currently they seem to default to Ada, which doesn't 
+> make a lot of sense if the record or array type is of convention C, 
+> for example.  This would also be more consistent with how formal 
+> parameters of an anonymous access-to-subprogram type work.
+> 
+> Any objections to creating such an AI?
+
+I was writing up an initial version of a convention AI (this and your other
+access-to-subprogram convention question).
+
+It strikes me that this issue also occurs for anonymous access-to-object
+types used as components. As with anonymous access-to-subprogram types, you
+can't explicitly give the convention for an anonymous type. And, as you say,
+it doesn't make much sense for a C record to contain a bunch of components
+having Ada convention access types.
+
+Indeed, taking B.1(12-20) literally, an implementation would be allowed to
+reject allowing convention C on any record or array with anonymous access
+components, as there would be no requirement that an Ada convention anonymous
+access type to be C-compatible (that is implementation-defined). That seems
+like madness to me. (Of course, anonymous access types are madness in general,
+so maybe that fits well. ;-)
+
+Unfortunately, exactly how to word this escapes me at the moment (and Tucker
+didn't suggest anything). The wording used for access-to-subprograms in 6.3.1
+would be backwards for components: B.1 says that one can only apply a
+convention L to a record type if all of its components are L-compatible. Thus
+saying that the convention of an anonymous access type is L if the enclosing
+type has convention L would be begging the question.
+
+We could try to allow anonymous access types to be L-compatible. Adding
+additional bullet after B.1(19) would seem to do the trick:
+
+* T is an anonymous access type, and T is eligible for convention L,
+
+(We want B.1(17/3 & 18) to apply to these anonymous types.)
+
+I think this is OK, as it doesn't seem to allow anything additional beyond
+components (one can't derive from an anonymous type).
+
+We'd still have to say something about the convention of the anonymous access
+type itself (probably after B.1(22)):
+
+If convention L is specified for a type T, for each component of T that
+has an anonymous access type, the convention of the anonymous access type is
+L.
+
+Does this work? Any better ideas?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 15, 2016  10:11 PM
+
+> It strikes me that this issue also occurs for anonymous 
+> access-to-object types used as components. As with anonymous 
+> access-to-subprogram types, you can't explicitly give the convention 
+> for an anonymous type. And, as you say, it doesn't make much sense for 
+> a C record to contain a bunch of components having Ada convention 
+> access types.
+
+I wonder if this problem also applies to stand-alone object declarations.
+Consider:
+
+    C : access Interfaces.C.Int with Convention C;
+
+The convention of the anonymous access type here is Ada, since we never say
+that it is anything else, and therefore 6.3.1(2/1) applies.
+
+I'll leave the wording to fix this as an exercise for the reader (or at least
+Tucker).
+
+P.S. I hate anonymous access types.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, December 15, 2016  10:36 PM
+
+Following is my draft of this AI. Constructive comments welcome. (Forget the
+non-constructive comments. ;-)
+
+[Editor's note: This was followed by version /01 of the AI.]
+
+****************************************************************
