@@ -1,0 +1,1066 @@
+!standard C.6(8/3)                                    16-12-19  AI12-0209-1/00
+!class Amendment 16-12-19
+!status work item 16-12-19
+!status received 16-09-27
+!priority Low
+!difficulty Hard
+!subject Refine definition of volatility
+!summary
+
+Waste lots of time making Ada code harder to understand. :-)
+
+!problem
+
+No one understands the purpose of Volatile in Ada. Some people believe
+this is because Volatile wraps a number of closely related concepts.
+Some of us think its because its really a necessary sop to allow optimization
+rather than always executing the canonical semantics (much like 11.6, which
+no one understands either). So let's make the situation worse. :-)
+
+!proposal
+
+Split Volatile into 4 aspects that make no intuitive sense either.
+
+Roughly speaking, an object is Volatile if and only at least one of the
+following 4 Boolean-valued properties of the object is True:
+
+    Async_Readers -
+      There may exist asynchronous external readers of the given object
+    Async_Writers -
+      There may exist asynchronous external writers of the given object.
+    Effective_Writes -
+      An assignment to the given object may have additional side-effects
+      (e.g., modifying external state or modifying variables within the
+      program which have the Async_Writers property).
+    Effective_Reads
+      A read of the given object may have side-effects
+      (e.g., modifying external state or modifying variables within the
+      program which have the Async_Writers property).
+
+!wording
+
+** TBD **
+
+!discussion
+
+The major benefit is in expressive power - it would allow users to more
+precisely describe what is going on. This benefits human readers, static
+analysis tools, and (in 3rd place) compilers.
+
+[Editor's Rant: The proposal claims to add readability, but that can't happen
+unless the names of the aspects are intuitively obvious. The existing proposal
+does not do that.
+
+Consider:
+     Effective_Reads => False;
+This is obviously an "ineffective read"; that intuitively means a read that
+does not read at all (does not get data). The intended meaning is more like
+     Read_Has_External_Effect => False;
+or (better, but more informal):
+     Read_Has_Side_Effect => False;
+One of these names might add some readability. In addition, such things appear
+extremely rarely in Ada code (should only occur in device interface packages).
+As such, they have to be beyond crystal clear as to the meaning or they will
+simply confuse. (It took me 3 re-readings of this proposal over 3 months
+including more than an hour today to get a basic understanding of what is
+being proposed.)
+
+Async_Readers is less problematical, but it of course violates Ada's ban of
+abbreviations. It should be Asynchronous_Readers.
+
+One also wonders if the complication of multipling the very complex rules
+by a factor of 4 could possible ever be done correctly. There's no benefit
+of any sort the rules are buggy and thus inconsistently or incorrectly
+implemented.
+
+Having 4 aspects seems like overkill, since only a few combinations could
+occur in practice: async-read-and-write, async-read-but-synchronized-writes,
+and device-hardware-with-side-effects (in which case all 4 are true).
+
+End Editor's Rant.]
+
+!ASIS
+
+Need new aspects.
+
+!ACATS test
+
+ACATS B-Tests and C-Tests are needed to check that the new capabilities
+are supported.
+
+
+!appendix
+
+From: Steve Baird
+Sent: Tuesday, September 27, 2016  1:22 PM
+
+For SPARK, Ada's definition of volatility has turned out to be too coarse and it
+has turned out to be useful to view volatility as a composition of 4 distinct,
+independently specifiable properties.
+
+Roughly speaking, an object is Volatile if and only at least one of the
+following 4 Boolean-valued properties of the object is True:
+
+    Async_Readers -
+      There may exist asynchronous external readers of the given object
+    Async_Writers -
+      There may exist asynchronous external writers of the given object.
+    Effective_Writes -
+      An assignment to the given object may have additional side-effects
+      (e.g., modifying external state or modifying variables within the
+      program which have the Async_Writers property).
+    Effective_Reads
+      A read of the given object may have side-effects
+      (e.g., modifying external state or modifying variables within the
+      program which have the Async_Writers property).
+
+This AI is about defining these 4 properties in Ada as Boolean-valued aspects and updating the existing rules about volatility in terms of these new aspects.
+
+For example:
+   Reading a volatile object is not an external interaction unless the
+   Effective_Reads property of the object is True.
+
+   Writing a volatile object is not an external interaction unless either
+   the Effective_Writes or the Async_Readers aspect of the object is
+   True.
+
+Roughly speaking, the rules for these new aspects would follow the existing
+rules for the Volatile aspect. Specifying "Volatile" would be viewed as
+shorthand for specifying all 4 aspects. Much of the needed wording (or at least
+a starting point for it) already exists in the SPARK RM; see
+docs.adacore.com/spark2014-docs/html/lrm (start with section 7.1.2).
+
+So why bother with any of this? What problem are we trying to solve here?
+
+This proposal offers a small benefit in potentially improved code generation for
+uses of volatile objects in some cases.
+
+For example, if only the Async_Readers aspect of an object is true, then code
+which only reads the object can treat the object as though it is not volatile.
+
+The major benefit is in expressive power - it would allow users to more
+precisely describe what is going on. This benefits human readers, static
+analysis tools, and (in 3rd place) compilers.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Tuesday, September 27, 2016  4:30 PM
+
+> The major benefit is in expressive power - it would allow users to
+> more precisely describe what is going on. This benefits human readers,
+> static analysis tools, and (in 3rd place) compilers.
+
+FWIW, I'm not convinced this ought to be in the standard. The benefits seem
+pretty minor.  Especially given the current paucity of Ada compilers (and adding
+features moves the world further in that direction).
+
+> For example:
+>    Reading a volatile object is not an external interaction unless the
+>    Effective_Reads property of the object is True.
+
+I don't understand that.  If the "outside world" is modifying a volatile
+variable, and the program reads it, the program should see the modification --
+this is input, and input is an external interaction.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September 27, 2016  9:24 PM
+
+I agree with Bob.  Reading such a volatile variable is like reading an external
+file (which is considered an external interaction), as it is only an input. The
+difference from a "normal" fully-volatile variable is that a read of such a
+special volatile variable is not an output to the outside world.  Nevertheless,
+the compiler cannot omit reads of such a volatile variable, since each read
+might return a different value, and so must be included among the required
+"external interactions" of the program.  But it can know that reading such a
+volatile variable has no side effect on the state of the external world.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Tuesday, September 27, 2016  10:21 PM
+
+I stand by my original statement.
+
+Consider
+
+       X := Volatile_Variable;
+       X := 10;
+
+or
+
+       Y := False and (Volatile_Variable = 123);
+
+It is ok to eliminate the reads of the volatile variable if and only if the
+Effective_Reads property is False.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, September 27, 2016  11:55 PM
+
+I see your argument, but then if you read from an external file and throw away
+the result, the compiler should be able to omit the reads as well.  This seems
+like a bigger change than we might have bargained for...
+
+Alternatively, we don't make the change in the wording you are suggesting, but
+presume that compilers can omit the read if they convince themselves that the
+ultimate result is indistinguishable.  That is presumably always permitted.
+
+***************************************************************
+
+From: Arnaud Charlet
+Sent: Wednesday, September 28, 2016  3:35 AM
+
+> I see your argument, but then if you read from an external file and
+> throw away the result, the compiler should be able to omit the reads
+> as well.
+
+Well only if the user sets Effective_Reads => False, which is the whole point of
+this property.
+
+> This seems like a bigger change than we might have bargained for...
+
+Not sure why you say so: if the user explicitly specifies Effective_Reads =>
+False then this is precisely what the user expects and what the RM should
+describe.
+
+In other words, if the user reads a file then clearly he should NOT set
+Effective_Reads => False since reading a file does have a clear effect.
+
+> Alternatively, we don't make the change in the wording you are
+> suggesting, but presume that compilers can omit the read if they
+> convince themselves that the ultimate result is indistinguishable.
+> That is presumably always permitted.
+
+Looks much weaker to me.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Wednesday, September 28, 2016  7:41 AM
+
+> It is ok to eliminate the reads of the volatile variable if and only
+> if the Effective_Reads property is False.
+
+OK, I agree with those examples, but I'm not sure that's exactly what your
+wording said.  How about:
+
+    X := 1;
+    ...
+    Put_Line (X'Img);
+
+?  Can this be optimized to (if X is volatile, but Effective_Reads => False):
+
+    Put_Line (" 1");
+
+?  I don't think it should.
+
+Getting the wording right for volatile is extremely difficult, because it's at
+the wrong level of abstraction for formal language definition. The C standard
+struggles with the same thing (and gets it even wronger than Ada).  I wonder if
+you're multiplying the difficulty by 4 here.  ;-)/2.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, September 28, 2016  12:00 PM
+
+> ?  I don't think it should.
+
+I assume you are not talking about eliminating the assignment, but only
+eliminating the read at the point of the call to Put_Line.
+
+This would be just fine if and only if
+Async_Writers and Effective_Reads are both False.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, September 28, 2016  12:17 PM
+
+> The C standard struggles with the same thing (and gets it even wronger
+> than Ada).
+
+I don't know how C handles volatility.
+Does C have any interesting ideas that would be worth discussing?
+
+Are there issues associated with referencing C volatiles from Ada?
+Does
+    X : Some_Convention_C_Type with Volatile, Import, Address => ... ; handle
+    this case? (maybe with Atomic instead of Volatile)
+
+> I wonder if you're multiplying the difficulty by 4 here.
+
+Just the opposite IMO.
+
+I think Ada's mistake was conflating 4 very different properties in the
+definition of volatility.
+
+If you just want to say "there is a thread written in C running around which
+might read variable X at any time", that is very different than "reading
+variable Y has significant side effects".
+
+In Ada today, you would declare both X and Y as volatile and lose the
+distinction.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, September 28, 2016  12:26 PM
+
+...
+> Getting the wording right for volatile is extremely difficult, because
+> it's at the wrong level of abstraction for formal language definition.
+> The C standard struggles with the same thing (and gets it even wronger
+> than Ada).  I wonder if you're multiplying the difficulty by 4 here.
+> ;-)/2.
+
+Probably even worse than that, because of interactions between the aspects.
+We just (literally at the last meeting with AI12-0128-1) got Volatile "right"
+(and that positive feeling will only last until the next problem is uncovered).
+I don't relish starting over with this very complicated wording.
+
+On top of which, I have to wonder what the likelihood is that a compiler could
+even take advantage of this information even if it had it. Most Ada compilers
+use someone else's backend, and those barely deal with Volatile as it is. (And
+this is primarily a back-end issue.) Even in Ada-specific parts, the
+intermediate code (and routines that use it) would need extensive changes in
+order to take any advantage of this.
+
+And it's WAY too complicated from a user perspective. Most users barely
+understand what Volatile is for -- making it 4x more complex would just drive
+the usage level down to approximately zero. (Heck, this applies even to Ada
+experts like me; I didn't understand what it was for until we started trying to
+correct the wording in the early 2000s.)
+
+Ergo, I find this idea to have negative benefit (and I don't think it is a good
+idea for SPARK to have that much detail, either, but that's not my bailiwick).
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, September 28, 2016  12:43 PM
+
+> Most users barely
+> understand what Volatile is for
+
+Agreed, but I would claim that this is because it is such an unintuitive
+mishmash of barely-related ideas.
+
+> making it 4x more complex would just
+> drive the usage level down to approximately zero.
+
+Note that this proposal would be 100% upward compatible, so nobody would be
+forced to do anything differently than what they are doing today. This just
+gives users the option of providing more precise specifications.
+
+> On top of which, I have to wonder what the likelihood is that a
+> compiler could even take advantage of this information even if it had it.
+
+I agree with you (and I made this point in my initial message) that improvement
+in generated code is not even close to the main argument for this proposal. If
+it happens, that's nice but ...
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, September 28, 2016  1:13 PM
+
+...
+> I agree with you (and I made this point in my initial
+> message) that improvement in generated code is not even close to the
+> main argument for this proposal. If it happens, that's nice but ...
+
+...then what's the point? Ada users care about code quality and are willing to
+work extra to get better code, but otherwise you're just adding noise. It's not
+like this is critical semantics (other than to language lawyers).
+
+***************************************************************
+
+From: Steve Baird
+Sent: Wednesday, September 28, 2016  1:32 PM
+
+> ...then what's the point? Ada users care about code quality and are
+> willing to work extra to get better code, but otherwise you're just adding
+> noise. It's not like this is critical semantics (other than to language
+> lawyers).
+
+As I said in the initial message:
+    The major benefit is in expressive power - it would allow users
+    to more precisely describe what is going on. This benefits human
+    readers, static analysis tools, and (in 3rd place) compilers.
+
+But since you ask, this could also allow relaxing language restrictions in some
+cases.
+
+For example, currently you cannot pass a volatile actual parameter by reference
+if the corresponding formal parameter type is not volatile (we don't want the
+callee to manipulate a volatile object without being aware that the object is
+volatile).
+
+If the parameter mode is "in" and the actual parameter has
+    effective_reads => false,
+    async_writers => false
+then this restriction could be relaxed.
+
+***************************************************************
+
+From: Bob Duff
+Sent: Wednesday, September 28, 2016  1:27 PM
+
+> I don't know how C handles volatility.
+
+It has a bunch of rules about how variable references have to be left intact,
+and then at the end of the section, it says something about how what constitutes
+a variable reference is implementation defined. (I don't remember if the term
+they use is "variable reference" -- something like that.)  Taken literally, it
+seems like the last sentence negates everything else in that section.
+
+But I've heard some people say that's not what they meant.
+
+> Does C have any interesting ideas that would be worth discussing?
+
+I doubt it.
+
+> Are there issues associated with referencing C volatiles from Ada?
+> Does
+>     X : Some_Convention_C_Type with Volatile, Import, Address => ... ;
+> handle this case? (maybe with Atomic instead of Volatile)
+
+I suppose that should work.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, September 28, 2016  2:17 PM
+
+> > ...then what's the point? Ada users care about code quality and are
+> > willing to work extra to get better code, but otherwise you're just adding
+> > noise. It's not like this is critical semantics (other than to language
+> > lawyers).
+>
+> As I said in the initial message:
+>     The major benefit is in expressive power - it would allow users
+>     to more precisely describe what is going on. This benefits human
+>     readers, static analysis tools, and (in 3rd place) compilers.
+
+I strongly disagree with the first point ("this benefits human readers").
+The entire concept of an "external effect" of a program is a sop to language
+lawyers (static analysis tools are of course a subset of language lawyers) and
+compiler implementers. (The latter so that we can have our optimization toys
+without being restricted to "as-if" optimizations.)
+
+The vast majority of programmers just want their code to do what they've
+written. They only care about "external effects" and 11.6 and object validity
+when it doesn't do what they've written. And those mainly are excuses for a
+compiler not to do what they've written -- which rarely makes the programmer
+much happier to find out that it is allowed.
+
+Anything that a programmer has to write to get the code to what they've clearly
+written (be it adding Volatile, 'Valid, or so on) is just noise to make the
+compiler happy for that large majority of programmers.
+
+Adding more such noise, or making it more detailed, is going in the wrong
+direction for that vast majority of programmers. It would be best to make it as
+easy as possible for the compiler to derive such information without the
+programmer writing anything extra at all. (I realize that's not very practical.)
+
+The language lawyer minority is of course different, but we shouldn't be
+designing Ada features solely for language lawyers.
+
+If SPARK needs/wants more detail, that's fine for them (there's lots of things
+that make sense for SPARK that make no sense for Ada). Don't pollute the
+language with unnecessary junk that does not help programmers (and if compilers
+don't take advantage of it, then it cannot help programmers).
+
+***************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, September 29, 2016  12:15 AM
+
+> On top of which, I have to wonder what the likelihood is that a
+> compiler could even take advantage of this information even if it had it.
+
+Such a compiler could of course have implementation defined aspects.
+The real question is whether it is worth putting them into the standard.
+
+***************************************************************
+
+From: Florian Schanda
+Sent: Thursday, September 29, 2016  3:00 AM
+
+> > As I said in the initial message:
+> >     The major benefit is in expressive power - it would allow users
+> >     to more precisely describe what is going on. This benefits human
+> >     readers, static analysis tools, and (in 3rd place) compilers.
+>
+> I strongly disagree with the first point ("this benefits human readers").
+> The entire concept of an "external effect" of a program is a sop to
+> language lawyers (static analysis tools are of course a subset of
+> language lawyers) and compiler implementers. (The latter so that we
+> can have our optimization toys without being restricted to "as-if"
+> optimizations.)
+
+I think the same could be said for any other annotation Ada contains. Types with
+ranges (yes, this is an annotation, but you might not think of it like that
+normally), pre- and post-conditions, etc.
+
+Many of these don't really serve a purpose - I mean its always possible to
+translate an Ada program to a C program - other than:
+   a) increase readability of code via documentation
+   b) allow bugs to be found early
+
+Ada has an edge of C as you can embed much more intent in the code. You can call
+this specification if you wish.
+
+Having:
+
+   Sensor : Integer with Async_Writers;
+   --  blah blah
+
+Tells me more than just:
+
+   Sensor : Integer with Volatile;
+   --  blah blah
+
+
+Of course, coming from the corner of "static analysis" I care even more as the
+first one allows me to do different - more precise - checks than the second.
+
+I am not sure about what a "typical" Ada user looks like these days, since most
+Ada users tend to be slightly older/experiences than fresh-out-of-
+undergrad-course type people. We find these are generally OK with writing
+annotations.
+
+Just my 2c.
+
+
+I think it would be nice to see in Ada, but equally I am totally happy to just
+have it in SPARK.
+
+***************************************************************
+
+From: Erhaard Ploedereder
+Sent: Thursday, September 29, 2016  10:44 AM
+
+> Anything that a programmer has to write to get the code to what
+> they've clearly written (be it adding Volatile, 'Valid, or so on) is
+> just noise to make the compiler happy for that large majority of programmers.
+
+Well, no. Due to optimizations done by hardware (e.g. speculative exeuction,
+out-of-order evaluation, superscalar architectures) even a priestly canonical
+non-optimizing compiler needs to do explicit things to "make the code do what
+the user wanted" by tricking the hardware into a completely sequential model.
+So, volatile may causes extra code in addition to merely writing/reading the
+location.
+
+***************************************************************
+
+From: Steve Baird
+Sent: Thursday, September 29, 2016  11:36 AM
+
+> Such a compiler could of course have implementation defined aspects.
+> The real question is whether it is worth putting them into the standard.
+
+I wrote:
+> this could also allow relaxing language restrictions in some cases.
+>
+> For example, currently you cannot pass a volatile actual parameter by
+> reference if the corresponding formal parameter type is not volatile
+> (we don't want the callee to manipulate a volatile object without
+> being aware that the object is volatile).
+
+I don't think a conforming implementation could implement this sort of
+relaxation of the current rules without some changes to the standard.
+
+But I think you're right about the rest of the proposal (and this is what is
+done for SPARK today).
+
+***************************************************************
+
+From: Bob Duff
+Sent: Thursday, September 29, 2016  1:52 PM
+
+> I don't think a conforming implementation could implement this sort of
+> relaxation of the current rules without some changes to the standard.
+
+I think an implementation can do whatever it likes if impl-def aspects are
+present.
+
+And no words in the RM can possibly change that fact.
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Thursday, September 29, 2016  3:37 PM
+
+>> Anything that a programmer has to write to get the code to what
+>> they've clearly written (be it adding Volatile, 'Valid, or so on) is
+>> just noise to make the compiler happy for that large majority of programmers.
+>
+> Well, no. Due to optimizations done by hardware (e.g. speculative
+> exeuction, out-of-order evaluation, superscalar architectures) even a
+> priestly canonical non-optimizing compiler needs to do explicit things
+> to "make the code do what the user wanted" by tricking the hardware
+> into a completely sequential model. So, volatile may causes extra code
+> in addition to merely writing/reading the location.
+
+That is a good point.  With the increasingly complex memory models out there,
+being more explicit about what "volatile" exactly means is increasingly
+important.  So I suspect that these aspects might be relevant to a growing
+number of compilers.  We should at least discuss it in an ARG meeting at some
+point.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, September 29, 2016  4:20 PM
+
+> > Am 28.09.2016 um 21:16 schrieb Randy Brukardt:
+> >> Anything that a programmer has to write to get the code to what
+> >> they've clearly written (be it adding Volatile, 'Valid, or so on)
+> >> is just noise to make the compiler happy for that large majority of
+> >> programmers.
+> >
+> > Well, no. Due to optimizations done by hardware (e.g. speculative
+> > exeuction, out-of-order evaluation, superscalar architectures) even
+> > a priestly canonical non-optimizing compiler needs to do explicit
+> > things to "make the code do what the user wanted" by tricking the
+> > hardware into a completely sequential model. So, volatile may causes
+> > extra code in addition to merely writing/reading the location.
+
+That's Atomic, in my view. "Volatile" merely means that all reads/writes get
+explicitly generated in the instruction sequence. Whatever happens below the
+instruction set level is not the compiler's concern. (Atomic, on the other hand,
+does potentially require locking.) In particular, "Volatile" doesn't make any
+additional claim of sequentiality beyond that of the canonical semantics.
+
+If the hardware has issues with strictly sequential execution, then it's likely
+that all generated reads/writes (not just volatile ones) will need some
+protection. Else it would be completely impossible to reason about the behavior
+of code, and that way lies madness.
+
+> That is a good point.  With the increasingly complex memory models out
+> there, being more explicit about what "volatile"
+> exactly means is increasingly important.  So I suspect that these
+> aspects might be relevant to a growing number of compilers.  We should
+> at least discuss it in an ARG meeting at some point.
+
+The risk here is to add excessive complication so that only a very tiny minority
+of programmers can actually use the language.
+
+My "dream" for parallelization is to make it possible to write a restricted form
+of sequential code that is guaranteed to work the same as regular sequential
+code when parallelized, with a minimum of fuss (preferably, nothing but the
+addition of "parallel" to the construct). Else the compiler would reject it, and
+potentially point out what needs to be changed to get it accepted.
+
+Of course, if the compiler can tell you what to change, it is only a small step
+to making that change itself. But that perhaps is a bridge too far.
+
+If we can't do this, then the vast majority of programmers will not be able to
+reliably produce code, especially as debugging of parallel code is practically
+impossible. (The use of a debugging tool necessarily changes the behavior.) I
+consider myself in the top 10% of programmers, and I know from experience that I
+cannot reliably produce parallel code. There are too many ways to hang yourself
+silently - it's like the bad old days before structured programming and strong
+typing made it possible for the compiler to prevent many bugs in sequential
+code.
+
+I want the complication to be for the compiler (and the language definition),
+and for the user model to be as simple and easy as possible. Stuff that goes the
+other way is dubious at best.
+
+Now, you could argue about my position as a quality programmer, but I find it
+impossible to believe that programmers of the 2010s are able to avoid issues
+without compiler support better than the programmers of the 1970s could do so.
+
+If most of you truly feel that I'm wrong about this, then I've probably reached
+the "useless blob of fat" stage of my career (certainly, always a possibility)
+-- in which case my further participation here is probably actively harmful for
+the future of Ada. My feelings on the generator proposal, and some of the other
+ideas recently raised, make me worry that this is becoming the case. I'd
+definitely like to know before I'm doing harm to the language's future.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, September 29, 2016  4:41 PM
+
+> I think the same could be said for any other annotation Ada contains.
+> Types with ranges (yes, this is an annotation, but you might not think
+> of it like that normally), pre- and post-conditions, etc.
+>
+> Many of these don't really serve a purpose - I mean its always
+> possible to translate an Ada program to a C program - other than:
+>    a) increase readability of code via documentation
+>    b) allow bugs to be found early
+
+Definitely not. Contracts (and ranges are just a built-in contract) change the
+semantics of a program with *dynamic* checks. These are the same checks that
+would have appeared in pragma Asserts or in ordinary code if the contracts
+didn't exist. In particular, the preconditions on the containers packages
+eliminate the matching code that currently appears inside of the subprogram
+bodies. This is far more than "an annotation that doesn't really serve a
+purpose".
+
+I think you are confusing the possibility of using these for static analysis
+(probably because of your background in that area) with their very real dynamic
+semantics. There is a very good reason that these contract aspects cannot be
+suppressed (that is, assumed to be true and the program is erroneous otherwise)
+but rather can be ignored (no assumptions about their values can be made).
+
+> Ada has an edge of C as you can embed much more intent in the code.
+> You can call this specification if you wish.
+
+Surely. But that intent is checked as part of the semantics. It's not just empty
+comments.
+
+> Having:
+>
+>    Sensor : Integer with Async_Writers;
+>    --  blah blah
+>
+> Tells me more than just:
+>
+>    Sensor : Integer with Volatile;
+>    --  blah blah
+
+Yes, it tells YOU more. It tells me nothing, because I have no concept of what
+Async_Writers means. I expect *all* of my code to execute following canonical
+semantics. I know of course that there are exceptions to the canonical
+semantics, but it is very rare that one has to care about those exceptions to
+the canonical semantics when reasoning about code. The vast majority of the
+time, those exceptions can be ignored. (That's clearly not true for compiler
+writers and for static analysis tool creators, but those people are very much in
+the minority -- except here, of course.)
+
+Volatile for me exists to force the compiler to follow the canonical semantics
+in some cases where it otherwise might not. This is just noise to normal program
+analysis (where one is assuming canonical semantics anyway). Making the noise
+more detailed doesn't have any effect other than to multiply the noise.
+
+> Of course, coming from the corner of "static analysis" I care even
+> more as the first one allows me to do different - more precise -
+> checks than the second.
+
+Understood. Your requirements are very different than what a typical reader of
+Ada code needs. (Same as mine are different when I'm wearing the compiler writer
+hat.)
+
+> I am not sure about what a "typical" Ada user looks like these days,
+> since most Ada users tend to be slightly older/experiences than
+> fresh-out-of- undergrad-course type people. We find these are
+> generally OK with writing annotations.
+
+Two points here:
+(1) You're still conflating contracts (which have definite impacts on canonical
+    semantics and/or legality) and annotations that have no such impact. I doubt
+    anyone (that's used Ada for any length of time) minds writing the former.
+(2) I specifically said that there was no benefit for the human reader. Whether
+    people mind *writing* them is irrelevant; the question is solely about
+    readability (always an important concern for Ada).
+
+> Just my 2c.
+
+My 10c (lots of inflation since I started out ;-).
+
+> I think it would be nice to see in Ada, but equally I am totally happy
+> to just have it in SPARK.
+
+Feel free to ignore me when it comes to SPARK; considering my feelings on
+non-compiler tools doing what should simply be legality checks, I probably don't
+have anything positive to add. ;-)
+
+***************************************************************
+
+From: Tucker Taft
+Sent: Thursday, September 29, 2016  4:48 PM
+
+>>> ... So, volatile may causes extra code in addition to merely
+>>> writing/reading the location.
+>
+> That's Atomic, in my view. "Volatile" merely means that all
+> reads/writes get explicitly generated in the instruction sequence.
+> Whatever happens below the instruction set level is not the compiler's
+> concern. (Atomic, on the other hand, does potentially require
+> locking.) In particular, "Volatile" doesn't make any additional claim
+> of sequentiality beyond that of the canonical semantics.
+>
+> If the hardware has issues with strictly sequential execution, then
+> it's likely that all generated reads/writes (not just volatile ones)
+> will need some protection. Else it would be completely impossible to
+> reason about the behavior of code, and that way lies madness.
+
+Unfortunately, it is also reality these days.  If you want to lose your lunch
+and go screaming down the hall, try reading some of these articles about modern
+hardware memory models, and how they are trying to deal with them in languages
+like Java and C++.  It is all very nasty.
+
+>> That is a good point.  With the increasingly complex memory models
+>> out there, being more explicit about what "volatile"
+>> exactly means is increasingly important.  So I suspect that these
+>> aspects might be relevant to a growing number of compilers.  We
+>> should at least discuss it in an ARG meeting at some point.
+>
+> The risk here is to add excessive complication so that only a very
+> tiny minority of programmers can actually use the language.
+
+I believe that we are remaining at a *much* higher level than where some
+languages are going with this memory model madness.  We are expressing the
+*intent* of the use of volatile, and leaving it to the compiler to figure out
+how to accomplish that with the appropriate number of memory "fences" and other
+nasty stuff.
+
+The problem is that in modern hardware, if you take the attitude that everything
+needs to be sequentially consistent, then your programs that try to do high
+performance parallel, lock-free things, will be maddeningly slow.  I am not sure
+that having these different flavors of volatile will help, but they can provide
+some fodder for beginning a discussion about how Ada should respond to these new
+memory models, especially as we discuss how to add more support for fine-grained
+parallelism.
+
+> My "dream" for parallelization is to make it possible to write a
+> restricted form of sequential code that is guaranteed to work the same
+> as regular sequential code when parallelized, with a minimum of fuss
+> (preferably, nothing but the addition of "parallel" to the construct).
+> Else the compiler would reject it, and potentially point out what
+> needs to be changed to get it accepted.
+
+I think we all agree with that dream, but it may depend on the programmer being
+very explicit about their intent.
+
+> ...
+> If most of you truly feel that I'm wrong about this, then I've
+> probably reached the "useless blob of fat" stage of my career
+> (certainly, always a
+> possibility) -- in which case my further participation here is
+> probably actively harmful for the future of Ada. ...
+
+Now now, don't go around the bend.  I think we are mainly asking to have a
+reasoned discussion about this at some ARG meeting in the future, since this is
+a big challenge for modern parallel computing.  I think we agree we want the
+language, as seen by the programmer, to stay above the level of memory fences
+and cache flushing.  But we as language designers and compiler developers need
+to determine whether the language enables programmers to express enough so that
+the compiler can do the correct and efficient thing in the context of these new
+hardware memory models.  It may very well be that these new volatile aspects do
+nothing for that, in which case they need a different rationale.  But I do
+believe they are at an appropriate level for Ada (and SPARK), namely at the
+semantic information-flow level, not at some low, implementation level.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, September 29, 2016  6:33 PM
+
+...
+> > If the hardware has issues with strictly sequential execution, then
+> > it's likely that all generated reads/writes (not just volatile ones)
+> > will need some protection. Else it would be completely impossible to
+> > reason about the behavior of code, and that way lies madness.
+>
+> Unfortunately, it is also reality these days.  If you want to lose
+> your lunch and go screaming down the hall, try reading some of these
+> articles about modern hardware memory models, and how they are trying
+> to deal with them in languages like Java and C++.  It is all very
+> nasty.
+
+I'll pass on screaming down the hall; I do enough of that reading the news
+(specifically election coverage).
+
+It's obviously a major pain for compiler writers, but the point is that such
+things should not show through to programmers (at least not for normal code). If
+normal code has to be slower to get sensible semantics, that's OK. Perhaps one
+might want to be able to turn sane behavior off for critical code, but that's a
+very small percentage of the total. (Premature optimization is the root of most
+[programming] evil, after all.)
+
+> >> That is a good point.  With the increasingly complex memory models
+> >> out there, being more explicit about what "volatile"
+> >> exactly means is increasingly important.  So I suspect that these
+> >> aspects might be relevant to a growing number of compilers.  We
+> >> should at least discuss it in an ARG meeting at some point.
+> >
+> > The risk here is to add excessive complication so that only a very
+> > tiny minority of programmers can actually use the language.
+>
+> I believe that we are remaining at a *much* higher level than where
+> some languages are going with this memory model madness.  We are
+> expressing the *intent* of the use of volatile, and leaving it to the
+> compiler to figure out how to accomplish that with the appropriate
+> number of memory "fences" and other nasty stuff.
+>
+> The problem is that in modern hardware, if you take the attitude that
+> everything needs to be sequentially consistent, then your programs
+> that try to do high performance parallel, lock-free things, will be
+> maddeningly slow.
+
+I'd argue that the compiler ought to be providing those sorts of things, in
+primitives (i.e. predefined protected objects and the like). Programmers should
+not be rolling their own. Ada, of course is already most of the way there. And
+again, if this code isn't in the critical 5% (and that's really only
+determinable by instrumentation of something existing), it shouldn't be trying
+to make high-performance anything.
+
+> I am not sure
+> that having these different flavors of volatile will help, but they
+> can provide some fodder for beginning a discussion about how Ada
+> should respond to these new memory models, especially as we discuss
+> how to add more support for fine-grained parallelism.
+
+OK, but I fear that we have the default wrong. *Everything* ought to be safe and
+predictable (even if slow) unless the programmer declares that it is OK to make
+a mess. (It's much like variable vs. constant -- constant should be the
+default.) Most code doesn't need the bleeding edge of performance, but all code
+has to be understandable.
+
+> > My "dream" for parallelization is to make it possible to write a
+> > restricted form of sequential code that is guaranteed to work the
+> > same as regular sequential code when parallelized, with a minimum of
+> > fuss (preferably, nothing but the addition of "parallel" to the construct).
+> > Else the compiler would reject it, and potentially point out what
+> > needs to be changed to get it accepted.
+>
+> I think we all agree with that dream, but it may depend on the
+> programmer being very explicit about their intent.
+
+That's of course the extra junk I'd rather avoid. But that's of course TBD -
+practical concerns can prevent elegant designs.
+
+> > ...
+> > If most of you truly feel that I'm wrong about this, then I've
+> > probably reached the "useless blob of fat" stage of my career
+> > (certainly, always a
+> > possibility) -- in which case my further participation here is
+> > probably actively harmful for the future of Ada. ...
+>
+> Now now, don't go around the bend.
+
+I've had the distinct feeling in various discussions here and elsewhere
+(including this one) that I'm being obstructionistic and non-helpful on various
+issues. Indeed, was recently accused directly of that in a comp.lang.ada
+discussion. I don't think that is true, but of course that is the sort of thing
+that one cannot see themselves. I definitely want to know if people start
+feeling that way.
+
+Besides, the "useless blob of fat" line was too good to waste. ;-). [I also had
+a line about needing to change my name to Wally, but I left it out as only
+Dilbert fans would get the reference.]
+
+> ...  I think we are mainly
+> asking to have a reasoned discussion about this at some ARG meeting in
+> the future, since this is a big challenge for modern parallel
+> computing.  I think we agree we want the language, as seen by the
+> programmer, to stay above the level of memory fences and cache
+> flushing.  But we as language designers and compiler developers need
+> to determine whether the language enables programmers to express
+> enough so that the compiler can do the correct and efficient thing in
+> the context of these new hardware memory models.  It may very well be
+> that these new volatile aspects do nothing for that, in which case
+> they need a different rationale.  But I do believe they are at an
+> appropriate level for Ada (and SPARK), namely at the semantic
+> information-flow level, not at some low, implementation level.
+
+They don't seem to have any intuitive meaning, (much like volatile itself), so
+in that sense I doubt that they help much. Hardly anyone would be able to figure
+out when to use them; probably most would end up using them only when their
+compiler's support people told them they had to. Ergo they still seem like
+overkill to me.
+
+But I do recognize that the (stupid, IMHO) expectation that code ought to be
+fast without any tuning is a problem for compilers on these new memory models.
+Fast and predictable are pretty much exclusive these days, and I at least want
+predictable until at least that point at which I absolutely know I need fast.
+(I've wasted far too much time in my career speeding up (and then debugging)
+code whose performance ultimately doesn't matter to the application speed. It's
+a trap everyone falls into from time-to-time. But it's absolutely wrong -- for
+any programming language.)
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Monday, December 19, 2016  10:06 PM
+
+> > Most users barely
+> > understand what Volatile is for
+>
+> Agreed, but I would claim that this is because it is such an
+> unintuitive mishmash of barely-related ideas.
+
+Having re-read all of this mail, I now begin to see what you are trying to say.
+I've been trying to avoid re-awakening this discussion, but it seems to me that
+the entire thread was misunderstood and I can't seem to let it go until I put
+some of my thoughts to the list.
+
+The fundamental problem is that you seem to have replaced an "unintuitive
+mishmash" by a different unintuitive mishmash.
+
+In particular, the "property" names you came up with are terrible, particularly
+"Effective_Writes". When I see
+    Effective_Writes => False;
+I think this is an "ineffective write", which obviously may not write anything
+ever. That's not what you mean (based on the original proposal), you mean
+    Write_Has_External_Effect => False; -- Formally, external to the current partition.
+
+With a name like that, you'd have a much more intuitive meaning. Which might
+even help readability.
+
+The other part seems to be worrying about the difference between reads and
+writes for these properties. In 98% of the code, there is only going to be a
+single declaration for any such object in a partition. (The other 2% fails
+sensible style guides and can be ignored.) Combined with other Ada rules, you
+can only have one declaration for each object in each program (the object can
+appear in multiple partitions, but it has to be in a pure or shared passive
+package for that to happen).
+
+As such, virtually every object will have both reads and writes. There's little
+point in separating them, either because of extreme rarity of occurrence
+(external effects) or the strong likelihood that they occur together (async
+access). (Although programmers really have to use extreme care with Volatile
+objects, since they may require synchronization. One hopes that they are
+minimized.)
+
+I could see separating out the unusual case of external effects (as in
+memory-mapped devices), something like  Access_Has_External_Effect. (The case
+where only one or the other access has an external effect is rare enough not to
+bother with treating separately; this was discussed a bit in the e-mail of
+AI12-0128-1.)
+
+The rest of it could be modeled as "Asynchronous_Access" (note that
+abbreviations like "Async" are not generally used in Ada naming; only IO and Id
+are exceptions that I know of).
+
+The only issue with doing that is that so far as I can tell, the rules are
+identical for each. On top of which, we would have to keep Atomic objects as
+Volatile (meaning that they have both properties), given the need for
+compatibility. But that seems wrong; we'd really rather that we require all
+external devices and the like to be declared, not be implicit in Atomic (if
+we're going to have such separate properties in the first place).
+
+We could simplify this idea by declaring that "Asynchonous_Access" is in fact
+"Volatile", and external effects have to be declared separately. But as noted
+about, that's incompatible. Perhaps we should have gone this route originally,
+but given that was done more than 20 years ago, it's not surprising that its not
+perfect.
+
+BTW, I don't see how this proposed split would help anything for weird memory
+models. If straight single-tasking sequential code doesn't have sequential
+behavior, the compiler will have to do whatever is needed to make that happen.
+(But I doubt any such architectures will ever go mainstream, as C code won't
+work on such a machine, either.) On the other hand, if ordinary sequential code
+works, that's sufficient for Volatile as well (given that a purely
+unsynchronized mix of reads and writes is not expected to work in Ada). I'd
+expect that most of the performance issues would come from Atomic objects, and
+there these properties wouldn't help (as the need to remain compatible would
+have all Atomic objects having all of the properties).
+
+In summary, there seems like there are some useful ideas here, but they seem as
+confused as you claim Volatile is. Perhaps additional thinking/explanation would
+make more sense.
+
+***************************************************************
+
