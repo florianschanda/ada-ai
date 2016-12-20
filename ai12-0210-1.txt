@@ -1,0 +1,174 @@
+!standard 7.3.2(17/4)                                 16-12-19  AI12-0210-1/00
+!standard 7.3.2(20.1/4)
+!class binding interpretation 16-12-19
+!status work item 16-12-19
+!status received 16-09-29
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Type Invariants and Generics
+!summary
+
+** TBD **
+
+!question
+
+7.3.2(20.1/4) says
+    For a view conversion to a class-wide type occurring within the
+    immediate scope of T, from a specific type that is a descendant of T
+    (including T itself), a check is performed on the part of the object
+    that is of type T.
+
+What does "occurring within the immediate scope" mean in the case where the 
+view conversion occurs in an instance of a generic unit? (Who knows?)
+
+One can also have the opposite situation where it is the generic unit body
+(or private part, in the case of a generic child unit) which can see the
+completion of the invariant-bearing type and the instance which occurs
+outside of that scope. 7.3.2(17/4) is about that case, but that rule doesn't
+address the other cases in which invariant checking rules depend on being or
+not being "in the immediate scope": view conversions (including conversion
+to classwide) and deferred constants. Should it? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD **
+
+!discussion
+
+Does anyone care? Pick something. :-)
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Steve Baird
+Sent: Thursday, September 29, 2016  6:31 PM
+
+Ada RM 7.3.2(20.1/4) says
+    For a view conversion to a class-wide type occurring within the
+    immediate scope of T, from a specific type that is a descendant of T
+    (including T itself), a check is performed on the part of the object
+    that is of type T.
+
+What does "occurring within the immediate scope" mean in the case where the 
+view conversion occurs in an instance of a generic unit?
+
+Consider the following example:
+
+  procedure Invariant_Test is
+    pragma Assertion_Policy (Check);
+
+    type T1 is tagged record
+       Aaa : Natural := 0;
+       Bbb : Natural := 100;
+    end record;
+
+    procedure Swap_T1 (X1 : in out T1) is
+    begin
+       X1 := (Aaa => X1.Bbb, Bbb => X1. Aaa);
+    end;
+
+    generic
+       type D is new T1 with private;
+    procedure Swap_View_Conversion (X : in out D);
+    procedure Swap_View_Conversion (X : in out D) is
+    begin
+       Swap_T1 (T1 (X)); -- a view conversion
+    end;
+
+    package Pkg is
+       type T2 is private;
+    private
+       type T2 is new T1 with null record
+         with Type_Invariant => T2.Aaa < T2.Bbb;
+
+       package Nested is
+          procedure Swap_T2 is new Swap_View_Conversion (T2);
+       end;
+     end;
+
+     package body Pkg is
+        Y : T2;
+     begin
+        Nested.Swap_T2 (Y);
+        pragma Assert (Y.Aaa = 100);
+     end;
+   begin null; end;
+
+Does the call to Nested.Swap_T2 fail an invariant check?
+
+Tuck said (in private communication):
+> Should an external generic, instantiated locally, be able to do 
+> something that a normal external package could *not* do. I believe the 
+> answer is yes, presuming the type with the invariant is only visible 
+> to the generic as a formal type, as opposed to being named directly. 
+> When you instantiate a generic with an actual type that has an 
+> invariant, and you do it within the full view of the type, then the 
+> generic should not be affected by the invariant.
+
+A general design principle is that invariants don't come into play very much
+as long as you stay inside the body of the package that implements the
+private type and don't call subprograms which are callable (directly or via
+overriding) from outside of that package. There are exceptions to that (e.g.,
+default initialization of an object declared in the package body), but that's
+the general idea. Tuck's suggestion that no exception should be raised in this
+case is consistent with that principle.
+
+Note that 7.3.2(20.1/4) is somewhat unusual in talking about being "within"
+some scope in the context of a dynamic semantics rule. Any time the RM does
+this, there are going to be questions about generics vs. instances.
+
+One can also have the opposite situation where it is the generic unit body (or
+private part, in the case of a generic child unit) which can see the
+completion of the invariant-bearing type and the instance which occurs
+outside of that scope. 7.3.2(17/4) is about that case, but that rule doesn't
+address the other cases in which invariant checking rules depend on being or
+not being "in the immediate scope": view conversions (including conversion to
+classwide) and deferred constants. These cases just need to be well-defined;
+all that is needed is a clarification one way or the other. The fact that
+7.3.2(17/4) is a rule and not a ramification *suggests* that no checks should
+be performed in these cases, but that seems far from conclusive. As usual, we
+should decide first what behavior we want before worrying about interpreting
+the current wording.
+
+7.3.2(17/4) also doesn't really deal well with a case like
+    package I1 is new G1;
+    package I2 is new I1.G2;
+When it says "and the generic is declared within the immediate scope of type
+T", in what scope is the generic I1.G2 declared? Inside (the expansion of) I1
+or inside G1? The point of this rule is to deal with generic bodies that can
+see the completion of the private type; this suggests that we want to think of
+I1.G2 as being declared inside of G1, as opposed to inside I1, but the current
+wording seems unclear.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, September 29, 2016  6:41 PM
+
+...
+> As usual, we should decide first what behavior we want before worrying 
+> about interpreting the current wording.
+
+When it comes to type invariants, pretty much the only thing we care about is
+that the rule is well-defined and doesn't cause horrible implementation
+problems. These are a distant fourth out of the four kinds of contracts; the
+fact that GNAT had completely implemented them wrong until Jeff wrote some
+ACATS tests tells me that no real users really care about the details of this
+feature.
+
+I suspect that these checks in instances will be hell on generic code sharing,
+but I have a hard time caring because I doubt that I'll ever have a customer
+who cares. (Ergo, probably these will never be implemented in Janus/Ada.)
+
+****************************************************************
