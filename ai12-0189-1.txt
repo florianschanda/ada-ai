@@ -1257,8 +1257,71 @@ I'm not convinced yet. Should be a robust discussion.
 
 ****************************************************************
 
+From: Brad Moore
+Sent: Friday, October 7, 2016  10:42 AM
+
+In case the discussion isn't robust enough, I think there is another angle to
+consider. I think this facility could potentially be considered as an
+alternative (or supplement) to AI-0119 on parallel loops.
+
+For instance,
+Consider the following Generic library
+
+    generic
+       type Loop_Index is range <>;
+       From     : Loop_Index := Loop_Index'First;
+       To       : Loop_Index := Loop_Index'Last;
+       type Result_Type is private;
+       with function Reducer (L, R : Result_Type) return Result_Type;
+       Identity : Result_Type;
+       Result   : in out Result_Type;
+    package Reducing_Parallel_Loop
+
+       type Input_Array is array (Loop_Index range <>) of Result_Type;
+
+       procedure Iterate
+          (Data       : Input_Array;
+           Process    : not null access
+              procedure (Item   : Result_Type;
+                         Result : in out Result_Type));
+
+    end Reducing_Parallel_Loop;
+
+
+Then one could use the syntax of this proposal to write:
+
+     declare
+         Sum : Integer := 0;
+
+         procedure Parallel is new Reducing_Parallel_Loop
+                                (Loop_Index => Natural,
+                                 From       => Arr'First,
+                                 To         => Arr'Last,
+                                 Result_Type => Integer,
+                                 Reducer    => "+",
+                                 Identity   => 0,
+                                 Result     => Sum);
+     begin
+         for (Item, Sum) of Parallel.Iterate(Arr) loop
+            Sum := @ + Item;
+         end loop;
+     end
+
+And you now have a parallel loop that looks like a regular loop, without
+having to introduce a parallel keyword, and the loop body doesn't look that
+different from the one proposed in AI12-0119.
+
+This particular example is better suited for non-chunking where the amount
+of processing of each iteration is significant compared to the amount of
+processing needed to do the iteration. But I think could be a good starting
+point to explore parallelism with this approach.
+
+****************************************************************
+
 From: Randy Brukardt
 Sent: Wednesday, October 5, 2016  9:14 PM
+
+> I'm not convinced yet. Should be a robust discussion.
 
 The critical point for me is that this tempting syntax should not be able to
 easily break existing subprograms for which it can be used. We cannot assume
@@ -1287,5 +1350,101 @@ still have transfer of control if we really think it is important (that's
 surely a discussion point), but I'm not in favor of adding a nice-to-have
 attractive hazard to the language. (And I DO like this feature, in the
 abstract.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, October 7, 2016  6:26 PM
+
+> The critical point for me is that this tempting syntax should not be 
+> able to easily break existing subprograms for which it can be used. We 
+> cannot assume that a relatively unusual technique for "last wishes" 
+> has been used, and we cannot assume that any "last wishes" aren't
+> critical. ...
+
+For what it is worth, I just took a look at AdaCore's implementation of
+Ada.Containers.Vectors, for routines taking an "access procedure."  All of
+them used finalization rather than exception handlers to ensure that the
+tampering bits were reset on exit.  So again, I am not convinced that
+requiring such an approach is inappropriate.
+
+I suppose we could define yet another aspect which must be specified on a
+subprogram with an access-to-procedure parameter, if it is to be used with
+a loop-body that contains a transfer of control out of the loop.  This would
+be the way for the implementor to say: 
+"yes, I used finalization for last wishes, and so my routine can support a
+loop body with a transfer of control."
+
+More generally, if your last wishes are "critical" then finalization seems the
+more robust approach.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, December 20, 2016  11:39 PM
+
+(just saw this reply now, cleaning out the unfiled ARG mail -- and we didn't
+discuss this AI in Pittsburgh):
+
+[This is regarding assuming the finalization is used to handle "last wishes"
+of access-to-subprogram iterators.]
+
+> >> I'm not convinced yet. Should be a robust discussion.
+> >
+> > The critical point for me is that this tempting syntax should not be 
+> > able to easily break existing subprograms for which it can be used. 
+> > We cannot assume that a relatively unusual technique for "last wishes"
+> > has been used, and we cannot assume that any "last wishes" 
+> > aren't critical. ...
+> 
+> For what it is worth, I just took a look at AdaCore's implementation 
+> of Ada.Containers.Vectors, for routines taking an "access procedure."  
+> All of them used finalization rather than exception handlers to ensure 
+> that the tampering bits were reset on exit.  So again, I am not 
+> convinced that requiring such an approach is inappropriate.
+
+Requiring of whom? For language-defined libraries like containers, using
+finalization is recommended as it would be good if they were safe in the face
+of abort. (Although that's not really possibly formally; such objects could
+be abnormal if the task manipulating them is aborted.)
+
+But it's hard to require user-written code to use any particular approach.
+Especially as most Ada code writers never think about being safe in the face
+of abort. (I would never have thought of that in the absence of this
+discussion; it's likely I would have used an exception handler in my
+Ada.Containers, as probably 80% of my code does. Creating a finalization
+mechanism is very complicated compared to a simple "others" handler with
+"raise;".)
+
+> I suppose we could define yet another aspect which must be specified 
+> on a subprogram with an access-to-procedure parameter, if it is to be 
+> used with a loop-body that contains a transfer of control out of the 
+> loop.  This would be the way for the implementor to say:
+> "yes, I used finalization for last wishes, and so my routine can 
+> support a loop body with a transfer of control."
+
+I don't think that is any help. Such an aspect can't be statically checked,
+so it would just be an annoyance to most users that would have to be applied
+to routines before the nice syntax can be used -- and most would apply it
+even if no finalization was used.
+
+> More generally, if your last wishes are "critical" then finalization 
+> seems the more robust approach.
+
+Surely. But how many Ada programmers know that? And even if the number is 80%,
+the other 20% is going to write code that doesn't use finalization. And the
+80% is probably going to do something else part of the time just because it's
+much easier to write a handler.
+
+I'm strongly opposed to any transfer-of-control mechanism that doesn't work for
+any arbitrary user code. We can't be putting unchecked restrictions on the code
+that can use this feature; any restrictions we want to have to be visible in
+the specification and checked in the body. Else we have an attractive hazard,
+and some percentage of Ada programmers are going to trip over it. (After all,
+one of the big advantages of Ada is that we don't allow arbitrary unchecked
+stuff to happen.)
+
+There are several solutions that work properly without putting unchecked
+requirements on the potentially user-written iterator. Let's use one of those.
 
 ****************************************************************
