@@ -1259,6 +1259,64 @@ generic coroutine instead. One less concept to worry about.
 
 ****************************************************************
 
+From: Jeff Cousins
+Sent: Monday, September 12, 2016  9:02 AM
+
+Hi.  I've done a bit of research on some suggested new keywords.
+
+Generator is already used by Ada.Numerics.Discrete_Random and
+Ada.Numerics.Float_Random. Yield is already used by Ada.Dispatching.
+Parallel isn't already used by the language, so I searched through
+about a million lines of our source code.
+There was one enumeration type with literals such as Parallel,
+Orthogonal, ..., used in 3 places.
+I'm sure that we could live with changing them.
+
+But new keywords aren't something to be introduced lightly.  The Ada 2005 new
+keywords had quite a bad impact on us.  I suspect many companies would have
+stuck with Ada 95 until the code could be replaced by C++.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Monday, September 12, 2016  9:16 AM
+
+> But new keywords aren't something to be introduced lightly.
+
+I agree.  Time to fight the "unreserved keyword" battle again?
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Monday, September 12, 2016  10:07 AM
+
+> But new keywords aren't something to be introduced lightly.  The Ada 
+> 2005 new keywords had quite a bad impact on us.  I suspect many 
+> companies would have stuck with Ada 95 until the code could be 
+> replaced by C++.
+
+Out of curiosity, would this impact have been reduced by an automatic
+migration tool ? This is what Apple is doing with Swift when they do
+backward-incompatible releases.
+
+Furthermore, we could provide some degree of insurance that the code is
+conform to the old version.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Monday, September 12, 2016  10:21 AM
+
+The mechanics of changing the code weren’t a big problem, it was more a
+management problem specific to the word “interface”.  Within our naval
+division there was a convention of defining the interface to a package in
+a .interface child package (and the implementation in a .impl child package),
+and where this interface formed the interface between code from one site and
+code from another site, the changes to avoid using the keyword had to be
+synchronised across sites.
+
+****************************************************************
+
 From: Steve Baird
 Sent: Monday, September 12, 2016  6:56 PM
 
@@ -2519,3 +2577,397 @@ still time right ? [This is version /02 of the AI - Editor.]
 
 ****************************************************************
 
+From: Tucker Taft
+Sent: Thursday, October 6, 2016  10:17 PM
+
+>> I don't think we need to face these problems, if we use something 
+>> close to 6.1/6.2 above for untagged subtype matching.
+>
+> How do you propose that we use those rules ? can you be more explicit 
+> about what you had in mind ?
+
+I think I was suggesting that the matching rules between the yielded type of
+an abstract generator and the yielded type of a concrete generator be based on
+the rules used for matching between a formal aliased parameter and the actual
+parameter specified in 6.4.1(6.1-6.2).
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, October 7, 2016  8:28 AM
+
+Since it seems quite unsure whether we can have a telecon tomorrow, here is a
+summary of my position.
+
+1) Generators are an implementation detail.
+Any package (or ADT) with a Get_Next function and a Has_More_Elements function
+is a generator. Whether a whole structure is constructed, or some magic gizmo
+produces elements one by one is, and should be, invisible to the caller.
+
+2) There are many ways a generator can be implemented using the current
+features of the language.
+For example, attached [See the end of this message - Editor] is the prime
+number generator implemented as an ADT, without tasks. A bit longer due to the
+look-ahead required by Is_Terminated, but that's all.
+
+Ada is about building-blocks. We already have the necessary building blocks.
+We may add some others that can be useful to generators (like passive tasks or
+value returning entries), but only if they have more usages than just
+generators (which is, in my opinion, the case for these two).
+
+3) Benefits do not outweigh the cost
+I see a whole new syntax, with lots of semantic difficulties in the proposal
+for a feature that (AFAIK) has not been asked for by any casual user (AdaCore
+correct me if I'm wrong). And I can imagine many more difficulties: what if
+generators are nested? what happens to nested tasks when a generator is
+suspended? etc.
+
+Moreove, I heartidly agree that we should not make the language too
+frightening for implementors who did not (yet) catch up with the latest
+version. What Ada needs is not more features, it's more vendors!
+
+4) I don't buy the motivations from the AI.
+   1. Non-determinism. Tasks execution is preemptive and thus
+      non-deterministic. It means that any access to non-synchronized
+      outer variables is non safe by default.
+
+Scheduling can be controlled, and Ada offers lots of features to that effect.
+Moreover, passive tasks would be deterministic. But more importantly, a
+generator implemented by a task is a typical example where you simply don't
+care when it runs (except that it could use spare cycles of hyper-threaded
+processors - a good thing in my view).
+
+I don't see why a generator implemented by a task would need to refer to
+global variables. OTOH, a generator as proposed could have a local task
+accessing global variables. This argument is really a red herring: if you are
+afraid of global variables, don't use them! Variables local to a task are all
+that's needed to keep a state.
+
+   2. Synchronization overhead. This stems from point 1, but when you
+      need a deterministic synchronization point, you'll pay for it in
+      performance. Assorted is the general overhead of
+      starting/stopping a task for short lived iterators.
+
+Tasking is not so bad, and moreover generators need full context switching,
+therefore it must first be shown that generator switching is significantly
+faster than task switching.
+
+And (sorry for repeating myself), tasking is just one possible way of
+implementing generators. I'm quite confident that most of them would be
+implemented with ADT, or plain packages, or queues, or....
+
+5)  Python people like it
+Sure. But remember that Python has no abstract data types, no information
+hiding, no packages - and no decent tasking.
+
+--------------------------------
+PS:
+I didn't write the AI on passive tasks because I don't think it should be
+discussed in the context of generators. It should be a proposal on its own.
+(All the best if it is also useful for implementing generators).
+
+---------
+with Text_IO; use Text_IO;
+with System;
+procedure Test_Gen2 is
+   
+   package Primer is
+      type Prime_Factory (Sieve_Size : Natural) is tagged private;
+      function Next (Generator : in out Prime_Factory) return Positive
+        with Post => Next'Result <= Generator.Sieve_Size;
+      function Is_Terminated (Generator : in Prime_Factory) return Boolean;
+   private
+      type Sieve is array (Positive range <>) of Boolean;
+      
+      -- tagged not necessary, just here to allow prefixed notation and keep
+      -- OO maniacs quiet.
+      type Prime_Factory (Sieve_Size : Natural) is tagged
+         record
+            Is_Composite  : Sieve (2 .. Sieve_Size) := (others => False);
+            Current       : Positive := 2;
+            Is_Terminated : Boolean := False;
+         end record;
+   end Primer;
+   
+   package body Primer is
+      procedure Mark_Multiples (Prime :        Positive;
+                                Into  : in out Prime_Factory) is
+           Multiple : Positive := Prime;
+      begin
+         loop
+            Into.Is_Composite (Multiple) := True;
+            exit when Multiple > Into.Sieve_Size - Prime;
+            Multiple := Multiple + Prime;
+         end loop;
+       end Mark_Multiples;
+       
+       function Next (Generator : in out Prime_Factory) return Positive is
+          Result : Positive;
+       begin
+          if Generator.Is_Terminated then
+             raise Constraint_Error; -- or whatever
+          end if;
+          Result := Generator.Current;
+          Mark_Multiples (Prime => Generator.Current, Into => Generator);
+          
+          while Generator.Current <= Generator.Sieve_Size loop
+             if not Generator.Is_Composite (Generator.Current) then
+                return Result;
+             end if;
+             Generator.Current := Generator.Current + 1;
+          end loop;
+          Generator.Is_Terminated := True;
+          return Result;
+       end Next;   
+       
+       function Is_Terminated (Generator : in Prime_Factory) return Boolean is
+       begin
+          return Generator.Is_Terminated;
+       end Is_Terminated;
+
+   end Primer;
+   use Primer;
+   
+    My_Gen : Prime_Factory (100);
+    Prime  : Positive;
+begin
+   while not My_Gen.Is_Terminated loop
+      Prime := My_Gen.Next;
+      Put_Line (Positive'image(Prime));
+   end loop;
+end Test_Gen2;
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Saturday, October 8, 2016  7:12 AM
+
+...
+> 1) Generators are an implementation detail.
+> Any package (or ADT) with a Get_Next function and a Has_More_Elements 
+> function is a generator. Whether a whole structure is constructed, or 
+> some magic gizmo produces elements one by one is, and should be, 
+> invisible to the caller.
+
+Indeed, generators are an implementation detail to the caller. It was asserted
+multiple times during the previous meeting that generators are useful to the
+implementer, and that to the caller they're just iterators. That does not make
+them useless, eg. the big missing part of your sentence is "they're an
+implementation detail *to the caller*".
+
+> 2) There are many ways a generator can be implemented using the 
+> current features of the language.
+> For example, attached is the prime number generator implemented as an 
+> ADT, without tasks. A bit longer due to the look-ahead required by 
+> Is_Terminated, but that's all.
+
+Well thank you for providing that, it's an interesting comparison. To my eye
+it is a perfect rationale of why generators are useful. On the other hand,
+saying that it's just "a bit longer but that's all" seems pretty
+disingenuous to me, since you're omitting the fact that it is also quite a bit
+more complicated.
+
+Ada is supposed to be about readability, and your example is much less
+readable (even though it is very well written), not in terms of lines of code
+but in terms of operational complexity, because 80% of your code is actually
+boilerplate maintaining the state of your iterator, and 20% is the sieve
+logic.
+
+The fact that this is already so apparent on an example so small that it can
+fit into an AI is in my opinion a very good counter argument to your whole
+line of reasoning on generators.
+
+> Ada is about building-blocks. We already have the necessary building 
+> blocks.
+
+You assert that as it is a fact, without providing any evidence in this
+mail- actually providing counter evidence in my opinion. The only viable
+alternative IMHO from the point of view of expressivity is doing this
+sieve as a (regular) task.
+
+> 3) Benefits do not outweigh the cost
+> I see a whole new syntax, with lots of semantic difficulties in the 
+> proposal for a feature that (AFAIK) has not been asked for by any 
+> casual user (AdaCore correct me if I'm wrong). And I can imagine many 
+> more > difficulties: what if generators are nested? what happens to nested 
+> tasks when a generator is suspended? etc.
+
+Your full input on those difficulties would be appreciated regardless of
+whether you are for integrating the feature or not.
+
+> Moreove, I heartidly agree that we should not make the language too 
+> frightening for implementors who did not (yet) catch up with the 
+> latest version. What Ada needs is not more features, it's more vendors!
+
+Well, this is always a compromise between the perceived usefulness of the
+feature and the perceived complexity of the implementation. With that said,
+I need to say that we are *already* implementing new features for the next
+version of Ada, so saying that "Ada doesn't need more features" in that
+context sounds a bit strange !
+
+> 4) I don't buy the motivations from the AI.
+>     1. Non-determinism. Tasks execution is preemptive and thus
+>        non-deterministic. It means that any access to non-synchronized
+>        outer variables is non safe by default.
+>
+> Scheduling can be controlled, and Ada offers lots of features to that 
+> effect. Moreover, passive tasks would be deterministic.
+
+Yes, as I already said, passive tasks would be an interesting substitute for
+generators in my opinion. You cannot make the point that generators are
+useless and passive tasks are not however, because they provide exactly the
+same kind of semantics..
+
+> But more
+> importantly, a generator implemented by a task is a typical example 
+> where you simply don't care when it runs (except that it could use 
+> spare cycles of hyper-threaded processors - a good thing in my view).
+
+That's true only for simple examples. There's plenty of examples where you do
+actually care, and where you *want* determinism and access to outer scope
+state. There is an incremental highlighter based on generators in GPS that
+follows such a design, that would be extremely hard to conceive with tasks.
+
+> I don't see why a generator implemented by a task would need to refer 
+> to global variables. OTOH, a generator as proposed could have a local 
+> task accessing global variables. This argument is really a red 
+> herring: if you are afraid of global variables, don't use them! 
+> Variables local to a task are all that's needed to keep a state.
+
+Are you saying that unsynchronized access to state outside of a task is a
+red-herring ? That's a pretty weird statement in my opinion, and completely
+disconnected from state of the art knowledge about multi-threaded programming.
+
+>     2. Synchronization overhead. This stems from point 1, but when you
+>        need a deterministic synchronization point, you'll pay for it in
+>        performance. Assorted is the general overhead of
+>        starting/stopping a task for short lived iterators.
+>
+> Tasking is not so bad, and moreover generators need full context
+> switching, therefore it must first be shown that generator switching is
+> significantly faster than task switching.
+
+We agree that it must be benchmarked.
+
+> And (sorry for repeating myself), tasking is just one possible way of
+> implementing generators. I'm quite confident that most of them would be
+> implemented with ADT, or plain packages, or queues, or....
+
+Yes they can, and it's painful and bug prone hence the need for this feature. 
+Saying that you can implement X with Y does not strike me as very useful in 
+discussions about language design. You can do object oriented programming in
+C,  and by that same logic, adding an object oriented layer to any language is
+useless.
+
+> 5)  Python people like it
+> Sure. But remember that Python has no abstract data types, no
+> information hiding, no packages - and no decent tasking.
+
+What is your point ? None of those language features except tasking give you 
+anything close to generators.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, October 7, 2016  10:15 AM
+
+>> > But for the generator library abstraction I presented, the use of a 
+>> > >
+> task is an implementation detail.
+>
+> It is not an implementation detail I think:
+>
+> 1. If you access any outer variable that is not part of the task body, 
+> you'll have potential race conditions. If you access synchronized 
+> objects you'll have potential deadlocks, etc.. You have all the 
+> problems of task based programming.
+>
+> 2. Even for the use of the synchronization buffer, you'll have 
+> synchronization involved, which means overhead, but also a potential 
+> system call on some systems, which can be a very bad thing if you're 
+> calling that in a tight (soft-realtime) loop.
+>
+> 3. Determinism. You control the order of execution of your generator.
+> It doesn't matter in simple examples, but is a big big plus of 
+> generators in the real world.
+>
+> 4. Those simpler characteristics also mean that the resulting feature 
+> will be *much* easier to use in some embedded footprints. Determinism 
+> + reduced runtime support means that it's much easier to certify code 
+> using generators than to certify code using tasks. It also means that 
+> having support in ZFP/SFP runtimes will also be much easier to 
+> implement.
+
+If I had implemented the buffer such that it only held one object, and that
+the generator did not fetch the value for that object until the client had
+blocked on a call to read the buffer, then I think there would be no potential
+race conditions, and it would be deterministic, since only one task would be
+progressing the usage of the generator at a time.
+
+As for synchronization overhead, that sounds like something that might be
+addressed by some compiler optimization, or by using parallelism. I also
+have doubts that most users wouldn't be happy with the performance using a
+task based solution.
+
+I suspect that people interested in determinism are not necessarily that
+interested in performance speed, and vice versa those interested in speed
+are not so interested in determinism.
+
+It also remains to be seen whether the python generator approach offers
+significant performance benefits.
+
+So I remain unconvinced so far, but interested to hear the discussion.
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Saturday, October 8, 2016  7:34 AM
+
+> If I had implemented the buffer such that it only held one object, and 
+> that the generator did not fetch the value for that object until the 
+> client had blocked on a call to read the buffer, then I think there 
+> would be no potential race conditions, and it would be deterministic, 
+> since only one task would be progressing the usage of the generator at a
+> time.
+
+That's True, but you would just have happened to make a deterministic program
+containing tasks. That's not impossible but it can get pretty difficult and
+requires following a certain discipline that the compiler cannot force you to
+follow. Generators (and passive tasks) on the other hand, are *always*
+deterministic, and that's where they're interesting for developers, but also
+for certification and proof. Even if you made a mistake, altered the wrong
+variable, implemented the wrong algorithm, you'll always get the same result.
+
+> As for synchronization overhead, that sounds like something that might 
+> be addressed by some compiler optimization, or by using parallelism.
+
+In some instances the parallelism will be a benefit. In others, what you want
+to express is mainly sequential, so synchronization will be the main thing
+your processor spends its time upon. I think a tree traversal will be one of
+those examples.
+
+> I
+> also have doubts that most users wouldn't be happy with the 
+> performance using a task based solution.
+
+Well that's clearly an unknown I agree.
+
+> I suspect that people interested in determinism are not necessarily 
+> that interested in performance speed, and vice versa those interested 
+> in speed are not so interested in determinism.
+
+I want both :) But more seriously, I think it's a whole package. We also have
+some customers who cannot use tasks at all, and are running on mono processors. 
+Tasks are also a hassle to add to ZFP (zero footprint) runtimes, where
+generators could be easier to add.
+
+> It  also remains to be seen whether the python generator approach 
+> offers significant performance benefits.
+
+It seems to me that this is the main question I need  to answer now. 
+Unfortunately I didn't have time to do the benchmarks before this ARG meeting,
+so I'm afraid it will remain an unknown for now.
+
+Thank you for the thorough feedback
+
+****************************************************************
