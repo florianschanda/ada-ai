@@ -1,0 +1,1706 @@
+!standard 9.11(0)                                    16-12-27  AI12-0197-4/00
+!class Amendment 16-12-27
+!status work item 16-12-27
+!status received 16-10-20
+!priority Low
+!difficulty Hard
+!subject Coroutines and channels
+!summary
+
+** TBD.
+
+!problem
+
+The expression of computation often works on streams of data. It is often
+necessary to express computation of streams as incremental routines, working on
+chunks of data. But expressing algorithms in an incremental fashion is difficult:
+It implies manually keeping and maintaining the state of your algorithm, saving
+it on exit, and restoring it on re-entry.
+
+Generators, often called resumable functions, or Iterators in C#, offer a way
+to write such incremental code in a straightforward procedural way, by giving
+you the possibility to resume a function after it has returned.
+
+This resumable return capability is generally called "yield" in other
+languages, so we will use the same terminology in this AI.
+
+Ada offers a similar capability via the way of tasks and rendez-vous. However,
+tasks have certain properties that are not always desirable:
+
+1. Non-determinism. Tasks execution is preemptive and thus non-deterministic. It
+   means that any access to non-synchronized outer variables is non safe by
+   default.
+
+   Non determinism also implies that the resulting code and runtime are much
+   harder to certify and that it is harder to prove any properties about them.
+
+2. Synchronization overhead. This stems from point 1, but when you need a
+   deterministic synchronization point, you'll pay for it in performance.
+   Assorted is the general overhead of starting/stopping a task for short lived
+   iterators.
+
+!proposal
+
+We introduce coroutines and channels.
+
+A coroutine uses the same syntax and most semantics as a parallel block, but
+the "arms" of the block are executed one at a time. Each of the arms can
+communicate using a special data structure called a channel; a read or write
+on a channel causes the current "arm" to stop executing and another "arm"
+starts/continues execution. An "arm" blocked on the read of a channel will
+continue once data is written to the channel by another "arm". ** More of this
+drivel is needed. :-) **
+
+** Rest TBD **
+
+!wording
+
+** TBD.
+
+!discussion
+
+** TBD.
+
+!ASIS
+
+** TBD.
+
+!ACATS test
+
+ACATS B- and C-Tests are needed to check that the new capabilities are
+supported.
+
+
+!appendix
+
+From: Tucker Taft
+Sent: Sunday, October 9, 2016  10:52 PM
+
+Last night I was thinking about generators and coroutines and such.  One idea I
+had mentioned earlier in an ARG e-mail is that we might define a kind of channel
+or queue that could be used to communicate between coroutines, and then provide
+a general coroutine facility.  As I thought more about this last night, I
+suddenly realized that the parallel block syntax provides a good starting place
+for coroutines:
+
+    Chan : Item_Channel(Max => 1);
+       --  Partially-buffered channel for values of type Item_Type.
+       --  Note that channel need *not* be a synchronized/protected object.
+   ...
+    coroutine
+       --  One coroutine writes into the Chan.Input when walking the Data_Structure
+       Walk_And_Flatten(Data_Structure, Into => Chan.Input);
+    and
+       --  One coroutine drains the channel by iterating over the Chan.Output
+       for Item of Chan.Output loop
+           Put_Line(Image(Item));
+       end loop;
+    end coroutine;
+
+As with the "parallel block" construct, you could create two or more coroutines
+with this construct.  They would be scheduled automatically, based on which one
+is not suspended waiting on a channel (or perhaps other coroutine-supportive
+structure).  They would never run in parallel.  In some sense this is like
+specifying that no more than one core/executor/CPU should be executing the
+coroutines (tasklet-like things) associated with each "arm" of the
+coroutine-block construct.  The scheduling would be non-preemptive, switching
+only when a coroutine blocks or finishes.  When the last coroutine that is
+writing into a particular channel.Input finishes, the corresponding
+channel.Output gets an end-of-input indication, causing the iteration to
+complete.
+
+There are various advantages of this approach to coroutines.  One, there is no
+need for the coroutines to explicitly name each other when yielding -- the other
+coroutines in the same construct are presumed to be working cooperatively, so
+scheduling between these is pretty trivial (especially if there are only two of
+them).  Secondly, you can do anything you want with a channel object as far as
+passing it to recursive calls. Finally, we don't need major new syntax for
+defining a whole new category of types (such as generators), with inheritance,
+etc.  We are essentially piggy-backing on the lightweight tasklet idea of
+parallel blocks, but saying coroutines from the same construct are essentially
+equivalent to tasklets that are guaranteed to never be executing concurrently
+with one another.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 12, 2016  5:55 PM
+
+Any comments on this e-mail?
+
+****************************************************************
+
+From: Steve Baird
+Sent: Wednesday, October 12, 2016  6:32 PM
+
+I'd like to see at least an informal sketch of the operations available for
+channels.
+
+I like the idea of using channels in place of generators, just because the rules
+needed for generators seem to introduce a fair amount of complexity (although I
+think the point made in Pittsburgh that if we do have generator types then they
+need to be tagged helps with some of that).
+
+Could you sketch out how a generator's Has_Next operation might be implemented
+using a channel? Recall that if My_Generator'Has_Next ever returns False, then
+it never again returns True. On the producer's side, do we just stuff a special
+"That's all folks" value in the channel? I suppose that would work, although
+multiple Has_Next queries might require doing something special.
+
+Do channels (as you envision them) work with limited types where build-in-place
+would be required?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 12, 2016  8:17 PM
+
+> I'd like to see at least an informal sketch of the operations
+> available for channels.
+
+I could imagine Put/Finalize on the Output side and Get/End_Of_Input on the
+Input side.
+
+Or we could model them after streams, and provide Write/Close and
+Read/End_Of_File.
+
+> I like the idea of using channels in place of generators, just because
+> the rules needed for generators seem to introduce a fair amount of
+> complexity (although I think the point made in Pittsburgh that if we
+> do have generator types then they need to be tagged helps with some of
+> that).
+>
+> Could you sketch out how a generator's Has_Next operation might be
+> implemented using a channel? Recall that if My_Generator'Has_Next ever
+> returns False, then it never again returns True. On the producer's
+> side, do we just stuff a special "That's all folks" value in the
+> channel? I suppose that would work, although multiple Has_Next queries
+> might require doing something special.
+
+Has_Next would be blocking if the "Output" side of the channel is still open,
+but there is no item waiting.
+
+> Do channels (as you envision them) work with limited types where
+> build-in-place would be required?
+
+Probably not.  You would have to use a level of indirection.  The channel itself
+would almost certainly be of a limited type, but it seems unlikely that it is
+worth allowing the elements to be of a limited type.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Wednesday, October 12, 2016  9:11 PM
+
+> Any comments on this e-mail?
+
+I have some. I've actually been giving this quite a bit of thought since we left
+Pittsburgh.
+
+I like the idea of piggy backing on the parallel block feature, but here are a
+few thoughts I have for consideration.
+
+1. For a serial construct, I think it is very important that the serial flow is
+   clear. In particular, which branch of the coroutine block starts things off?
+   If things happen in the wrong order, it could cause undesirable behaviour in
+   theory. I think we could say that the top branch in the construct is the
+   initial one.
+
+2. If the construct is to support more than two branches, then the serial flow
+   between the branches needs to be obvious. According to the wikipedia
+   definition of coroutine, the coroutine can control where execution continues
+   after a yield. How would one reference the target coroutine with this syntax.
+   Maybe there should be some way to provide a name for each branch, that can be
+   referenced in a yield statement.
+
+3. If we decide to only support two branches in the construct, then it can be
+   implicit where the yield gos (always the alternate branch), this is basically
+   the generator model, which is more limited than coroutines, and on the
+   wikipedia page is described as a semi-coroutine.
+
+4. I have been playing around with this and have an almost working
+   implementation, based on the API of the parallel block libraries I have in
+   the Paraffin libraries, except the implementation does not involve any tasks.
+   I use calls to setjmp/longjmp instead.
+
+5. J.P. said that Ada is about making abstraction using building blocks. It
+   appears Ada may be missing some basic building blocks in this area.
+   Specifically, support for non-local gotos are missing. One can import the C
+   calls to setjmp, longjmp, but that is non-portable particularly because the
+   stack information data structure used in these calls is non-portable, and
+   different across targets platforms, versions of the same OS (eg 32 bit vs 64
+   bit), and even different OS versions.
+
+   It seems to me that it would be helpful to have a standard Ada version of
+   setjmp/longjmp, that one can use portably across compilers. I'd be willing to
+   write such an AI up, if there is enough interest.
+
+   With such a capability, one could use that building block to create generator
+   and coroutine libraries, and other abstraction in theory.
+
+6. My library API looks like the following; The coroutines are passed as a
+   single callback that accepts an id parameter from 1 to the number of
+   coroutines. The users code executes a case statement based on this parameter
+   to separate all the coroutines. The number associated with the coroutine is
+   its id, and is used in the Yield calls to identify which coroutine is
+   yielding, and which coroutine is being yielded to.
+
+
+package Coroutines is
+
+    subtype Coroutine_Count is Positive;
+    subtype Coroutine_Id is Coroutine_Count;
+
+    type Coroutine_Manager
+           (Count : Coroutine_Count) is tagged limited private;
+
+    procedure Execute
+      (Manager : in out Coroutine_Manager;
+       Process : not null access procedure (Id : Coroutine_Id));
+
+    procedure Yield
+      (Manager : in out Coroutine_Manager;
+       From, To : Coroutine_Id)
+      with Pre => (From <= Item.Count and then To <= Item.Count);
+
+private
+
+    ...
+end Coroutines;
+
+And usage for a simple generator example that generates a sequence of
+integers....
+
+with Ada.Text_IO; use Ada.Text_IO;
+with Interfaces; use Interfaces;
+with Coroutines;
+
+procedure Test_Coroutines
+is
+
+    Generator_Value : Integer := 0;
+
+    Manager : Coroutines.Coroutine_Manager (Count => 2);
+
+    procedure Process (Id : Coroutines.Coroutine_Count) is
+    begin
+       if Id = 1 then
+          while Generator_Value <= 4 loop
+             --  Ask the Generator to get another value
+             Manager.Yield (From => 1, To => 2);
+
+             --  Print out the value;
+             Put_Line (Integer'Image (Generator_Value));
+          end loop;
+       else
+          --  Generate Integer values when asked
+          for I in 1 .. 10 loop
+             Generator_Value := I;
+             Manager.Yield (From => 2, To => 1);
+          end loop;
+       end if;
+    end Process;
+
+begin  -- Test_Coroutines
+    Manager.Execute (Process'Access);
+end Test_setjmp;
+
+The idea is that each branch of the user supplied Process callback is a
+different coroutine. The first executed coroutine is associated with Id = 1. The
+Yield call specified the source and destination coroutine id's.
+
+I think this implementation could be mapped quite easily to the syntax you
+described.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Wednesday, October 12, 2016  9:20 PM
+
+A couple of other points. Note that no synchronization is needed on the
+generator value in the example.
+
+Also, this raises some interesting questions about parallel blocks, which I
+think could also be configured to approximate generator behaviour, but using
+tasklets, which in theory would be more expensive.
+
+For a generator, using parallel blocks, using FIFO dispatching (run to
+completion model) where there is a separate executor for both branches of the
+parallel block, but both executors are bound to the same CPU, and run at the
+same priority. In theory, if a Yield (as in the existing procedure in the real
+time annex) statement (or delay statement) is executed that would cause the one
+executing tasklet to get placed at the end of the priority queue, and the other
+tasklet that was waiting to execute could then begin executing. In this manner a
+generator could in theory be created where there is no synchronization on the
+generator result variable, as only one executor would ever be executing at once.
+I think it would be a little bit much to set this up, or rely on the handoff, so
+a sequential generator as I have implemented using non-local gotos I think would
+be more efficient, simpler to analyze, and more robust in maintaining sequential
+ordering.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, October 12, 2016  10:23 PM
+
+...
+> I like the idea of piggy backing on the parallel block feature, but
+> here are a few thoughts I have for consideration.
+>
+> 1. For a serial construct, I think it is very important that the
+> serial flow is clear. In particular, which branch of the coroutine
+> block starts things off? If things happen in the wrong order, it could
+> cause undesirable behaviour in theory. I think we could say that the
+> top branch in the construct is the initial one.
+
+Actually, my intent was that the user never need to worry about that.  The only
+guarantee is that only one coroutine from a given coroutine-block will operate
+at a time.
+
+> 2. If the construct is to support more than two branches, then the
+> serial flow between the branches needs to be obvious. According to the
+> wikipedia definition of coroutine, the coroutine can control where
+> execution continues after a yield. How would one reference the target
+> coroutine with this syntax. Maybe there should be some way to provide
+> a name for each branch, that can be referenced in a yield statement.
+
+Again, my hope is that it will not matter.  When one of the coroutines blocks,
+control is passed to any other coroutine of the same construct that is ready to
+run.
+
+> 3. If we decide to only support two branches in the construct, then it
+> can be implicit where the yield gos (always the alternate branch),
+> this is basically the generator model, which is more limited than
+> coroutines, and on the wikipedia page is described as a semi-coroutine.
+
+I don't see the need to limit it to just two coroutines, but I do think it is
+important that the coroutines should not worry about which other coroutine will
+get control next. It will be necessary to create a number of examples to verify
+that this approach works, but I believe it should.  It is based on the theory
+that the parallel block feature will work in that way, and the only difference
+is that there is no need for any locking because coroutine switching only
+happens when a coroutine-cognizant blocking operation is called.
+
+...
+> It seems to me that it would be helpful to have a standard Ada version
+> of setjmp/longjmp, that one can use portably across compilers.
+> I'd be willing to write such an AI up, if there is enough interest.
+
+I am not sure I agree with this approach.  Setjmp/longjmp are known to have all
+kinds of bizarre issues.  I really believe they are better left as
+implementation techniques usable by the compiler to implement things like
+exceptions and coroutines.
+
+> With such a capability, one could use that building block to create
+> generator and coroutine libraries, and other abstraction in theory.
+
+Perhaps, but if we want to go this route, I suspect "continuations" is a better
+model. Scheme built a lot of very cool control-flow constructs on top of
+continuations, and I suspect it is a much safer and more Ada-appropriate
+building block.
+
+> 6. My library API looks like the following; The coroutines are passed
+> as a single callback that accepts an id parameter from 1 to the number
+> of coroutines. The users code executes a case statement based on this
+> parameter to separate all the coroutines. The number associated with
+> the coroutine is its id, and is used in the Yield calls to identify
+> which coroutine is yielding, and which coroutine is being yielded to. ...
+
+As mentioned above, I think it is better to leave the choice of which coroutine
+should execute next to the run-time system, and rely on the use of
+coroutine-cognizant blocking operations as the way to yield control.  One of the
+very nice things about the tasklet model in my view is that they are anonymous.
+I think keeping the coroutines anonymous will make them much easier to use
+properly.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, October 13, 2016  1:31 AM
+
+>> It seems to me that it would be helpful to have a standard Ada
+>> version of setjmp/longjmp, that one can use portably across compilers.
+>> I'd be willing to write such an AI up, if there is enough interest.
+>
+> I am not sure I agree with this approach.  Setjmp/longjmp are known to
+> have all kinds of bizarre issues.  I really believe they are better
+> left as implementation techniques usable by the compiler to implement
+> things like exceptions and coroutines.
+
+I think I spoke too soon about setjmp/longjmp. After testing some examples, i am
+seeing the bizarre issues. I think there are problems with jumping over things
+that need finalization for example, and other problems with how the stacks (such
+as secondary stacks) are managed under the covers. So it seems at least mapping
+to those C functions is not a good idea.
+
+...
+>> 6. My library API looks like the following; The coroutines are passed
+>> as a single callback that accepts an id parameter from 1 to the
+>> number of coroutines. The users code executes a case statement based
+>> on this parameter to separate all the coroutines.
+>> The number
+>> associated with
+>> the coroutine is its id, and is used in the Yield calls to identify
+>> which coroutine is yielding, and which coroutine is being yielded to. ...
+>
+> As mentioned above, I think it is better to leave the choice of which
+> coroutine should execute next to the run-time system, and rely on the
+> use of coroutine-cognizant blocking operations as the way to yield
+> control.  One of the very nice things about the tasklet model in my
+> view is that they are anonymous.  I think keeping the coroutines
+> anonymous will make them much easier to use properly.
+
+I see your point. If a parallel model can work with this structure, then in
+theory a sequential one could as well, if we can find an efficient way to make
+it work without involving tasks. It seems that it might be confusing to call
+these coroutines, as they dont seem to fit the online definition of how they
+behave, however. But if the order of execution doesn't matter, then overall
+effect is the same.
+
+One question I have about channels. I like the feature the Rust language uses to
+prevent data races, where basically only one place in the code has permissions
+to update a variable. That seems like it would be nice to somehow fit something
+like that into Ada. Is that the channel concept, or is that something somewhat
+different?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 13, 2016  8:00 AM
+
+> One question I have about channels. I like the feature the Rust
+> language uses to prevent data races, where basically only one place in
+> the code has permissions to update a variable. That seems like it
+> would be nice to somehow fit something like that into Ada.
+
+SPARK does these checks as a matter of course as part of its anti-aliasing
+checks.  We will need to do these as part of our Global checks if we want task
+safety.  For coroutines, there is no need for such checks between coroutines,
+because coroutines are never running concurrently.  It is fine if there are two
+"writers" into a channel, so long as they take turns.
+
+> ... Is that the
+> channel concept, or is that something somewhat different?
+
+Not really.  Rust (just like SPARK and ParaSail) is enforcing this at compile
+time.
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Thursday, October 13, 2016  10:08 AM
+
+I have to think about this some more, I find the idea interesting in theory, but
+I don't think it fulfills every use case of generators out of the box.
+
+- One thing I have a big issue with to start is:
+
+> They would be scheduled automatically, based on which one is not suspended
+> waiting on a channel (or perhaps other coroutine-supportive structure).
+
+This is not coroutines anymore in that case. Coroutines have the property that
+the user decides what code is gonna run next. Generators do too, insofar as the
+user knows that he is giving back control to the caller.
+This makes coroutines/generators code straightforward to expand which is a key
+property. The users *knows* the order of execution, and can rely on it. It seems
+to me that just having a special type of channel, on which you can call "Yield",
+which is defined as "put an element into the channel and yield control to
+whoever is waiting on it" would be sufficient to get those kind of semantics.
+
+- Deferring the responsibility of coroutine-like execution to the caller seems
+fine to me, with one caveat: What happens if you call a subprogram that writes
+into a channel in a non-coroutine context ? Will it block eventually ? (If the
+channel has bounded capacity I guess it should right ?).
+
+- Last but not least, you lose the most important part of generators: The
+ability to save the context of execution of a generator, return it, and resume
+it later. It's not obvious how you'd propose doing something like that on top of
+this. I guess if we had lambda that saved their execution context it could work
+:)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 13, 2016  11:05 AM
+
+...
+>> They would be scheduled automatically, based on which one is not
+>> suspended waiting on a channel (or perhaps other coroutine-supportive
+>> structure).
+>
+> This is not coroutines anymore in that case. Coroutines have the
+> property that the user decides what code is gonna run next. Generators
+> do too, insofar as the user knows that he is giving back control to the
+> caller.
+
+True, but I am suggesting that that property is not as valuable as you think,
+and makes the usage less friendly and harder to reuse in slightly different
+situations.  E.g., suppose you decide to add some buffering into the channel.
+If you are explicitly yielding to a specific other coroutine, you have to check
+whether the channel is now full at each point, and yield only if so, etc.  This
+doesn't seem useful.
+
+> This makes coroutines/generators code straightforward to expand which is a key
+> property.
+
+Not sure what you mean by "expand."  If it means you can write out the sequence
+of things that are happening, I don't see how that is necessarily true since the
+data structure you are walking, for example, is not known in advance.  In any
+case, to me the key property is that you don't have more than one coroutine
+executing at a time.  I don't see it is that important for the user to control
+the order of execution precisely.  I would need to see some examples involving
+two or more coroutines where more than one is actually ready to run, and you
+really care which one runs next.  When there are only two coroutines, and you
+yield only as part of blocking on a channel (or other coroutine-cognizant data
+structure), there is no ambiguity, and not having to name the partner in the
+communication is a significant advantage in my view.
+
+I believe one of the biggest advantages of Ada 95's protected objects over Ada
+83's rendezvous is the fact that the partners in the communication or
+interaction don't need to name one another.  They are connected because they
+share an object through which they communicate.  Having to name the
+communication partner is always more complicated and less flexible in my view.
+So I am proposing that coroutines would also benefit by using anonymous
+"data-oriented" communication rather than having to name the other partner in
+the communication.
+
+Think of all the complexity associated with inversion of control techniques, all
+due to the fact that normal procedure calling requires that the caller name the
+callee.  I see no advantage of putting that burden on coroutines, and then
+having to "inject" them with the name of their partner.
+
+> The users *knows* the order of execution, and can rely on it.
+
+I am not convinced they should care, and they clearly don't know it precisely in
+advance since, as mentioned above, you have flow of control that depends on the
+structure being walked.  In any case, this only seems of concern when you have
+more than two coroutines, if we presume you only yield as a side-effect of
+blocking on something like a channel.
+
+> ... It seems to me that just
+> having a special type of channel, on which you can call "Yield", which
+> is defined as "put an element into the channel and yield control to
+> whoever is waiting on it" would be sufficient to get those kind of semantics.
+
+That is exactly what I am proposing, so now I am unclear on how we disagree.
+
+> - Deferring the responsibility of coroutine-like execution to the
+> caller seems fine to me, with one caveat: What happens if you call a
+> subprogram that writes into a channel in a non-coroutine context ?
+> Will it block eventually ? (If the channel has bounded capacity I guess it
+> should right ?).
+
+It would deadlock if there are no other coroutines in existence for the same
+thread of control that are ready to run.  Luckily, this kind of deadlock is easy
+to detect, so it would be easy to raise Program_Error when such a situation
+occurs.
+
+> - Last but not least, you lose the most important part of generators: The
+> ability to save the context of execution of a generator, return it, and
+> resume it later.
+
+That is the whole point of a coroutine.  Whenever it yields control, e.g. after
+writing into a channel, its context of execution is preserved.  In fact, the
+advantage of this construct is that the code inside the coroutine "arm" can be
+as complicated and heavily recursive as you like, since the channel object is
+just a regular object which can be passed into recursive routines, referenced
+using an up-level reference, etc.
+
+> ... It's not obvious
+> how you'd propose doing something like that on top of this.
+
+Then clearly I didn't explain it very well, since that is the whole point of
+this construct.  The various coroutines produced by this construct have their
+own execution context, which is preserved when they block.  They necessarily
+share a thread of control, but they each have their own stack, effectively.
+
+> ... I guess if we had lambda that
+> saved their execution context it could work :)
+
+I don't see why that is needed.
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Thursday, October 13, 2016  11:46 AM
+
+> True, but I am suggesting that that property is not as valuable as you
+> think, and makes the usage less friendly and harder to reuse in
+> slightly different situations.  E.g., suppose you decide to add some
+> buffering into the channel. If you are explicitly yielding to a specific
+> other coroutine, you have to check whether the channel is now full at each
+> point, and yield only if so, etc.  This doesn't seem useful.
+
+Well suppose you don't. The whole point is that generator model is simple in
+terms of how it executes, and you just proposed 10 ways to make it more
+complicated with no good reason as far as I can see.
+
+Also, meta-point, but we shouldn't name a construct coroutines if they're not
+respecting the very definition of coroutines.
+
+I have given plenty of reasons why the determinism and easy execution model of
+generators are valuable, in this and other discussions. What you didn't do on
+your side, is provide reasons why they're not so valuable.
+
+Also this whole discussion is hard because you're attacking coroutines where in
+reality we're proposing generators, which are a subtly but still quite different
+beast.
+
+>> This makes coroutines/generators code straightforward to expand which is a
+>> key property.
+>
+> Not sure what you mean by "expand."  If it means you can write out the
+> sequence of things that are happening, I don't see how that is necessarily
+> true since the data structure you are walking, for example, is not known in
+> advance.
+
+This is not the same thing. With generators, when you yield, you know that the
+control is returned to the caller with the next element that he asked. For the
+caller, it means that between the moment where he calls the generator and the
+moment he gets the element, the only code that will execute is the one charged
+to compute his next element.
+
+This is an important contract. Now I'm not sure if the model you propose breaks
+that contract or not, and in what ways and when. It seems like if you have a
+channel that can buffer more than one element, it could already have
+repercussions that are not expected. If you take the example of a syntax
+highlighter, that will call a generator to incrementally get a list of token,
+the model is simple: Every time the highlighter will get *one* token, and will
+highlight it in the interface.
+
+With your model, depending on the size of the buffer, the behavior will change
+dramatically. The coroutine could either work completely as a function call,
+where everything gets highlighted when the tokenizer has finished his work, if
+the buffer size is very big. Or it could work as the generator model.
+
+> I believe one of the biggest advantages of Ada 95's protected objects over Ada
+> 83's rendezvous is the fact that the partners in the communication or
+> interaction don't need to name one another.  They are connected because they
+> share an object through which they communicate.  Having to name the
+> communication partner is always more complicated and less flexible in my view.
+> So I am proposing that coroutines would also benefit by using anonymous
+> "data-oriented" communication rather than having to name the other partner in
+> the communication.
+
+In the case of generators, you don't need to name the calling function, which
+makes them more flexible in that regard, and more limited also.
+
+> Think of all the complexity associated with inversion of control techniques,
+> all due to the fact that normal procedure calling requires that the caller
+> name the callee.  I see no advantage of putting that burden on coroutines, and
+> then having to "inject" them with the name of their partner.
+
+But there is actually no current proposal for Ada on the table that proposes
+doing that, so you're kind of attacking a straw-man here.
+
+>> The users *knows* the order of execution, and can rely on it.
+>
+> I am not convinced they should care, and they clearly don't know it precisely
+> in advance since, as mentioned above, you have flow of control that depends on
+> the structure being walked.  In any case, this only seems of concern when you
+> have more than two coroutines, if we presume you only yield as a side-effect
+> of blocking on something like a channel.
+
+This is the whole point of generators, which makes them analyzable in terms of
+performance, but *also* deterministic. If the runtime can choose which coroutine
+to execute next, you lose that defining property.
+
+>> ... It seems to me that just
+>> having a special type of channel, on which you can call "Yield", which is
+>> defined as "put
+>> an element into the channel and yield control to whoever is waiting on it"
+>> would be
+>> sufficient to get those kind of semantics.
+>
+> That is exactly what I am proposing, so now I am unclear on how we disagree.
+
+We don't - on that point :)
+
+>> - Deferring the responsibility of coroutine-like execution to the caller
+>> seems fine to me,
+>> with one caveat: What happens if you call a subprogram that writes into a
+>> channel in a
+>> non-coroutine context ? Will it block eventually ? (If the channel has
+>> bounded capacity I
+>> guess it should right ?).
+>
+> It would deadlock if there are no other coroutines in existence for the same
+> thread of control that are ready to run.  Luckily, this kind of deadlock is
+> easy to detect, so it would be easy to raise Program_Error when such a
+> situation occurs.
+
+Fair enough.
+
+>> - Last but not least, you lose the most important part of generators: The
+>> ability to save
+>> the context of execution of a generator, return it, and resume it later.
+>
+> That is the whole point of a coroutine.  Whenever it yields control, e.g.
+> after writing into a channel, its context of execution is preserved.  In fact,
+> the advantage of this construct is that the code inside the coroutine "arm"
+> can be as complicated and heavily recursive as you like, since the channel
+> object is just a regular object which can be passed into recursive routines,
+> referenced using an up-level reference, etc.
+>
+>> ... It's not obvious
+>> how you'd propose doing something like that on top of this.
+>
+> Then clearly I didn't explain it very well, since that is the whole point of
+> this construct.  The various coroutines produced by this construct have their
+> own execution context, which is preserved when they block.  They necessarily
+> share a thread of control, but they each have their own stack, effectively.
+
+Yes, but you cannot *name* them, and pass them around as first class objects,
+which is a key point of the generator proposal, without which they become pretty
+useless in my opinion.
+
+Taking the lexer example, where you have a generator producing tokens that you
+will pass around to your parser functions, return, etc, you cannot do that with
+your model. It basically has the same drawbacks as the for loop body procedure
+model, IE. the whole coroutine needs to execute at the point where you declare
+the coroutine block, which is a strictly less powerful model.
+
+I could live with the execution changing depending on the size of the buffer, if
+that's explicit enough I don't care, people wanting generator behavior will just
+use a buffer size of 1 and only 2 threads of execution at the same time. But
+this second point is a deal-breaker as far as I'm concerned.
+
+Also meta-point: I understand that language design is a continuum. But there
+should be a *very strong incentive* to do things as there are done in other
+languages, if possible !
+
+Ada has been adding features that "looks like" what you have in other languages,
+but are not, and it's been confusing users. Tagged types are an example of that.
+I would need to see that this model is so superior to generators that it makes
+it worth doing something different.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 13, 2016  1:01 PM
+
+> ... This is an important contract. Now I'm not sure if the model you
+> propose breaks that contract or not, and in what ways and when. It
+> seems like if you have a channel that can buffer more than one element,
+> it could already have repercussions that are not expected.
+> If you take the example of a syntax highlighter, that will call a
+> generator to incrementally get a list of token, the model is simple:
+> Every time the highlighter will get *one* token, and will highlight it in the
+> interface.
+
+The size of the channel's buffer would be completely up to the programmer.  So
+presumably they wouldn't use buffering if they didn't want it.
+
+> ...
+>> I believe one of the biggest advantages of Ada 95's protected objects
+>> over Ada 83's rendezvous is the fact that the partners in the
+>> communication or interaction don't need to name one another.  They
+>> are connected because they share an object through which they
+>> communicate.  Having to name the communication partner is always more
+>> complicated and less flexible in my view. So I am proposing that
+>> coroutines would also benefit by using anonymous "data-oriented"
+>> communication rather than having to name the other partner in the
+>> communication.
+>
+> In the case of generators, you don't need to name the calling
+> function, which makes them more flexible in that regard, and more limited
+> also.
+
+Agreed.  I am suggesting that the flexibility and generality of coroutines can
+be achieved without requiring naming the other partner.  I like generators as
+well, but as you saw, introducing them requires a lot of mechanism.  If we could
+get by with coroutines, particularly if they are seen as very similar to
+parallel blocks, that could simplify the support, reduce the complexity of the
+language enhancement, and give the Ada user more power over all.
+
+>> Think of all the complexity associated with inversion of control
+>> techniques, all due to the fact that normal procedure calling
+>> requires that the caller name the callee.  I see no advantage of
+>> putting that burden on coroutines, and then having to "inject" them with the
+>> name of their partner.
+>>
+>
+> But there is actually no current proposal for Ada on the table that
+> proposes doing that, so you're kind of attacking a straw-man here.
+
+Sorry, my point was to suggest that we should consider supporting coroutines
+instead of the special case that is generators, but we should not be bound by
+what "conventional" coroutines do in terms of naming the partner and controlling
+the sequencing.  When someone says "but those aren't coroutines" that is what I
+am objecting to. In fact many languages have supported coroutines in one form or
+another over the years, and in some cases they require an explicit target
+whenever you yield, and in other cases they don't.
+
+In Ada 95, protected objects were based to some degree on monitors, but those
+required explicit "Wakeup" calls using a condition-variable queue.  In Ada 95,
+we dispensed with explicit wakeup and made it implicit in the entry barriers,
+making it much easier to talk about the state of the system, and to prove
+various things about the state when an entry body was executed.  I would suggest
+that we could adopt the flexibility of a coroutine-like structure, implement
+generators in various ways on top of that, but dispense with the need to
+identify what coroutine is taking over control as a side-effect of blocking.
+Clearly that works quite well as far as supporting generators.  I hypothesize
+that it would support most other contexts where coroutines are used.
+
+> ...
+> Yes, but you cannot *name* them, and pass them around as first class
+> objects, which is a key point of the generator proposal, without which they
+> become pretty useless in my opinion. ...
+
+What you pass around is the channel object, rather than the generator.  That is
+the key point I might not have made clear.  You can declare the channel object
+at the same place where you create the two (or more) coroutines, and the first
+coroutine (e.g. the lexer) keeps stuffing lexemes into the channel whenever it
+is active, the other coroutine(s) performs the rest of the algorithm, fetching
+tokens, say, from the channel object whenever and wherever it needs them.   You
+can have multiple channels, each with a separate name, each associated with a
+coroutine that is stuffing things into it, or conceivably a single coroutine
+could put things into two or more channels (then you might want some buffering).
+
+As far as what other languages are doing, "Go" has a very similar model to what
+I am describing.  But Go relies on garbage collection, and the actual lifetime
+of a goroutine is not particularly well defined.   But since there is no point
+for a coroutine/goroutine to outlive the channel through which it is
+communicating with the rest of the world, there seems no need to make the
+lifetime of the coroutine indefinite.
+
+I could see tying the declaration of the channel(s) quite closely to the
+coroutine construct, e.g.:
+
+    declare
+       Lex_Chan : Lex_Channel(Size => (if Interactive then 0 else 100));
+                        -- Unbuffered if taking input interactively
+       Unit_Chan : Unit_Channel(Size => 0); -- Unbuffered
+    begin coroutine
+       Lexer(Source_File, Output => Lex_Chan);
+    and
+       Parser(Input => Lex_Chan, Output => Unit_Chan);
+    and
+       Backend(Input => Unit_Chan, Output => Output_File);
+    end coroutine;
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Thursday, October 13, 2016  1:24 PM
+
+It makes sense. The model is different enough that I need some time to wrap my
+head around it. I feel like, me and Florian compiling that corpus of examples
+for generator could be a good start, because we could then port them to this
+channel model and compare them.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Thursday, October 13, 2016  9:13 PM
+
+> I don't see the need to limit it to just two coroutines, but I do
+> think it is important that the coroutines should not worry about which
+> other coroutine will get control next. It will be necessary to create
+> a number of examples to verify that this approach works, but I believe
+> it should.  It is based on the theory that the parallel block feature
+> will work in that way, and the only difference is that there is no
+> need for any locking because coroutine switching only happens when a
+> coroutine-cognizant blocking operation is called.
+
+This sounds good to me. But I am wondering if instead of coming up with a new
+channel mechanism, what about the idea of just using protected objects, except
+that for PO's inside coroutine blocks the implementation could substitute with a
+lighter weight implementation that assumes all access to the PO is via
+sequential code. In most cases of coroutines, I would think some sort of
+protected queue abstraction would be used to pass data between the coroutines.
+
+The advantages I see would be;
+   1) People are already familiar with the semantics of how PO's work, and
+      wouldn't have to learn about a new synchronization primitive.
+   2) Less work needed for implementors presumably, and less work needed to
+      describe in the RM
+   3) If a programmer chooses to write an abstraction using coroutines with
+      serial semantics, but then later decides to switch to parallel execution,
+      all that is needed is to change the "coroutine" keyword to the "parallel"
+      keyword in the users code (assuming the global aspects also indicated it
+      was safe to do so). It would be similarly easy to switch back to
+      sequential from parallel.
+
+As for a possible implementation, I am thinking it could be that each coroutine
+would be assigned its own executor, and all executors of the same coroutine
+construct would be tied to execute on the same CPU as the enclosing task. If a
+task is migrated to another core, the executors would also get migrated to that
+core. They presumably would run at the same priority as the enclosing task, but
+since they all execute on the same core, presumably an implementation could
+optimize and use lighter-weight threads of control.
+
+Would the use of lightweight PO's instead of channels have some appeal, or do
+you see channels as having other benefits that would be needed, but not possible
+with PO's?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 20, 2016  4:43 PM
+
+...
+> For a generator, using parallel blocks, using FIFO dispatching (run to
+> completion model) where there is a separate executor for both branches
+> of the parallel block, but both executors are bound to the same CPU,
+> and run at the same priority. In theory, if a Yield (as in the
+> existing procedure in the real time annex) statement (or delay
+> statement) is executed that would cause the one executing tasklet to
+> get placed at the end of the priority queue, and the other tasklet
+> that was waiting to execute could then begin executing. In this manner
+> a generator could in theory be created where there is no
+> synchronization on the generator result variable, as only one executor
+> would ever be executing at once. I think it would be a little bit much
+> to set this up, or rely on the handoff, so a sequential generator as I
+> have implemented using non-local gotos I think would be more
+> efficient, simpler to analyze, and more robust in maintaining
+> sequential ordering.
+
+Since this is essentially how tasking is implemented in Janus/Ada, I can say
+that it isn't "a bit much" to set this up.
+
+I've been toying with the idea of adding additional executors (essentually OS
+threads) to the existing task manager; doing that would eliminate most of the
+issues involved with supporting multiple threaded tasks without rewriting the
+entire compiler. (Each entrance to the task supervisor can do the needed
+saving/setup, so the runtime doesn't need to be reorganized.) I would certainly
+include some API to ensure that some task/tasklet (they're essentially the same
+thing in this model) is "locked" to a particular executor.
+
+Of course, this would require some redo of task supervisors that use a more
+conventional model. But it seems to me that doing so would be no harder than
+implementing coroutines from scratch.
+
+(BTW: Isn't setjmp/longjmp essentially equivalent to raising/handling an
+exception? Can't you use that instead of relying on C stuff that probably
+doesn't properly finalize Ada stack frames??)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 20, 2016  5:15 PM
+
+...
+> Also meta-point: I understand that language design is a continuum. But there
+> should be a *very strong incentive* to do things as there are done in other
+> languages, if possible !
+
+The "if possible" is what makes this an almost vacuous statement, to the point
+of being wrong. Almost all "interesting" languages have garbage collection.
+Ada's design is actively hostile to automatic garbage collection (you cannot
+garbage collect any object that has non-trivial finalization, which includes
+most of the types from the standard library). The features that you can
+implement and how you can implement them are very strongly influenced by the
+presence or absence of garbage collection.
+
+When you fold in Ada's very strict named typing, Ada's visibility model, Ada's
+fairly strict contract model for generics, and accessibility checks, the odds
+are that no language feature can make it into Ada without very substantial
+modification. And even then, there is a strong concern about it appearing
+"bolted-on".
+
+I would hope that we would focus on functionality and not on particular language
+features. There are always going to be languages that have "cooler" features
+than Ada; the question however is whether Ada is making it too hard to get one's
+work done.
+
+Tucker's idea of piggybacking on the proposed parallel block structure seems
+like an approach that fits with what we're trying to do with Ada 2020, it
+doesn't appear to add a lot of language overhead beyond what is already there
+(and it fits perfectly with the implementation of tasking that I envision in
+Janus/Ada 2020 -- should that ever exist).
+
+A full generator proposal, regardless of semantics, is going to be way too
+heavyweight for the language. We simply don't have the time or resources (maybe
+AdaCore does, but not the community as a whole) to add something that large to
+the language on top of the things we're already promising. (And those are way
+more important to the long-term use of the language.)
+
+So any time spent considering that is simply wasted, in my view. Tucker is
+trying to find ways to fit the generator semantics into the Ada 2020 language,
+and that seems to be the only approach that has any realistic chance of success.
+Work on how to improve those ideas, and don't waste your time (and ours) on
+things that simply will not happen.
+
+My $0.22 worth (overhead expenses have gone up a lot, so it's a lot more than
+$0.02 these days).
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, October 21, 2016  2:47 PM
+
+> (BTW: Isn't setjmp/longjmp essentially equivalent to raising/handling
+> an exception? Can't you use that instead of relying on C stuff that
+> probably doesn't properly finalize Ada stack frames??)
+
+Thanks for that suggestion Randy. I was able to use that to come up with a
+pretty simple working generator abstraction that does not involve any tasking,
+and should be pretty efficient I think.
+
+The basic premise is that generators typically need to involve state, such as
+iterating through a binary tree of values, whereas the client usage of the
+generator typically involves little or no saved state, and mostly iterates in a
+loop to process values generated by the generator.
+
+The generator code is executed first and internally calls the client procedure
+after yielding a value, the client procedure raises an exception when it wants
+to obtain the next value. That exception is handled inside the yield statement,
+which allows the generator to obtain the next value, and yield back to another
+call to the client procedure.
+
+This raises a few questions regarding future generator support.
+
+1) It seems that a generator abstraction is a special case of coroutine, that
+  probably should be implemented differently. To implement coroutines, you
+  probably need to context switch between different stacks for each coroutine,
+  whereas for generator, a single stack can be used.
+
+2) Piggybacking on the parallel block syntax for coroutines might make sense,
+  but for a simple generator implementation like the one below, it's not clear
+  to me that the parallel block syntax can easily be mapped to such an
+  implementation. For the parallel block/coroutine syntax, we are saying that
+  the order of execution is not important. However for the implementation below,
+  the order is important. The generator must execute first, as it more heavily
+  relies on the stack. It also ensures there is a value ready for the client, so
+  the client assumes it is there initially, and only advances the generator
+  after it has finished processing the value, instead of advancing the generator
+  before processing the value.
+
+3) The implementation of the generator generic is pretty trivial, once
+  you realize the approach. Given the ease of use in the examples below,
+  is it worth adding special generator syntax to further simplify
+  expressing this construct?
+
+Here is the generator generic I came up with;
+
+generic
+    type Result_Type is private;
+    with procedure Client;
+    --  Note: Client is called once per generated value. Any state needed
+    --  between calls should be stored globally to the call package Generators is
+
+    procedure Yield (Result : Result_Type);
+    --  Called by Generator to yield a result to the client
+
+    function Value return Result_Type;
+    --  Called by Client to retrieve the next value
+
+    procedure Next;
+    --  Called by Client to request Generator to obtain the next value
+    --  NOTE: Next should not need to be called to obtain the first value
+    --  The first value will be available before Client is called
+
+private
+
+    Next_Result : Result_Type;
+
+    function Value return Result_Type is (Next_Result);
+
+    pragma Inline (Value, Next);
+end Generators;
+
+package body Generators is
+
+    Generator_Handoff : exception;
+
+    procedure Next is
+    begin
+       raise Generator_Handoff;
+    end Next;
+
+    procedure Yield (Result : Result_Type) is
+    begin
+       Next_Result := Result;
+       Client;
+    exception
+       when Generator_Handoff =>
+          null;
+    end Yield;
+
+end Generators;
+
+And to show usage. First a generator that generates a set of increasing integer
+values. The client controls execution and only wants the first 4 values;
+
+    declare
+       procedure Print_Values;
+
+       package My_Generator is new Generators
+                                      (Result_Type => Integer,
+                                       Client      => Print_Values);
+       Done : Boolean := False;
+
+       procedure Print_Values is
+       begin
+          while My_Generator.Value <= 4 loop
+
+             --  Print out the value;
+             Put_Line (Integer'Image (My_Generator.Value));
+
+             --  Ask the Generator to get another value
+             My_Generator.Next;
+          end loop;
+
+          Done := True;
+       end Print_Values;
+    begin
+       while not Done loop
+          My_Generator.Yield (My_Generator.Value + 1);
+       end loop;
+    end;
+
+
+To show a more complicated example of iterating through a binary tree of integer
+values. In this example, the client does not exit early. All values of the tree
+are processed.
+
+    declare
+       Tree : constant Integer_Tree.Tree := Integer_Tree.Create;
+
+       procedure Print_Values;
+
+       package My_Generator is new Generators
+                                     (Result_Type => Integer,
+                                      Client      => Print_Values);
+
+       procedure Print_Values is
+       begin
+          Put_Line ("Value is" & Integer'Image (My_Generator.Value));
+
+          --  Ask the Generator to get another value
+          My_Generator.Next;
+       end Print_Values;
+
+       procedure Tree_Iterate is
+          procedure Next (Root : Integer_Tree.Tree) is
+          begin
+             if Root.Left /= null then
+                Next (Root.Left.all);
+             end if;
+
+             -- Yield a new value to the generator client
+             My_Generator.Yield (Root.Value);
+
+             if Root.Right /= null then
+                Next (Root.Right.all);
+             end if;
+          end Next;
+       begin
+          Next (Tree);
+       end Tree_Iterate;
+
+    begin
+       Put_Line ("Printing Tree");
+       Tree_Iterate;
+    end;
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, October 21, 2016  3:36 PM
+
+> ... This raises a few questions regarding future generator support.
+>
+> 1) It seems that a generator abstraction is a special case of
+> coroutine, that probably should be implemented differently.
+> To implement coroutines, you probably need to context switch between
+> different stacks for each coroutine, whereas for generator, a single stack can
+> be used.
+
+Not sure why you say that.  The "state" of a generator includes the state of its
+stack, so you really need to give it its own stack.  Looking below I see you are
+back to passing in a "client" procedure.  So yes, for that you don't need
+another stack, but we are also back to something equivalent to the loop-body
+procedure solution.
+
+> ... Here is the generator generic I came up with;
+>
+> generic
+>    type Result_Type is private;
+>    with procedure Client;
+>    --  Note: Client is called once per generated value. Any state needed
+>    --  between calls should be stored globally to the call package
+> Generators is ...
+
+If you are passing in a "client" procedure, this isn't really a full-up
+generator.  We are really back to the access-to-procedure/loop-body situation,
+which I think accomplishes more easily what you are proposing here.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, October 21, 2016  4:37 PM
+
+...
+> > ... Here is the generator generic I came up with;
+> >
+> > generic
+> >    type Result_Type is private;
+> >    with procedure Client;
+> >    --  Note: Client is called once per generated value. Any state needed
+> >    --  between calls should be stored globally to the call package
+> > Generators is ...
+>
+> If you are passing in a "client" procedure, this isn't really a
+> full-up generator.  We are really back to the
+> access-to-procedure/loop-body situation, which I think accomplishes
+> more easily what you are proposing here.
+
+Assuming that we can come to some agreement on how to handle "early"
+completion of the loop. That's not clear at this point. Else that feature may
+never exist.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Friday, October 21, 2016  5:37 PM
+
+>> ... Here is the generator generic I came up with;
+>>
+>> generic
+>>    type Result_Type is private;
+>>    with procedure Client;
+>>    --  Note: Client is called once per generated value. Any state needed
+>>    --  between calls should be stored globally to the call package
+>> Generators is ...
+>
+> If you are passing in a "client" procedure, this isn't really a
+> full-up generator.  We are really back to the
+> access-to-procedure/loop-body situation, which I think accomplishes
+> more easily what you are proposing here.
+
+I'm not sure what isn't "full-up" about this, as it looks and feels like a
+generator in that it provides that view that one logic thread yields values to
+another.
+
+But I'm not sure I'm understanding your thinking here, as there are a couple of
+ways I could interpret this comment.
+
+1) I could be using the access-to-procedure/loop-body in my abstraction as
+presented. To do that, I would need to pass the client procedure access into the
+call to Yield, not as a generic formal as it is currently.
+
+I'm also thinking the code would look weird to present the call to Yield as a
+loop, since in this case, it really isn't one. It's just a callout to the client
+to process the yielded value.
+
+Another issue with the loop body proposal as would apply in this case is, what
+happens when there are no parameters to the loop body procedure. Presumably the
+syntax would look like;
+
+    for () of Container.Iterate(X, Y, Z) loop
+    end loop;
+
+?   (i.e. empty parens would be needed?)
+
+In any case, I think that applying the loop body syntax to this abstraction
+wouldn't work very well, and would make something that looks like a generator
+look confusingly like a doubly nested loop, when the behaviour is very different
+from that.
+
+2) So I think what you are really saying is that for something like iterating
+through a tree, the container abstraction should provide an Iterate call that
+accepts an access to procedure.
+
+In that case, I would agree that the loop body syntax would be preferable.
+However, what if the abstraction or processing involved doesn't have such a
+procedure?  I think there are probably lots of python examples of generators,
+where the processing might not even be involving containers. (For example, the
+case of generating a sequence of prime numbers)
+
+This abstraction provides lazy evaluation of a generator, that can in theory be
+applied in cases where no such loop body procedure is available, and in such a
+case, I'm thinking it would be easier to write a generator, than to write the
+Iterate procedure that could be called using the anonymous loop body syntax.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, October 22, 2016  8:31 AM
+
+>> If you are passing in a "client" procedure, this isn't really a
+>> full-up generator.  We are really back to the
+>> access-to-procedure/loop-body situation, which I think accomplishes
+>> more easily what you are proposing here.
+>
+> I'm not sure what isn't "full-up" about this, as it looks and feels
+> like a generator in that it provides that view that one logic thread yields
+> values to another. ...
+
+Perhaps you missed the discussion.  For a "full-up" generator, you can pass the
+generator object around, and call it whenever you want another element.  In what
+you have proposed, and in the loop-body procedure proposal, the "consumer" is
+always called at the same entry point, forcing the consumer (i.e. the loop body,
+or the generic formal procedure in your case) to keep all of its state in state
+variables.
+
+The classic example of a "full-up" generator is a Lexer/Parser connection.  The
+Lexer is the generator, the Parser is the consumer, and both can benefit from
+having their own stack, since the lexer might more naturally produce the next
+lexeme at different places in its logic, and the parser most naturally consumes
+the next lexeme at different places in its logic.  In most compilers, we accept
+the limitations of having a single stack, and design the lexer to record its
+state, if needed, in persistent state variables, and restart the lexer on each
+request for the "next" lexeme at the same entry point.  But expecting the parser
+to be called once with each lexeme at the same entry point is very awkward in
+some parsers (e.g. recursive descent parsers), because there is more state, and
+the context is potentially recursive.  LALR parsers like Yacc are generally
+designed to capture most of the relevant state in state variables, but they
+still want to be able to call "Next_Lexeme" in th middle of the logic.  So to
+summarize, a "full up" generator could be used to implement a lexer where the
+state is represented by stack context rather than state variables, and this
+generator could be passed around within a parser and the parser could request
+the "next lexeme" wherever it so desired.
+
+The "coroutine" model described in one of my earlier notes would use a "channel"
+object (essentially a bounded queue) to hold the "next lexeme" and the lexer
+would have its own stack context and could add lexemes into the channel whenever
+it was "ready" to do so, and the parser would have its own stack context and
+could remove them from the channel whenever it needed the next lexeme.  If the
+channel is unbuffered, then every other invocation of these operations would
+generally involve a context switch.  If the channel is buffered, then there
+would generally be fewer context switches.
+
+The "full up" generator model is a simplified coroutine, but still requires two
+stack contexts, and seems to also require more language change.  The coroutine
+model seems to be, ironically, both more powerful and somewhat simpler from a
+language point of view. What you have proposed with your generic, and the
+loop-body approach, are both less powerful.  In my view, the loop-body approach
+is easier to use than the other alternatives, but does not provide "full up"
+generator or coroutine capabilities.  The coroutine + channel approach is nice
+in my view because it seems to match up quite well with the parallel block
+construct which we seem to be converging on.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Monday, October 24, 2016  1:31 AM
+
+...
+> Perhaps you missed the discussion.  For a "full-up" generator, you can
+> pass the generator object around, and call it whenever you want
+> another element.  In what you have proposed, and in the loop-body
+> procedure proposal, the "consumer" is always called at the same entry
+> point, forcing the consumer (i.e. the loop body, or the generic formal
+> procedure in your case) to keep all of its state in state variables.
+
+OK, thanks for the clarification, and thanks for the excellent example of a
+lexer as a full up generator. I actually realized after sending my last email
+what you meant by full up, but didnt have a good example of one. Am I correct in
+assuming also that a coroutine block acting as a generator isn't a full up
+generator either, since one cannot call into the coroutine from anywhere, like a
+real generator. The generator is bound to the consumer since both are within the
+same construct.
+
+eg. For a generator that generates prime numbers, I could not call
+Get_Next_Prime from anywhere, as one might do in Python. It has be called from
+the other coroutine.
+
+> The classic example of a "full-up" generator is a Lexer/Parser
+> connection.  The Lexer is the generator, the Parser is the consumer,
+> and both can benefit from having their own stack, since the lexer
+> might more naturally produce the next lexeme at different places in
+> its logic, and the parser most naturally consumes the next lexeme at
+> different places in its logic.  In most compilers, we accept the
+> limitations of having a single stack, and design the lexer to record
+> its state, if needed, in persistent state variables, and restart the
+> lexer on each request for the "next" lexeme at the same entry point.
+> But expecting the parser to be called once with each lexeme at the
+> same entry point is very awkward in some parsers (e.g. recursive
+> descent parsers), because there is more state, and the context is
+> potentially recursive.  LALR parsers like Yacc are generally designed
+> to capture most of the relevant state in state variables, but they
+> still want to be able to call "Next_Lexeme" in the middle of the
+> logic.  So to summarize, a "full up" generator could be used to
+> implement a lexer where the state is represented by stack context
+> rather than state variables, and this generator could be passed around within
+> a parser and the parser could request the "next lexeme"
+> wherever it so desired.
+
+I can see that for complex processing such as this, both coroutines would need
+their own stack, and my generic wouldn't be useful. However, for some (simpler)
+examples of generators, you can get by giving the stack to the generator, and
+having invoking the consumer as you need it as part of the same stack.
+
+I'm not sure what it is I have with my generic. I might be viewed as a possible
+implementation that a smart compiler might use for a coroutine block with two
+coroutines, if the compiler can determine that the consumer coroutine can be
+restarted as needed without affecting the result. Or it might be something that
+a programmer can use in certain situations if it can significantly outperform
+what you get by using a coroutine block. (Yet to be seen)
+
+> The "coroutine" model described in one of my earlier notes would use a
+> "channel" object (essentially a bounded queue) to hold the "next lexeme"
+> and the lexer would have its own stack context and could add lexemes
+> into the channel whenever it was "ready" to do so, and the parser
+> would have its own stack context and could remove them from the
+> channel whenever it needed the next lexeme.  If the channel is
+> unbuffered, then every other invocation of these operations would
+> generally involve a context switch.  If the channel is buffered, then
+> there would generally be fewer context switches.
+
+Makes sense.
+
+> The "full up" generator model is a simplified coroutine, but still
+> requires two stack contexts, and seems to also require more language
+> change.  The coroutine model seems to be, ironically, both more
+> powerful and somewhat simpler from a language point of view. What you
+> have proposed with your generic, and the loop-body approach, are both
+> less powerful.  In my view, the loop-body approach is easier to use
+> than the other alternatives, but does not provide "full up" generator
+> or coroutine capabilities.  The coroutine + channel approach is nice
+> in my view because it seems to match up quite well with the parallel
+> block construct which we seem to be converging on.
+
+I do have some interesting results, from my further experimentation.
+
+First off, I was able to improve the interface to the generic such that it looks
+like a python generator. That is, you can express the generator as an endless
+loop. (eg. A generator that generates a sequence of increasing prime numbers can
+in theory be called an infinite number of times (limited by the target
+architecture). Also, the generator code is passed as a procedure into the
+generic, in addition to the client.
+
+I also noticed that my generic actually is a full up generator for certain kinds
+of generators. For lack of a better name, I call these "cursive" generators,
+where the next value of the generator can be determined from the previous value
+alone. The value of the generator is essentially a type of cursor. An example of
+a cursive generator is the prime number example. For such a problem, one can
+pass a null procedure into my generic for the consumer, and instead just execute
+the generator when ever another value is needed.
+
+
+This pretty much looks and behaves identically to the corresponding generator in
+Python.
+
+In Python:
+
+       def get_primes(number):
+           while True:
+               if is_prime(number):
+                   number = yield number
+               number += 1
+
+       def print_successive_primes(iterations, base=10):
+            prime_generator = get_primes(base)
+            prime_generator.send(None)
+            for i in range(iterations):
+               print(prime_generator.next)
+
+
+Using my generic in Ada:
+
+   declare
+      package Prime_Generator is new
+         Generators (Result_Type => Integer,
+                     Generator   => Get_Primes,
+                     Initial_Value => 0);
+
+       procedure Get_Primes (Number : in out Integer) is
+       begin
+          loop
+             if Is_Prime (Number) then
+                Prime_Generator.Yield (Number);
+             end if;
+
+             Number := Number + 1;
+          end loop;
+       end Get_Primes;
+    begin
+       --  A full up generator, this consumer code can be called from
+       --  anywhere, from multiple loops even.
+       for I in 1 .. 1000 loop
+           Put_Line (Prime_Generator.Next);
+       end loop;
+    end;
+
+I now have two forms of generics, one is the non-cursive non-full up form, and
+the other is the cursive, full up form.
+
+
+Now for some interesting performance results.
+
+I used the example of a generator that generates a sequence of numbers from 1 to
+N. For this I want to generate the sum.
+
+This gives some good performance comparisons.
+
+First for a normal loop written as;
+
+       for I in 1 .. N loop
+          Sum := Sum + I;
+       end loop;
+
+Then written as a non-cursive, non-full up generic; One flavour of the generic
+uses exceptions, and the other uses function returns.
+
+I then ran against two other versions, a cursive full up generic using
+exceptions, and another cursive, full-up generic using function returns.
+
+Finally, I ran against another full up generic that runs the generator in a
+separate task, and a protected object is used to pass values between the
+generator and the consumer.
+
+Here are the times for calculating the sum from 1 to 1_000_000.
+
+Normal loop sum of 10000000 integers is  50000005000000,
+    Elapsed = 00:00:00.04
+
+Non-Cursive, non-full up, using exceptions Generator sum of 10000000 integers is
+50000005000000,
+    Elapsed = 00:02:13.56
+
+Non-Cursive2, non-full up, using function return Generator sum of 10000000
+integers is  50000005000000,
+    Elapsed = 00:00:00.12
+
+Cursive, full up, using function return
+Generator2 sum of 10000000 integers is  50000005000000,
+    Elapsed = 00:00:00.09
+
+Cursive, full up, using exceptions
+Generator sum of 10000000 integers is  50000005000000,
+    Elapsed = 00:02:17.37
+
+Full Up Tasking Generator
+sum of 10000000 integers is  50000005000000,
+    Elapsed = 00:01:49.68
+
+All the solutions using the exception mechanism are literally over 1000 times
+slower than the simple sequential loop. The exception mechanism is zero-cost
+exceptions, which is zero cost if exceptions are not raised, but since an
+exception is raised for each generated value they are big-cost exceptions. The
+exception versions are even slower than the full up tasking version.
+
+Using setjmp/longjmp exceptions might give better performance, but I was unable
+to get the compiler to generate code for this.
+
+In any case, I think using exceptions in this manner for such an implementation
+is a non-starter.
+
+However, using function returns is only 3 times slower for non-full up, and only
+2 times slower for the full-up cursive generic.
+
+This is within an acceptable performance range I would think.
+
+I suspect doing context switching as per the coroutine model would be take
+considerably longer than these simple models, but hopefully much faster than the
+other times I reported. It will be interesting to compare such an implementation
+with these other versions.
+
+Here is the listing of the code for the cursive, full up generator with returns
+used this test:
+
+
+    declare
+       procedure Generate_Integers (Number : in out Long_Integer);
+
+       package Number_Generator is new
+         Cursive_Generators2 (Result_Type   => Long_Integer,
+                              Generator     => Generate_Integers,
+                              Initial_Value => 0);
+
+       procedure Generate_Integers (Number : in out Long_Integer) is
+       begin
+          Number := Number + 1;
+       end Generate_Integers;
+
+       Sum : Long_Integer := 0;
+    begin
+       Put ("Cursive Generator2 sum of" & Long_Integer'Image (N) &
+              " integers is ");
+
+       for I in 1 .. N loop
+          --  Print out the value;
+          Sum := Sum + Number_Generator.Next;
+       end loop;
+
+       Put_Line (Long_Integer'Image (Sum));
+
+    end;
+
+or for comparison, the non-cursive, non-full up version.
+
+    declare
+       use all type Generators2.Consumer_Request;
+       procedure Generate_Integers (Number : in out Long_Integer);
+       function Add_Numbers return Generators2.Consumer_Request;
+
+       package Number_Generator is new
+         Generators2.Generators (Result_Type   => Long_Integer,
+                                 Consumer      => Add_Numbers,
+                                 Generator     => Generate_Integers,
+                                 Initial_Value => 0);
+
+       -- Note Generator is an endless loop
+       procedure Generate_Integers (Number : in out Long_Integer) is
+       begin
+          loop
+             Number := Number + 1;
+             Number_Generator.Yield (Number);
+          end loop;
+       end Generate_Integers;
+
+       Current_Index : Long_Integer := 1;
+       Sum : Long_Integer := 0;
+
+       function Add_Numbers return Generators2.Consumer_Request is
+       begin
+          if Current_Index <= N then
+             Current_Index := Current_Index + 1;
+             Sum := Sum + Number_Generator.Value;
+             return Next;
+          end if;
+          return Done;
+       end Add_Numbers;
+
+    begin
+       Put ("Non-Cursive2 Generator sum of" & Long_Integer'Image (N) &
+              " integers is ");
+
+       Number_Generator.Execute;
+
+       Put_Line (Long_Integer'Image (Sum));
+
+    end;
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, October 24, 2016  7:45 AM
+
+>> ...
+>> Perhaps you missed the discussion.  For a "full-up" generator, you
+>> can pass the generator object around, and call it whenever you want
+>> another element.  In what you have proposed, and in the loop-body
+>> procedure proposal, the "consumer" is always called at the same entry
+>> point, forcing the consumer (i.e. the loop body, or the generic
+>> formal procedure in your case) to keep all of its state in state variables.
+>
+> OK, thanks for the clarification, and thanks for the excellent example
+> of a lexer as a full up generator. I actually realized after sending
+> my last email what you meant by full up, but didnt have a good example
+> of one. Am I correct in assuming also that a coroutine block acting as
+> a generator isn't a full up generator either, since one cannot call
+> into the coroutine from anywhere, like a real generator. The generator
+> is bound to the consumer since both are within the same construct.
+>
+> eg. For a generator that generates prime numbers, I could not call
+> Get_Next_Prime from anywhere, as one might do in Python. It has be
+> called from the other coroutine. ...
+
+You can pass the channel object around as much as you like, so the channel
+object acts as the generator for this purpose.  The coroutine block construct
+determines the lifetime of the generator/channel, so the generator/channel is
+effectively finalized as you exit the coroutine block construct, but it could
+still represent a large part of the life of the program if the coroutine block
+construct is in the main subprogram.
+
+So with the coroutine block construct, you do effectively "bound" the lifetime
+of the generator/channel, which avoids the need for garbage collection.  One
+could imagine having an unbounded-life generator/channel, using the equivalent
+of an allocator to initialize it and unchecked-deallocation to finalize it.  Not
+clear how important that capability would be.
+
+****************************************************************
