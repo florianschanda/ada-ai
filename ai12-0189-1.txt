@@ -1448,3 +1448,329 @@ There are several solutions that work properly without putting unchecked
 requirements on the potentially user-written iterator. Let's use one of those.
 
 ****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, December 21, 2016  9:13 AM
+
+>> I suppose we could define yet another aspect which must be specified 
+>> on a subprogram with an access-to-procedure parameter, if it is to be 
+>> used with a loop-body that contains a transfer of control out of the 
+>> loop.  This would be the way for the implementor to say:
+>> "yes, I used finalization for last wishes, and so my routine can 
+>> support a loop body with a transfer of control."
+>
+> I don't think that is any help. Such an aspect can't be statically 
+> checked, so it would just be an annoyance to most users that would 
+> have to be applied to routines before the nice syntax can be used -- 
+> and most would apply it even if no finalization was used.
+
+What I was suggesting is that they could use the loop-body syntax even without
+this aspect, but if they wanted to permit an "exit" or other transfer of
+control out of the loop, they had to specify this aspect.  Yes I suppose they
+could lie and say "I use finalization for cleanup" and then go ahead and use
+exception handlers.  But why would they do that?  And we could pretty easily
+check for the use of "when others ... raise" and produce a warning in the
+presence of such an aspect.
+
+>> More generally, if your last wishes are "critical" then finalization 
+>> seems the more robust approach.
+>
+> Surely. But how many Ada programmers know that? And even if the number 
+> is 80%, the other 20% is going to write code that doesn't use 
+> finalization. And the 80% is probably going to do something else part 
+> of the time just because it's much easier to write a handler.
+
+Using finalization for cleanup is practically a "mantra" in the C++ world, and
+I don't know why you think exception handling is so much simpler.  You have to
+worry about multiple exceptions, and worry about exception handlers that raise
+exceptions by mistake, etc.  Using finalization is clearly a more robust way
+to do cleanup even without any aborts permitted.  And if we ask the user to
+write an aspect that says "yes I used finalization" what more can we do to
+protect the programmer against their own laziness?
+
+> I'm strongly opposed to any transfer-of-control mechanism that doesn't 
+> work for any arbitrary user code. We can't be putting unchecked 
+> restrictions on the code that can use this feature; any restrictions 
+> we want to have to be visible in the specification and checked in the 
+> body. Else we have an attractive hazard, and some percentage of Ada 
+> programmers are going to trip over it. (After all, one of the big 
+> advantages of Ada is that we don't allow arbitrary unchecked stuff to 
+> happen
+
+Programmers can also write "pragma Suppress(All_Checks);" because of those
+pesky constraint checks.  I really don't understand your vehemence here.  
+Finalization is not just to protect against abort.  It is a much cleaner way
+to deal with exceptions as well.
+
+> There are several solutions that work properly without putting 
+> unchecked requirements on the potentially user-written iterator. Let's 
+> use one of those.
+
+You will have to remind me of what you think is better than relying on
+finalization. Exceptions that must be re-thrown and which are not handled by
+"when others" would seem to be at least as error prone, and require a
+completely new concept in the language.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 21, 2016  8:27 PM
+
+...
+> > I don't think that is any help. Such an aspect can't be statically 
+> > checked, so it would just be an annoyance to most users that would 
+> > have to be applied to routines before the nice syntax can be used -- 
+> > and most would apply it even if no finalization was used.
+> 
+> What I was suggesting is that they could use the loop-body syntax even 
+> without this aspect, but if they wanted to permit an "exit" or other 
+> transfer of control out of the loop, they had to specify this aspect.  
+> Yes I suppose they could lie and say "I use finalization for cleanup" 
+> and then go ahead and use exception handlers.  But why would they do 
+> that?
+
+So their code would compile. And they'd curse Ada for making them do it. 
+
+...
+> And we
+> could pretty easily check for the use of "when others ... 
+> raise" and produce a warning in the presence of such an aspect.
+> 
+> >> More generally, if your last wishes are "critical" then 
+> >> finalization seems the more robust approach.
+> >
+> > Surely. But how many Ada programmers know that? And even if the 
+> > number is 80%, the other 20% is going to write code that doesn't use 
+> > finalization. And the 80% is probably going to do something else 
+> > part of the time just because it's much easier to write a handler.
+> 
+> Using finalization for cleanup is practically a "mantra" in the C++ 
+> world, and I don't know why you think exception handling is so much 
+> simpler.  You have to worry about multiple exceptions, and worry about 
+> exception handlers that raise exceptions by mistake, etc.
+
+Really? I just use
+    exception
+       when others =>
+           -- Cleanup
+           raise;
+
+And I don't worry about anything. (Maybe that's wrong.:-) And it doesn't
+matter what exception gets here (and Ada doesn't allow "multiple exceptions"
+at a time). Cleanup raising an exception is a bug, pure and simple, if it does
+it here, it would do it in finalization and then debugging would be a
+nightmare. ("raise;" preserves exception information, so it's crystal clear
+whether the exception passed through the routine or whether it is new from
+inside of the routine (meaning a bug) -- but finalization raising an exception
+just raises a non-specific Program_Error, so the source of the problem is
+completely lost.)
+
+In addition, writing finalization is lengthy (lots of text is needed), so there
+is a very strong requirement to share it. But that makes figuring out what to
+cleanup complex (requiring access discriminants or some other complex
+creation).
+
+If we already had a "finally" clause, perhaps we could have a different
+discussion. But since we don't (and even if we added it now), existing code
+doesn't use it and finalization is so painful it is only used for critical
+situations. I've only used it for locks, where a failure to clean up means
+certain deadlock for the program. I don't find storage leaks or missing
+tampering bits of objects that are abnormal anyway to be in that category of
+criticality, but they better not happen in "normal" usage.
+
+> Using finalization is
+> clearly a more robust way to do cleanup even without any aborts 
+> permitted.  And if we ask the user to write an aspect that says "yes I 
+> used finalization" what more can we do to protect the programmer 
+> against their own laziness?
+
+Don't assume anything about user code. (Or at least as little as possible.)
+
+> > I'm strongly opposed to any transfer-of-control mechanism that 
+> > doesn't work for any arbitrary user code. We can't be putting 
+> > unchecked restrictions on the code that can use this feature; any 
+> > restrictions we want to have to be visible in the specification and 
+> > checked in the body. Else we have an attractive hazard, and some 
+> > percentage of Ada programmers are going to trip over it. (After all, 
+> > one of the big advantages of Ada is that we don't allow arbitrary 
+> > unchecked stuff to happen
+> 
+> Programmers can also write "pragma Suppress(All_Checks);" 
+> because of those pesky constraint checks.  I really don't understand 
+> your vehemence here.  Finalization is not just to protect against 
+> abort.  It is a much cleaner way to deal with exceptions as well.
+
+Which requires writing an extra 50-100 lines of code. Too complicated for all
+but the most critical of items (and those that naturally wrap into ADTs -
+which an iterator does not).
+
+> > There are several solutions that work properly without putting 
+> > unchecked requirements on the potentially user-written iterator.
+> > Let's use one of those.
+> 
+> You will have to remind me of what you think is better than relying on 
+> finalization.
+> Exceptions that must be re-thrown and which are not handled by "when 
+> others" would seem to be at least as error prone, and require a 
+> completely new concept in the language.
+
+There is no "throwing" of exceptions in Ada. :-) They're either raised or
+propagated. And there must be nothing special about this exception (that's
+the whole point, the "when others" is the cleanup mechanism).
+
+But I think you've lost sight of the big picture here. (Easy to do because
+of the time that's passed.) Let me start from the beginning.
+
+Existing procedure iterators have no built-in transfer of control mechanism.
+If one is needed, that has to be provided by the user. As suggested in the
+AARM notes for the containers, one uses an exception to do that.
+
+For instance, if we have:
+
+  procedure  Iterate
+     (Container : in Vector;
+      Process   : not null access procedure (Position : in Cursor));
+
+Currently, we'd have to write something like the following if we needed to
+exit from the loop:
+
+    declare
+       Done : exception;
+       procedure Do_It (Position : in Cursor) is
+       begin
+          -- Do stuff here.
+          if <we need to exit> then
+             raise Done;
+          end if;
+       end Do_It;
+    begin
+       My_Vect.Iterator (Do_It'Access);
+    exception
+       when Done => null;
+    end;
+
+An iterator procedure that eats exceptions rather than propagating them will
+not work with this structure. Such an iterator cannot support any kind of
+transfer of control, and one has to assume that's an intentional design
+decision. Trying to graft on transfer of control to such an iterator is never
+going to work in any scenario.
+
+But I'd expect procedure iterators like that to be rare (certainly, none of
+the language-defined ones allow that). Indeed, I'd consider an iterator that
+does not propagate exceptions to be broken (as it requires iteration to always
+proceed to completion, and that would almost never make sense).
+
+My first inclination would be to mirror the underlying construct and simply
+ban explicit transfer of control from such a procedure loop body. (That is,
+no exit, no return, no goto.) That's certainly the easiest solution and has
+the clear advantage that it allows us to support more in the future (do it
+wrong now and we're stuck forever).
+
+However, "exit" is common so it makes sense to generate a structure like the
+above automatically. So following is a concrete proposal.
+
+=====================================
+
+Randy's idea of loop-body procedures.
+
+We start with Tucker's proposal, deleting the last two paragraphs. That is,
+the static semantics is the same.
+
+Then:
+
+There is an exception named Exit_from_Loop_Procedure_Body declared in System
+(System seems best as it already allows arbitrary implementation-defined
+identifiers, so adding one more unlikely to be used in user code shouldn't be
+a problem. But any package would do.)
+
+A loop body with a procedure iterator is equivalent to the following code:
+
+    declare
+       procedure <<Anon>> (<<params>>) is
+       begin
+          <<loop body statements>>
+       end <<Anon>>;
+    begin
+       <Procedure_Name> (..., <<Anon>>'Access, ...);
+    exception
+       when System.Exit_from_Loop_Procedure_Body => null;
+    end;
+
+Return and Goto are illegal in the <<loop body statements>>. For exit, the
+optional loop name (if present) shall not identify a loop that surrounds the
+loop body (it could identify an inner loop). For an exit statement that exits
+the loop body,
+
+     exit <<loop-body-name>> when <condition>; is equivalent to:
+     if <condition> then
+        raise System.Exit_from_Loop_Procedure_Body;
+     end if;
+
+AARM Reason: We support "exit" from the loop-body procedure as it is a common
+need. The only requirement on the (potentially) user-written iterator routine
+is that it propagate the Exit_from_Loop_Procedure_Body exception (and operate
+properly when that happens). This is pretty much a requirement on such routines
+anyway, as the user-written callback can always propagate an exception (on
+purpose or via a bug), and eating such an exception would make debugging
+difficult and eliminate any possibility of terminating the iteration early.
+
+We don't support any other sort of explicit transfer of control out of a
+loop-body procedure as the underlying mechanism does not support such
+transfers (gotos out of procedures have always been illegal in Ada, and Ada
+does not have any sort of non-local return). It's possible to program such
+transfers in most cases, but some corner cases cannot be directly programmed
+(for instance, returns for a function that returns an object of a limited
+type). As such, generally allowing all explicit transfers of control is
+problematical; if we have to disallow some sorts of transfer of control, we
+might as well only allow the most useful one.
+
+=====================================================
+
+I think this is enough for this feature, it balances complexity with
+ease-of-use. I don't believe that it makes sense to go to heroic efforts to
+provide functionality for syntactic sugar that the underlying mechanism
+doesn't have. And I want to assume as little as possible about the underlying
+code (which is likely to be preexisting) as possible.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, December 21, 2016  9:33 PM
+
+I don't really agree with all of your arguments, but I do believe that at
+least supporting "exit" is very important.  I would also like to support the
+other capabilities (return, etc.) but I agree those are less important.  If
+others on the ARG are OK with your proposal, I could support it, but my
+sense was there was a concern about code that might "swallow" exceptions.
+You point out that code like that is asking for trouble anyway, and I agree.
+I believe code that is using exception handlers instead of finalization to do
+cleanup is also asking for trouble, but my main goal is to have loop-body
+procedures that support exit.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 21, 2016  10:39 PM
+
+Fair enough.
+
+One mistake in my proposal comes to mind:
+
+I said "Return and Goto are illegal in the <<loop body statements>>." This is
+too fierce in the case of goto: we of course should allow gotos to labels
+local to the <<loop body statements>>. The rule ought to be something like "A
+goto that appears in the <<loop body statements>> shall target a label in the
+<<loop body statements>>".
+
+And one point I forget in my write-up:
+
+By making the correspondence of "exit;" to a raise statement explicit, we at
+least motivate what will happen if the iterator swallows the exception without
+a trace. It should be less of a surprise than if this is hidden completely.
+
+P.S. I'm dubious about the alternative of using ATC, even forgetting the
+finalization issue. I don't think that I would expect an exit to make objects
+in the loop abnormal; that's always a risk once abort gets involved with
+something.
+
+****************************************************************

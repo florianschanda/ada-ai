@@ -30,6 +30,66 @@ address the other cases in which invariant checking rules depend on being or
 not being "in the immediate scope": view conversions (including conversion
 to classwide) and deferred constants. Should it? (Yes.)
 
+7.3.2(17/4) also seems unclear in the case of a nested generic unit.
+Consider:
+
+  procedure Invtest is
+     package Pkg is
+        type T is private;
+
+        generic
+        package G1 is
+           generic
+           package G2 is
+              procedure Proc (X : in out T);
+           end G2;
+        end G1;
+
+     private
+        type T is record
+           Xx, Yy : Integer := 0;
+        end record with
+           Type_Invariant => (T.Xx <= T.Yy);
+     end Pkg;
+
+     package body Pkg is
+        package body G1 is
+           package body G2 is
+              procedure Proc (X : in out T) is
+              begin
+                 X.Yy := Integer'First;
+              end Proc;
+           end G2;
+       end G1;
+     end Pkg;
+
+     package I1 is new Pkg.G1;
+
+     package I2 is new I1.G2;
+     Var : Pkg.T;
+  begin
+     I2.Proc (Var);
+
+     --  If we reach this point without raising an exception, then
+     --  Var has an invariant-violating value.
+
+  end Invtest;
+
+The relevant wording of 7.3.2(17/4) is
+    ... is declared within the immediate scope of type T (or by an
+    instance of a generic unit, and the generic is declared within the
+    immediate scope of type T), ...
+
+I2.Proc is not declared within the immediate scope of type Pkg.T (G1.G2.Proc
+is, but that's irrelevant). So we need to look at the wording in parentheses.
+Is I2.Proc declared by an instance of a generic unit? Yes it is. So far so
+good. Is that generic declared within the immediate scope of T? No it isn't!
+G1.G2 is declared within the immediate scope of T, but that's irrelevant. The
+generic unit we are interested in is I1.G2, which is not declared within the
+immediate scope of T.
+
+Should there be some wording adjustment to fix this? (Yes.)
+
 !recommendation
 
 (See Summary.)
@@ -41,6 +101,60 @@ to classwide) and deferred constants. Should it? (Yes.)
 !discussion
 
 Does anyone care? Pick something. :-)
+
+[Editor's musings:
+
+For the third issue, one needs to be careful with the wording lest a type
+declared within the outer generic get swept up in the special case (such a
+type should always be checked in this case).
+
+There is also an issue with derived generic formal types.
+
+  procedure Invtest2 is
+     package Pkg2 is
+        type T is private;
+
+        generic
+           type Der is new T with private;
+        package G1 is
+           generic
+           package G2 is
+              procedure Proc2 (X : in out Der);
+           end G2;
+        end G1;
+
+     private
+        type T is record
+           Xx, Yy : Integer := 0;
+        end record with
+           Type_Invariant => (T.Xx <= T.Yy);
+     end Pkg2;
+
+     package body Pkg2 is
+        package body G1 is
+           package body G2 is
+              procedure Proc2 (X : in out Der) is	
+              begin
+                 X.Yy := Integer'First; -- This can see the components of T.
+              end Proc2;
+           end G2;
+       end G1;
+     end Pkg2;
+
+     package I1 is new Pkg.G1(Pkg.T);
+
+     package I2 is new I1.G2;
+     Var : Pkg.T;
+  begin
+     I2.Proc (Var);
+     --  If we reach this point without raising an exception, then
+     --  Var has an invariant-violating value.
+  end Invtest2;
+
+I don't see how the existing rules deal with this, and it's not listed in the
+case of holes, either.
+
+End Editor's musings.]
 
 !ASIS
 
