@@ -1,4 +1,5 @@
-!standard 7.3.3(0)                                    16-08-31  AI12-0187-1/02
+!standard 7.3.3(0)                                    16-12-28  AI12-0187-1/03
+!standard 13.1.1(4/3)
 !class Amendment 16-06-02
 !status work item 16-06-02
 !status received 16-06-02
@@ -32,10 +33,11 @@ properties. For a window manager, the visibility, size, position, and color
 of a window are stable properties (there probably are more).
 
 Stable properties are important as they can often be determined by simple
-program analysis. For instance, after a call to Create, it's obvious that
-the file is open and that does not need to be checked on subsequent calls
-to I/O routines. For this analysis to be possible, the compiler has to know
-that calls to most I/O routines do not change the stable properties.
+program analysis. For instance, after a successful call to Create, it's
+obvious that the file is open and that does not need to be checked on
+subsequent calls to I/O routines. For this analysis to be possible, the
+compiler has to know that calls to most I/O routines do not change the
+stable properties.
 
 That can be done in Ada 2012 by including the stable properties in every
 postcondition for routines that operate on the ADT. For Text_IO, this would
@@ -56,12 +58,8 @@ This works, but has a number of disadvantages:
 
 !proposal
 
-[Author's note: This is pseudo-wording; I've described it fairly formally so
-that the rules are clear. It wobbles back-and-forth from formal wording style
-to an informal description. It definitely will need formal wording (especially
-for the definition of the aspects and the syntax of the "not" lists.)]
-
-Add a type and subprogram aspect Stable_Properties.
+Add a type and subprogram aspect Stable_Properties along with class-wide
+versions.
 
 This aspect can be given on a partial view or on a full type with no partial
 view, and on primitive subprograms. (It's not allowed on formal types, since
@@ -70,28 +68,119 @@ subprogram version be used to override the type version when necessary; it
 is not very useful as a stand-alone aspect (it makes more sense to just modify
 the postcondition in that case).
 
-For a type, the value of the aspect is a list of function names. The named
-functions must be property functions. For a primitive subprogram, the value
-of the aspect is either a list of function names, or a list of items, each being
-"not" followed by a function name; again all of the functions need to be names of
-property functions.
+The aspect determines a list of property functions for each primitive
+subprogram. The postcondition(s) of the subprogram are modified with an
+item that verifies that the property is unchanged for each parameter of
+the appropriate type, unless that property is already referenced in the
+explicit postcondition (or inherited postcondition, in the case of class-wide
+postconditions).
 
-    AARM Ramification: For a subprogram, the functions all have "not" or none
-    do; mixing "not" functions with regular functions is not allowed.
+For the details, see the !wording part of this AI.
 
-    AARM Reason: The aspect Stable_Properties for a subprogram provides a way
-    to override the properties inherited from a type.
+!wording
 
-A *property function* of a type T is a function with a single parameter, that
-is a primitive operation of T or a function whose parameter is class-wide and
-covers T. The return type of a property function is nonlimited.
+[Editor's note: I've put this into Section 7 after type invariants since it
+is primarily about ADTs and in particular about private types. Arguably,
+it should instead follow 6.1.1 as it is also primarily about postconditions
+(in that case, the references to partial views is a forward reference and
+would require a "(see 7.3)"; otherwise, nothing but the section number would
+need to be changed).]
 
-The *stable property functions" of a type T are those denoted in the aspect
-Stable_Properties for T.
+Add a new clause:
 
-For a primitive subprogram S, any property functions mentioned after "not" for
-the Stable_Property aspect of S shall be a stable property function of a type
-for which S is primitive.
+7.3.3 Stable Properties of a Type
+
+  It is usual that some of the characteristics of a data type are unchanged by
+  most of the primitive operations on the type. Such characteristics are called
+  *stable properties* of the type.
+
+Syntax
+
+  type_property_aspect_definition ::= name {, name}
+
+  subprogram_property_aspect_definition ::= [not] name {, [not] name}
+
+Static Semantics
+
+  A *property function* of a type T is a function with a single parameter, that
+  is a primitive operation of T or a function whose parameter is class-wide and
+  covers T. The return type of a property function is nonlimited.
+
+  For a private type, private extension, or full type that does not have a
+  partial view, the following language-defined aspects may be specified with an
+  aspect_specification (see 13.1.1):
+
+  Stable_Properties
+
+    This aspect shall be specified by a type_property_aspect_definition; each
+    name shall statically denote a property function of the type. This aspect
+    defines the *stable property functions* of the associated type.
+
+    AARM Discussion: We do not allow this aspect on generic formal types, as it
+    is only meaningful for primitive subprograms and generic formal types have
+    no such subprograms.
+
+    AARM Aspect Description for Stable_Properties: A list of functions
+    describing characteristics that usually are unchanged by primitive
+    operations of the type or an individual primitive subprogram.
+
+  Stable_Properties'Class
+
+    This aspect shall be specified by a type_property_aspect_definition; each
+    name shall statically denote a property function of the type. This aspect
+    defines the *class-wide stable property functions* of the associated type.
+    Redundant[Unlike most class-wide aspects, Stable_Properties'Class is not
+    inherited by descendant types and subprograms, but the enhanced class-wide
+    postconditions are inherited in the normal manner.]
+
+    AARM Proof: Class-wide inheritance has to be explicitly defined. Here we
+    are not making such a definition, so there is no inheritance. 6.1.1
+    defines the inheritance of class-wide postconditions.
+
+    AARM Discussion: Since class-wide postconditions are inherited by
+    descendants, we don't need the stable property functions to be inherited;
+    if they were, we'd be duplicating the checks, which we don't want.
+
+    AARM Aspect Description for Stable_Properties'Class: A list of functions
+    describing characteristics that usually are unchanged by primitive
+    operations of a class of types or a primitive subprogram for such a class.
+
+  For a primitive subprogram, the following language-defined aspects may be
+  specified with an aspect_specification (see 13.1.1):
+
+  Stable_Properties
+
+    This aspect shall be specified by a subprogram_property_aspect_definition;
+    each name shall statically denote a property function of a type for which
+    the associated subprogram is primitive.
+
+  Stable_Properties'Class
+
+    This aspect shall be specified by a subprogram_property_aspect_definition;
+    each name shall statically denote a property function of a tagged type for
+    which the associated subprogram is primitive. Redundant[Unlike most
+    class-wide aspects, Stable_Properties'Class is not inherited by descendant
+    subprograms, but the enhanced class-wide postconditions are inherited in
+    the normal manner.]
+
+  AARM Reason: The subprogram versions of Stable_Properties are provided to
+  allow overriding the stable properties of a type for an individual primitive
+  subprogram. While they can be used even if the type has no stable properties,
+  that is not an intended use (as simply modifying the postcondition directly
+  makes more sense for something that only happens in one place).
+
+Legality Rules
+
+  In a subprogram_property_aspect_definition for a subprogram S:
+    * all or none of the items shall be preceded by /not/;
+
+    AARM Ramification: The listed functions all have /not/ or none
+      do; mixing /not/ functions with regular functions is not allowed.
+
+    * any property functions mentioned after /not/ shall be a stable property
+      function of a type for which S is primitive.
+
+Static Semantics
 
 For a primitive subprogram S of a type T, the stable property functions for S for
 type T are:
@@ -107,11 +196,16 @@ type T are:
    type, and thus there can be more than one such set of stable properties
    for a subprogram. Thus we say "stable property functions for S for type T".
 
+A similar definition applies for class-wide stable property functions by
+replacing aspect Stable_Properties with aspect Stable_Properties'Class
+in the above definition.
+
 For every primitive subprogram S of a type T that is not a stable property
-function of T, the actual postcondition of S includes expressions of the form
-F(P) = F(P)'Old, all "and"ed with each other and any explicit postcondition,
-where F is each stable property function of S for type T that does not occur
-in the explicit postcondition of S, and P is each parameter of S that has type T.
+function of T, the actual specific postcondition of S includes expressions of
+the form F(P) = F(P)'Old, all /and/ed with each other and any explicit specific
+postcondition, where F is each stable property function of S for type T that
+does not occur in the explicit specific postcondition of S, and P is each
+parameter of S that has type T.
 
    AARM Ramification: There is one F(P) = F(P)'Old subexpression for every
    combination of stable expression function of type T and parameter of type T.
@@ -119,29 +213,34 @@ in the explicit postcondition of S, and P is each parameter of S that has type T
    parameters of type T, then there are six such subexpressions appended to the
    postcondition.
 
-   The resulting postcondition is evaluated as described in 6.1.1. One hopes
-   that compilers can be smart enough to prove that many of these
+   The resulting specific postcondition is evaluated as described in 6.1.1.
+   One hopes that compilers can be smart enough to prove that many of these
    postconditions cannot fail, but that is not required here.
    End AARM Ramification.
 
-For tagged types and their primitive subprograms, there is a similar aspect
-Stable_Properties'Class. These aspects works exactly like the equivalent
-Stable_Properties aspects, except that they modify the class-wide postcondition
-rather than the specific postcondition. Redundant[Unlike most class-wide
-aspects, Stable_Properties'Class is not inherited by descendant types and
-subprograms, but the enhanced class-wide postconditions are inherited in the
-normal manner.]
+For every primitive subprogram S of a type T that is not a stable property
+function of T, the actual class-wide postcondition of S includes expressions
+of the form F(P) = F(P)'Old, all /and/ed with each other and any explicit 
+class-wide postcondition, where F is each class-wide stable property function
+of S for type T that does not occur in any class-wide postcondition that
+applies to S, and P is each parameter of S that has type T.
 
-   AARM Discussion: Since class-wide postconditions are inherited by
-   descendants, we don't need the stable property functions to be inherited;
-   if they were, we'd be duplicating the checks, which we don't want. And
-   we don't want to duplicate any of the rules about class-wide postconditions,
-   so we just say that the modified postconditions is what those rules apply
-   to.
+   AARM Reason: We suppress stable property expressions if the property
+   function appears in the explicit class-wide postcondition, or in any
+   inherited class-wide postconditions. If we didn't do that, we could
+   have conflicting requirements in an inherited postcondition and the
+   current one. We also avoid redundant property checks.
 
-!wording
+   AARM Ramification: The resulting class-wide postcondition is evaluated
+   as described in 6.1.1. In particular, the enhanced class-wide
+   postcondition IS the class-wide postcondition for S, and therefore
+   inherited postconditions include any stable property expressions.
 
-** TBD.
+Modify 13.1.1(4/3):
+
+   aspect_definition ::= name | expression | identifier |
+                         type_property_aspect_definition |
+                         subprogram_property_aspect_definition
 
 !discussion
 
@@ -231,6 +330,15 @@ description. Thus we're sticking with that term.
 (8) The real key to this feature is how well this works in practice, for
 packages like the containers. It will be used in AI12-0112-1, so we should
 have some fully worked out examples.
+
+(9) I didn't make any attempt to modify the wording in 6.1.1 to mention that
+the class-wide postcondition that "applies" to a subprogram might have been
+modified to add some stable property expressions. In general, we want to use
+the same rules for all evaluations of a class-wide postcondition, including
+any added parts. However, it would appear that this might cause failures of
+the Legality Rules 6.1.1(10/3-17/3). I believe that the wording is sufficient
+as I have presented it here, but it is hard to be sure.
+
 
 !example
 
@@ -355,5 +463,23 @@ From: Tullio Vardanega
 Sent: Friday, June 3, 2016  8:48 AM
 
 Yes, I second.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, December 28, 2016  6:42 PM
+
+Just in time for some light New Year's reading, following find a fully worded
+version of the Stable Properties AI.
+
+We did not discuss this AI in Pittsburgh (even though it addresses one of the
+"areas of special interest") as it was crowded out by lower-priority AIs.
+(Grumble.) I had previously passed an earlier draft past Tucker, and he had
+encouraged me to complete the wording. I've now done that, hopefully we won't
+now decide to change the model 180 degrees.
+
+As always comments welcome.
+
+[Following was version /03 of the AI - Editor.]
 
 ****************************************************************
