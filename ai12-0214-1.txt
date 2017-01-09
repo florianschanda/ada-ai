@@ -1,0 +1,522 @@
+!standard 5.4(4/3)                                  16-01-09  AI12-0214-1/01
+!class Amendment 17-01-09
+!status work item 17-01-09
+!status received 16-10-08
+!priority Very_Low
+!difficulty Hard
+!subject Case pattern matching
+!summary
+
+** TBD.
+
+!problem
+
+Ada has case statements and expressions, that allows testing for the value of a
+variable. It allows and enforce full coverage checking. On the other hand, it
+only works on discrete types, which limits their usefulness somehow.
+
+Also, Ada has discriminated types with variant parts, that allows
+having a variable "shape" for a record type depending on the value of a
+discriminant. This is a very useful facility, but we have no way of ensuring
+that a user is accessing the correct components, and we have to resort to
+dynamic checks.
+
+
+   type Maybe (Option : Boolean) is record
+      case Option is
+         when True => Val : Integer;
+         when False => null;
+      end case;
+   end record;
+
+   procedure Print_The_Maybe (M : Maybe) is
+   begin
+      if M.Option = False then
+         Put_Line (M.Val'Img);  --  Error here, not statically checked
+      else
+         null;
+      end if;
+   end Print_The_Maybe;
+
+!proposal
+
+We propose introducing a new construct, mainly in case statements and
+expressions's alternatives: Pattern matching of the value being discriminated
+upon.
+
+We would use aggregate syntax to specify the structure and expected values of
+the value matched upon, like in the following example:
+
+	type R is record
+		A, B : Boolean;
+	end record;
+
+	R_Inst : R;
+
+	case R_Inst is
+		when (True, True) => ..
+		when (True, False) => ..
+		when (False, False) => ..
+		when (False, True) => .. -- Every possibility has been covered.
+	end case;
+
+Along with this proposal, we propose relaxing the legality checking of the type
+of the top level value being matched upon by the case expression and statement,
+from discrete types, to the following rule:
+
+The top level value's type needs to have a finite and known number of shapes.
+With shape being defined as:
+
+- For numeric types, the shape is the number of possible values the type.
+- For record types, the shapes are the set of possible components lists
+  (1 for regular records, N for variant records)
+- For array types with known bounds there is one shape.
+- For array types, there is is as many shapes as there are possible
+  (Start_Index, End_Index) combinations.
+- For private types there is no known shape.
+
+The box can be used when the users just wants to ignore a value, and others can
+be used in aggregate to denote of every other component, like in regular
+aggregates, and with the same limitations.
+
+    type Arr is array (Natural range <>) of Integer;
+
+    A : Arr := ...;
+
+    case A is
+        -- Match when first element is one
+        when (1, others => <>) => ...
+
+        -- Match when every element except first is one
+        when (<>, others => 1) => ...
+    end case;
+
+But the proposal is not yet complete. In the example above, we want to be able
+to, not only match on the value of the Option discriminant, but also to easily
+get the value of the Val field, when Option is True. For this, we want to
+introduce a new variable binding that will be bound to Val. In terms of
+coverage, it is also equivalent to a wildcard (any value for Val will trigger
+the match):
+
+	procedure Print_The_Maybe (M : Maybe) is
+	begin
+	   case M is
+	      declare V : Integer when (True, V) => Put_Line (V'Img);
+	      when (Option => False) => null;
+	   end case;
+	end Print_The_Maybe;
+
+Since there can be no ambiguity on the type of V in the above example, we
+propose making the type annotation optional, and allow the following:
+
+	procedure Print_The_Maybe (M : Maybe) is
+	begin
+	   case M is
+	      declare V when (True, V) => Put_Line (V'Img);
+	      when (Option => False) => null;
+	   end case;
+	end Print_The_Maybe;
+
+The great benefit of the above is that with this construct, it is impossible to
+access the value of Val when the Option discriminant is false: An incorrect
+aggregate structure will result in an error.
+
+This in turn allows more expressive ways of designing APIs when you need to
+return several values. So far you had the following options:
+
+	--  Example 1
+	procedure Read (Success : out Boolean; Number : out Integer);
+
+	--  Usage:
+	declare
+		Success : Boolean;
+		Number  : Integer;
+	begin
+		Read (Success, Number);
+		Put_Line (Number'Image);
+	end;
+	--  A lot of boiler plate just to read and print a number. Also user can
+	--  ignore error case !
+
+
+	--  Example 2
+	function Read (Number : out Integer) return Boolean;
+
+	--  Usage:
+	declare
+		Number  : Integer;
+		Success : Boolean := Read (Number);
+	begin
+		Put_Line (if Success then Number'Image else "No number");
+	end;
+	--  A lot of boiler plate still
+
+	--  Example 3
+    type Read_Result (Success : Boolean) is record
+        case Success is
+        when True =>  Result  : Integer;
+        when False => null;
+        end case;
+    end record;
+
+	function Read return Read_Result;
+
+	--  Usage:
+	declare
+		Read_Res : Read_Result := Read;
+	begin
+		Put_Line (if Read_Res.Success
+		          then Read_Res.Result'Image else "No number");
+	end;
+
+With pattern matching, taking the third example's API, you can express the use
+case as:
+
+	Put_Line (case Read is
+			  declare Result when (True, Result) => Result'Image,
+			  when (Success => False) => "No_Number");
+
+You don't need to introduce a procedural context to treat the result of the
+read, and the user has to handle the failure case, as opposed as the previous
+examples.
+
+This pattern of being able to encourage the user to handle error cases, and
+remind him to treat everything via coverage checking, is very useful in contexts
+where exceptions are not an option.
+
+The rule on types shapes means that the user cannot match on a value of a Float
+type, but can match on a record containing a Float. For subcomponents of a type
+with no known number of shapes, the only allowed matchers are either a reference
+to a pattern object declaration or a box:
+
+    type Rec (Option : Boolean) is record
+        Value : Float;
+    end record;
+
+    R : Rec;
+
+    case R is
+        when (True, 1.0) => ...          --  Illegal
+        when (True, <>) => ...           --  Legal
+        declare A when (True, A) => ...  --  Legal
+    end case;
+
+This feature allows matching on string literals, which are considered like
+array aggregates:
+
+      case S is
+          when "begin" => ...;
+          when "end" => ...;
+          when others => ...;
+      end case;
+
+Syntax
+
+This proposal requires introducing a new branch in the
+case_statement_alternative and case_expression_alternative rules.
+
+	pattern_object_declaration ::=
+	    defining_identifier [":" (subtype_indication
+	                              | access_definition
+	                              | array_type_definition)]
+
+	pattern_object_declarations ::=
+	    pattern_object_declaration {"," pattern_object_declaration}
+
+	case_statement_alternative ::=
+	    "declare" pattern_object_declarations
+    	    "when" discrete_choice_list => sequence_of_statements
+	    | "when" discrete_choice_list "=>" sequence_of_statements
+
+    case_expression_alternative ::=
+	    "declare" pattern_object_declarations
+    	    "when" discrete_choice_list => dependent_expression
+    	| "when" discrete_choice_list "=>" dependent_expression
+
+Name Resolution Rules
+
+A pattern matching literal should have the valid structure of a literal for
+the value matched. His type is the type of the value matched, without ambiguities.
+
+In the case of aggregate literals, the type of each subcomponent's value is the
+type of the expected subcomponent, as in a regular aggregate.
+
+In the case of aggregate literals with values bound through pattern object
+declarations, their type is the type of the subcomponent in the type definition.
+
+Even though the type of a component cannot be ambiguous, the user is allowed to
+annotate the type of the pattern object declaration, for clarity purposes and
+for consistency with other object declarations. In that case, the type
+annotation needs to refer exactly to the type of the component.
+
+In order to allow matching on records containing accesses, if the matched value
+or sub-component is an access, then a literal of the type pointed to by the
+access type is allowed. This would allow use of the form:
+
+    type Linked_List_Node;
+    type Linked_List is access all Linked_List_Node;
+
+    type Linked_List_Node is record
+       Val  : Integer;
+       Next : Linked_List;
+    end record;
+
+    L : Linked_List;
+
+    case L.all is
+       declare First, Second, Third, Next
+       when (First, (Second, (Third, Next))) => ...
+       when others => ...
+    end case;
+
+Legality Rules
+
+The only entities allowed in a pattern matching literal are other literals and
+statically known constants. Referencing a non constant declaration defined in
+an outer scope is illegal.
+
+Declared pattern objects are constant views of the components they refer to.
+Modifying their value is illegal. Taking a non-constant access on them is
+illegal.
+
+The coverage check rule is relaxed in the following way:
+
+1. A pattern object is considered to cover every possible value of the matched
+   value, regardless whether the type of the value is discrete or not.
+2. The set represented by the union of all possible case alternatives needs to
+   cover every possible value of the type being matched upon.
+3. The only option for the user to cover every possible value of a type with a
+   conceptually infinite number of values is to use a pattern object, a box, or
+   a top level "others =>" alternative
+4. The box and pattern objects won't trigger overlap errors for already covered
+   values, so that the following is possible
+
+   case A is
+        when (1, True) => ...
+        declare A when (1, A) => ...
+   end case;
+
+5. Every match via a literal for a specific value must precede a match for this
+   specific value made via a box or via a pattern object.
+
+    type Rec is record
+        A, V : Integer range 1 .. 3;
+    end record;
+
+    R : Rec;
+
+    case R is
+        when (1, <>) =>  ...
+
+        -- Illegal! Should be before the matching of V subcomponent via box
+        when (1, 1) =>  ...
+    end case;
+
+The type of the value being matched upon needs to have a known number of shapes,
+following the definition of shape outlined in the proposal.
+
+Dynamic semantics
+
+The pattern matching literal will be structurally and recursively compared to
+the value matched against. In case of a pattern object, any value is accepted.
+The match will succeed if every literal or constant matched is equal to its
+counterpart in the dynamic value matched upon.
+
+!wording
+
+** TBD (some of the above could be used)
+
+!discussion
+
+Coverage check
+
+From preliminary discussions, I expect one of the biggest objections to this
+proposal to be the lifting of the restriction of the case statement and
+expression to work only on values of discrete types.
+
+Lifting it is fundamental to this proposal. There was however a number of
+different possibilities:
+
+1. Restrict to types that directly or indirectly have a discrete number of
+   possible values. A record containg integer sub-components would be allowed,
+   but not a record containing a floating point sub-component.
+2. Restrict to types that have a limited number of shapes. Dont allow direct
+   matching on literals for types that are not discrete. That's the choice
+   being made currently.
+3. Allow everything, just enforce the "others" when there is no discrete number
+   of possible values.
+
+It is felt that 2 is the most pragmatic choice. it's necessary in order to make
+pattern-matching useful enough, because the first alternative would disable
+useful use cases such as this one:
+
+    type Read_Result (Success : Boolean) is record
+        case Success is
+        when True =>  Result  : Integer;
+        when False => null;
+        end case;
+    end record;
+
+	function Read return Read_Result;
+
+	case Read is
+	    declare Result when (True, Result) => ...
+	    when others => ...
+	end case;
+
+Ranges, subtypes:
+
+When matching discrete types, one can use ranges and subtypes to match a set of
+value of the discrete type. Question is, should we allow matching sub-components
+in the same way, as in:
+
+    type Rec is record
+        A, V : Integer range 1 .. 3;
+    end record;
+
+    R : Rec;
+
+    case R is
+        when (1 .. 2, 1 .. 2) =>
+        when (1 .. 3, 3) =>
+        when (3, 1 .. 3) =>
+    end case;
+
+Syntax
+
+The syntax for declaring pattern objects is new so we must consider different
+options.
+
+First proposal:
+
+   case A is
+        when (1, True) => ...
+        declare A when (1, A) => ... -- Declaration via declare .. when ...
+   end case;
+
+This one is pretty verbose but feels very Ada idiomatic in our opinion.
+
+Rejected alternative:
+
+   case A is
+        when (1, True) => ...
+        when (1, A) => ... -- Declaration via declare .. when ...
+   end case;
+
+This proposal corresponds to the way it is done in most languages with
+pattern-matching, but we feel it is not adapted to Ada.
+
+While sufficient, this syntax would be confusing: We don't know whether A is a
+statically known constant or a newly declared pattern object without looking at
+the context. Also, if A also refers to an outer scope declaration, the code
+might do something else than what the user expects, if he's not familiar with
+the rule that you cannot use variables in matches.
+
+Third proposal:
+
+   case A is
+        when (1, True) => ...
+        when (1, A is <>) => ... -- Declaration via identifier "is" <>
+   end case;
+
+Less verbose than the first proposal, and also has the advantage of composing
+nicely with the box matching syntax. Could also accomodate optional type
+annotations. Possible cons: The aggregate is cluttered, declarations are
+scattered, and the alterations to the grammar would be less localized.
+
+Alternatives order rule
+
+The rule 5 described in legality rules might be too restrictive.
+
+5. Every match via a literal for a specific value must precede a match for this
+   specific value made via a box or via a pattern object.
+
+This disallows the following, which intuitively corresponds to a valid execution:
+
+   case A is
+        when (1, 1) => ...
+        when (1, <>) => ...
+        when (<>, 1) => ...
+   end case;
+
+First option:
+- Alternatives are considered in sequential order.
+- If an element of an alternative is less general than the same one in a
+  preceding alternative, then the subset of cases handled by this alternative
+  and by none of the preceding alternatives, must be non-empty.
+
+This would disallow the following
+
+   case A is
+       when (1, <>) => ...
+       when (1, 1) => ... -- This pattern can never be matched
+   end case;
+
+But allow those:
+
+   case A is
+       when (1, <>) => ...
+       when (<>, 1) => ...
+   end case;
+
+   case A is
+       when (<>, 1) => ...
+       when (1, <>) => ...
+   end case;
+
+In the example above, both case statements are valid, and for the value (1, 1),
+a different code path will be executed, making the branches order sensitive,
+which goes against the current design of the case statement.
+
+This is the way pattern matching works in OCaml/Haskell/etc..
+
+Second option:
+
+- An alternative can not appear twice.
+- If an element of an alternative is less general than the same one in a
+  preceding alternative, then the subset of cases allowed by both alternatives
+  must be covered by a preceding alternative.
+
+In this option, we're constraining the order of the alternatives for
+readability, eg. we force the user to go from less general to more general
+matches, but the order of alternatives has no direct influence on the code that
+will be executed in the end, making the proposal more in line with the current
+case statement and expression.
+
+   case A is  -- ILLEGAL
+       when (1, <>) => ...
+       when (<>, 1) => ...
+   end case;
+
+   case A is  -- ILLEGAL
+       when (<>, 1) => ...
+       when (1, <>) => ...
+   end case;
+
+   case A is  -- LEGAL
+       when (1, 1) => ...
+       when (<>, 1) => ...
+       when (1, <>) => ...
+   end case;
+
+!ASIS
+
+** TBD.
+
+!ACATS test
+
+Many new ACATS tests would be needed to check that the new capabilities are
+supported.
+
+!appendix
+
+From: Raphael Amiard
+Sent: Sunday, October 9, 2016  7:41 AM
+
+Here is an AI for a feature proposal I've been drafting with some help. Of
+course too late to discuss at this meeting, but it'll let a lot of time for
+people to look at it until the next one though !
+[This is version /01 of the AI - Editor.]
+
+****************************************************************
+
