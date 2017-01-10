@@ -1,0 +1,350 @@
+!standard 6.1.1(24/3)                                  17-01-09  AI12-0217-1/01
+!standard 6.1.1(27/3)
+!class binding interpretation 17-01-09
+!status work item 17-01-09
+!status received 16-11-15
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject 6.1.1(27/3) should be less restrictive
+!summary
+
+6.1.1(27/3) should allow some indexed and selected components as the
+prefix of potentially unevaluated Old attribute references.
+
+!question
+
+6.1.1(27/3) requires that the prefix of an Old attribute_reference that is
+potentially unevaluated statically denotes an object. "Statically denotes"
+does not allow any indexed or selected components.
+
+The intent of this rule is to prevent dependence on names whose evaluation
+might raise an exception, especially in the case where the cause of the
+exception is tested. For instance, if D is a Boolean discriminant of Rec, and
+N is a component of Rec that depends on D, then we want the following to be
+illegal:
+
+    procedure P03 (R : in out Rec)
+       with Post => (if R.D then R.N'Old = 1); -- Illegal
+
+If we allowed this, the user might expect the test of the discriminant to
+prevent problems, but the prefixes of the Old attribute are evaluated
+unconditionally (since the compiler can't be certain of the value of the
+discriminant).
+
+But we shouldn't be disallowing the use of components that don't depend on
+discriminants in such contexts:
+
+    procedure Foom (K : in Kind; P : in out Rec)
+       with Post => (if K = C then P.C = P.C'Old); -- (1)
+
+(1) is illegal by the current rules (P.C does not statically denote an
+object).
+
+This seems too fierce; it is likely to be an annoyance to users where Ada
+is unnecessarily nagging them.
+
+Should this rule be relaxed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add after 6.1.1(24/3):
+
+A name *statically names* an object if it:
+    * statically denotes the declaration of an object Redundant[(possibly
+      through one or more renames)];
+    * is a selected_component whose prefix statically names an object, there
+      is no implicit dereference of the prefix, and the selector_name names a
+      component that does not depend on a discriminant; or
+       AARM Note: We disallow components that depend on a discriminant so that
+          no discriminant checks are needed to evaluate the prefix.
+    * is an indexed_component whose prefix statically names an object, the
+      object is statically constrained, and the index expressions of the
+      object are static and have values are within the range of the index
+      constraint.
+[Author's note: The selected_component case seems to be the important one;
+if the indexed_component case seems too complicated, we should just drop it.]
+
+Modify 6.1.1(27/3):
+
+The prefix of an Old attribute_reference that is potentially unevaluated shall
+statically {name}[denote] an object.
+
+!discussion
+
+The basic idea is that we want to allow any prefix of 'Old that cannot raise
+an exception when evaluated. (Note that we're talking about the evaluation
+of the prefix itself, not the evaluation of the value of the prefix; an
+invalid value can always raise an exception.) In order to do that, we define
+a new term (as it has to be recursive) that allows selected_components that
+don't include implicit dereferences and do not depend on a discriminant,
+and indexed_components with static indexes where the object is statically
+constrained.
+
+Other names could have been allowed (for instance, a dereference of a null
+excluding access subtype), but we don't want to make this too complicated.
+
+Note that there is no actual bug here: we are not allowing anything that
+causes a problem, and there is a workaround to any case that this enhanced
+rule will allow (since there must be a prefix that is a statically denoted
+object, one can use 'Old on that prefix -- but that could be expensive
+if the prefix is a large object).
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Randy Brukardt
+Sent: Tuesday, November 15, 2016  4:22 PM
+
+I'm writing an ACATS test for the last sentence of 6.1.1(27/3).
+
+In order to do this properly, I looked up the definition of "statically
+denotes". That is given in 4.9(14-17):
+
+  A name statically denotes an entity if it denotes the entity and:
+
+    * It is a direct_name, expanded name, or character_literal, and it denotes a
+      declaration other than a renaming_declaration; or
+
+    * It is an attribute_reference whose prefix statically denotes some entity;
+      or
+
+    * It denotes a renaming_declaration with a name that statically denotes the
+      renamed entity.
+
+  AARM Ramification: Selected_components that are not expanded names and
+  indexed_components do not statically denote things.
+
+------------
+
+This definition means that a selected component never statically denotes
+something, even if there is no dereference and the component in question does
+not depend on a discriminant. Similarly, an indexed component never statically
+denotes something, even if the index expression is static.
+
+Taken literally, this rule seems too fierce. The purpose of the 6.1.1(27/3) rule
+is to make it unnecessary to evaluate the prefix in these contexts. As such,
+there is no problem with indexed components with a static index expression, or
+with a selected component for a normal record component (that is, one that
+doesn't need a dereference and that does not depend on a discriminant).
+
+The record component case in particular seems fairly likely in
+postconditions:
+
+    procedure Foom (K : in Kind; P : in out Rec)
+       with Post => (if K = C then P.C = P.C'Old); -- Illegal by current rules.
+
+Please note that there is nothing actually wrong with the current wording, in
+that no problematic cases are being allowed, and there is a sensible workaround
+(at least in this case).
+
+However this strikes me as one of these cases where Ada is being picky in a way
+that is likely to annoy users. We have these cases which are not problems being
+made illegal just because it was easiest to do so. Note that in the similar case
+in 6.4.1, we defined a term to avoid a similar problem with those rules.
+
+If we wanted to fix this, we'd need to define an additional term, say
+"statically name".
+
+A name statically names an object if it:
+    * statically denotes the declaration of an object Redundant[(possibly
+      through one or more renames)];
+    * is a selected_component whose prefix statically names an object, there is
+      no implicit dereference of the prefix, and the selector_name names a
+      component that does not depend on a discriminant; or
+       AARM Note: We disallow components that depend on a discriminant so that
+          no discriminant checks are needed to evaluate the prefix.
+    * is an indexed_component whose prefix statically names an object and whose
+      index expression(s) are static and whose values are within the range of the
+      associated index subtype.
+
+The prefix of an Old attribute_reference that is potentially unevaluated shall
+statically name an object.
+
+This wording would allow the above as well as more complex names:
+
+    procedure Foom (K : in Kind; P : in out Rec)
+       with Post => (if K = A then P.A(Arr'First) = P.A(Arr'First)'Old); -- Illegal by the current rules, allowed by the above.
+
+---
+
+Unless we decide to change this rule, I will test it literally. (It's important
+that compilers do not allow too much so that code is portable.) So I'd like to
+know sooner rather than later whether we intend to relax this rule.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Wednesday, November 16, 2016  12:20 PM
+
+At first the current rule seemed reasonable, but looking at our test code base I
+notice several uses of selected components and indexed components with
+non-static indices in postconditions. In particular, in postconditions for array
+subprograms it is common to have a quantified expression over elements of the
+input array (which is in turn a component of a larger structure). So a more
+permissive rule might be preferable, in particular for SPARK users.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 16, 2016  3:10 PM
+
+...
+> At first the current rule seemed reasonable, but looking at our test
+> code base I notice several uses of selected components and indexed
+> components with non-static indices in postconditions. In particular,
+> in postconditions for array subprograms it is common to have a
+> quantified expression over elements of the input array (which is in
+> turn a component of a larger structure).
+> So a more permissive rule might be preferable, in particular for SPARK
+> users.
+
+Most sensible quantified expressions using 'Old are illegal by the second
+sentence of 6.1.1(27/3), regardless of what relaxation we do here. In
+particular, the prefix of 'Old can't include the loop parameter of a quantified
+expression. (That happens because 'Old is handled textually, so there is only
+one for the entire quantified expression, and that clearly can't handle a
+varying value.)
+
+That is:
+     Post => (for I in 1 .. 10 => Table(I)'Old = Table(I)); is illegal and that
+     wouldn't change by the proposed change.
+
+But I would expect selected components to be common, and since there is no
+problem with them so long as no discriminant check is needed, I do think those
+should be allowed. And once we do that, we might as well allow some indexed
+components as well.
+
+The basic purpose of this is rule is to avoid problems with 'Old prefixes that
+the program might want to not evaluate (thus appear in a conditional context);
+any prefix that might raise an exception (and thus need to be conditional) needs
+to be disallowed. But any prefix whose evaluation can't raise an exception ought
+to be allowed, lest we annoyingly prevent useful cases that could not possibly
+be a problem.
+
+****************************************************************
+
+From: Edmond Schonberg
+Sent: Wednesday, November 16, 2016  3:31 PM
+
+...
+> Most sensible quantified expressions using 'Old are illegal by the
+> second sentence of 6.1.1(27/3), regardless of what relaxation we do
+> here. In particular, the prefix of 'Old can't include the loop
+> parameter of a quantified expression. (That happens because 'Old is
+> handled textually, so there is only one for the entire quantified
+> expression, and that clearly can't handle a varying value.)
+
+Indeed, all the examples I’ve seen have the form  Array_Object’Old (I)  where
+i is the loop parameter. However the object is often a component of a larger
+structure, so the selected component case seems more important.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Wednesday, November 16, 2016  5:10 PM
+
+> I'm writing an ACATS test for the last sentence of 6.1.1(27/3).
+
+> Taken literally, this rule seems too fierce. The purpose of the
+> 6.1.1(27/3) rule is to make it unnecessary to evaluate the prefix in
+> these contexts. As such, there is no problem with indexed components
+> with a static index expression, or with a selected component for a
+> normal record component (that is, one that doesn't need a dereference
+> and that does not depend on a discriminant).
+
+I don't see that.
+
+> The record component case in particular seems fairly likely in
+> postconditions:
+>
+>     procedure Foom (K : in Kind; P : in out Rec)
+>        with Post => (if K = C then P.C = P.C'Old); -- Illegal by
+> current rules.
+
+I think it should be illegal.  P.C'Old might be invalid if the 'if' condition
+is false.
+
+But now that I think about it, (if K = C then P = P'Old) which is currently
+legal, has the same problem.
+
+>     * is an indexed_component whose prefix statically names an object
+> and whose index expression(s) are static and whose
+>       values are within the range of the associated index subtype.
+
+You're trying to capture the idea of "an indexed component that is known (at
+compile time) not to raise an exception".  I don't think the above quite
+works, because the index subtype might be nonstatic, and anyway, what
+matters is the bounds of the object, which also might be nonstatic.  And
+there's the same problem with invalid data, which can also raise exceptions.
+
+> The prefix of an Old attribute_reference that is potentially
+> unevaluated shall statically name an object.
+>
+> This wording would allow the above as well as more complex names:
+>
+>     procedure Foom (K : in Kind; P : in out Rec)
+>        with Post => (if K = A then P.A(Arr'First) =
+> P.A(Arr'First)'Old); -- Illegal by the current rules, allowed by the above.
+
+> Unless we decide to change this rule, I will test it literally. (It's
+> important that compilers do not allow too much so that code is
+> portable.) So I'd like to know sooner rather than later whether we
+> intend to relax this rule.
+
+Seems to need rethinking.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 16, 2016  5:29 PM
+
+...
+> But now that I think about it, (if K = C then P = P'Old) which is
+> currently legal, has the same problem.
+
+My understanding was that the rule was intended to prevent cases where the
+evaluation of the prefix might raise an exception, especially those that
+might have been prevented with a conditional.
+
+The ACATS test I wrote has
+
+    procedure P03 (R : in out Rec)
+       with Post => (if R.D then R.N'Old = 1);             -- ERROR: A1 {34;6}
+
+as one of the motivating examples (R.D being a boolean discriminant, and R.N
+a component that depends on that discriminant).
+
+I don't think there was any intent to try to avoid issues with evaluating the
+*value* of some Old attribute. That seems impossible, as any object might have
+an invalid value in some part. Any use of 'Old seems to be at risk of that.
+
+I just find it bizarre that
+
+    procedure P99 (K : in Kind; R : in out Rec)
+       with Post => (if K = Unchg then R.D'Old = R.D);
+
+is illegal (D being a discriminant). R'Old.D is legal in this case, but why
+annoy users with that sort of nagging?
+
+...
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, November 16, 2016  7:29 PM
+
+I would agree we should try to be more flexible with 'Old's that appear in
+potentially unevaluated contexts.
+
+****************************************************************
