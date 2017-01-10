@@ -1,0 +1,559 @@
+!standard 12.3.1(0)                                  17-01-09  AI12-0215-1/01
+!class Amendment 17-01-09
+!status work item 17-01-09
+!status received 16-10-13
+!priority Low
+!difficulty Hard
+!subject Implicit instantiations
+!summary
+
+*** TBD.
+
+!problem
+
+Declaring a stand-alone object of a generic type can be unnecessarily verbose,
+requiring the introduction of extra declaration and name (with the extra
+cognitive overhead of such declarations).
+
+There should be a short-hand for simple generic objects.
+
+!proposal
+
+[This is not quite wording - Author.]
+
+A stand-alone object can be declared with an *anonymous instance subtype*.
+This defines a generic instance along with declaring the object.
+
+We have a new kind of object_declaration (we already have 5, so what's one more??)
+
+ defining_identifier_list : [aliased] [constant] anonymous_instance_type [:= expression]
+        [aspect_specification];
+
+ anonymous_instance_type ::=
+    *generic_package_*name.*subtype_*identifier [generic_actual_part]
+
+The *generic_package_*name shall name a generic package (called G here).
+The *subtype_*identifier shall name a tagged type declared in the visible
+part of G. The generic_actual_part is interpreted as specified in
+Section 12 for G, all of the rules for an instance of G apply.
+
+The aspect_specification applies to the object(s); if an aspect_specification
+is needed for the instance, an explicit named instance will be required.
+
+Similar to a prefixed view, we allow "generic prefixed names" for an object
+has an anonymous instance type. Such an object can prefix:
+  * types and subtypes declared in the visible part of the generic package;
+  * exceptions declared in visible part of the generic package;
+  * objects declared in the visible part of the generic package;
+  * generic packages declared in the visible part of the generic package;
+  * subprograms declared in the visible part of the generic package
+    that do not have any parameters of a tagged type.
+
+Reason: The restriction against parameters of a tagged type are to avoid
+confusion between prefixed views and generic prefixed names of the same
+subprogram. We allow other subprograms mainly because we want to have
+some way to call cursor operations of containers.
+
+[Editor's note: This last allowance might be more confusing than it is
+worth.]
+
+The dynamic semantics of an object of an anonymous instance type is
+as if an anonynous instantiation of the generic appears immediately
+before the object declaration.
+
+That is:
+
+    X : Ada.Containers.Vectors.Vector(Integer, My_Record);
+
+is equivalent to:
+
+    package <Anon> is Ada.Containers.Vectors(Integer, My_Record);
+    X : <Anon>.Vector;
+
+!wording
+
+** TBD.
+
+!discussion
+
+This proposal is purely syntactic sugar which allows eliminating the 
+instance declaration for instances that are only used to declare a single
+group of objects.
+
+The original e-mail proposal included some structural equivalence features.
+Such features should be considered separately, as tying some desirable property
+to some other property is almost always a mistake. We do not want people
+writing generics just so that they can get some form of structural
+equivalence! Nor do we want people using anonynmous instances just for
+structural equivalence (as in such a case, falling back to a named instance
+would not be a possibility).
+
+The original e-mail proposal included some restrictions on the generics that
+can be instantiated. There seems to be no important reason for such
+restrictions: the feature is dynamically equivalent to a normal instance and
+users should not be confused by that. If there is an important need to show
+the lifetime of the instance, an explicit instance should be used (if it
+hurts to use a shorthand, don't use a shorthand!)
+
+We limit this feature to tagged types so that the prefix notation is available
+for calls. This eliminates the need to name the instance for calls using the
+object. (For untagged types, one has to either name the package or have a use
+clause on the package or type -- all of which require naming the instance
+somehow.)
+
+We define generic prefixed names so that common operations can be accomplished
+without defining an explicit instance. (If, however, these prefixes become
+ambiguious, then a normal named instance should be used.)
+
+The original e-mail proposal suggested using ' rather than . for generic
+prefixed names. That would however interfere with object attributes, requiring
+far more complex resolution for them than is currently used. Since we already
+have similar uses of . for prefixes, there doesn't seem to be any important
+reason to use a different selection character. (Again, ambiguity is best fixed
+with an explicit instance.)
+
+The motivating case for generic prefixed names is using cursors of a container:
+
+    X : Ada.Containers.Ordered_Map.Map (Key_Type => Natural,
+                                        Element_Type => My_Record);
+    C : X.Cursor;
+
+    -- The following are all normal prefixed views:
+    X.Insert (Key => 1, New_Item => Some_Rec);
+    X.Insert (Key => 2, New_Item => Another_Rec);
+    C := X.First_Key;
+    -- The following are generic prefixed names:
+    X.Next (C);
+
+    procedure Do_It (Obj : in out X.Map) is ...
+
+Note that one could declare multiple objects from a single instance by using
+generic prefixed names:
+    Y : X.Map;
+
+This doesn't allow Y to be used in a generic prefixed name, however. (If you
+really need a name for an instance, it's better to declare it explicitly.)
+The intention is that generic prefixed names are used sparingly.
+
+!ASIS
+
+** TBD.
+
+!ACATS test
+
+ACATS B-Tests and C-Tests will be needed to check that the new capabilities
+are supported. (Note that all objectives for generic instances would be
+fair game for this construct.)
+
+
+!appendix
+
+From: Tucker Taft
+Sent: Thursday, October 13, 2016  3:14 PM
+
+> ... Meta-point: This is IMHO the third time that it turns out that we
+> have weaknesses in the generic model that would force us to have
+> built-in solutions instead of hybrid library ones, or completely library ones:
+>
+> 1. The first is the type of generators.
+> 2. The second is the type of lambda functions.
+> 3. The third is the 'Reduce function/built-in.
+
+For me, this is a higher priority item.  I would very much like to see
+instantiation of (stateless) generics as part of declaring an object.  E.g:
+
+    X : Vectors.Vector(Integer);
+
+or
+
+    use Ada.Containers.Vectors;  --  "use" of a generic package
+
+    ...
+
+    X : Vector(Integer);
+
+This would only be permitted for generic packages that have no namable state
+(e.g. a pragma No_Namable_State might allow access types, but no package-level
+variables), as otherwise you end up with lots of copies of the state associated
+with anonymous instances, which is not a good thing.  You might need a way to
+name exceptions, constants, and auxiliary types declared in such a generic
+package.  Perhaps the most obvious would be something like X'Cursor and
+X'Empty_Vector.
+
+Sharing of code across instances would be encouraged (Randy's RR compiler is way
+ahead here, of course ;-).  We would have to see whether "structural" type
+equivalence rules should be used (i.e. all instantiations with the "same" actual
+parameters are presumed the same, and declare the same types/exceptions).   If
+not, then if you wanted to share instantiations semantically, you might be
+obliged to use something like:
+
+   Y : X'Type;
+
+or
+    type Vec_Int is new Vector(Integer);
+
+    X : Vec_Int;
+   ...
+    Y : Vec_Int;
+
+
+You could also imagine implicit instantiation of generic subprograms at a call
+point, presuming the generic formal parameters are only types that are used
+somewhere in the profile of the generic subprogram or in the definition of other
+formal parameter types, e.g.
+
+    with Ada.Unchecked_Deallocation;
+
+    ...
+
+       Ada.Unchecked_Deallocation(P);
+
+I believe this would make Ada generics much more usable, and would reduce the
+need for special-case syntactic sugar.
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Thursday, October 13, 2016  3:41 PM
+
+>For me, this is a higher priority item.  I would very much like to see
+>instantiation of (stateless) generics as part of declaring an object.  E.g:
+
+I agree.
+
+...
+
+>This would only be permitted for generic packages that have no namable state
+>(e.g. a pragma No_Namable_State might allow access types, but no package-level
+>variables), as otherwise you end up with lots of copies of the state associated
+>with anonymous instances, which is not a good thing.  You might need a way to
+>name exceptions, constants, and auxiliary types declared in such a generic
+>package.  Perhaps the most obvious would be something like X'Cursor and
+>X'Empty_Vector.
+
+I also agree with all of the above. I also think that this should go hand in
+hand with other enhancements to generics. For example, your vector example
+doesn't work for the moment, because you need both an index type and an element
+type. If you introduce Manu's and Bob's AI about default parameters in generics,
+we could say that the default index type for generic vectors is Positive for
+example.
+
+
+>Sharing of code across instances would be encouraged (Randy's RR compiler is
+>way ahead here, of course ;-).  We would have to see whether "structural"
+>type equivalence rules should be used (i.e. all instantiations with the
+>"same" actual parameters are presumed the same, and declare the same
+>types/exceptions).
+
+I think we should use structural equivalence rules, because Ada is generally
+missing any form of higher level structural typing, and that causes a lot of
+problems. Also people wanting generics with nominal typing already have the
+(very logical in that instance) choice of creating instances. Here is a mail I
+sent to Steve in a discussion about this topic:
+
+I think I agree with you, at least insofar as I don't think anonymous types were
+introduced in Ada for the good reasons, and I think their design suffer from
+that, and from the fact designers actually never wanted structural typing
+*anywhere* in Ada.
+
+I do think on the other hand that structural typing is a very useful tool. If we
+agree that a type system is a way for the programmer to best express verified
+invariants about his programs, then structural typing allows the programmer to
+express invariants that are useful, and impossible to express with nominal
+typing. And I think this greatly cripples Ada, the area suffering most being
+generic programming.
+
+Sometimes, I want to be able to express the fact that I want this specific
+access type, which satisfies specific invariants (like a Filesystem string
+access), and I think Ada is a great language in allowing me to express that.
+
+Some other times, I want to be able to express that I just want an access to a
+string, with no particular properties belonging to the access type itself. Same
+for arrays, and same for generics (take a vector of Integer as an example). Ada,
+in disallowing me to express that:
+
+* Makes the code harder to read. I'll have to verify that this access type, in a
+  library for example, is indeed compatible with my access type. That it
+  satisfies the invariants, if there are some. I'll have to possibly change file
+  when reading a subprogram signature to check that.
+
+* Makes the code less maintainable. I have to know about every possible usage of
+  my type and subprogram in advance if I want to keep types unified. If I merge
+  code from different code bases, I have to unify types after the fact. I have
+  to find a place to put those types, where there isn't any logical one.
+
+* Makes the code less modular. If I have two libraries, both having a type that
+  should be equivalent, I cannot make them cooperate without writing some glue
+  code.
+
+* Makes higher order generic programming with sharing nearly impossible. I'll
+  have to declare ad-hoc instances of generic packages that I need, often
+  several times.
+
+I think a lot those issues arise when you deal with an ecosystem that has a lot
+of third-party code. The fact that the Ada ecosystem has gravitated towards
+monolithic code bases is a big reason why this hasn't been adressed IMHO. But it
+also prevents in some fashion growing reusable libraries ecosystem.
+
+I'm ranting now I'm just trying to explain that my peeve in this domain is not
+coming out of nowhere. I know that Ada is a strongly nominally typed language at
+its core, and I think keeping it coherent is important. I still thing there are
+strong arguments for structural typing out there, that we should not ignore in
+our reflections.
+
+[End quoted e-mail.]
+
+Anyway, thinking on it, I wonder if I don't agree with you, and if I don't think
+that this is a much more important topic than lambdas and generators.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 20, 2016  3:39 PM
+
+...
+> We would have
+> to see whether "structural" type equivalence rules should be used
+> (i.e. all instantiations with the "same" actual parameters are
+> presumed the
+> same, and declare the same types/exceptions).   If not, then
+> if you wanted to share
+> instantiations semantically, you might be obliged to use something
+> like:
+>
+>    Y : X'Type;
+
+Ignoring the larger topic here, I don't think that making some corner-case
+feature structurally equivalent is a very good idea. We already tried that
+with anonymous access types, and what it tends to do is encourage people to
+use a feature that they otherwise would not. I'd hate to see people wrapping
+all of their types into generics just so they can program like they do in C.
+(And that's probably unfair to C; it has better typing than that.)
+
+Specifically, we already looked at X'Type in AI12-0123-1. It was a can of
+worms, and I don't see how tying it to an instantiation would change that.
+First of all, of course, is that "X'Type" is meaningless; it has to be some
+sort of subtype. Certainly, we don't want to allow declaring composite objects
+having lost the original constraints! There's more in AI12-0123-1 and the
+associated meeting minutes, I'm sure.
+
+> or
+>     type Vec_Int is new Vector(Integer);
+>
+>     X : Vec_Int;
+>    ...
+>     Y : Vec_Int;
+
+This seems to be the more Ada-like solution.
+
+An implicit instantiation would be a short-hand for packages/types that you
+are only going to use once (there are a lot of those in the containers). If
+you need to use more than once, do it explicitly.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 20, 2016  3:54 PM
+
+>I also agree with all of the above. I also think that this should go hand in
+>hand with other enhancements to generics. For example, your vector example
+>doesn't work for the moment, because you need both an index type and an
+>element type. If you introduce Manu's and Bob's AI about default parameters
+>in generics, we could say that the default index type for generic vectors
+>is Positive for example.
+
+Ignoring the larger points again:
+
+(1) I don't see why Tucker's proposal wouldn't work. Surely it would allow
+multiple actual parameters (surely everything else does).
+
+    X : Ada.Containers.Vectors.Vector(Integer, Positive);
+
+seems fine to me.
+
+(2) The default generic parameter AI dates to June 12, 2002, proposed by
+Thomas Wolf. My reaction to his proposal: "Thanks for writing this, it saved
+me from having to do it. (I was going to make a similar proposal when I got a
+round tuit.)" Where he got the idea, I can't be sure (there was some
+comp.lang.ada discussion at that time that might be interesting to look up).
+But it is WAAAAY older than the recent proposal. In addition, I did not use
+their proposal at all, since it was NN (ACATS for "Nothing New") and it was
+missing parts ("in out" parameters in particular). In any case, giving Manu
+and Bob any credit for this idea is really wrong; it way predates that. (To
+be fair, Bob may have had the idea before 2002 since it would have made sense
+in the context of Ada 9x, but I don't have any evidence of that.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 20, 2016  4:07 PM
+
+> Ignoring the larger topic here, I don't think that making some
+> corner-case feature structurally equivalent is a very good idea. We
+> already tried that with anonymous access types, and what it tends to
+> do is encourage people to use a feature that they otherwise would not.
+> I'd hate to see people wrapping all of their types into generics just so
+> they can program like they do in C. (And that's probably unfair to C; it
+> has better typing than that.)
+>
+> Specifically, we already looked at X'Type in AI12-0123-1. ...
+
+That was more of a straw man.  I am in favor of structural equivalence so you
+*don't* need to use something like X'Type.
+
+>> or
+>>     type Vec_Int is new Vector(Integer);
+>>
+>>     X : Vec_Int;
+>>    ...
+>>     Y : Vec_Int;
+>
+> This seems to be the more Ada-like solution.
+
+It still forces a separate instantiation, which really interferes with
+appropriate uses in my view.
+
+> An implicit instantiation would be a short-hand for packages/types
+> that you are only going to use once (there are a lot of those in the
+> containers).
+
+I suppose anonymous array types in Ada are still useful, so even if you didn't
+have structural equivalence, you could create singleton vectors if we allowed:
+
+   X : Vector(Integer);
+
+but say that each such usage is a distinct type.  But I would still prefer the
+structural equivalence approach here, and if you want a unique type (aka
+"branded" type in Modula-3 parlance), you can declare it with the "type
+Vec_Int is new ..." syntax. We are talking about an abstract type in any case,
+since this is the result of an instantiation of a generic, so it isn't
+particularly similar to allowing free conversion between all numeric types.
+We could go further and allow it only for types that are a private view, but
+that that seem to be a bit of overprotection of the programmer.
+
+> ... If you need to use more than one, do it explicitly.
+
+Seems like this might be taking strong typing a bit too far.  Anonymous access
+types were more of a challenge because of accessibility.  I would suggest that
+these instantiations inherit the accessibility of the generic actual
+parameters, so structurally equivalent instantiations would necessarily have
+the same accessibility.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Thursday, October 20, 2016  4:38 PM
+
+>...In any case, giving Manu
+> and Bob any credit for this idea is really wrong; it way predates
+>that. (To  be fair, Bob may have had the idea before 2002 since it
+>would have made  sense in the context of Ada 9x, but I don't have any
+>evidence of that.)
+
+It's an obvious idea, so I'm sure I and many others have independently
+"invented" it since long ago.  Some kinds of parameters (generic formal, and
+normal subp params) allow defaults; others don't.  That's an obvious
+inconsistency.
+
+I don't know why Manu left out generic formal 'in out's. I did mention it to him
+at some point.  I guess they're so little used that people forget about them.
+
+Note that Ada originally allowed defaults on 'out' and 'in out'
+parameters of subprograms.  That was deleted before 1983.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, October 20, 2016  5:42 PM
+
+> >...In any case, giving Manu
+> > and Bob any credit for this idea is really wrong; it way predates
+> >that. (To  be fair, Bob may have had the idea before 2002 since it
+> >would have made  sense in the context of Ada 9x, but I don't have any
+> >evidence of that.)
+>
+> It's an obvious idea, so I'm sure I and many others have independently
+> "invented" it since long ago.  Some kinds of parameters (generic
+> formal, and normal subp params) allow defaults; others don't.  That's
+> an obvious inconsistency.
+
+Right. I didn't want to imply that you were stealing the idea (but I probably
+managed that anyway). There's a reason that I try to refer to AIs by number and
+not by the author. In this case, there was a worked out proposal from years ago,
+and that seemed like a better starting point than a new write-up that hadn't
+been vetted.
+
+I do find it interesting that Tucker circa 2016 finds the use of "use" in this
+context just fine, while it was Tucker circa 2002 that found it completely
+unacceptable (according to the Vienna meeting minutes) which led to the
+proposal's eventual death.
+
+...
+> I don't know why Manu left out generic formal 'in out's.
+> I did mention it to him at some point.  I guess they're so little used
+> that people forget about them.
+
+It was mentioned in the e-mail thread that was glued onto the proposal. The
+omission sealed-the-deal for me to use the old proposal , since it handled that.
+
+> Note that Ada originally allowed defaults on 'out' and 'in out'
+> parameters of subprograms.  That was deleted before 1983.
+
+Probably before 1980, since I don't remember that at all. (And Janus/Ada started
+out as an Ada-80 compiler, since 1983 was two years in the future. :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 9, 2017  9:07 PM
+
+...
+> I would very much
+> like to see instantiation of
+> (stateless) generics as part of declaring an object.  E.g:
+> 
+>     X : Vectors.Vector(Integer);
+
+I've written up a basic proposal for this feature as purely syntactic sugar.
+Hopefully, this will give us a decent starting place for discussion.
+[This was version /01 of the AI - Editor.]
+
+---
+
+I purposely did not address any structural equivalence ideas in this proposal.
+While I remain open to further examples on this point, I am absolutely not
+interested in tying any important new functionality to anonymous declarations
+(be them new or old functionality).
+
+We almost always come to regret tying one new feature with some other new
+feature. (Bob has said this better than I several times in the past.) I
+definitely don't want to see people writing generic units just so that they
+can get structural type equivalence, nor do I want to see people writing
+anonymous instances just for this purpose when otherwise a normal declaration
+would do.
+
+Anonymous anything should NEVER have capabilities that the otherwise equivalent
+named entity do not have. Take anonymous access-to-subprogram parameters
+(please! :-):
+   * You cannot attach a predicate to an anonymous access-to-subprogram
+     parameter;
+   * Given adoption of another current proposal, you cannot attach a
+     precondition or postcondition to an anonymous access-to-subprogram
+     parameter [aside: and sticking it into the subprogram profile is a
+     non-starter, the result would be completely unreadable most of the time];
+   * You cannot share a complex definition of an anonymous
+     access-to-subprogram parameter;
+   * You cannot reasonably extend the facility of calling any subprogram
+     indirectly to anything other than parameters. [Whether that would make
+     sense is irrelevant now, because it's not possible.]
+[Note: Erhard raised these concerns at the time, but we junked the idea of
+"named anonymous access-to-subprogram types" for obvious reasons. The problem
+though was tying any part of this idea to "anonymous"; if we had given the
+concept some silly name - say "frobisher" (thanks Steve ;-), the idea of
+"named frobisher access-to-subprogram types" and "anonymous frobisher
+access-to-subprogram types" seems fine.]
+
+I'm getting off-topic, but hopefully you see my point.
+
+****************************************************************
+
