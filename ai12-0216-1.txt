@@ -1,0 +1,266 @@
+!standard 6.4.1(6.17/3)                                17-01-09  AI12-0216-1/01
+!class binding interpretation 17-01-09
+!status work item 17-01-09
+!status received 16-12-13
+!priority Very_Low
+!difficulty Easy
+!qualifier Omission
+!subject 6.4.1(6.16-17/3) goes too far
+!summary
+
+6.4.1(6.16-17/3) only applies to parameters of an elementary type.
+
+!question
+
+Consider:
+
+    type Reference_Ptr is access Reference;
+    type Reference is ...
+
+    type Format_Type is tagged limited record
+        Number_Paragraphs : Boolean;
+        References : Reference_Ptr := null;
+    end record;
+
+    procedure Make_Ref2 (List          : in out Reference_Ptr;
+                         Format_Object : in out Format_Type;
+                         Result        : in out Boolean) is
+    begin
+        null; -- Body not relevant.
+    end Make_Ref2;
+
+    procedure Process (Format_Object : in out Format_Type) is
+       My_Result : Boolean := False;
+    begin
+       Make_Ref2 (Format_Object.References, Format_Object, My_Result); -- (1)
+    end Process;
+
+6.4.1(6.16-17/3) does apply to this case (there are two in out parameters of
+an elementary type), so the overlap is illegal.
+
+But that makes no sense, since there is no problem with the copy-back
+operation ordering. There's no portability problem here, but we have an
+error.
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Modify 6.4.1(6.17/3):
+
+For each name N that {denotes an object of an elementary type and} is passed
+as a parameter of mode in out or out to the call C, there is no other name
+among the other parameters of mode in out or out to C that is known to denote
+the same object.
+
+!discussion
+
+The example in the !question is in fact OK, as the rule is "known to denote the
+same object", not "known to refer to the same object". (These are different!!)
+"Known to denote the same object" means exactly the same, whereas the latter
+includes overlapping.
+
+However, there still is an issue with a 4-parameter call:
+
+    procedure Make_Ref3 (List          : in out Reference_Ptr;
+                         Format_Object : in out Format_Type;
+                         Format_Object : in out Format_Type;
+                         Result        : in out Boolean) is
+        -- Has two elementary in out parameters, 6.4.1(16-17/3) does apply.
+    begin
+        null; -- Body not relevant.
+    end Make_Ref3;
+
+    procedure Process (Format_Object : in out Format_Type) is
+       My_Result : Boolean := False;
+    begin
+       Make_Ref3 (Format_Object.References, Format_Object,
+                  Format_Object, My_Result); -- (2)
+    end Process;
+
+(2) is illegal by the current rule, even though the parameters that match are
+passed by reference and thus do not have an issue with copy-back ordering.
+
+Thus we give this AI a very low priority, but we should fix the wording to be
+what was intended.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS B-Test should check that this rule is enforced correctly.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Tuesday, December 13, 2016  6:51 PM
+
+The point of the call anti-aliasing rule (6.4.1(16-17/3)) is to ensure that
+obvious order-dependent calls are not allowed. Specifically, the order of
+parameter copy-back is unspecified, so any dependence on that is a mistake. The
+anti-aliasing rules are intended to catch obvious order-dependencies, and not
+complain about cases that don't cause problems.
+
+I recently had a complaint that the ARM formatting tool would not compile with
+GNAT. The "error" turned out to be a bug in GNAT; it appears that the compiler
+was enforcing 6.4.1(16-17/3) on a routine to which it does not apply (it only
+has one "in out" parameter of an elementary type, 6.4.1(16-17/3)).
+
+This led me to thinking that a similar call would have been illegal has there
+been a second "in out" parameter of an elementary type, even though the call has
+no order dependency (the other parameter being by-reference, so there is no
+copy-back at all).
+
+This leads me to wondering whether the rule ought to be considering by-reference
+parameters at all. I can't think of (today) any way for a by-reference parameter
+to cause an order-dependency with a by-copy parameter. Thus, the current rule
+seems to have false positives when a by-reference parameter overlaps with a
+by-copy parameter.
+
+Therefore, I wonder if we should weaken the rule to omit by-reference parameters
+altogether:
+
+If a call C has two or more parameters of mode in out or out that are of an
+elementary type, then the call is legal only if:
+
+* For each name N that is passed as a parameter of mode in out or out to the
+  call C, there is no other name among the other parameters of mode in out or
+  out {other than those known to be of a by-reference type} to C that is known
+  to denote the same object.
+
+Since we aren't allowed to directly use "by-reference" in Legality Rules (the
+reason for "known to be" above -- "by-reference" itself ignores privacy), maybe
+we should simply limit the rule to elementary parameters and let any issues with
+private types that are actually by-copy be undetected:
+
+If a call C has two or more parameters of mode in out or out that are of an
+elementary type, then the call is legal only if:
+
+* For each name N that is passed as a parameter of mode in out or out to the
+  call C, there is no other name among the other parameters of mode in out or
+  out {of an elementary type} to C that is known to denote the same object.
+
+I've attached below the test program that I sent to AdaCore. It's a very
+simplified version of one package in the ARM formatter program.
+
+package Test641 is
+
+    type Output_Type is abstract tagged limited null record;
+
+    type Format_Type is tagged limited private;
+
+    procedure Real_Process (Format_Object : in out Format_Type;
+                            Output_Object : in out Output_Type'Class);
+
+private
+
+    type Reference;
+    type Reference_Ptr is access Reference;
+    type Reference is record
+        Ref_Len  : Natural;
+        Next : Reference_Ptr;
+    end record;
+
+    type Format_Type is tagged limited record
+        Number_Paragraphs : Boolean;
+        References : Reference_Ptr := null;
+    end record;
+
+end Test641;
+
+package body Test641 is
+
+    procedure Make_Ref1 (List          : in out Reference_Ptr;
+                         Format_Object : in out Format_Type;
+                         Output_Object : in out Output_Type'Class) is
+        -- Has one elementary in out parameter, 6.4.1(16-17/3) does not apply.
+    begin
+        null; -- Body not relevant.
+    end Make_Ref1;
+
+    procedure Make_Ref2 (List          : in out Reference_Ptr;
+                         Format_Object : in out Format_Type;
+                         Result        : in out Boolean) is
+        -- Has two elementary in out parameters, 6.4.1(16-17/3) does apply.
+    begin
+        null; -- Body not relevant.
+    end Make_Ref2;
+
+    procedure Real_Process (Format_Object : in out Format_Type;
+                            Output_Object : in out Output_Type'Class) is
+       My_Result : Boolean := False;
+    begin
+       Make_Ref1 (Format_Object.References, Format_Object, Output_Object); -- OK.
+          -- 6.4.1(16-17/3) does not apply, so the overlap is OK.
+
+       Make_Ref2 (Format_Object.References, Format_Object, My_Result); -- ERROR:
+          -- 6.4.1(16-17/3) does apply, so the overlap is illegal.
+          -- Note: I wonder if the 6.4.1(17/3) rule should be rewritten
+          -- to exclude thiis case. The copy-backs do not overlap, so there
+          -- is no portability problem here.
+    end Real_Process;
+
+end Test641;
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, December 13, 2016  8:11 PM
+
+> Therefore, I wonder if we should weaken the rule to omit by-reference
+> parameters altogether:
+
+I agree.  If you read the lead-in to this rule (para 6.16) which is only
+concerned about parameters of an elementary type, it makes no sense that the
+next paragraph (6.17) applies to parameters of a non-elementary type.  This
+looks like a typo to me.  I believe that the intent was that 6.17 only applied
+to the case when N denotes an object of an elementary type.  Somehow the word
+"elementary" got lost.  If the intent was to somehow enforce this rule on
+non-elementary parameters, so long as there were at least two elementary
+parameters as well, you would presume the AI would somehow have some
+justification for that weird situation.  But it makes no mention of this.  It
+talks a bit about our being conservative to avoid false positives, and not
+worrying about partial views.
+
+> If a call C has two or more parameters of mode in out or out that are
+> of an elementary type, then the call is legal only if:
+>
+> * For each name N that is passed as a parameter of mode in out or out
+> to the call C, there is no other name among the other parameters of
+> mode in out or out {other than those known to be of a by-reference
+> type} to C that is known to denote the same object.
+
+...
+
+> * For each name N that is passed as a parameter of mode in out or out
+> to the call C, there is no other name among the other parameters of
+> mode in out or out {of an elementary type} to C that is known to denote the
+> same object.
+
+Yes, something like this.  Or simply change the first appearance of N to be "For
+each name N that denotes an object of an elementary type and is passed ..."
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, December 13, 2016  8:44 PM
+
+Yes, I suppose that is good enough, because we're requiring "same object" and
+not just overlaps for this rule.
+
+Ah! But since we are requiring "known to denote the same object", the case I was
+worrying about isn't a problem (the parameters overlap but don't denote the same
+object, since they're different types). That means it hardly ever would matter,
+you'd need a call like:
+      Ugly (Obj, Obj, Res1, Res2);
+where Obj is a by-reference object, and Res1 and Res2 are elementary objects and
+all of the parameters are in out.
+
+I'd guess that means we probably still should fix the wording, but it's a lot
+lower priority than I originally thought.
+
+****************************************************************
