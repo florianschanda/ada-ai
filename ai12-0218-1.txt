@@ -1,0 +1,540 @@
+!standard 13.5.3(6)                                  17-01-10  AI12-0218-1/01
+!class Amendment 17-01-10
+!status work item 17-01-10
+!status received 16-11-15
+!priority Low
+!difficulty Medium
+!subject Endianness-neutral record representation clauses
+!summary
+
+!problem
+
+
+!proposal
+
+Adapting code to run on targets with different endiannesses has long been a
+problematic endeavour for Ada users. Even though Ada 2005 improved the situation
+compared to Ada 95 with the AI95-0133 binding interpretation, there was in
+general no way to specify a record representation clause in a way that would
+produce identical sequences of bytes in memories for little-endian and
+big-endian targets. In some cases, this could be achieved using customized
+representation clauses depending on the target, but in cases where some record
+components cross byte boundaries, there was no other working option but to
+introduce explicit byte swapping operations.
+
+This often created confusion in users, who discovered that setting the Bit_Order
+attribute on a record clause did not achieve a portable representation.
+
+For this reason, a new attribute Scalar_Storage_Order has been introduced in
+GNAT, and has been in industrial use by AdaCore customers for several years now.
+This attribute allows programmers to specify the order in which storage units
+that make up a machine scalar are to be stored in memory, allowing compilers to
+automatically and transparently produce any required byte swapping operations
+when record components are accessed. This allows code that depends on a specific
+endianness to run unmodified on targets of the opposite endianness, keeping
+identical data representations (identical sequences of storage units in memory).
+
+This attribute was presented in an Ada-Europe 2013 article:
+"Lady Ada Mediates Peace Treaty in Endianness War".
+
+The proposed formal definition for the new attribute, essentially quoted from
+the GNAT Reference Manual, goes as follows:
+
+For every array or record type S, the representation attribute
+Scalar_Storage_Order denotes the order in which storage elements that make up
+scalar components are ordered within S. The value given must be a static
+expression of type System.Bit_Order. Other properties are as for Bit_Order, as
+defined by 13.5.3(4). The default value of Scalar_Storage_Order is
+System.Default_Bit_Order.
+
+For a record type T, if T'Scalar_Storage_Order is specified explicitly, it shall
+be equal to T'Bit_Order. Note: this means that if a Scalar_Storage_Order
+attribute definition clause is not confirming, then the type’s Bit_Order shall
+be specified explicitly and set to the same value.
+
+Derived types inherit an explicitly set scalar storage order from their parent
+types. This may be overridden for the derived type by giving an explicit scalar
+storage order for the derived type. For a record extension, the derived type
+must have the same scalar storage order as the parent type.
+
+A component of a record or array type that is a bit-packed array, or that does
+not start on a byte boundary, must have the same scalar storage order as the
+enclosing record or array type.
+
+No component of a type that has an explicit Scalar_Storage_Order attribute
+definition may be aliased.
+
+A confirming Scalar_Storage_Order attribute definition clause (i.e. with a value
+equal to System.Default_Bit_Order) has no effect.
+
+If the opposite storage order is specified, then whenever the value of a scalar
+component of an object of type S is read, the storage elements of the enclosing
+machine scalar are first reversed (before retrieving the component value,
+possibly applying some shift and mask operatings on the enclosing machine
+scalar), and the opposite operation is done for writes.
+
+In that case, the restrictions set forth in 13.5.1(10.3/2) for scalar components
+are relaxed. Instead, the following rules apply:
+
+  * the underlying storage elements are those at positions
+    (position + first_bit / storage_element_size)
+    .. (position + (last_bit + storage_element_size - 1) / storage_element_size)
+
+  * the sequence of underlying storage elements shall have a size no
+    greater than the largest machine scalar
+
+  * the enclosing machine scalar is defined as the smallest machine scalar
+    starting at a position no greater than
+      position + first_bit / storage_element_size
+    and covering storage elements at least up to
+      position + (last_bit + storage_element_size - 1) / storage_element_size
+
+  * the position of the component is interpreted relative to that machine
+    scalar.
+
+If no scalar storage order is specified for a type (either directly, or by
+inheritance in the case of a derived type), then the default is normally the
+native ordering of the target, but this default can be overridden using pragma
+Default_Scalar_Storage_Order.
+
+Note that if a component of T is itself of a record or array type, the specfied
+Scalar_Storage_Order does not apply to that nested type: an explicit attribute
+definition clause must be provided for the component type as well if desired.
+
+Note that the scalar storage order only affects the in-memory data
+representation. It has no effect on the representation used by stream
+attributes.
+
+!wording
+
+** TBD.
+
+!discussion
+
+[Editor's take: This never was a technical problem. We made a specific
+decision to not require compilers to support byte swapping code. There
+were two reasons for this:
+(1) Byte swapping is expensive, and users need to use it VERY sparingly, lest
+their entire application become very slow. As such, byte swapping needs to be
+restricted to the interfacing code, and should be VERY obvious in the code.
+(2) The implementation cost of byte swapping is substantial, and given the
+(hopefully) very limited use of it in code, the cost-benefit ratio is strongly
+tilted to the cost side of the equation.
+We need to revisit this decision and determine whether the original situation
+has changed. (Does any other programming language require byte swapping code??)
+
+(For me, it would probably be cheaper to hand-create byte swapping code for
+every customer that needs it than to try to implement a general solution in
+our compiler.)
+End Editor's take.]
+
+!ASIS
+
+New aspect, otherwise no ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the new capabilities are supported.
+
+
+!appendix
+
+From: Thomas Quinot
+Sent: Thursday, November 10, 2016  2:20 PM
+
+Adapting code to run on targets with different endiannesses has long been a
+problematic endeavour for Ada users. Even though Ada 2005 improved the situation
+compared to Ada 95 with the AI95-0133 binding interpretation, there was in
+general no way to specify a record representation clause in a way that would
+produce identical sequences of bytes in memories for little-endian and
+big-endian targets. In some cases, this could be achieved using customized
+representation clauses depending on the target, but in cases where some record
+components cross byte boundaries, there was no other working option but to
+introduce explicit byte swapping operations.
+
+This often created confusion in users, who discovered that setting the Bit_Order
+attribute on a record clause did not achieve a portable representation.
+
+For this reason, a new attribute Scalar_Storage_Order has been introduced in
+GNAT, and has been in industrial use by AdaCore customers for several years now.
+This attribute allows programmers to specify the order in which storage units
+that make up a machine scalar are to be stored in memory, allowing compilers to
+automatically and transparently produce any required byte swapping operations
+when record components are accessed. This allows code that depends on a specific
+endianness to run unmodified on targets of the opposite endianness, keeping
+identical data representations (identical sequences of storage units in memory).
+
+This attribute was presented in an Ada-Europe 2013 article:
+"Lady Ada Mediates Peace Treaty in Endianness War".
+
+The proposed formal definition for the new attribute, essentially quoted from
+the GNAT Reference Manual, goes as follows:
+
+For every array or record type S, the representation attribute
+Scalar_Storage_Order denotes the order in which storage elements that make up
+scalar components are ordered within S. The value given must be a static
+expression of type System.Bit_Order. Other properties are as for Bit_Order, as
+defined by 13.5.3(4). The default value of Scalar_Storage_Order is
+System.Default_Bit_Order.
+
+For a record type T, if T'Scalar_Storage_Order is specified explicitly, it shall
+be equal to T'Bit_Order. Note: this means that if a Scalar_Storage_Order
+attribute definition clause is not confirming, then the type’s Bit_Order shall
+be specified explicitly and set to the same value.
+
+Derived types inherit an explicitly set scalar storage order from their parent
+types. This may be overridden for the derived type by giving an explicit scalar
+storage order for the derived type. For a record extension, the derived type
+must have the same scalar storage order as the parent type.
+
+A component of a record or array type that is a bit-packed array, or that does
+not start on a byte boundary, must have the same scalar storage order as the
+enclosing record or array type.
+
+No component of a type that has an explicit Scalar_Storage_Order attribute
+definition may be aliased.
+
+A confirming Scalar_Storage_Order attribute definition clause (i.e. with a value
+equal to System.Default_Bit_Order) has no effect.
+
+If the opposite storage order is specified, then whenever the value of a scalar
+component of an object of type S is read, the storage elements of the enclosing
+machine scalar are first reversed (before retrieving the component value,
+possibly applying some shift and mask operatings on the enclosing machine
+scalar), and the opposite operation is done for writes.
+
+In that case, the restrictions set forth in 13.5.1(10.3/2) for scalar components
+are relaxed. Instead, the following rules apply:
+
+  * the underlying storage elements are those at positions
+    (position + first_bit / storage_element_size)
+    .. (position + (last_bit + storage_element_size - 1) / storage_element_size)
+
+  * the sequence of underlying storage elements shall have a size no
+    greater than the largest machine scalar
+
+  * the enclosing machine scalar is defined as the smallest machine scalar
+    starting at a position no greater than
+      position + first_bit / storage_element_size
+    and covering storage elements at least up to
+      position + (last_bit + storage_element_size - 1) / storage_element_size
+
+  * the position of the component is interpreted relative to that machine
+    scalar.
+
+If no scalar storage order is specified for a type (either directly, or by
+inheritance in the case of a derived type), then the default is normally the
+native ordering of the target, but this default can be overridden using pragma
+Default_Scalar_Storage_Order.
+
+Note that if a component of T is itself of a record or array type, the specfied
+Scalar_Storage_Order does not apply to that nested type: an explicit attribute
+definition clause must be provided for the component type as well if desired.
+
+Note that the scalar storage order only affects the in-memory data
+representation. It has no effect on the representation used by stream
+attributes.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, November 16, 2016  7:21 PM
+
+> ... This attribute
+> allows programmers to specify the order in which storage units that
+> make up a machine scalar are to be stored in memory, allowing
+> compilers to automatically and transparently produce any required byte
+> swapping operations when record components are accessed.
+...
+
+Herein lies the rub, of course. In the past, we have not be willing to require
+compilers to be able to generate byte swapping code. Certainly, it could be
+rather difficult to retrofit such a capability into an existing compiler.
+
+So the question is not really how to technically do this, but rather if it is
+important enough of a capability for the rather significant impact on (non-GNAT)
+compilers. We don't want to make it so hard to implement Ada 202x that only
+AdaCore does so.
+
+P.S. I don't think this would be hard to support in the current implementation
+of Janus/Ada. The problem is that the current implementation of Janus/Ada
+doesn't come close to supporting the full generality of component bit mapping in
+Ada (components of composite types have to be byte-aligned in current
+Janus/Ada), and the changes needed to support that full generality are likely to
+make it much harder to support byte-swapping as well. So I doubt that Janus/Ada
+is representative here.
+
+****************************************************************
+
+From: Christoph Grein
+Sent: Saturday, November 19, 2016  11:01 AM
+
+I do not see what this new attribute buys me.
+See e.g. the following record:
+
+for T use record
+   I at 0 range  0 .. 15;
+   A at 2 range  0 .. 12;
+   B at 2 range 13 .. 17;
+   C at 2 range 18 .. 23;
+   D at 2 range 24 .. 31;
+end record;
+for T'Bit_Order use System.High_Order_First;
+
+On a BE machine, the layout is as follows (for items crossing byte boundaries,
+the MSB part is given in upper case, the LSB partlower case).
+
+Byte 0       1       |2       3       4       5
+   BE 0123456789012345|01234567890123456789012345678901
+      IIIIIIIIiiiiiiii|AAAAAAAAaaaaaBBBbbCCCCCCDDDDDDDD
+
+Bytes are counted left to right, bits as well within the respective machine
+scalars. There are two machine scalars: One for I (two bytes 0 .. 1), one for A
+to D (four bytes 2 .. 5). (Actualy, machine scalars are not needed for a
+confirming Bit_Order.)
+
+With Ada 95 (machine scalars not yet defined), GNAT on an LE machine complains
+about non-contiguous bit fields.
+
+(In the following, on an LE machine, bits and bytes are written down right to
+left and counted accordingly.)
+
+As I understand Ada 2005, on an LE machine, the layout is asfollows (bytes are
+counted right to left LE since the attribute does not affect byte order, bits
+within the machine scalars left to right as requested BE; friendly GNAT even
+tells me the bit numbers in LE order, counted right to left):
+
+gprbuild -ws -c -f -u -PC:\...\ada_kurs.gpr -XGeneration=Ada_2012 endianness.adb gcc -c -g -g -O2 -gnatQ -gnato -fstack-check -gnatE -gnatf -gnat12 endianness.adb
+endianness.adb:35:19: info: reverse bit order in machine scalar of length 16
+endianness.adb:35:19: info: little-endian range for component "I" is 0 .. 15
+endianness.adb:36:19: info: reverse bit order in machine scalar of length 32
+endianness.adb:36:19: info: little-endian range for component "A" is 19 .. 31
+endianness.adb:37:18: info: reverse bit order in machine scalar of length 32
+endianness.adb:37:18: info: little-endian range for component "B" is 14 .. 18
+endianness.adb:38:18: info: reverse bit order in machine scalar of length 32
+endianness.adb:38:18: info: little-endian range for component "C" is 8 .. 13
+endianness.adb:39:18: info: reverse bit order in machine scalar of length 32
+endianness.adb:39:18: info: little-endian range for component "D" is 0 .. 7
+[2016-11-19 17:50:33] process terminated successfully, elapsed time: 04.89s
+
+      AAAAAAAAaaaaaBBBbbCCCCCCDDDDDDDD|IIIIIIIIiiiiiiii
+   BE 01234567890123456789012345678901|0123456789012345
+   LE 10987654321098765432109876543210|5432109876543210
+Byte LE     5       4       3       2|       1       0
+
+So having an object of this type on my windows machine, where on earth do I need
+byte swapping when accessing a component?And that's what the new attribute is
+all about...
+
+???????Please enlighten me...
+
+Only when receiving such an object from or sending to a BE machine, is byte swapping of the machine scalars needed:
+0<-->1
+5<-->2
+4<-->3
+
+****************************************************************
+
+From: Thomas Quinot
+Sent: Monday, November 28, 2016  1:24 PM
+
+> I do not see what this new attribute buys me.
+
+Compatible representations between big endian and little endian targets.
+
+> See e.g. the following record:
+>
+> for T use record
+>    I at 0 range  0 .. 15;
+>    A at 2 range  0 .. 12;
+>    B at 2 range 13 .. 17;
+>    C at 2 range 18 .. 23;
+>    D at 2 range 24 .. 31;
+> end record;
+> for T'Bit_Order use System.High_Order_First;
+>
+> On a BE machine, the layout is as follows (for items crossing byte
+> boundaries, the MSB part is given in upper case, the LSB partlower case).
+>
+> Byte 0       1       |2       3       4       5
+>    BE 0123456789012345|01234567890123456789012345678901
+>       IIIIIIIIiiiiiiii|AAAAAAAAaaaaaBBBbbCCCCCCDDDDDDDD
+>
+> Bytes are counted left to right, bits as well within the respective
+> machine scalars. There are two machine scalars:
+> One for I (two bytes 0 .. 1), one for A to D (four bytes 2 .. 5).
+
+Right.
+
+> (Actualy, machine scalars are not needed for a confirming Bit_Order.)
+
+Not clear what you mean when you say "machine scalars are not needed".
+
+> As I understand Ada 2005, on an LE machine, the layout is asfollows
+
+>       AAAAAAAAaaaaaBBBbbCCCCCCDDDDDDDD|IIIIIIIIiiiiiiii
+>    BE 01234567890123456789012345678901|0123456789012345
+>    LE 10987654321098765432109876543210|5432109876543210
+> Byte LE     5       4       3       2|       1       0
+
+Yes that looks correct, and as you can see this representation is not compatible
+with the above. For example the storage element at offset 2 contains DDDDDDDD,
+whereas on a BE machine it would contain AAAAAAAA. That's why you need to byte
+swap the storage elements that make up a machine scalar.
+
+> Only when receiving such an object from or sending to a BE machine, is
+> byte swapping of the machine scalars needed:
+> 0<-->1
+> 5<-->2
+> 4<-->3
+
+Right, the point of Scalar_Storage_Order is to ensure the consistency of data
+representations between little endian and big endian targets. This is useful not
+only when sending/receiving data, but also anytime a component moves from a big
+endian CPU to a little endian CPU but can't change the data representation (e.g.
+because of having to operate on saved data files, or interfacing with some 3rd
+party hardware, or other legacy components).
+
+****************************************************************
+
+From: Thomas Quinot
+Sent: Monday, November 28, 2016  1:29 PM
+
+> Herein lies the rub, of course. In the past, we have not be willing to
+> require compilers to be able to generate byte swapping code.
+> Certainly, it could be rather difficult to retrofit such a capability
+> into an existing compiler.
+
+Well, we were able to retrofit it in GNAT, so it's not unfeasible :-)
+
+> So the question is not really how to technically do this, but rather
+> if it is important enough of a capability for the rather significant
+> impact on
+> (non-GNAT) compilers. We don't want to make it so hard to implement
+> Ada 202x that only AdaCore does so.
+
+This proved a very useful feature (saving time and lots of tedious, error-prine
+effort) for a number of our customers, and this fixes a longstanding pain point
+in the language. Many users over the years were quite discombobulated that just
+specifying Bit_Order on a record type was not enough to obtain a portable
+representation, and were quite disappointed that there was actually no way to
+achieve that in Ada.
+
+Now if it is deemed to complicated to implement for some implementations, maybe
+an implementation permission could be added to restrict the applicability of
+this aspect. We still see value in having it standardized for those
+implementations that do support it.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, November 29, 2016  2:05 PM
+
+> > Herein lies the rub, of course. In the past, we have not be willing
+> > to require compilers to be able to generate byte swapping code.
+> > Certainly, it could be rather difficult to retrofit such a
+> > capability into an existing compiler.
+>
+> Well, we were able to retrofit it in GNAT, so it's not unfeasible :-)
+
+As I used to say repeatedly during the Ada 9x process, it's almost never
+*impossible* to implement something, but it often is very *expensive* to
+implement something.
+
+I've never had any doubt that it can be done, but the effort needed could be
+extensive (depending on the compiler architecture - especially on how localized
+component access is). I'd guess the effort in Janus/Ada to be 2-3 man-months.
+That's a quite significant effort and the payoff has to be quite significant as
+well.
+
+> > So the question is not really how to technically do this, but rather
+> > if it is important enough of a capability for the rather significant
+> > impact on (non-GNAT) compilers. We don't want to make it so hard to
+> > implement Ada 202x that only AdaCore does so.
+>
+> This proved a very useful feature (saving time and lots of tedious,
+> error-prine effort) for a number of our customers, and this fixes a
+> longstanding pain point in the language.
+> Many users over the years were quite discombobulated that just
+> specifying Bit_Order on a record type was not enough to obtain a
+> portable representation, and were quite disappointed that there was
+> actually no way to achieve that in Ada.
+
+Dealing with "split" components is a very significant cost (at runtime as well
+as in the compiler), and I have to wonder if these users realize quite what code
+they're forcing the compiler to generate. In the handful of cases where I've
+personally needed to do this, I've always byte-swapped first and dealt with any
+bit-fields in the native byte sex. (But I've haven't had a big-endian target in
+the last 20 years - I'm dubious that Janus/Ada itself would even work right on a
+big-endian system.)
+
+So it seems to me that this is a rather specialized need. (I don't recall any of
+our customers needing this, but of course we don't have any big-endian targets
+so that may not be meaningful.)
+
+> Now if it is deemed to complicated to implement for some
+> implementations, maybe an implementation permission could be added to
+> restrict the applicability of this aspect. We still see value in
+> having it standardized for those implementations that do support it.
+
+Since most implementations copy stuff from GNAT as their customers demand, I
+don't see much advantage to this approach. Putting it into the Standard will put
+pressure on other vendors to support it. And since hardly anyone is implementing
+Ada 2012, making Ada 202x hard to implement without a corresponding usage
+benefit just seems likely to fragment the market more.
+
+In any case, I'd like to get input from non-AdaCore users on this feature.
+
+****************************************************************
+
+From: Christoph Grein
+Sent: Wednesday, November 30, 2016  1:11 PM
+
+>> (Actualy, machine scalars are not needed for a confirming Bit_Order.)
+> Not clear what you mean when you say "machine scalars are not needed".
+
+What I meant here is that the RM does not talk about machine scalars for a
+confirming Bit_Order. They are introduced just for the nonconfirming case.
+
+>> As I understand Ada 2005, on an LE machine, the layout is asfollows
+>>        AAAAAAAAaaaaaBBBbbCCCCCCDDDDDDDD|IIIIIIIIiiiiiiii
+>>     BE 01234567890123456789012345678901|0123456789012345
+>>     LE 10987654321098765432109876543210|5432109876543210
+>> Byte LE     5       4       3       2|       1       0
+> Yes that looks correct, and as you can see this representation is not
+> compatible with the above. For example the storage element at offset 2
+> contains DDDDDDDD, whereas on a BE machine it would contain AAAAAAAA.
+> That's why you need to byte swap the storage elements that make up a
+> machine scalar.
+
+Yes, only the components within a machine scalar have the same representation.
+
+I still do not understand what you mean with byte swapping. Until to this stage,
+there is no need for it. Or do you mean to swap bytes 1 to 2 with 2 to 5 so that
+you arrive at the following (which indeed is identical to BE)?
+
+       IIIIIIIIiiiiiiiiAAAAAAAAaaaaaBBBbbCCCCCCDDDDDDDD
+Byte LE      5       4       3       2       1       0
+
+What I do not understand is: When does such byte swapping take place?
+Each time a component is accessed? This looks like a terrible waste of execution
+time. As I said this would only be needed once when receiving or sending data
+from one architecture to the other.
+
+>> Only when receiving such an object from or sending to a BE machine,
+>> is byte swapping of the machine scalars needed:
+>> 0<-->1
+>> 5<-->2
+>> 4<-->3
+> Right, the point of Scalar_Storage_Order is to ensure the consistency
+> of data representations between little endian and big endian targets.
+> This is useful not only when sending/receiving data, but also anytime
+> a component moves from a big endian CPU to a little endian CPU but
+> can't change the data representation (e.g. because of having to
+> operate on saved data files, or interfacing with some 3rd party
+> hardware, or other legacy components).
+
+With "moving" you mean a distributed environment? I subsumed this in
+"sending/receiving".
+
+****************************************************************
