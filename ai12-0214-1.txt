@@ -520,3 +520,264 @@ people to look at it until the next one though !
 
 ****************************************************************
 
+From: Tucker Taft
+Sent: Thursday, October 13, 2016  10:14 AM
+
+Did you consider the syntax:
+
+    when (True, <A>) =>
+
+where <id> is declaring id to represent what "<>" would have represented on
+its own?
+
+I think we also talked about:
+
+   when R : (True, <>) =>
+
+where you now use R.blah to refer to parts matched by <>
+
+I find the "declare ... when ..." syntax too verbose, and think the
+"when R : ( ... ) =>"  syntax the most consistent with how exception
+occurrences are declared now.
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Thursday, October 13, 2016  10:29 AM
+
+> Did you consider the syntax:
+>
+>    when (True, <A>) =>
+
+No, we didn't think about that. On the one hand, I like it because it's very
+concise, coherent with the unnamed case, and quite clear about what this does !
+
+On the other hand I'm worried that it will make the lexer's work a bit harder,
+since here "<A>" can be parsed either as "Op(LT), Id(A), Op(GT)" or as
+"Pattern_Match_Id(A)".
+
+I'll try and implement this in libadalang's parser, to see what the
+repercussions are.
+
+>
+> where <id> is declaring id to represent what "<>" would have 
+> represented on its own?
+>
+> I think we also talked about:
+>
+>   when R : (True, <>) =>
+>
+> where you now use R.blah to refer to parts matched by <>
+>
+> I find the "declare ... when ..." syntax too verbose, and think the "when R : 
+> ( ... ) =>" syntax the most consistent with how exception occurrences 
+> are declared now.
+
+Yes we did. I think that being able to name the top level object is a great
+capability, so I'll add it to the AI. I don't however, as explained in the
+previous exchanges, think that it is a substitute for sub-component matching.
+If you want I can submit my rationale on the ARG thread.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, October 13, 2016  10:40 AM
+
+...
+> On the other hand I'm worried that it will make the lexer's work a bit 
+> harder, since here "<A>" can be parsed either as "Op(LT), Id(A), Op(GT)"
+> or as "Pattern_Match_Id(A)".
+
+This one is pretty easy, because you can actually lex it as LT, Id, GT.  But
+you just have to distinguish in the parser between unary "<" and binary ">"
+which is pretty easy.  We make that sort of distinction all the time.
+
+> I'll try and implement this in libadalang's parser, to see what the repercussions are.
+
+I would be surprised if it is difficult to handle in the parser.  I don't see
+any need to alter the lexer for this.
+
+...
+>> I find the "declare ... when ..." syntax too verbose, and think the 
+>> "when R : ( ... ) =>" syntax the most consistent with how exception
+>> occurrences are declared now.
+>
+> Yes we did. I think that being able to name the top level object is a 
+> great capability, so I'll add it to the AI. I don't however, as 
+> explained in the previous exchanges, think that it is a substitute for 
+> sub-component matching. If you want I can submit my rationale on the ARG thread.
+
+Yes, please do, as I don't remember why you think it is not an adequate substitute.
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Thursday, October 13, 2016  10:41 AM
+
+...
+>This one is pretty easy, because you can actually lex it as LT, Id, GT.  But
+>you just have to distinguish in the parser between unary "<" and binary ">"
+>which is pretty easy.  We make that sort of distinction all the time. 
+
+Yes, you're probably right !
+
+>Yes, please do, as I don't remember why you think it is not an adequate
+>substitute. 
+
+Here it is, slightly edited to use the new syntax you proposed - I already
+love it :)
+
+
+Naming the object that is being matched upon, while it can be useful, is not
+sufficient. First it's not as expressive. You'll have to repeat the path to the
+sub (sub-sub) component you wanted to match, which is verbose and possibly
+error prone. And then, if you want to make a rule out of the fact that you can
+statically check that the path is correct, the implementation will be more
+complex, because you'll have to remember the paths and check that what the user
+is doing is going along those paths. Taking the realistically complex example
+of the connection I showed earlier:
+
+type Connection_State is (Init, Connecting, Connected, Disconnected);
+
+type Ping (Has_Ping_Info : Boolean := False) is record
+   case Has_Ping_Info is
+   when True =>
+      Last_Ping_Time    : Time_T;
+      Last_Ping_Id      : Ping_Id;
+   end case;
+end record;  
+
+type Connection_Info (State : Connection_State) is record
+   Server : Internet_Address;
+   case State is
+   when Connected =>
+      Session_Id        : Unbounded_String;
+      Ping_Info         : Ping;
+   when Connecting =>
+      When_Initiated    : Time_T;
+   when Disconnected =>
+      When_Disconnected : Time_T;
+   when Init =>
+      null;
+   end case;
+end record;
+
+C : Connection_Info;
+
+case C is
+   when (Connected, <S_Id>, (True, <>, <Ping_Time>)) =>
+      Put_Line ("Connected ! Session Id is " & S_Id & " Ping time is " & Ping_Time'Image);
+   when others => null;
+end case;
+
+Constrast with only top-level object naming:
+
+case C is
+   when CC : (Connected, <>, (True, <>, <>)) =>
+      Put_Line ("Connected ! Session Id is "
+                & CC.Session_Id & " Ping time is "
+                & C.Ping_Info.Last_Ping_Time'Image);
+                --  Woops, I used the original name rather than the matched
+                --  name ! The compiler will silently ignore my error.
+   when others => null;
+end case;
+
+Having to repeat the path is less readable and more error prone. You go through
+the trouble of expressing the pattern, just to have to repeat the logic
+underneath, effectively writing the paths twice, once in aggregate syntax, the
+other in prefix syntax.
+
+Statically ensuring that the accessed information is correct will be much more
+work for the compiler.
+
+Not to mention, that would be (yet another) feature that we don't implement
+like other languages.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 9, 2016  6:45 PM
+
+(Replying to an old thread that I must have missed back in October:)
+
+...	
+>Constrast with only top-level object naming:
+>		
+>case C is
+>   when CC : (Connected, <>, (True, <>, <>)) =>
+>      Put_Line ("Connected ! Session Id is "
+>                & CC.Session_Id & " Ping time is "
+>                & C.Ping_Info.Last_Ping_Time'Image);
+>                --  Woops, I used the original name rather than the matched
+>                --  name ! The compiler will silently ignore my error.
+
+What error? C and CC are views of the same object, and clearly have the same
+value. If there is an error here, it is declaring CC in the first place (see
+below).
+
+>		   when others => null;
+>		end case;
+
+One would want these shorthands in cases where the name of the original object
+is too complex. If, for instance, the original object was a function call with
+parameters, then the shorthand makes sense:
+
+case Get_Connection (From => Server) is
+ ... -- Rest as above.
+
+But in this case, if you mistyped the identifier, the compiler will give you
+an error. So I don't see any real problem with mistakes here.
+
+Keep in mind that every identifier (and every entity for that matter) that one
+declares adds to the cognitive load of the reader. You really shouldn't do it
+unless it actually helps reading the code. (Exactly where that line is
+obviously is a personal choice, but it is far away from renaming a single
+character identifier.)
+
+>Having to repeat the path is less readable and more error prone. You go 
+>through the trouble of expressing the pattern, just to have to repeat 
+>the logic underneath, effectively writing the paths twice, once in 
+>aggregate syntax, the other in prefix syntax.
+
+Arguably, that's a good thing.
+
+BTW, Ada doesn't currently allow positional <> aggregate components, and I'd
+suggest that we retain that rule here. (Assuming you really want to model these
+patterns as aggregates.) [Especially as many style guides ban positional record
+aggregates altogether.] Therefore, your example would have to be written
+something like:
+
+case Get_Connection (From => Server) is
+   when CC : (State => Connected, Server => <>,
+              Session_Id => <>,
+              Ping_Info => (Has_Ping_Info => True, Last_Ping_Time => <>, Last_Ping_Id => <>)) =>
+       Put_Line ("Connected ! Session Id is "
+                 & CC.Session_Id & " Ping time is "
+                 & CC.Ping_Info.Last_Ping_Time'Image);
+
+So the names you need are already in the source. Declaring more names would
+just be more noise.
+
+[Aside: in writing the above, I see that your original example doesn't have
+enough components (the Server component seems to have been left out). Which is
+why many style guides require component names ... ;-)]
+
+>Statically ensuring that the accessed information is correct will be 
+>much more work for the compiler.
+
+There seems to be no need to do that. Again, this is just a different view of
+an existing object, we really should not care which of those views is accessed.
+		
+>Not to mention, that would be (yet another) feature that we don't 
+>implement like other languages.
+
+You already know what I think about that: if you want to use some other
+language, do that. Don't try to mess up Ada with the exact features of other
+languages; whatever we do should fit into the Ada model and not look like it
+was stolen from someone else. (That's why some form of case coverage is
+mandatory for this feature.)
+
+Tucker's idea seems to fit with the existing syntax of the language, and seems
+to be sufficient for the job.
+
+****************************************************************

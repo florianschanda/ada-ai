@@ -557,3 +557,187 @@ I'm getting off-topic, but hopefully you see my point.
 
 ****************************************************************
 
+From: Tucker Taft
+Sent: Monday, January 9, 2017  9:07 PM
+
+> I purposely did not address any structural equivalence ideas in this 
+> proposal. While I remain open to further examples on this point, I am 
+> absolutely not interested in tying any important new functionality to 
+> anonymous declarations (be them new or old functionality).
+>
+> We almost always come to regret tying one new feature with some other 
+> new feature. (Bob has said this better than I several times in the 
+> past.) I definitely don't want to see people writing generic units 
+> just so that they can get structural type equivalence, nor do I want 
+> to see people writing anonymous instances just for this purpose when 
+> otherwise a normal declaration would do.
+
+When I said "structural equivalence" what I meant was that two instantiation
+short-hands with the same parameters would refer to the same implicit
+instantiation.  So there is only one type, and only one instance, which is
+being used in all places where the short-hand specifies the same parameters.
+This is important so as to avoid code bloat, and is generally what you want
+when using this sort of short-hand for generic instantiation. 
+
+This implies there should be no state associated with the generic, or else
+you can unintentionally create race conditions, etc.
+
+If we believe it is important to allow implicit instantiations of state-ful
+generics (something about which I am not personally convinced), then I would
+propose we define an aspect to distinguish the two approaches.  Given that
+very few Ada compilers implement generic sharing, this feature is of much
+more limited use if it produces extraordinary code bloat.
+
+> Anonymous anything should NEVER have capabilities that the otherwise 
+> equivalent named entity do not have.
+
+I am not proposing that.  I am merely proposing that the syntactic sugar
+involves a more globally instantiated generic, rather than a new one
+instantiated at each point of use.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 9, 2017  11:13 PM
+
+> When I said "structural equivalence" what I meant was that two 
+> instantiation short-hands with the same parameters would refer to the 
+> same implicit instantiation.
+
+Raphael was talking about something more general in his messages, and that's
+mainly what I responded to. But...
+
+> ...  So there is only
+> one type, and only one instance, which is being used in all places 
+> where the short-hand specifies the same parameters.
+> This is important so as to avoid code bloat, and is generally what you 
+> want when using this sort of short-hand for generic instantiation.
+
+I stand by my statement: I don't want special semantics just for anonymous
+anything instead of for all anythings.
+
+In this case, I don't really see the problem. If someone is using this
+short-hand so much that they're getting code bloat, the fix is easy enough.
+You can either write a named instance, or you can use the generic prefixed
+name of the type to share the type with another object. You're doing it
+wrong if you write a lot of instances, implicit or otherwise.
+
+Moreover, I suspect this semantics would be a can of worms. There are a lot
+of generic parameters in the typical instance (including the container
+instances - ordered_maps has 4 parameters, for instance), not just types. If
+any of those parameters are local (that is, the types or subprograms are
+declared locally), you really do not want to be hoisting these instances out
+of their scope. And if you're only going to do this in a single scope, you
+aren't going to prevent code bloat unless the code is rather unusual.
+
+At a minimum, you'll need rules about actual parameter matching to deal with
+when this is and is not done, plus the nesting implications. Sounds like a
+lot of work.
+
+> This implies there should be no state associated with the generic, or 
+> else you can unintentionally create race conditions, etc.
+
+Which is another reason that some sort of implicit instance sharing is a bad
+idea. All that seems to do is add complications.
+
+If we do this at all, let it be exactly syntactic sugar, with no semantic
+changes.
+ 
+> If we believe it is important to allow implicit instantiations of 
+> state-ful generics (something about which I am not personally 
+> convinced), then I would propose we define an aspect to distinguish 
+> the two approaches.
+
+It's hard to write a useful generic that doesn't have some sort of state.
+The Janus/Ada containers have state (used to detect dangling cursors). I will
+not stand for a requirement that the containers packages (or any other
+language-defined generics, for that matter, with the obvious exception of the
+pure packages) have no state.
+
+As such, there would be hardly any cases where you could use this feature on a
+stateless generic, so there would be little value to this compared with the
+complications that it would bring.
+
+[Aside: As I wrote the proposal, there is no possibility of having a
+discriminant constraint, so one couldn't use this with the bounded containers.
+There might be some way to fix that (the wording would be a mess, but if
+someone else wants to try it, be my guest), but such an instance would look
+really strange:
+    B : Ada.Containers.Bounded_Vectors.Vector(100)(Integer, My_Rec);
+Only the bounded containers are Pure and thus they'd be the only containers
+allowed with Tucker's scheme.]
+
+> Given that very
+> few Ada compilers implement generic sharing, this feature is of much 
+> more limited use if it produces extraordinary code bloat.
+
+That's only a problem if someone is used extraordinary numbers of instances.
+I really don't think we ought to be designing syntax sugar around unusual
+cases. Moreover, it only works if the instances actually can be hoisted (that
+depends on where the actual parameters are declared, as I previously noted).
+
+> > Anonymous anything should NEVER have capabilities that the otherwise 
+> > equivalent named entity do not have.
+> 
+> I am not proposing that.  I am merely proposing that the syntactic 
+> sugar involves a more globally instantiated generic, rather than a new 
+> one instantiated at each point of use.
+
+Yes you are. You're adding a poor-man's sharing mechanism, and only allowing
+it to be used from this anonymous instance. If this was a good idea, it
+should work for any instance, named or anonymous, so that one can switch
+between them without causing semantics changes.
+
+But I don't think this is a good idea, even without considering sharing.
+There are too many ways for this sort of thing to go wrong: not just local
+data (state) in the generic, but also local types and subprograms, and the
+issues of matching arbitrary lists of actual parameters [and across just how
+much program text???].
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, January 9, 2017  11:49 PM
+
+It strikes me that many new proposals are just about ease of writing... Sigh
+
+
+> When I said "structural equivalence" what I meant was that two 
+> instantiation short-hands with the same parameters would refer to the 
+> same implicit instantiation.  So there is only one type, and only one 
+> instance, which is being used in all places where the short-hand 
+> specifies the same parameters.
+
+Even if the two implicit instantiations are within different compilation
+units?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, January 10, 2017  12:04 AM
+
+> It strikes me that many new proposals are just about ease of 
+> writing... Sigh
+
+At least most such proposals have a "low" priority.
+ 
+...
+> > When I said "structural equivalence" what I meant was that two 
+> > instantiation short-hands with the same parameters would refer to 
+> > the same implicit instantiation.  So there is only one type, and 
+> > only one instance, which is being used in all places where the 
+> > short-hand specifies the same parameters.
+> Even if the two implicit instantiations are within different 
+> compilation units?
+
+Yes, I wondered that too. If it is only within one program unit, it would
+seem to have little effect on code bloat unless the code is very unusual.
+If it is within an entire compilation unit, all kinds of worms show up, and
+I still doubt the effect on code bloat. You have to share generics across
+compilation units to get much benefit to sharing, some of that is the "rules"
+people have learned from using other compilers, but I think a lot of it is
+natural. (Especially if we're only talking about container-like generics, as
+in this proposal.)
+
+****************************************************************
+

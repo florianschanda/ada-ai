@@ -1,4 +1,4 @@
-!standard 9.5(17/3)                                 16-11-14    AI12-0064-2/05
+!standard 9.5(17/3)                                 17-01-11    AI12-0064-2/06
 !standard 9.5.1(8)
 !standard 9.5.1(9)
 !standard 9.5.1(10)
@@ -9,8 +9,8 @@
 !standard 9.5.1(15)
 !standard 9.5.1(16)
 !standard 9.5.1(18)
+!standard 9.5.1(22.1/2)
 !standard 3.10.2(33/3)
-!standard 4.5(9)
 !standard 4.6(24.21/4)
 !standard 4.9(8)
 !standard 13.1.1(17/4)
@@ -37,43 +37,40 @@ of a subprogram's declaration.
 
 !proposal
 
-[Summary of changes for October 2016 meeting:
+[Summary of changes for June 2017 meeting:
 
-Defined the term "allows blocking", as "not nonblocking" or "aspect Nonblocking
-has the value False" are awkward.
+Applied the minor wording changes requested during meeting #56 (Pittsburgh).
 
-Redid the definition of the aspect so that it is defined for all program units
-and for task entries. (Even though not all entities allow it to be specified.)
-We also defined the aspect Nonblocking to always have the value False for entries.
+Added definition of nonblocking-static expressions, to reply to a comment from
+Steve Baird that a static expression cannot have different values in a generic
+unit and its associated instance. This means that the nonblocking attribute
+cannot be static in some cases for a generic unit, and we still want to allow
+such attribute references to be used to specify nonblocking aspects. The value
+used to specify a nonblocking aspect needs to be known at compile-time, so that
+it can be used to enforce Legality Rules. Thus we need this term to allow only
+static expressions and Nonblocking attributes, and combinations of them.
 
-Changed default value of S'Nonblocking for a formal subprogram in the generic
-specification (as requested in Pisa).
+Removed all notations that nonblocking attributes are static. I originally
+planned to leave them static other than when required to be nonstatic, but
+that proved hard to do (they can't be static when specified by an expression
+containing one or more Nonblocking attributes, even when the subprogram is
+non-generic). And it doesn't seem necessary for the rules; we just require
+them to be nonblocking-static when we need to require something.
 
-Removed special case for synchronized interfaces, and added an AARM note to
-explain why that's not needed. (also from Pisa).
+Tightened up the note 9.5.1(22.1/2) to say exactly what you have to do (specify
+the aspect to have the value True) rather than just "use" the aspect.
 
-Removed special case for renames of entries, (and entry calls in general), and
-added an AARM note to explain why.
+Deleted a redundant rule about the Access attribute (it was given normatively
+in both 3.10.2 and 9.5).
 
-Added an AARM note to highlight that a routine that overrides an allows
-blocking routine (like Finalize) can still be declared nonblocking itself.
-(Else any non-trivial finalization and allocation/deallocation could never be
-used in nonblocking code, which would be bad.)
+Finished the list of what needs to be done for non-container units. (Mostly
+adding "with Nonblocking => True").
 
-Added changes to 13.1 and 13.1.1 to eliminate the "no language-defined aspectcs
-can be specified on generic formal parameters", 'cause it's clearly not true.
+Moved the rules about predefined operators into the aspect definition, since
+they sometimes contradict the other rules in that section (which isn't going
+to work.)
 
-Changed "program unit" to "entity" in various places, as formal parameters,
-access-to-subprogram types, and other things aren't program units.
-
-Moved most of the text from 9.5.1 to 9.5 along with these new definitions.
-
-Redid the note at the end of 9.5.1 to suggest the use of aspect Nonblocking on
-protected units, as well as Detect_Blocking to clean up anything missed.
-
-Started work on a list of changes to language-defined units. This pointed
-out the need for the nonblocking attribute for formal packages, so that
-was defined.]
+]
 
 
 [Editor's note: Individual rule changes scattered throughout the Standard
@@ -83,6 +80,30 @@ Add after 9.5(17/3):
 
    Static Semantics
 
+   An expression is a nonblocking-static expression if it is one of the following:
+      * a static expression;
+      * a Nonblocking attribute reference;
+      * a call to a predefined boolean logical operator and, or, xor, or not,
+        where each operand is nonblocking-static;
+      * a short-circuit control form where both operands are
+        nonblocking-static; or
+      * a parenthesized nonblocking-static expression. 
+
+   [Editor's note: This wording is intended to parallel the definition of
+    predicate-static expression (from 3.2.4(15-22/3)). Since a
+    nonblocking-static expression has to be of a Boolean type, we don't
+    need the other cases (membership, equality/ordering, and case expression).
+    We could add the equality/ordering/membership cases here if the group thinks
+    that for consistency is more important than keeping the size small.
+    (conditional expressions would need a very different rule if we wanted it;
+    the selector or conditions would have to be static and the
+    dependent_expressions would have to be nonblocking-static.]
+
+      AARM Reason: We define the term "nonblocking-static expression" so that
+      nonblocking attribute references can be used to define the value of
+      other nonblocking aspects, but that we don't allow anything with a value
+      not known at compile-time.
+     
    For a program unit, for a task entry, for
    a formal package, formal subprogram, formal object of an anonymous
    access-to-subprogram type, and for a named access-to-subprogram type
@@ -107,7 +128,7 @@ Add after 9.5(17/3):
        The Nonblocking aspect may be specified for all entities for
        which it is defined, except for protected operations and
        task entries. If directly specified, the aspect_definition shall
-       be a static expression.
+       be a nonblocking-static expression.
 
        For a generic instantiation, the aspect is determined by the setting
        for the generic unit[Redundant, re-evaluated based on the actual
@@ -134,6 +155,26 @@ Add after 9.5(17/3):
          individual rules for these cases, but there were already many
          of them, and this solution avoids the need for extra rules.
 
+       For a predefined operator of an elementary type. and for the
+       predefined ordering operators of an array type, the value of the
+       aspect is True. For predefined equality operators of composite types,
+       the value of the aspect is False.
+
+          AARM Reason: Record equality can be composed of operations including
+          user-defined "=" operators, which might allow blocking. Array
+          equality might use some record equality. We can't introduce an
+          incompatibility here, so we have to assume the worst.
+
+[Editor's note: We might be able to do better here for untagged types (inc.
+arrays) by examining the type definition, but sadly for tagged types we have
+to allow it to be blocking as some overriding might need that (and all of the
+overridings need to be the same). As such, we do not bother with the extra
+complexity of rules to allow some record equality to be nonblocking.]
+
+** ARG wants this changed, but how??? Note that this says that the "=" of a
+partial view has the value False, and the "=" of a completing elementarary
+type has True, which isn't going to work.
+         
        For any other program unit, formal package,
        formal subprogram, formal object, or (formal) access-to-subprogram
        type, the aspect is determined by the setting for the innermost
@@ -183,9 +224,7 @@ Add after 9.5(17/3):
 
        A subprogram shall be nonblocking if it overrides a nonblocking
        dispatching operation. An entry shall not implement a
-       nonblocking procedure. In an Access attribute_reference for a
-       nonblocking access-to-subprogram type, the subprogram denoted by
-       the prefix shall be nonblocking.
+       nonblocking procedure.
 
          AARM Discussion: Rules elsewhere in the standard (4.6 and 3.10.2)
          ensure that access-to-subprogram conversion and the Access attribute
@@ -202,8 +241,8 @@ Add after 9.5(17/3):
        In a generic instantiation:
 
         * the actual subprogram corresponding to a nonblocking formal
-          subprogram shall be nonblocking (an actual that is an entry is
-          not permitted in this case);
+          subprogram shall be nonblocking Redundant[(an actual that is an
+          entry is not permitted in this case)];
 
         * the actual type corresponding to a nonblocking formal
           access-to-subprogram type shall be nonblocking;
@@ -233,8 +272,7 @@ For a prefix S that denotes a subprogram (including a formal subprogram):
 
 S'Nonblocking
        Denotes whether subprogram S is considered nonblocking; the value
-       of this attribute is of type Boolean, Redundant[and is always
-       static].
+       of this attribute is of type Boolean.
 
        The prefix S shall statically denote a subprogram.
 
@@ -266,8 +304,7 @@ For a prefix P that denotes a package (including a formal package):
 
 P'Nonblocking
        Denotes whether package P is considered nonblocking; the value
-       of this attribute is of type Boolean, Redundant[and is always
-       static].
+       of this attribute is of type Boolean.
 
        If P denotes a formal package of a generic unit G, the value of
        P'Nonblocking is True within the body of G or within the body of a
@@ -281,7 +318,7 @@ access-to-subprogram subtypes):
 S'Nonblocking
        Denotes whether a subprogram designated by a value of type S is
        considered nonblocking; the value of this attribute is of type
-       Boolean, Redundant[and is always static].
+       Boolean.
 
 
 [Editor's note: The following is moved from 9.5.1, including the AARM notes
@@ -342,16 +379,16 @@ Delete 9.5.1(9-16, 18) and the associated AARM notes.
 
 Replace note 9.5.1(22.1/2) with:
 
-The aspect Nonblocking can be used on the definition of a protected unit in
-order to reject most attempts to use potentially blocking operations within
-the protected unit (see 9.5). The pragma Detect_Blocking may be used to
+The aspect Nonblocking can be specified True on the definition of a protected
+unit in order to reject most attempts to use potentially blocking operations
+within the protected unit (see 9.5). The pragma Detect_Blocking may be used to
 ensure that any remaining executions of potentially blocking operations
 during a protected action raise Program_Error. See H.5.
 
   AARM Discussion: The deadlock case cannot be detected at compile-time,
   so pragma Detect_Blocking is needed to give it consistent behavior.
 
-Modify 3.10.2(33/3):
+Modify 3.10.2(33/3): [Part of the definition of the Access attribute for subprograms]
 
    ...  The accessibility level of P shall not be statically deeper than that
    of S. {If S is nonblocking, P shall be nonblocking. }In addition to the
@@ -359,28 +396,9 @@ Modify 3.10.2(33/3):
    {these rules apply}[this rule applies] also in the private part of an
   instance of a generic unit.
 
-Add after 4.5(9): [General rules for predefined operators]
-
-   Predefined operators other than "=" for record types are nonblocking; the
-   predefined "=" operator for record types allows blocking.
-
-       AARM Reason: Record equality can be composed of operations including
-       user-defined "=" operators, which might allow blocking. We
-       can't introduce an incompatibility here, so we have to assume the worst.
-
-[Editor's note: We might be able to do better here for untagged types by
-examining the type definition, but sadly for tagged types we have to allow it
-to be blocking as some overriding might need that (and all of the overridings
-need to be the same). As such, we do not bother with the extra complexity
-of rules to allow some record equality to be nonblocking.]
-
 Add after 4.6(24.21/4): [Type conversion Legality Rules for access-to-subprogram types]
 
   * If the target type is nonblocking, the operand type shall be nonblocking.
-
-Add after 4.9(8):
-
-  * an attribute_reference whose designator is Nonblocking;
 
 Modify the AARM Note 13.1(9.d/3):
 
@@ -438,134 +456,129 @@ the contracts at once for those.
 
 The entire list of non-container units is:
 
-{{Note: I've only done part of this list; the units that don't start with Ada haven't been handled yet.}}
-
-    Ada.Assertions — 11.4.2 - Pure
-    Ada.Asynchronous_Task_Control — D.11 - Nonblocking => True
-    Ada.Calendar — 9.6 - Nonblocking => True
-    Ada.Calendar.Arithmetic — 9.6.1 - Nonblocking => True
-    Ada.Calendar.Formatting — 9.6.1 - Nonblocking => True
-    Ada.Calendar.Time_Zones — 9.6.1 - Nonblocking => True
-    Ada.Characters — A.3.1 - Pure
-    Ada.Conversions — A.3.4 - Pure
-    Ada.Handling — A.3.2 - Pure
-    Ada.Latin_1 — A.3.3 - Pure
-    Ada.Command_Line — A.15 - Nonblocking => True
-    Ada.Complex_Text_IO — G.1.3 - Nonblocking => False (** String routines)
-    Ada.Decimal — F.2 - Pure
-    Ada.Direct_IO — A.8.4 - Nonblocking => False (I/O)
-    Ada.Directories — A.16 - Nonblocking => False (I/O) - Full_Name through Compose should have Nonblocking => True (as they are just string manipulation routines).
-    Ada.Directories.Hierarchical_File_Names — A.16.1 - Nonblocking => True (these are all string manipulation routines).
-    Ada.Directories.Information — A.16 - (**** Impl def)
-    Dispatching — D.2.1
-      EDF — D.2.6
-      Non_Preemptive — D.2.4
-      Round_Robin — D.2.5
-    Dynamic_Priorities — D.5.1
-    Environment_Variables — A.17
-    Exceptions — 11.4.1
-    Execution_Time — D.14
-      Group_Budgets — D.14.2
-      Interrupts — D.14.3
-      Timers — D.14.1
-    Ada.Finalization — 7.6 - Nonblocking => False (*** user overriding)
-    Float_Text_IO — A.10.9
-    Float_Wide_Text_IO — A.11
-    Float_Wide_Wide_Text_IO — A.11
-    Integer_Text_IO — A.10.8
-    Integer_Wide_Text_IO — A.11
-    Integer_Wide_Wide_Text_IO — A.11
-    Interrupts — C.3.2
-      Names — C.3.2
-    IO_Exceptions — A.13
-    Iterator_Interfaces — 5.5.1
-    Locales — A.19
-    Numerics — A.5
-      Complex_Arrays — G.3.2
-      Complex_Elementary_Functions — G.1.2
-      Complex_Types — G.1.1
-      Discrete_Random — A.5.2
-      Elementary_Functions — A.5.1
-      Float_Random — A.5.2
-      Generic_Complex_Arrays — G.3.2
-      Generic_Complex_Elementary_Functions
-            — G.1.2
-      Generic_Complex_Types — G.1.1
-      Generic_Elementary_Functions — A.5.1
-      Generic_Real_Arrays — G.3.1
-      Real_Arrays — G.3.1
-    Real_Time — D.8
-      Timing_Events — D.15
-    Sequential_IO — A.8.1
-    Storage_IO — A.9
-    Ada.Streams — 13.13.1 - Nonblocking => False (*** user overriding)
-    Ada.Streams.Stream_IO — A.12.1 - Nonblocking => False
-    Strings — A.4.1
-      Bounded — A.4.4
-        Equal_Case_Insensitive — A.4.10
-        Hash — A.4.9
-        Hash_Case_Insensitive — A.4.9
-        Less_Case_Insensitive — A.4.10
-      Fixed — A.4.3
-        Equal_Case_Insensitive — A.4.10
-        Hash — A.4.9
-        Hash_Case_Insensitive — A.4.9
-        Less_Case_Insensitive — A.4.10
-      Equal_Case_Insensitive — A.4.10
-      Hash — A.4.9
-      Hash_Case_Insensitive — A.4.9
-      Less_Case_Insensitive — A.4.10
-      Maps — A.4.2
-        Constants — A.4.6
-      Unbounded — A.4.5
-        Equal_Case_Insensitive — A.4.10
-        Hash — A.4.9
-        Hash_Case_Insensitive — A.4.9
-        Less_Case_Insensitive — A.4.10
-      UTF_Encoding — A.4.11
-        Conversions — A.4.11
-        Strings — A.4.11
-        Wide_Strings — A.4.11
-        Wide_Wide_Strings — A.4.11
-      Wide_Bounded — A.4.7
-        Wide_Equal_Case_Insensitive
-              — A.4.7
-        Wide_Hash — A.4.7
-        Wide_Hash_Case_Insensitive — A.4.7
-      Wide_Equal_Case_Insensitive — A.4.7
-      Wide_Fixed — A.4.7
-        Wide_Equal_Case_Insensitive
-              — A.4.7
-        Wide_Hash — A.4.7
-        Wide_Hash_Case_Insensitive — A.4.7
-      Wide_Hash — A.4.7
-      Wide_Hash_Case_Insensitive — A.4.7
-      Wide_Maps — A.4.7
-        Wide_Constants — A.4.7
-      Wide_Unbounded — A.4.7
-        Wide_Equal_Case_Insensitive
-              — A.4.7
-        Wide_Hash — A.4.7
-        Wide_Hash_Case_Insensitive — A.4.7
-      Wide_Wide_Bounded — A.4.8
-        Wide_Wide_Equal_Case_Insensitive
-              — A.4.8
-        Wide_Wide_Hash — A.4.8
-        Wide_Wide_Hash_Case_Insensitive
-              — A.4.8
-      Wide_Wide_Equal_Case_Insensitive — A.4.8
-      Wide_Wide_Fixed — A.4.8
-        Wide_Wide_Equal_Case_Insensitive — A.4.8
-        Wide_Wide_Hash — A.4.8
-        Wide_Wide_Hash_Case_Insensitive — A.4.8
-      Wide_Wide_Hash — A.4.8
-      Wide_Wide_Hash_Case_Insensitive - A.4.8
-      Wide_Wide_Maps — A.4.8
-        Wide_Wide_Constants — A.4.8
-      Wide_Wide_Unbounded — A.4.8
-        Wide_Wide_Equal_Case_Insensitive — A.4.8
-        Wide_Wide_Hash — A.4.8
-        Wide_Wide_Hash_Case_Insensitive — A.4.8
+  Ada.Assertions — 11.4.2 - Pure
+  Ada.Asynchronous_Task_Control — D.11 - Nonblocking => True
+  Ada.Calendar — 9.6 - Nonblocking => True
+  Ada.Calendar.Arithmetic — 9.6.1 - Nonblocking => True
+  Ada.Calendar.Formatting — 9.6.1 - Nonblocking => True
+  Ada.Calendar.Time_Zones — 9.6.1 - Nonblocking => True
+  Ada.Characters — A.3.1 - Pure
+  Ada.Conversions — A.3.4 - Pure
+  Ada.Handling — A.3.2 - Pure
+  Ada.Latin_1 — A.3.3 - Pure
+  Ada.Command_Line — A.15 - Nonblocking => True
+  Ada.Complex_Text_IO — G.1.3 - Nonblocking => False (** String routines)
+  Ada.Decimal — F.2 - Pure
+  Ada.Direct_IO — A.8.4 - Nonblocking => False (I/O)
+  Ada.Directories — A.16 - Nonblocking => False (I/O) - Full_Name through Compose should have Nonblocking => True (as they are just string manipulation routines).
+  Ada.Directories.Hierarchical_File_Names — A.16.1 - Nonblocking => True (these are all string manipulation routines).
+  Ada.Directories.Information — A.16 - (**** Impl def)
+  Ada.Dispatching — D.2.1 - Nonblocking => False (For Yield by the second sentence of D.2.1(7/3), which should be deleted. There are no other subprograms here.)
+  Ada.Dispatching.EDF — D.2.6 - Nonblocking => False ??? -- The language doesn't say either way, but at a minimum Delay_Until_and_Set_Deadline has to be potentially blocking.
+                                        -- Since Set_Deadline causes a task dispatching point by D.2.6(19/2), it at least causes premption, so it seems to be potentially blocking as well.
+					-- Get_Deadline probably ought not be potentially blocking. Asked Alan.
+  Ada.Dispatching.Non_Preemptive — D.2.4 - Nonblocking => True -- AARM Note D.2.4(2.b/3) confirms this for Yield_to_Higher. Yield_to_Same_or_Higher is a rename, and gets the value from the original routine.
+  Ada.Dispatching.Round_Robin — D.2.5 - Nonblocking => True ??? -- No explicitly defined potentially blocking routines, and the semantics don't seem to require any. Asked Alan.
+  Ada.Dynamic_Priorities — D.5.1 - Nonblocking => True ??? -- No explicitly defined potentially blocking routines. Asked Alan.
+  Ada.Environment_Variables — A.17 - Nonblocking => True
+  Ada.Exceptions — 11.4.1 - Nonblocking => True
+  Ada.Execution_Time — D.14 - Nonblocking => True
+  Ada.Execution_Time.Group_Budgets — D.14.2 - Nonblocking => True
+  Ada.Execution_Time.Interrupts — D.14.3 - Nonblocking => True
+  Ada.Execution_Time.Timers — D.14.1 - Nonblocking => True
+  Ada.Finalization — 7.6 - Nonblocking => False (*** user overriding)
+  Ada.Float_Text_IO — A.10.9 - Nonblocking => False (** String routines)
+  Ada.Float_Wide_Text_IO — A.11 - Nonblocking => False (** String routines)
+  Ada.Float_Wide_Wide_Text_IO — A.11 - Nonblocking => False (** String routines)
+  Ada.Integer_Text_IO — A.10.8 - Nonblocking => False (** String routines)
+  Ada.Integer_Wide_Text_IO — A.11 - Nonblocking => False (** String routines)
+  Ada.Integer_Wide_Wide_Text_IO — A.11 - Nonblocking => False (** String routines)
+  Ada.Interrupts — C.3.2 - Nonblocking => True
+  Ada.Interrupts.Names — C.3.2 - (**** Impl def)
+  Ada.IO_Exceptions — A.13 - Pure
+  Ada.Iterator_Interfaces — 5.5.1 - Nonblocking => False (this declares interfaces used elsewhere, and we have to allow blocking in the
+				    -- implemented routines. This is annoying; we may have to make a separate nonblocking version for the parallel stuff)
+  Ada.Locales — A.19 - Nonblocking => True
+  Ada.Numerics — A.5 - Pure
+  Ada.Numerics.Complex_Arrays — G.3.2 - Pure
+  Ada.Numerics.Complex_Elementary_Functions — G.1.2 - Pure
+  Ada.Numerics.Complex_Types — G.1.1 - Pure
+  Ada.Numerics.Discrete_Random — A.5.2 - Nonblocking => True
+  Ada.Numerics.Elementary_Functions — A.5.1 - Pure
+  Ada.Numerics.Float_Random — A.5.2 - Nonblocking => True
+  Ada.Numerics.Generic_Complex_Arrays — G.3.2 - Nonblocking => True (generic with formal packages, but all matching instances have to have Nonblocking True)
+  Ada.Numerics.Generic_Complex_Elementary_Functions — G.1.2 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Numerics.Generic_Complex_Types — G.1.1 - Nonblocking => True (Pure but generic)
+  Ada.Numerics.Generic_Elementary_Functions — A.5.1 - Nonblocking => True (Pure but generic)
+  Ada.Numerics.Generic_Real_Arrays — G.3.1 - Nonblocking => True (Pure but generic)
+  Ada.Numerics.Real_Arrays — G.3.1 - Pure
+  Ada.Real_Time — D.8 - Nonblocking => True
+  Ada.Real_Time.Timing_Events — D.15 - Nonblocking => True (confirmed by note D.15(48/2)).
+  Ada.Sequential_IO — A.8.1 - Nonblocking => False (I/O)
+  Ada.Storage_IO — A.9 - Nonblocking => False (I/O)
+  Ada.Streams — 13.13.1 - Nonblocking => False (*** user overriding)
+  Ada.Streams.Stream_IO — A.12.1 - Nonblocking => False (I/O)
+  Ada.Strings — A.4.1 - Pure
+  Ada.Strings.Bounded — A.4.4 - Nonblocking => True
+  Ada.Strings.Bounded.Equal_Case_Insensitive — A.4.10 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Bounded.Hash — A.4.9 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Bounded.Hash_Case_Insensitive — A.4.9 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Bounded.Less_Case_Insensitive — A.4.10 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Fixed — A.4.3 - Nonblocking => True
+  Ada.Strings.Fixed.Equal_Case_Insensitive — A.4.10 - Pure (from a rename)
+  Ada.Strings.Fixed.Hash — A.4.9 - Pure
+  Ada.Strings.Fixed.Hash_Case_Insensitive — A.4.9 - Pure
+  Ada.Strings.Fixed.Less_Case_Insensitive — A.4.10 - Pure
+  Ada.Strings.Equal_Case_Insensitive — A.4.10 - Pure
+  Ada.Strings.Hash — A.4.9 - Pure
+  Ada.Strings.Hash_Case_Insensitive — A.4.9 - Pure
+  Ada.Strings.Less_Case_Insensitive — A.4.10 - Pure
+  Ada.Strings.Maps — A.4.2 - Pure
+  Ada.Strings.Maps.Constants — A.4.6 - Pure
+  Ada.Strings.Unbounded — A.4.5 - Nonblocking => True
+  Ada.Strings.Unbounded.Equal_Case_Insensitive — A.4.10 - Nonblocking => True
+  Ada.Strings.Unbounded.Hash — A.4.9 - Nonblocking => True
+  Ada.Strings.Unbounded.Hash_Case_Insensitive — A.4.9 - Nonblocking => True
+  Ada.Strings.Unbounded.Less_Case_Insensitive — A.4.10 - Nonblocking => True
+  Ada.Strings.UTF_Encoding — A.4.11 - Pure
+  Ada.Strings.UTF_Encoding.Conversions — A.4.11 - Pure
+  Ada.Strings.UTF_Encoding.Strings — A.4.11 - Pure
+  Ada.Strings.UTF_Encoding.Wide_Strings — A.4.11 - Pure
+  Ada.Strings.UTF_Encoding.Wide_Wide_Strings — A.4.11 - Pure
+  Ada.Strings.Wide_Bounded — A.4.7 - Nonblocking => True
+  Ada.Strings.Wide_Bounded.Wide_Equal_Case_Insensitive — A.4.7 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Wide_Bounded.Wide_Hash — A.4.7 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Wide_Bounded.Wide_Hash_Case_Insensitive — A.4.7 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Wide_Equal_Case_Insensitive — A.4.7 - Pure
+  Ada.Strings.Wide_Fixed — A.4.7 - Nonblocking => True
+  Ada.Strings.Wide_Fixed.Wide_Equal_Case_Insensitive — A.4.7 - Pure (from a rename)
+  Ada.Strings.Wide_Fixed Wide_Hash — A.4.7 - Pure
+  Ada.Strings.Wide_Fixed Wide_Hash_Case_Insensitive — A.4.7 - Pure
+  Ada.Strings.Wide_Hash — A.4.7 - Pure
+  Ada.Strings.Wide_Hash_Case_Insensitive — A.4.7 - Pure
+  Ada.Strings.Wide_Maps — A.4.7 - Nonblocking => True
+  Ada.Strings.Wide_Maps.Wide_Constants — A.4.7 - Nonblocking => True
+  Ada.Strings.Wide_Unbounded — A.4.7- Nonblocking => True
+  Ada.Strings.Wide_Unbounded.Wide_Equal_Case_Insensitive — A.4.7- Nonblocking => True
+  Ada.Strings.Wide_Unbounded.Wide_Hash — A.4.7- Nonblocking => True
+  Ada.Strings.Wide_Unbounded.Wide_Hash_Case_Insensitive — A.4.7- Nonblocking => True
+  Ada.Strings.Wide_Wide_Bounded — A.4.8 - Nonblocking => True
+  Ada.Strings.Wide_Wide_Bounded.Wide_Wide_Equal_Case_Insensitive — A.4.8 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Wide_Wide_Bounded.Wide_Wide_Hash — A.4.8 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Wide_Wide_Bounded.Wide_Wide_Hash_Case_Insensitive — A.4.8 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
+  Ada.Strings.Wide_Wide_Equal_Case_Insensitive — A.4.8 - Pure
+  Ada.Strings.Wide_Wide_Fixed — A.4.8 - Nonblocking => True
+  Ada.Strings.Wide_Wide_Fixed.Wide_Wide_Equal_Case_Insensitive — A.4.8 - Pure (from a renames)
+  Ada.Strings.Wide_Wide_Fixed.Wide_Wide_Hash — A.4.8 - Pure
+  Ada.Strings.Wide_Wide_Fixed.Wide_Wide_Hash_Case_Insensitive — A.4.8 - Pure
+  Ada.Strings.Wide_Wide_Hash — A.4.8 - Pure
+  Ada.Strings.Wide_Wide_Hash_Case_Insensitive - A.4.8 - Pure
+  Ada.Strings.Wide_Wide_Maps — A.4.8 - Nonblocking => True
+  Ada.Strings.Wide_Wide_Maps.Wide_Wide_Constants — A.4.8 - Nonblocking => True
+  Ada.Strings.Wide_Wide_Unbounded — A.4.8 - Nonblocking => True
+  Ada.Strings.Wide_Wide_Unbounded.Wide_Wide_Equal_Case_Insensitive — A.4.8 - Nonblocking => True
+  Ada.Strings.Wide_Wide_Unbounded.Wide_Wide_Hash — A.4.8 - Nonblocking => True
+  Ada.Strings.Wide_Wide_Unbounded.Wide_Wide_Hash_Case_Insensitive — A.4.8 - Nonblocking => True
   Ada.Synchronous_Barriers — D.10.1 - Nonblocking => True (Wait_For_Release has Nonblocking => False by D.10.1(14/3); that paragraph should be deleted).
   Ada.Synchronous_Task_Control — D.10 - Nonblocking => True (Suspend_Until_True has Nonblocking => False by D.10(10), that sentence should be deleted).
   Ada.Synchronous_Task_Control.EDF — D.10 - Nonblocking => False (by D.10(10.1/3), that sentence should be deleted.)
@@ -580,7 +593,7 @@ The entire list of non-container units is:
   Ada.Text_IO.Editing — F.3.3 - Nonblocking => False (** String routines)
   Ada.Text_IO.Text_Streams — A.12.2 - Nonblocking => False
   Ada.Text_IO.Unbounded_IO — A.10.12 - Nonblocking => False
-  Ada.Unchecked_Conversion — 13.9 - Pure
+  Ada.Unchecked_Conversion — 13.9 - Nonblocking => True (Pure but generic)
   Ada.Unchecked_Deallocate_Subpool — 13.11.5 - Nonblocking => False (*** user calls)
   Ada.Unchecked_Deallocation — 13.11.2 - Nonblocking => True
   Ada.Wide_Characters — A.3.1 - Pure
