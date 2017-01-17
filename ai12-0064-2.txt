@@ -1,4 +1,4 @@
-!standard 9.5(17/3)                                 17-01-11    AI12-0064-2/06
+!standard 9.5(17/3)                                 17-01-17    AI12-0064-2/06
 !standard 9.5.1(8)
 !standard 9.5.1(9)
 !standard 9.5.1(10)
@@ -64,13 +64,39 @@ Deleted a redundant rule about the Access attribute (it was given normatively
 in both 3.10.2 and 9.5).
 
 Finished the list of what needs to be done for non-container units. (Mostly
-adding "with Nonblocking => True").
+adding "with Nonblocking => True"). Still need to figure out the list of
+paragraph numbers (I won't do that until we're pretty sure these rules are
+right).
+
+Moved the Legality Rules out of the aspect definition (it was just getting
+really long).
+
+Added the ability to specify the Nonblocking aspect for any type. This is
+used for the aspect of the predefined operators for composite types (and
+the previous uses for access-to-subprogram types). We allow it on all types
+so that private types completed by elementary types work; but we do not
+use it in generic matching unless the formal might be composite.
 
 Moved the rules about predefined operators into the aspect definition, since
 they sometimes contradict the other rules in that section (which isn't going
-to work.)
+to work.) Elementary predefined operators are always nonblocking (this is
+important if they reimerge).
 
-]
+Added a rule that if a composite type is specified to be nonblocking, then the
+type is illegal if any of the "=" operators used to implement its predefined
+"=" allow blocking. This is a lot easier than trying to calculate that.
+
+Adopted a much more complex set of "assume-the-worst" rules for generic
+bodies. These are only needed if someone messes up the declaration of a
+generic unit (but that's likely to happen). See the discussion for examples.
+
+Nonblocking for formal parameters is always that of the actual; it no longer
+inherits from the surrounding unit. That eliminates matching in the normal
+case; matching is only necessary if the aspect is specified for the formal
+(which we allow).
+
+Changed nonblocking to an operational aspect, as we need to be able to
+specify it on partial views.]
 
 
 [Editor's note: Individual rule changes scattered throughout the Standard
@@ -106,9 +132,8 @@ Add after 9.5(17/3):
      
    For a program unit, for a task entry, for
    a formal package, formal subprogram, formal object of an anonymous
-   access-to-subprogram type, and for a named access-to-subprogram type
-   (including a formal type), the following language-defined
-   representation aspect is defined:
+   access-to-subprogram type, and for a type (including a formal type), the
+   following language-defined operational aspect is defined:
 
    Nonblocking
 
@@ -127,8 +152,13 @@ Add after 9.5(17/3):
 
        The Nonblocking aspect may be specified for all entities for
        which it is defined, except for protected operations and
-       task entries. If directly specified, the aspect_definition shall
-       be a nonblocking-static expression.
+       task entries. In particular, Nonblocking may be specified for
+       generic formal parameters. If directly specified, the
+       aspect_definition shall be a nonblocking-static expression.
+
+       [Editor's note: The explicit mention of generic formal parameters
+       here is to make it clear that such specification is intended;
+       13.1(9.4/5) does not apply to Nonblocking.]
 
        For a generic instantiation, the aspect is determined by the setting
        for the generic unit[Redundant, re-evaluated based on the actual
@@ -155,122 +185,54 @@ Add after 9.5(17/3):
          individual rules for these cases, but there were already many
          of them, and this solution avoids the need for extra rules.
 
-       For a predefined operator of an elementary type. and for the
-       predefined ordering operators of an array type, the value of the
-       aspect is True. For predefined equality operators of composite types,
-       the value of the aspect is False.
+       For a predefined operator of an elementary type the value of the
+       aspect is True. For a predefined operator of a composite type, the
+       value of the aspect is determined by the value of the aspect for
+       the type.
 
-          AARM Reason: Record equality can be composed of operations including
-          user-defined "=" operators, which might allow blocking. Array
-          equality might use some record equality. We can't introduce an
-          incompatibility here, so we have to assume the worst.
+          AARM Reason: Predefined operators of elementary types can never
+          include any potentially blocking operations, so we want them to
+          declare that. Record equality can be composed of operations
+          including user-defined "=" operators, which might allow blocking.
+          Array equality might use some record equality. So we have to
+          have the possibility of allowing blocking for them. We don't just
+          copy the nonblocking aspect of the type, as someone could declare
+          an elementary type to allow blocking, but we don't want to have
+          worry about generic matching, so the operators are handled separately.
+          In addition, aspects of subprograms can be view-specific, while
+          aspects of types cannot be view specific (see 13.1.1); thus in order
+          to handle private types completed by elementary types, we need to
+          have this rule apply to the operators, not the types.
 
-[Editor's note: We might be able to do better here for untagged types (inc.
-arrays) by examining the type definition, but sadly for tagged types we have
-to allow it to be blocking as some overriding might need that (and all of the
-overridings need to be the same). As such, we do not bother with the extra
-complexity of rules to allow some record equality to be nonblocking.]
+       For a full type declaration that has a partial view, the value of the
+       aspect is the same as that of the partial view.
 
-** ARG wants this changed, but how??? Note that this says that the "=" of a
-partial view has the value False, and the "=" of a completing elementarary
-type has True, which isn't going to work.
-         
-       For any other program unit, formal package,
-       formal subprogram, formal object, or (formal) access-to-subprogram
-       type, the aspect is determined by the setting for the innermost
-       program unit enclosing the entity.
+          AARM Reason: Type aspects are never view-specific; they always have
+          the same value for all views.
+
+       For a formal type, formal package, or formal subprogram,
+       the aspect is that of the actual type, package, or subprogram.
+
+          AARM Reason: This means that Nonblocking matching for an instance
+          is only necessary when the aspect is explicitly specified.
+
+       For any other program unit, type, or formal object, the aspect is
+       determined by the setting for the innermost program unit enclosing the
+       entity.
+
+          [Editor's note: Formal objects are here since objects don't have
+          the aspect in general, only in this specific case.]
 
        If not specified for a library unit, the default is True if the
        library unit is declared pure and is not a generic unit, and
        False otherwise.
 
-       A nonblocking program unit shall not contain, other than within
-       nested units with Nonblocking specified as False, a call on a
-       callable entity for which the Nonblocking aspect is False, nor
-       shall it contain any of the following:
+      [Editor's note: Legality Rules follow all of these other Static Semantics
+      definitions.]
 
-         * a select_statement;
-         * an accept_statement;
-         * a delay_statement;
-         * an abort_statement;
-         * task creation or activation.
+   For a prefix S that denotes a subprogram (including a formal subprogram):
 
-         AARM Ramification: Implicit calls for finalization, storage pools, and
-         the like are covered by the above prohibition. The rules above say
-         "a call", not "an explicit call". Such calls are considered statically
-         bound when that is possible, that is when the controlling object has
-         a known specific type (even if the actual implementation uses dispatching).
-
-         AARM Discussion: We don't need to specially worry about subprograms of
-         limited interfaces that are implemented by entries, as any such
-         subprogram necessarily has the value False for the Nonblocking aspect,
-         and thus is already covered by the prohibition against calling such
-         subprograms.
-
-         Similarly, we don't need to worry specially about entry calls, as they
-         will be detected by the prohibition against calls to entities with the
-         Nonblocking aspect False.
-         End AARM Discussion.
-
-       For the purposes of the above rule, an entry_body is considered
-       nonblocking if the immediately enclosing protected unit is nonblocking.
-
-         AARM Reason: An entry always allows blocking (by rule); but we want to
-         be able to compile-time check for most violations of prohibition against
-         potentially blocking operations in a protected action (see 9.5.1). We do
-         that by using the nonblocking status of the protected unit as the
-         controlling factor, and enforce that by not allowing the specification
-         of the Nonblocking aspect for any protected operation.
-
-       A subprogram shall be nonblocking if it overrides a nonblocking
-       dispatching operation. An entry shall not implement a
-       nonblocking procedure.
-
-         AARM Discussion: Rules elsewhere in the standard (4.6 and 3.10.2)
-         ensure that access-to-subprogram conversion and the Access attribute
-         enforce nonblocking.
-
-         AARM Ramification: A nonblocking subprogram can override one that
-         allows blocking, but the reverse is illegal. Thus one can declare
-         a Finalize subprogram to be nonblocking, even though it overrides a
-         routine that allows blocking. (This works as a nonblocking subprogram
-         allows a strict subset of the operations allowed in allows blocking
-         subprograms, so calling such a subprogram as if it allows blocking
-         -- as is necessary in a dispatching call -- is harmless.)
-
-       In a generic instantiation:
-
-        * the actual subprogram corresponding to a nonblocking formal
-          subprogram shall be nonblocking Redundant[(an actual that is an
-          entry is not permitted in this case)];
-
-        * the actual type corresponding to a nonblocking formal
-          access-to-subprogram type shall be nonblocking;
-
-        * the actual object corresponding to a formal object of a
-          nonblocking access-to-subprogram type shall be of a nonblocking
-          access-to-subprogram type;
-
-        * the actual instance corresponding to a nonblocking formal package
-          shall be nonblocking.
-
-       In addition to the places where Legality Rules normally apply
-       (see 12.3), the above rules apply also in the private part of an
-       instance of a generic unit.
-
-       AARM Ramification: For a generic formal parameter to be nonblocking
-       (thus, for these rules to apply), either it or some enclosing
-       unit has to explicitly specify aspect Nonblocking to be True.
-       In particular, these rules do not apply when it or some enclosing unit
-       specifies aspect Nonblocking to be an expression involving attribute
-       Nonblocking of a generic formal parameter (see below). However, in
-       such a case, these rules do apply in the instance of the specification
-       of the generic unit (the normal re-checking is needed). For instance,
-       the body of an expression function might make a prohibited call.
-
-For a prefix S that denotes a subprogram (including a formal subprogram):
-
-S'Nonblocking
+   S'Nonblocking
        Denotes whether subprogram S is considered nonblocking; the value
        of this attribute is of type Boolean.
 
@@ -281,91 +243,246 @@ S'Nonblocking
          use in aspect specifications, we don't want any evaluation, as it
          would happen at some freezing point.
 
-       If S denotes a formal subprogram of a generic unit G, the value of
-       S'Nonblocking is True within the body of G or within the body of a
-       generic unit declared within the declarative region of G, and False
-       otherwise. Otherwise, S'Nonblocking returns the value of the
-       Nonblocking aspect of S.
+       If S denotes a formal subprogram of a generic unit, the value of
+       S'Nonblocking is False. Otherwise, S'Nonblocking returns the value of
+       the Nonblocking aspect of S.
 
-         AARM Reason: Inside the generic body of G (and the bodies of generic
-         child units of G), we assume the worst about S'Nonblocking, so we
-         enforce the nonblocking restrictions on entities that use it to define
-         their own nonblocking aspect. In the specification of G, we
-         assume-the-best and expect the Legality Rules (all of them) to be
-         rechecked in the instance. This does not impose any requirement on
-         the formal subprogram (that can be done by specifying the value of the
-         aspect).
+         AARM Reason: We give the aspect a value in order to make
+         assume-the-best checks in a generic specification and expect the
+         Legality Rules (all of them) to be rechecked in the instance. We have
+         separate assume-the-worst checks for a generic body. This does not
+         impose any requirement on the formal subprogram (that can be done by
+         specifying the value of the aspect).
 
          AARM To Be Honest: In an instance, S'Nonblocking returns the value
          of the nonblocking aspect of the actual subprogram, even if referenced
          through the name of the formal.
 
-For a prefix P that denotes a package (including a formal package):
+   For a prefix P that denotes a package (including a formal package):
 
-P'Nonblocking
+   P'Nonblocking
        Denotes whether package P is considered nonblocking; the value
        of this attribute is of type Boolean.
 
-       If P denotes a formal package of a generic unit G, the value of
-       P'Nonblocking is True within the body of G or within the body of a
-       generic unit declared within the declarative region of G, and False
-       otherwise. Otherwise, P'Nonblocking returns the value of the
-       Nonblocking aspect of P.
+       If P denotes a formal package of a generic unit, the value of
+       P'Nonblocking is False. Otherwise, P'Nonblocking returns
+       the value of the Nonblocking aspect of P.
 
-For a prefix S that denotes an access-to-subprogram subtype (including formal
-access-to-subprogram subtypes):
+   For a prefix S that denotes a subtype (including formal subtypes):
 
-S'Nonblocking
-       Denotes whether a subprogram designated by a value of type S is
-       considered nonblocking; the value of this attribute is of type
-       Boolean.
+   S'Nonblocking
+       Denotes whether predefined operators (and in the case of
+       access-to-subprogram subtypes) a subprogram designated by a value of
+       type S are considered nonblocking; the value of this attribute is of
+       type Boolean.
 
+       If S denotes a formal subtype of a generic unit, the value of
+       S'Nonblocking is False. Otherwise, S'Nonblocking returns
+       the value of the Nonblocking aspect of S.
 
-[Editor's note: The following is moved from 9.5.1, including the AARM notes
-with minimal changes. The entry_call_statement rule had been previously
-identified as needing a change (it's really broken, having nothing specifically
-to do with this AI).]
+   [Editor's note: The following is moved from 9.5.1, including the AARM notes
+   with minimal changes. The entry_call_statement rule had been previously
+   identified as needing a change (it's really broken, having nothing specifically
+   to do with this AI).]
 
-The following are defined to be *potentially blocking* operations:
+   The following are defined to be *potentially blocking* operations:
 
-  AARM Reason: The primary purpose of these rules is to define what operations
-  are not allowed in a protected operation (blocking is not allowed). Some of
-  these operations are not directly blocking. However, they are still treated
-  as potentially blocking, because allowing them in a protected action might
-  impose an undesirable implementation burden.
+     AARM Reason: The primary purpose of these rules is to define what operations
+     are not allowed in a protected operation (blocking is not allowed). Some of
+     these operations are not directly blocking. However, they are still treated
+     as potentially blocking, because allowing them in a protected action might
+     impose an undesirable implementation burden.
 
-  * a select_statement;
-  * an accept_statement;
-  * an entry_call_statement, or a call on a procedure that
-    renames or is implemented by an entry;
-  * a delay_statement;
-  * an abort_statement;
-  * task creation or activation;
-  * an external call on a protected subprogram (or an external requeue) with
-    the same target object as that of the protected action;
+     * a select_statement;
+     * an accept_statement;
+     * an entry_call_statement, or a call on a procedure that
+       renames or is implemented by an entry;
+     * a delay_statement;
+     * an abort_statement;
+     * task creation or activation;
+     * an external call on a protected subprogram (or an external requeue)
+       with the same target object as that of the protected action;
 
-  AARM Reason: This is really a deadlocking call, rather than a blocking call,
-  but we include it in this list for simplicity.
+     AARM Reason: This is really a deadlocking call, rather than a blocking
+     call, but we include it in this list for simplicity.
 
-  * a call on a subprogram whose body contains a potentially blocking operation.
+     * a call on a subprogram whose body contains a potentially blocking
+       operation.
 
-  AARM Reason: This allows an implementation to check and raise Program_Error as
-  soon as a subprogram is called, rather than waiting to find out whether it
-  actually reaches the potentially blocking operation.
+     AARM Reason: This allows an implementation to check and raise Program_Error
+     as soon as a subprogram is called, rather than waiting to find out whether
+     it actually reaches the potentially blocking operation.
 
-[Editor's notes: End mostly unchanged text. I considered trying to unify
-Nonblocking and potentially blocking further, but
-that seemed messy and error-prone. One could imagine replacing the last rule
-with "a call on a subprogram with Nonblocking = False", but that would expose
-a lot of existing code to a Bounded Error (since the default for Nonblocking
-is False, and that has to be the case for compatibility).]
+   [Editor's notes: End mostly unchanged text. I considered trying to unify
+   Nonblocking and potentially blocking further, but that seemed messy and
+   error-prone. One could imagine replacing the last rule with "a call
+   on a subprogram with Nonblocking = False", but that would expose a lot of
+   existing code to a Bounded Error (since the default for Nonblocking
+   is False, and that has to be the case for compatibility).]
 
-Language-defined subprograms for which the Nonblocking aspect has the value
-False [Redundant: (whether explicitly or by inheritance)] are potentially
-blocking.
+   Language-defined subprograms for which the Nonblocking aspect has the value
+   False [Redundant: (whether explicitly or by inheritance)] are potentially
+   blocking.
 
 [Editor's note: This is what remains of 9.5.1(18). The old definition should be
 reflected in the aspect values for language-defined routines.]
+
+   Legality Rules
+
+   A nonblocking program unit shall not contain, other than within
+   nested units with Nonblocking specified as False, a call on a
+   callable entity for which the Nonblocking aspect is False, nor
+   shall it contain any of the following:
+
+      * a select_statement;
+      * an accept_statement;
+      * a delay_statement;
+      * an abort_statement;
+      * task creation or activation.
+
+      AARM Ramification: Implicit calls for finalization, storage pools, and
+      the like are covered by the above prohibition. The rules above say
+      "a call", not "an explicit call". Such calls are considered statically
+      bound when that is possible, that is when the controlling object has
+      a known specific type (even if the actual implementation uses dispatching).
+
+      AARM Discussion: We don't need to specially worry about subprograms of
+      limited interfaces that are implemented by entries, as any such
+      subprogram necessarily has the value False for the Nonblocking aspect,
+      and thus is already covered by the prohibition against calling such
+      subprograms.
+
+      Similarly, we don't need to worry specially about entry calls, as they
+      will be detected by the prohibition against calls to entities with the
+      Nonblocking aspect False.
+      End AARM Discussion.
+
+   For the purposes of the above rule, an entry_body is considered
+   nonblocking if the immediately enclosing protected unit is nonblocking.
+
+      AARM Reason: An entry always allows blocking (by rule); but we want to
+      be able to compile-time check for most violations of prohibition against
+      potentially blocking operations in a protected action (see 9.5.1). We do
+      that by using the nonblocking status of the protected unit as the
+      controlling factor, and enforce that by not allowing the specification
+      of the Nonblocking aspect for any protected operation.
+
+   A subprogram shall be nonblocking if it overrides a nonblocking
+   dispatching operation. An entry shall not implement a
+   nonblocking procedure.
+
+      AARM Discussion: Rules elsewhere in the standard (4.6 and 3.10.2)
+      ensure that access-to-subprogram conversion and the Access attribute
+      enforce nonblocking.
+
+      AARM Ramification: A nonblocking subprogram can override one that
+      allows blocking, but the reverse is illegal. Thus one can declare
+      a Finalize subprogram to be nonblocking, even though it overrides a
+      routine that allows blocking. (This works as a nonblocking subprogram
+      allows a strict subset of the operations allowed in allows blocking
+      subprograms, so calling such a subprogram as if it allows blocking
+      -- as is necessary in a dispatching call -- is harmless.)
+
+   It is illegal to specify aspect Nonblocking for the full view of a type
+   that has a partial view.
+
+      AARM Ramification: The aspect should be specified on the partial view
+      for such a type. This is necessary to prevent the predefined equality
+      operator from being nonblocking in the partial view and allowing
+      blocking in the full view.
+
+   If prefix of a Nonblocking attribute reference denotes a generic unit G
+   or an entity declared in a generic unit G, the reference shall occur in
+   the declarative region of G.
+
+      AARM Reason: We want the value of Nonblocking attributes to be static
+      so long as they occur outside of any generic unit. The Nonblocking
+      aspect of a generic unit will often depend on the actual parameters
+      of the unit, so it cannot be static (or have any well-defined value).
+
+      AARM Ramification: There is no such restriction on instances of
+      generic units.
+
+   The predefined equality operator for a composite type is illegal if it is
+   nonblocking and any primitive or predefined "=" for any component type
+   allows blocking.
+
+      AARM Ramification: This applies to both record and array "=".
+
+   In a generic instantiation:
+
+      * the actual subprogram corresponding to a nonblocking formal
+        subprogram shall be nonblocking Redundant[(an actual that is an
+        entry is not permitted in this case)];
+
+      * the actual type corresponding to a nonblocking formal
+        private, derived, array, or access-to-subprogram type shall
+        be nonblocking;
+
+        AARM Ramification: We do not require matching for formal
+        scalar or access-to-object types, as their predefined operators are
+        always nonblocking (and they reimerge in the generic unit) -- the
+        nonblocking status of the type has no impact.
+
+      * the actual object corresponding to a formal object of a
+        nonblocking access-to-subprogram type shall be of a nonblocking
+        access-to-subprogram type;
+
+      * the actual instance corresponding to a nonblocking formal package
+        shall be nonblocking.
+
+    In addition to the places where Legality Rules normally apply
+    (see 12.3), the above rules apply also in the private part of an
+    instance of a generic unit.
+
+    AARM Ramification: For a generic formal parameter to be nonblocking
+    (thus, for these rules to apply), either it or some enclosing
+    unit has to explicitly specify aspect Nonblocking to be True.
+    In particular, these rules do not apply when it or some enclosing unit
+    specifies aspect Nonblocking to be an expression involving attribute
+    Nonblocking of a generic formal parameter. However, in
+    such a case, these rules do apply in the instance of the specification
+    of the generic unit (the normal re-checking is needed). For instance,
+    the body of an expression function might make a prohibited call.
+
+    A program unit P declared inside of a generic body is considered nonblocking
+    for the purposes of checking the restrictions on a nonblocking unit unless
+    the value of its Nonblocking aspect is statically False. For the purposes of
+    checks in P, a call to a subprogram is considered to allow blocking
+    unless:
+       * the value of its Nonblocking aspect is statically True, or
+       * its Nonblocking aspect conforms exactly to that of P, or some part of
+         the aspect of P that is combined with the remainder of the aspect of
+         P by one or more "and" or "and then" operations.
+    For the purposes of the above matching, an aspect which has the value of
+    the actual aspect is considered to be a Nonblocking attribute reference for
+    the associated formal entity.
+
+    AARM Ramification: That is, if the aspect of the program unit is specified
+    (directly or via inheritance) with any non-static Nonblocking aspects, it
+    is considered to be a nonblocking program unit for the purposes of making
+    checks. This is a typical "assume-the-worst" rule.
+
+    AARM Reason: The second part allows calls on subprograms with Nonblocking
+    aspects of Formal'Nonblocking, so long as the Nonblocking aspect of P is 
+    contains some formula that contains Formal'Nonblocking combined with "and".
+    This ensures that P will always allow blocking if the actual for Formal
+    turns out to allow blocking.
+
+    Without this rule, we'd allow calls on formals in any body subprogram,
+    even if the subprogram did not include the formal in its Nonblocking
+    aspect. For instance:
+
+    procedure Blah with Formal1'Blocking is
+    begin
+       Formal2;
+    end Blah;
+  
+    If Formal1 is nonblocking and Formal2 allows blocking, then we'd have a
+    nonblocking routine calling a routine that might block. That has to be
+    prevented.
+    End AARM Reason.
+
 
 Modify 9.5.1(8):
 
@@ -400,6 +517,16 @@ Add after 4.6(24.21/4): [Type conversion Legality Rules for access-to-subprogram
 
   * If the target type is nonblocking, the operand type shall be nonblocking.
 
+Add after 4.9(8):
+
+  * an attribute_reference whose prefix denotes a non-generic entity that is not
+    declared in a generic unit, and whose attribute_designator is Nonblocking;
+
+[Editor's note: Any generic unit or anything declared inside of a generic unit
+makes Nonblocking nonstatic. We want non-generic Nonblocking to be static so
+that it can be used freely in defining the Nonblocking aspect for other entities,
+and so that such uses don't affect the generic body assume-the-worst rules.]
+
 Modify the AARM Note 13.1(9.d/3):
 
    ...most aspects do not need this complexity[ (including all language-defined
@@ -410,8 +537,14 @@ can be specified on generic formal parameters, and it surely is
 language-defined. In this particular case, the rule itself is fine (it says
 "Unless otherwise specified...").]
 
-Delete "a generic_formal_parameter_declaration" from 13.1.1(17/4) [since
-we allow specifying Nonblocking on formals.]
+Add Nonblocking to the list of operational aspects in AARM  13.1(8.mm-rr/1).
+
+Remove generic_formal_parameter_declaration from the list in 13.1.1(17/5).
+
+[Editor's note: Nonblocking is allowed there, of course, so the statement will
+be clearly False. Moreover, 13.1(9.4/5) already says the same thing, with the
+needed "unless otherwise specified", so we don't need to mention formals here
+at all.]
 
 Modify the AARM Note 13.1.1(17.a/3):
 
@@ -421,7 +554,7 @@ Modify the AARM Note 13.1.1(17.a/3):
    formals; only the handful of aspects allowed on formals have such rules.
    Therefore,} the implementation will need to define actual [type] matching
    rules for any aspects allowed on formal types[; there are no default matching
-   rules defined by the language.]
+   rules defined by the language].
 
 Add after 13.13.2(37/1):
 
@@ -506,7 +639,7 @@ The entire list of non-container units is:
   Ada.Numerics.Discrete_Random — A.5.2 - Nonblocking => True
   Ada.Numerics.Elementary_Functions — A.5.1 - Pure
   Ada.Numerics.Float_Random — A.5.2 - Nonblocking => True
-  Ada.Numerics.Generic_Complex_Arrays — G.3.2 - Nonblocking => True (generic with formal packages, but all matching instances have to have Nonblocking True)
+  Ada.Numerics.Generic_Complex_Arrays — G.3.2 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
   Ada.Numerics.Generic_Complex_Elementary_Functions — G.1.2 - Nonblocking => True (generic with a formal package, but all matching instances have to have Nonblocking True)
   Ada.Numerics.Generic_Complex_Types — G.1.1 - Nonblocking => True (Pure but generic)
   Ada.Numerics.Generic_Elementary_Functions — A.5.1 - Nonblocking => True (Pure but generic)
@@ -588,8 +721,8 @@ The entire list of non-container units is:
   Ada.Task_Identification — C.7.1 - Nonblocking => True (Abort_Task has Nonblocking => False by C.7.1(16); that paragraph should be deleted)
   Ada.Task_Termination — C.7.3 - Nonblocking => True
   Ada.Text_IO — A.10.1 - Nonblocking => False (** String routines)
-  Ada.Text_IO.Bounded_IO — A.10.11 - Nonblocking => Bounded'Nonblocking (* generic)
-  Ada.Text_IO.Complex_IO — G.1.3 - Nonblocking => Complex_Types'Nonblocking (* generic)
+  Ada.Text_IO.Bounded_IO — A.10.11 - Nonblocking => False -- I/O
+  Ada.Text_IO.Complex_IO — G.1.3 - Nonblocking => False -- I/O
   Ada.Text_IO.Editing — F.3.3 - Nonblocking => False (** String routines)
   Ada.Text_IO.Text_Streams — A.12.2 - Nonblocking => False
   Ada.Text_IO.Unbounded_IO — A.10.12 - Nonblocking => False
@@ -599,18 +732,18 @@ The entire list of non-container units is:
   Ada.Wide_Characters — A.3.1 - Pure
   Ada.Wide_Characters.Handling — A.3.5 - Pure
   Ada.Wide_Text_IO — A.11 - Nonblocking => False (** String routines)
-  Ada.Wide_Text_IO.Complex_IO — G.1.4 - Nonblocking => Complex_Types'Nonblocking (* generic)
+  Ada.Wide_Text_IO.Complex_IO — G.1.4 - Nonblocking => False -- I/O
   Ada.Wide_Text_IO.Editing — F.3.4 - Nonblocking => False (** String routines)
   Ada.Wide_Text_IO.Text_Streams — A.12.3 - Nonblocking => False
-  Ada.Wide_Text_IO.Wide_Bounded_IO — A.11 - Nonblocking => Wide_Bounded'Nonblocking (* generic)
+  Ada.Wide_Text_IO.Wide_Bounded_IO — A.11 - Nonblocking => False -- I/O
   Ada.Wide_Text_IO.Wide_Unbounded_IO — A.11 - Nonblocking => False
   Ada.Wide_Wide_Characters — A.3.1 - Pure
   Ada.Wide_Wide_Characters.Handling — A.3.6 - Pure
   Ada.Wide_Wide_Text_IO — A.11 - Nonblocking => False (** String routines)
-  Ada.Wide_Wide_Text_IO.Complex_IO — G.1.4 - Nonblocking => Complex_Types'Nonblocking (* generic)
+  Ada.Wide_Wide_Text_IO.Complex_IO — G.1.4 - Nonblocking => False -- I/O
   Ada.Wide_Wide_Text_IO.Editing — F.3.4 - Nonblocking => False (** String routines)
   Ada.Wide_Wide_Text_IO.Text_Streams — A.12.3 - Nonblocking => False
-  Ada.Wide_Wide_Text_IO.Wide_Wide_Bounded_IO — A.11 - Nonblocking => Wide_Wide_Bounded'Nonblocking (* generic)
+  Ada.Wide_Wide_Text_IO.Wide_Wide_Bounded_IO — A.11 - Nonblocking => False -- I/O
   Ada.Wide_Wide_Text_IO.Wide_Wide_Unbounded_IO — A.11 - Nonblocking => False
   Interfaces — B.2 - Pure
   Interfaces.C — B.3 - Pure
@@ -764,6 +897,131 @@ flexible possible generics.
 
 ---
 
+The assume-the-worst rules are fairly complex, in that we want to allow the
+intended cases without accidentally allowing illegal situations in instances.
+Just assuming that the aspects have the value True works for the intended
+usage, but we have to detect errors in that usage.
+
+For instance, consider the following example:
+
+   generic
+      type P is private;
+      Obj : P;
+      function F (Param : P) return Boolean;
+   package Gen is
+      with Nonblocking => P'Nonblocking and F'Nonblocking;
+      procedure Proc (Param : P);
+   end Gen;
+
+   package body Gen is
+      procedure Proc (Param : P) is
+      begin
+         if P = Obj then -- (1)
+             ...
+         elsif F (P) then -- (2)
+             ...
+         end if;
+      end Proc;
+   end Gen;
+
+In this normal usage, the entire generic has a nonblocking aspect based on the
+"and" of the actuals Nonblocking status. This means that procedure Proc also
+inherits this aspect. As such, (1) and (2) should be allowed, as any legal
+instance will work. A "split" instance (where the Nonblocking aspect differ;
+for instance when P is nonblocking and F allows blocking) will end up allowing
+blocking for Proc. We avoid any check as the assume-the-worst says no check is
+needed for a call whose Nonblocking aspect exactly matches some portion of the
+aspect expression combined with "and" for the subprogram as a whole.
+
+One can also imagine a belt-and-suspenders approach where *everything* is
+specified:
+
+   generic
+      type P is private with Nonblocking => P'Nonblocking;
+      Obj : P;
+      function F (Param : P) return Boolean with Nonblocking => F'Nonblocking;
+   package Gen is
+      with Nonblocking => P'Nonblocking and F'Nonblocking;
+      procedure Proc (Param : P);
+   end Gen;
+
+This also works fine (assuming the same body), as the same matching rule applies.
+In this case, Proc will only be nonblocking if both P and F are nonblocking, so there
+can be no problem with the calls to either.
+
+Similarly, if we wanted to specify a more limited nonblocking for a different
+procedure, we could do that:
+
+   generic
+      type P is private;
+      Obj : P;
+      function F (Param : P) return Boolean;
+   package Gen2 is
+      with Nonblocking => P'Nonblocking and F'Nonblocking;
+      procedure Proc2 (Param : P) with F'Nonblocking;
+   end Gen2;
+
+   package body Gen2 is
+      procedure Proc2 (Param : P) is
+      begin
+         if F (P) then -- (3)
+             ...
+         end if;
+      end Proc;
+   end Gen;
+
+In this case, the aspect of the subprogram called at (3) (that of the actual,
+F'Nonblocking) exactly matches that of the checked subprogram (Proc2). This
+is true even if the actual for P allows blocking, since no allows blocking
+operation of P is called in Proc2.
+
+As noted before, we need the complex rules in order to avoid problems when
+someone screws up. Consider a version of the Gen2 that puts the wrong
+aspect on Proc2:
+
+   generic
+      type P is private;
+      Obj : P;
+      function F (Param : P) return Boolean;
+   package Gen2 is
+      with Nonblocking => P'Nonblocking and F'Nonblocking;
+      procedure Proc2 (Param : P) with P'Nonblocking;
+   end Gen2;
+
+Again, any combination of nonblocking aspects of the actuals would be legal.
+The rules as described make the call at (3) illegal (as the aspects don't
+conform). This is important, as the case where the actual for F allows
+blocking and the actual for P is nonblocking would lead to a nonblocking
+subprogram calling a subprogram that allows blocking. However, our
+initial rule of treating all of the attributes as having the value True would
+have allowed this case (since both Proc2 and F have values that derive from
+formal entities, just different ones). That can't be allowed.
+
+Similarly, consider mistakenly using "or" instead of "and" for the unit
+in the general case:
+
+   generic
+      type P is private;
+      Obj : P;
+      function F (Param : P) return Boolean;
+   package Gen is
+      with Nonblocking => P'Nonblocking or F'Nonblocking;
+      procedure Proc (Param : P);
+   end Gen;
+
+This wouldn't change the legality of the actuals at all. The rules as
+described would make both calls (1) and (2) illegal, as the neither of
+the aspects of the formal would conform with the aspect inherited for
+Proc (and the "and" rule for portions would not apply). Again, in the
+case where the actual for F allows blocking and the actual for P is
+nonblocking we would have a nonblocking subprogram Proc calling a
+subprogram F (2) that allows blocking, so this indeed has to be illegal.
+(The call (1) would not be a problem in that case, but reverse the
+blocking of the actuals and then (1) would be the problematic call.)
+Again, the initial rule would not have detected the problem. 
+
+---
+
 Comparing Alternative 1 with this proposal.
 
 The problem with alternative 1 is that a generic unit like the containers
@@ -828,7 +1086,8 @@ Nonblocking => False to the instance My_Hashed_Map.
 That doesn't seem good.
 
 If the default of Ada.Containers.Hashed_Map is changed to False, then the
-above works, but there no longer is any way to get a Nonblocking container.
+above works, but then there no longer is any way to get a Nonblocking
+container.
 
     package My_Hashed_Map is new
        Ada.Containers.Hashed_Map (Label, Element, Hash, "=")
@@ -900,7 +1159,9 @@ impractical for existing generics and a usage pain for new generics.
   with function "=" (Left, Right : Element_Type)
      return Boolean is <>;
   package Ada.Containers.Hashed_Maps is
-     with Nonblocking => Hash'Nonblocking and
+     with Nonblocking => Key_Type'Nonblocking and
+                         Element_Type'Nonblocking and
+                         Hash'Nonblocking and
                          Equivalent_Keys'Nonblocking and
                          Element_Equal'Nonblocking;
      pragma Preelaborate(Hashed_Maps);
