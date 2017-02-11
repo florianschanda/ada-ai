@@ -1,4 +1,4 @@
-!standard 9.5(17/3)                                 17-02-10    AI12-0064-2/08
+!standard 9.5(17/3)                                 17-02-11    AI12-0064-2/09
 !standard 9.5.1(8)
 !standard 9.5.1(9)
 !standard 9.5.1(10)
@@ -88,7 +88,7 @@ type is illegal if any of the "=" operators used to implement its predefined
 
 Nonblocking is now an expression-valued aspect, so that it makes sense inside
 of generic units. Outside of any generic, it is required to be static so that
-we can enforce Legality Rules based on an unambigious value. In order to
+we can enforce Legality Rules based on an unambiguous value. In order to
 follow the model of preconditions, the expression is given a name, the
 "blocking restriction expression". I changed as many uses as possible to use
 this name; it makes more sense than talking about the "value of the
@@ -103,7 +103,7 @@ directly specified); it no longer inherits from the surrounding unit. That
 eliminates matching checks for an instantiation in the normal case; matching
 is only necessary if the aspect is specified for the formal (which we allow).
 
-Changed nonblocking to an operational aspect, as we need to be able to
+Changed nonblocking to be an operational aspect, as we need to be able to
 specify it on partial views.]
 
 
@@ -114,28 +114,32 @@ Add after 9.5(17/3):
 
    Static Semantics
 
-   An expression is a nonblocking-static expression if it is one of the following:
+   An expression is *nonblocking-static* if it is one of the following:
       * a static expression;
       * a Nonblocking attribute reference;
       * a call to a predefined boolean logical operator and, or, xor, or not,
         where each operand is nonblocking-static;
+      * a call to a predefined equality or ordering operator, where one operand
+        is a Nonblocking attribute reference, and the other is a static
+        expression;
       * a short-circuit control form where both operands are
-        nonblocking-static; or
+        nonblocking-static;
+      * an if_expression where each condition is a static exprssion and
+        each dependent_expression is nonblocking-static;
+      * a case_expression where the selecting_expression is static and
+        each dependent_expression is nonblocking-static; or
       * a parenthesized nonblocking-static expression. 
 
    [Editor's note: This wording is intended to parallel the definition of
-    predicate-static expression (from 3.2.4(15-22/3)). Since a
-    nonblocking-static expression has to be of a Boolean type, we don't
-    need the other cases (membership, equality/ordering, and case expression).
-    We could add the equality/ordering/membership cases here if the group thinks
-    that for consistency is more important than keeping the size small.
-    (conditional expressions would need a very different rule if we wanted it;
-    the selector or conditions would have to be static and the
-    dependent_expressions would have to be nonblocking-static.]
+    predicate-static expression (from 3.2.4(15-22/3)). The membership
+    case doesn't make any sense here (T'Nonblocking in Boolean???).
+    The equality/ordering operators aren't very useful, but it seems strange
+    to leave them out. Conditional expressions have a different rule than
+    predicate-static.]
 
       AARM Reason: We define the term "nonblocking-static expression" so that
       nonblocking attribute references can be used to define the value of
-      other nonblocking aspects, but that we don't allow anything with a value
+      other nonblocking aspects, but we don't allow anything with a value
       not known at compile-time.
      
    For a program unit, for a task entry, for
@@ -149,9 +153,9 @@ Add after 9.5(17/3):
        be specified by an expression, called a *blocking restriction
        expression*. If directly specified, the aspect_definition shall be a
        nonblocking-static expression. The expected type for the expression is
-       Boolean. [Redundant: The aspect_definition can be omitted from the
-       specification of this aspect; in that case the blocking restriction
-       expression for the entity is the enumeration literal True.]
+       the predefined type Boolean. [Redundant: The aspect_definition can be
+       omitted from the specification of this aspect; in that case the blocking
+       restriction expression for the entity is the enumeration literal True.]
 
          AARM Proof: 13.1.1 allows omitting the aspect expression for
          any aspect with type Boolean; we take advantage of that here.
@@ -160,6 +164,12 @@ Add after 9.5(17/3):
          to boolean-valued aspects - we take advantage of the vagueness
          here. The basic outline of the wording is the same as used
          for preconditions.]
+
+         [Editor's 2nd note: One difference with preconditions is the we
+         specify that the type is Boolean, not "any boolean type". We did
+         this because we have matching attributes, and having attributes
+         with a different type than the aspect is weird, while attributes
+         with "any boolean type" is weirder. ]
 
        The Nonblocking aspect may be specified for all entities for
        which it is defined, except for protected operations and
@@ -172,7 +182,7 @@ Add after 9.5(17/3):
        "unless otherwise specified" of that rule.]
 
        When the blocking restriction expression is static for an entity,
-       the expression is evaluated to produce a static value for aspect.
+       the expression is evaluated to produce a static value for the aspect.
        When aspect Nonblocking is statically False for an entity, the entity
        might contain a potentially blocking operation; such an entity *allows
        blocking*. If the aspect is statically True for an entity, the entity
@@ -192,12 +202,19 @@ Add after 9.5(17/3):
          that Program_Error is raised in a deadlock situation.
 
        For a generic instantiation and entities declared within such an
-       instance, the aspect is determined by the aspect expression for the 
-       corresponding entity of generic unit, with any Nonblocking attributes
-       of the generic formal parameter replaced by the appropriate expression
-       of the corresponding actual parameters. If the aspect is directly
-       specified for an instance, the specified expression shall be
-       confirming.
+       instance, the aspect is determined by the blocking restriction
+       expression for the corresponding entity of the generic unit, with
+       any Nonblocking attributes of the generic formal parameter replaced
+       by the appropriate expression of the corresponding actual parameters.
+       If the aspect is directly specified for an instance, the specified
+       expression shall be fully conforming with the blocking restriction
+       expression of the instance (after replacement).
+
+         AARM To Be Honest: If the aspect after replacement is static,
+         conformance with the literal representing the value of the aspect
+         is sufficient. The intent is that we only allow specification
+         of a confirming aspect for an instance (but confirming itself
+         is not defined for operational aspects).
 
          AARM Ramification: If replacing Nonblocking attribute references
          makes the blocking restriction expression of an entity declared within
@@ -210,6 +227,11 @@ Add after 9.5(17/3):
        [Editor's note: I've made the re-evaluation and re-checking of the
        Nonblocking aspect explicit; while it follows from "normal" generic
        instance processing, it's unusual enough to be worth spelling out.]
+
+       [Editor's 2nd note: I tried to use "confirming" here, but confirming is
+       not defined for operational aspects. And then we would probably
+       have had to explain thata for non-static aspect expressions, that
+       "confirming is conforming". :-)]
 
        For a (protected or task) entry, the blocking restriction expression is
        the Boolean literal False.
@@ -235,7 +257,7 @@ Add after 9.5(17/3):
           Array equality might use some record equality. So we have to
           have the possibility of allowing blocking for them. We don't just
           copy the nonblocking aspect of the type, as someone could declare
-          an elementary type to allow blocking, but we don't want to have
+          an elementary type to allow blocking, but we don't want to have to
           worry about generic matching, so the operators are handled separately.
           In addition, aspects of subprograms can be view-specific, while
           aspects of types cannot be view specific (see 13.1.1); thus in order
@@ -263,7 +285,7 @@ Add after 9.5(17/3):
           actual parameters of the instance is only necessary when the aspect
           is explicitly specified for the formal type.
 
-       Unless directly specified, for a derived type, the blocking restriction
+       Unless directly specified, for a derived type the blocking restriction
        expression is that of the parent type.
 
           AARM Discussion: The expressions that can be specified for a derived
@@ -287,8 +309,8 @@ Add after 9.5(17/3):
    For a prefix S that denotes a subprogram (including a formal subprogram):
 
    S'Nonblocking
-       Denotes whether subprogram S is considered nonblocking; the value
-       of this attribute is of type Boolean.
+       Denotes whether subprogram S is considered nonblocking; the type
+       of this attribute is the predefined type Boolean.
 
        The prefix S shall statically denote a subprogram.
 
@@ -297,46 +319,38 @@ Add after 9.5(17/3):
          use in aspect specifications, we don't want any evaluation, as it
          would happen at some freezing point.
 
-       S'Nonblocking returns the value of the Nonblocking aspect of S.
-
-         AARM To Be Honest: In an instance, S'Nonblocking returns the value
-         of the nonblocking aspect of the actual subprogram, even if referenced
-         through the name of the formal. In the generic, it is a placeholder
-         for this value.
+       S'Nonblocking returns the blocking restriction expression of S.
+       When S'Nonblocking is static, the value of S'Nonblocking is the static
+       value of that expression.
 
        [Editor's note: All of these attributes are not allowed to be used
        outside of a generic unit if the prefix is that of an entity declared
-       within the generic unit; in that case, the nonblocking value depends
-       on the actuals and thus only has a defined value in an instance. This
-       is given in the Legality Rules below.]
+       within the generic unit; when the prefix is that of an entity declared
+       within a generic unit, the nonblocking value may depend on the actuals
+       and thus only has a defined static value in an instance (that is outside
+       of any generic). This is given in the Legality Rules below.]
 
    For a prefix P that denotes a package (including a formal package):
 
    P'Nonblocking
-       Denotes whether package P is considered nonblocking; the value
-       of this attribute is of type Boolean.
+       Denotes whether package P is considered nonblocking; the type
+       of this attribute is the predefined type Boolean.
 
-       P'Nonblocking returns the value of the Nonblocking aspect of P.
-
-         AARM To Be Honest: In an instance, P'Nonblocking returns the value
-         of the nonblocking aspect of the actual package, even if referenced
-         through the name of the formal. In the generic, it is a placeholder
-         for this value.
+       P'Nonblocking returns the blocking restriction expression of P.
+       When P'Nonblocking is static, the value of P'Nonblocking is the static
+       value of that expression.
 
    For a prefix S that denotes a subtype (including formal subtypes):
 
    S'Nonblocking
        Denotes whether predefined operators (and in the case of
        access-to-subprogram subtypes) a subprogram designated by a value of
-       type S are considered nonblocking; the value of this attribute is of
-       type Boolean.
+       type S are considered nonblocking; the type of this attribute is the
+       predefined type Boolean.
 
-       S'Nonblocking returns the value of the Nonblocking aspect of S.
-
-         AARM To Be Honest: In an instance, S'Nonblocking returns the value
-         of the nonblocking aspect of the actual subtype, even if referenced
-         through the name of the formal. In the generic, it is a placeholder
-         for this value.
+       S'Nonblocking returns the blocking restriction expression of S.
+       When S'Nonblocking is static, the value of S'Nonblocking is the static
+       value of that expression.
 
    [Editor's note: The following is moved from 9.5.1, including the AARM notes
    with minimal changes. The entry_call_statement rule had been previously
@@ -378,9 +392,8 @@ Add after 9.5(17/3):
    existing code to a Bounded Error (since the default for Nonblocking
    is False, and that has to be the case for compatibility).]
 
-   Language-defined subprograms for which the Nonblocking aspect has the value
-   False [Redundant: (whether explicitly or by inheritance)] are potentially
-   blocking.
+   If a language-defined subprogram allows blocking, then it is a potentially
+   blocking operation.
 
 [Editor's note: This is what remains of 9.5.1(18). The old definition should be
 reflected in the aspect values for language-defined routines.]
@@ -453,8 +466,8 @@ reflected in the aspect values for language-defined routines.]
       blocking in the full view.
 
    Aspect Nonblocking shall be specified for a derived type only if it
-   confirms the blocking restriction expression of the ancestor type or if
-   it is specified to have the Boolean literal True.
+   fully conforms to the blocking restriction expression of the ancestor type
+   or if it is specified to have the Boolean literal True.
 
       AARM Reason: Boolean-valued aspects have a similar rule (see 13.1.1),
       we want this one to work similarly.
@@ -462,12 +475,12 @@ reflected in the aspect values for language-defined routines.]
       [Editor's note: The rule in question is 13.1.1(18.1/4).]
 
    If aspect Nonblocking is specified for an entity that is not a generic
-   unit or declared inside of a generic unit, the value of the aspect shall
-   be specified by a static expression.
+   unit or declared inside of a generic unit, the aspect_definition shall
+   be a static expression.
 
-   If prefix of a Nonblocking attribute reference denotes a generic unit G
-   or an entity declared in a generic unit G, the reference shall occur in
-   the declarative region of G.
+   If the prefix of a Nonblocking attribute reference denotes a generic unit G
+   or an entity declared within a generic unit G, the reference shall occur
+   within the declarative region of G.
 
       AARM Reason: We want the value of Nonblocking attributes to be static
       so long as they occur outside of any generic unit. The Nonblocking
@@ -477,10 +490,10 @@ reflected in the aspect values for language-defined routines.]
       a generic is used outside of the generic. Note that the previous rule
       makes it illegal to use such an attribute to specify aspect Nonblocking
       outside of a generic, but we don't want to allow any other uses since
-      it does not have a value until instantiated.
+      it does not have a static value until instantiated.
 
-      AARM Ramification: There is no such restriction on instances of
-      generic units.
+      AARM Ramification: This rule does not apply to instances of generic
+      units and entities declared within them.
 
    The predefined equality operator for a composite type is illegal if it is
    nonblocking and any primitive or predefined "=" for any component type
@@ -556,7 +569,7 @@ reflected in the aspect values for language-defined routines.]
 
       AARM Reason: The second part allows calls on subprograms with Nonblocking
       aspects of Formal'Nonblocking, so long as the Nonblocking aspect of P is 
-      contains some formula that contains Formal'Nonblocking combined with "and".
+      some formula that contains Formal'Nonblocking combined with "and".
       This ensures that P will always allow blocking if the actual for Formal
       turns out to allow blocking.
 
@@ -653,8 +666,8 @@ Modify the AARM Note 13.1.1(17.a/3):
 
 Add after 13.13.2(37/1):
 
-   The default implementations of stream-oriented attributes has the value False
-   for aspect Nonblocking.
+   The aspect Nonblocking is the Boolean literal False for the default
+   implementations of stream-oriented attributes.
 
    AARM Reason: The underlying Read/Write operations are called via dispatching
    calls. Since we cannot afford any incompatibility with existing
@@ -982,7 +995,8 @@ directly on an individual protected operation.  However, we allow
 specifying Nonblocking on a protected unit to determine the setting for
 all of the enclosed protected operations.
 
-We only allow specifying a confirming value of Nonblocking on a generic
+We only allow specifying a conforming expression (essentially a
+confirming value) of Nonblocking on a generic
 instantiation; the value of the aspect comes from the generic unit
 (possibly after re-evaluating the aspect based on the values of the
 actual parameters). Specifying a different value would simply be
