@@ -1,4 +1,4 @@
-!standard 9.5(17/3)                                 17-02-11    AI12-0064-2/09
+!standard 9.5(17/3)                                 17-02-15    AI12-0064-2/10
 !standard 9.5.1(8)
 !standard 9.5.1(9)
 !standard 9.5.1(10)
@@ -50,12 +50,8 @@ used to specify a nonblocking aspect needs to be known at compile-time, so that
 it can be used to enforce Legality Rules. Thus we need this term to allow only
 static expressions and Nonblocking attributes, and combinations of them.
 
-Removed all notations that nonblocking attributes are static. I originally
-planned to leave them static other than when required to be nonstatic, but
-that proved hard to do (they can't be static when specified by an expression
-containing one or more Nonblocking attributes, even when the subprogram is
-non-generic). And it doesn't seem necessary for the rules; we just require
-them to be nonblocking-static when we need to require something.
+Nonblocking attributes are now static only if their prefix is not a generic
+unit nor declared in a generic unit.
 
 Tightened up the note 9.5.1(22.1/2) to say exactly what you have to do (specify
 the aspect to have the value True) rather than just "use" the aspect.
@@ -75,16 +71,23 @@ Added the ability to specify the Nonblocking aspect for any type. This is
 used for the aspect of the predefined operators for composite types (and
 the previous uses for access-to-subprogram types). We allow it on all types
 so that private types completed by elementary types work; but we do not
-use it in generic matching unless the formal might be composite.
+use it in generic matching unless the formal might be composite. Note that
+the Nonblocking aspect of an elementary type has no meaning at all other
+than to set the value of the corresponding attribute; it only exists so that
+private types completed by elementary types have a well-defined aspect.
+
+Changed nonblocking to be an operational aspect, as we need to be able to
+specify it on partial views.
 
 Moved the rules about predefined operators into the aspect definition, since
-they sometimes contradict the other rules in that section (which isn't going
+they sometimes contradicted the other rules in that section (which isn't going
 to work.) Elementary predefined operators are always nonblocking (this is
-important if they reimerge).
+important if they re-emerge).
 
 Added a rule that if a composite type is specified to be nonblocking, then the
 type is illegal if any of the "=" operators used to implement its predefined
-"=" allow blocking. This is a lot easier than trying to calculate that.
+"=" allow blocking. This is a lot easier way to get nonblocking "=" than trying
+to calculate that from all of the used "=" operators.
 
 Nonblocking is now an expression-valued aspect, so that it makes sense inside
 of generic units. Outside of any generic, it is required to be static so that
@@ -92,20 +95,29 @@ we can enforce Legality Rules based on an unambiguous value. In order to
 follow the model of preconditions, the expression is given a name, the
 "blocking restriction expression". I changed as many uses as possible to use
 this name; it makes more sense than talking about the "value of the
-Nonblocking aspect" when that might be a complex expression.
+Nonblocking aspect" when that might be a complex expression. (When Tucker
+reviewed the AI, he asked me to remove most of the remaining uses of "value",
+which did seem to improve the understandability.)
 
 Adopted a much more complex set of "assume-the-worst" rules for generic
 bodies. These are only needed if someone messes up the declaration of a
-generic unit (but that's likely to happen). See the discussion for examples.
+generic unit (but that's likely to happen soon or later). See the discussion
+for examples of why we need these complex rules.
 
 Nonblocking for formal parameters is always that of the actual (unless it is
 directly specified); it no longer inherits from the surrounding unit. That
 eliminates matching checks for an instantiation in the normal case; matching
 is only necessary if the aspect is specified for the formal (which we allow).
+This change causes mistakes in defining the nonblocking aspects of a generic
+unit to make that unit illegal; the previous definition meant that they usually
+made the instance illegal instead (which clearly would be harder to debug and
+rather late as well).
 
-Changed nonblocking to be an operational aspect, as we need to be able to
-specify it on partial views.]
+Tightened up the definition of the attributes, so they make more sense as
+expressions, and explicitly stated where the underlying expression is
+evaluated.]
 
+---
 
 [Editor's note: Individual rule changes scattered throughout the Standard
 follow this primary definition.]
@@ -124,7 +136,7 @@ Add after 9.5(17/3):
         expression;
       * a short-circuit control form where both operands are
         nonblocking-static;
-      * an if_expression where each condition is a static exprssion and
+      * an if_expression where each condition is a static expression and
         each dependent_expression is nonblocking-static;
       * a case_expression where the selecting_expression is static and
         each dependent_expression is nonblocking-static; or
@@ -207,31 +219,37 @@ Add after 9.5(17/3):
        any Nonblocking attributes of the generic formal parameter replaced
        by the appropriate expression of the corresponding actual parameters.
        If the aspect is directly specified for an instance, the specified
-       expression shall be fully conforming with the blocking restriction
-       expression of the instance (after replacement).
+       expression shall be static and have the same value as the blocking
+       restriction expression of the instance (after replacement).
 
-         AARM To Be Honest: If the aspect after replacement is static,
-         conformance with the literal representing the value of the aspect
-         is sufficient. The intent is that we only allow specification
-         of a confirming aspect for an instance (but confirming itself
-         is not defined for operational aspects).
+         AARM Reason: We want to allow confirming aspects for instances,
+         but nothing else. The Legality Rules of the generic body were
+         checked assuming the blocking restriction expression of the
+         generic unit, and if that is changed, the instance body might
+         make calls that allow blocking in subprograms that are nonblocking.
 
-         AARM Ramification: If replacing Nonblocking attribute references
-         makes the blocking restriction expression of an entity declared within
-         a generic instance into a static expression, the value of that
-         expression is used to recheck all of the nonblocking Legality Rules
-         in a generic specification. For instance, an instance is illegal
-         if the instance contains a nonblocking expression function that
-         calls a potentially blocking actual subprogram.
+         AARM Ramification: If the blocking restriction expression of the
+         instance is not static (if the instance is itself inside of a
+         generic unit), then the Nonblocking aspect cannot be specified
+         for the instance.
 
        [Editor's note: I've made the re-evaluation and re-checking of the
        Nonblocking aspect explicit; while it follows from "normal" generic
        instance processing, it's unusual enough to be worth spelling out.]
 
-       [Editor's 2nd note: I tried to use "confirming" here, but confirming is
-       not defined for operational aspects. And then we would probably
-       have had to explain thata for non-static aspect expressions, that
-       "confirming is conforming". :-)]
+       [Editor's 2nd note: I tried to use the term "confirming" here, but
+       confirming is not defined for operational aspects (13.1(18.2/3) only
+       applies to representation aspects). And then we would probably
+       have had to explain that for non-static aspect expressions, that
+       "conforming is confirming". :-)]
+
+       [Editor's 3rd note: We originally had a mechanism for allowing a
+       conforming expression to be given here in case the aspect expression
+       is not static, but the description seemed too complex for a feature
+       that is "nice-to-have" at best. We could have allowed no specification
+       at all for instances, but it seems useful for the reader of a instance
+       to know that the instance is nonblocking without having to look up the
+       definition of the generic unit and repeat any substitutions.]
 
        For a (protected or task) entry, the blocking restriction expression is
        the Boolean literal False.
@@ -319,9 +337,8 @@ Add after 9.5(17/3):
          use in aspect specifications, we don't want any evaluation, as it
          would happen at some freezing point.
 
-       S'Nonblocking returns the blocking restriction expression of S.
-       When S'Nonblocking is static, the value of S'Nonblocking is the static
-       value of that expression.
+       S'Nonblocking represents the blocking restriction expression of S;
+       evaluation of S'Nonblocking evaluates that expression.
 
        [Editor's note: All of these attributes are not allowed to be used
        outside of a generic unit if the prefix is that of an entity declared
@@ -336,9 +353,8 @@ Add after 9.5(17/3):
        Denotes whether package P is considered nonblocking; the type
        of this attribute is the predefined type Boolean.
 
-       P'Nonblocking returns the blocking restriction expression of P.
-       When P'Nonblocking is static, the value of P'Nonblocking is the static
-       value of that expression.
+       P'Nonblocking returns the blocking restriction expression of P;
+       evaluation of P'Nonblocking evaluates that expression.
 
    For a prefix S that denotes a subtype (including formal subtypes):
 
@@ -348,9 +364,8 @@ Add after 9.5(17/3):
        type S are considered nonblocking; the type of this attribute is the
        predefined type Boolean.
 
-       S'Nonblocking returns the blocking restriction expression of S.
-       When S'Nonblocking is static, the value of S'Nonblocking is the static
-       value of that expression.
+       S'Nonblocking represents the blocking restriction expression of S;
+       evaluation of S'Nonblocking evaluates that expression.
 
    [Editor's note: The following is moved from 9.5.1, including the AARM notes
    with minimal changes. The entry_call_statement rule had been previously
@@ -495,6 +510,11 @@ reflected in the aspect values for language-defined routines.]
       AARM Ramification: This rule does not apply to instances of generic
       units and entities declared within them.
 
+   [Editor's note: Visibility takes care of a lot of this rule, and perhaps
+   we can drop the part about "an entity declared withing a generic unit G".
+   I am just taking the certain approach of banning everything we don't want
+   to allow even if it might not be possible, lest Steve find a way.]
+
    The predefined equality operator for a composite type is illegal if it is
    nonblocking and any primitive or predefined "=" for any component type
    allows blocking.
@@ -514,7 +534,7 @@ reflected in the aspect values for language-defined routines.]
 
         AARM Ramification: We do not require matching for formal
         scalar or access-to-object types, as their predefined operators are
-        always nonblocking (and they reimerge in the generic unit) -- the
+        always nonblocking (and they re-emerge in the generic unit) -- the
         nonblocking status of the type has no impact.
 
       * the actual object corresponding to a formal object of a
@@ -915,7 +935,7 @@ for user code (as in storage pools or streams). Since all dispatching calls
 have to "assume the worst" for nonblocking, and we have to keep compatibility
 with existing Ada code, we cannot make such packages (and types) nonblocking.
 The user can explicitly mark their overriding routines Nonblocking (overridings
-of "allows blocking" subprograms can be declared noblocking, but the other way
+of "allows blocking" subprograms can be declared nonblocking, but the other way
 around is prohibited).
 
 Items marked "(*** user calls)" make calls on code that is potentially
@@ -934,7 +954,7 @@ packages that have no evidence that nonblocking was considered need to be
 explicitly potentially blocking (see e-mail of January 11, 2017, and the reply).
 In particular, Ada.Dispatching.EDF.Delay_Until_and_Set_Deadline, which includes
 the semantics of a delay statement, needs to be potentially blocking but isn't
-declared this way yet.
+declared this way in the RM.
 
 End lengthy editor's note.]
 
@@ -1027,7 +1047,7 @@ important for the containers, which we want to be primarily nonblocking.
 
 This mechanism takes some effort for the implementer of a generic unit,
 but it means that the instantiator of such a unit does not need to
-worry about nonblocking, as the most restrictive setting compatable with
+worry about nonblocking, as the most restrictive setting compatible with
 the actual subprograms will automatically be chosen.
 
 Unfortunately, this mechanism doesn't have an obvious extension to support
@@ -1211,7 +1231,7 @@ Imagine that a user has an existing user-defined Hash function:
 
 With this proposal (as outlined in the example section below), if they don't
 care about nonblocking (as is likely to be the case for recompiling existing
-code), their existing instantation will compile with no problem:
+code), their existing instantiation will compile with no problem:
 
     package My_Hashed_Map is new
        Ada.Containers.Hashed_Map (Label, Element, Hash, "=");
@@ -1236,7 +1256,7 @@ With a good error message, the correct fix should be easy to find.
 
 For alternative 1 (as described in AI12-0064-1/05), the situation is different.
 
-The original instantation of:
+The original instantiation of:
 
     package My_Hashed_Map is new
        Ada.Containers.Hashed_Map (Label, Element, Hash, "=");
@@ -1802,7 +1822,7 @@ to take effect until it is suspended and then becomes ready
 (D.2.5(11/2)). Am I right?
  
 Similarly, nothing is said for Ada.Dynamic_Priorities. That may be 
-ntentional, but it is hard for me to tell (the lack of wording 
+intentional, but it is hard for me to tell (the lack of wording 
 doesn't tell one if that was considered and intentionally omitted).
 Could you confirm (or deny) that Set_Priority was intended to be
 nonblocking? (That is, not potentially blocking.)
