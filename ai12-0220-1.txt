@@ -1,0 +1,756 @@
+!standard 6.1.1(1/4)                                  17-04-07  AI12-0220-1/01
+!standard 6.1.1(39/3)
+!class Amendment 17-04-07
+!status work item 17-04-07
+!status received 16-12-22
+!priority Low
+!difficulty Hard
+!subject Pre/Post for access-to-subprogram types
+!summary
+
+** Assigned to Steve Baird
+
+!problem
+
+** Assigned to Steve Baird
+
+!proposal
+
+(See Summary.)
+
+!wording
+
+** Assigned to Steve Baird
+
+Notes: The basic idea only needs modifying 6.1.1(1/4) to allow Pre/Post on
+access-to-subprogram types, and 6.1.1(39/3) to say that Pre/Post of the
+access type is also evaluated.
+
+We also need to consider doing the same for formal subprograms (important)
+and for renames (not important, other than to be consistent with formal
+subprograms).
+
+We also need to consider whether we need to make this available for
+closure access-to-subprogram types (aka anonymous access-to-subprogram
+parameter types), which clearly need this capability and cannot be handled
+by just declaring a named type (which has very different semantics).
+
+This latter issue may be better split to a separate-but-related AI; I'll
+leave that to Mr. Baird.
+
+!discussion
+
+** Assigned to Steve Baird
+
+We definitely need to explain here why we're not making any attempt at
+matching. It seems to me that is a job for separate tools (and style rules??),
+and not the language (from a language perspective, this is purely a dynamic
+feature so matching isn't needed for correctness).
+
+Personally, I'm not interested in doing this for access-to-subprogram types
+and not also doing it for formal subprograms, as I do not want to create
+incentives to use access-to-subprogram values (fully dynamic) instead of
+formal subprograms (with static checking for some properties) - RLB
+
+!ASIS
+
+None needed.
+
+!ACATS test
+
+ACATS B-Test and C-Tests are needed to check that the new capabilities
+are supported.
+
+
+!appendix
+
+From: Steve Baird
+Sent: Thursday, December 22, 2016  10:26 PM
+
+This message is intended to open a discussion of allowing Pre and Post aspects
+to be specified for named access-to-subprogram types.
+
+First, a disclaimer about my motivation:
+   This capability would make it easier for SPARK to add
+   access-to-subprogram types to its supported subset of Ada.
+   SPARK needs a Pre/Post contract for any supported form of call.
+   This is what got me looking at this issue in the first place.
+   However, I will try to argue for this proposal strictly from an
+   Ada (as opposed to SPARK) perspective.
+
+The benefits of this change are similar to the benefits associated with
+Pre'Class and Post'Class. Having a more-precisely specified contract is of value
+to both the "My_Subp_Ptr.all" caller and to the the
+"Some_Concrete_Subprogram'Access" evaluator in much the same way that Pre'Class
+and Post'Class are of value to both the caller in a dispatching call and to the
+declarer of an overriding subprogram. Anything that allows the programmer to
+more precisely express how a program works and the assumptions that the program
+relies upon is of value.
+
+The main idea is that the usual precondition/postcondition runtime checks are
+performed for a call to a subprogram denoted via an access-to-subprogram value
+if the Pre or Post aspects are specified for the given access type. This would
+be in addition to any checks associated with the Pre or Post aspects of the
+designated subprogram itself. If values of two different access-to-subprogram
+types designate the same subprogram, then calls through the two values may
+perform different precondition/postcondition checks.
+
+To illustrate,
+
+      pragma Assertion_Policy (Check);
+      type T1 is access procedure (X : Integer) with Pre => X mod 2 = 0;
+      type T2 is access procedure (X : Integer); -- no Pre specification
+
+      generic
+         with procedure P (X : Integer);
+      package G is
+         procedure Pp (X : Integer) renames P;
+      end G;
+
+      procedure Foo (X : Integer) is ... end;
+
+      procedure Bar is
+          Ptr1 : T1 := Foo'Access;
+          procedure Renamed (X : Integer) renames Ptr1.all;
+
+          package I1 is new G (Foo);
+          package I2 is new G (Ptr1.all);
+      begin
+          Foo (111);                      -- no precondition check
+          Ptr1.all (222);                 -- precondition check performed
+          T2 (Ptr1).all (333);            -- no precondition check
+          T2'(Ptr1.all'Access).all (444); -- no precondition check
+          Renamed (666);                  -- precondition check performed
+          I1.Pp (777);                    -- no precondition check
+          I2.Pp (888);                    -- precondition check performed
+      end;
+
+Opinions?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, December 23, 2016  10:22 AM
+
+Worth mentioning explicitly is that we have discussed this quite a bit among
+ourselves, and concluded that any sort of checks on creation or conversion of an
+access-to-subprogram value didn't make sense in the Ada context.  Clearly in the
+context of SPARK there should be static checks to prove that the precondition on
+the access-to-subprogram type implies the precondition on the subprogram itself,
+and vice-versa for postconditions, plus appropriate checks on conversion.  But
+trying to do this in the Ada context is just too complex, and would require
+proof capabilities that we have never required for an Ada compiler.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, April  5, 2017  9:12 PM
+
+I'm starting to process the older e-mail since the last time I did it. Steve
+somehow did the equivalent of a Friday afternoon news dump by posting a bunch of
+ideas just before Christmas (and the day after my last work cutoff). No one ever
+commented on these before, so I'm doing it now as I'm rereading these ideas.
+
+> This message is intended to open a discussion of allowing Pre and Post
+> aspects to be specified for named access-to-subprogram types.
+...
+> The benefits of this change are similar to the benefits associated
+> with Pre'Class and Post'Class. Having a more-precisely specified
+> contract is of value to both the "My_Subp_Ptr.all" caller and to the
+> the "Some_Concrete_Subprogram'Access" evaluator in much the same way
+> that Pre'Class and Post'Class are of value to both the caller in a
+> dispatching call and to the declarer of an overriding subprogram.
+> Anything that allows the programmer to more precisely express how a
+> program works and the assumptions that the program relies upon is of
+> value.
+...
+
+I don't have any objection to the basic idea. But I do wonder why
+access-to-subprogram is special in this regard, but renames and generic formal
+subprograms do not allow new pre/post. In the latter case in particular, it
+seems that the same dynamic would apply; else for a call inside of the generic
+unit one has less contract information than for any other call. (At least in the
+case of a renames, one can usually figure out the preconditions that apply to
+the renamed entity.)
+
+Ergo, I think any such change should apply to all three of access-to-subprogram,
+generic formal subprogram, and renames (with the same additive semantics;
+presumably SPARK would add additional requirements). Note that I've included
+renames only because we've wanted to keep an equivalence between generic formal
+parameters and the equivalent renames; this is much more important for generic
+formal parameters.
+
+Secondly, this again brings up the issue of anonymous access-to-subprogram
+parameters, which cannot have aspects and thus could not have preconditions.
+Since the semantics of anonymous access-to-subprogram types is very different
+than that of a named access-to-subprogram, one cannot just replace one by the
+other.
+
+Allowing aspect specifications in anonymous access-to-subprogram types would
+take an already terrible syntax situation and make it 100% unreadable.
+Therefore, I believe that is a non-starter.
+
+Therefore, I think we would have to reconsider again the idea of "named
+anonymous access-to-subprogram types" (with better terminology!!!), essentially
+using an aspect to select a "fat pointer" representation that includes the
+necessary static link. (AI12-0025-1 proposed allowing "Unchecked_Access" with
+such a representation in order to allow a more general version of the anonymous
+access-to-subprogram. We rather abandoned that idea years ago, but the issue of
+contracts for such types suggests re-raising it.)
+
+Anyway, some thoughts on this topic, to inform an AI to be built. BTW, Steve,
+are you volunteering to write such an AI???
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, April  5, 2017  9:36 PM
+
+> ... I don't have any objection to the basic idea. But I do wonder why
+> access-to-subprogram is special in this regard, but renames and
+> generic formal subprograms do not allow new pre/post. In the latter
+> case in particular, it seems that the same dynamic would apply; else
+> for a call inside of the generic unit one has less contract
+> information than for any other call. (At least in the case of a
+> renames, one can usually figure out the preconditions that apply to
+> the renamed entity.)
+>
+> Ergo, I think any such change should apply to all three of
+> access-to-subprogram, generic formal subprogram, and renames (with the
+> same additive semantics; presumably SPARK would add additional requirements).
+> Note that I've included renames only because we've wanted to keep an
+> equivalence between generic formal parameters and the equivalent
+> renames; this is much more important for generic formal parameters.
+
+I agree that just about the only justification, and it seems weak, for putting
+these on renames is to preserve the equivalence with generic formals.  However,
+one issue that did come up recently is there is no way to put a Pre'Class aspect
+on a dispatching operation defined by a renaming of a non-dispatching operation,
+and that seems a bit weird.
+
+> Secondly, this again brings up the issue of anonymous
+> access-to-subprogram parameters, which cannot have aspects and thus could not
+> have preconditions.
+> Since the semantics of anonymous access-to-subprogram types is very
+> different than that of a named access-to-subprogram, one cannot just
+> replace one by the other.
+>
+> Allowing aspect specifications in anonymous access-to-subprogram types
+> would make an already terrible syntax situation and make it 100% unreadable.
+> Therefore, I believe that is a non-starter.
+>
+> Therefore, I think we would have to reconsider again the idea of
+> "named anonymous access-to-subprogram types" (with better
+> terminology!!!), essentially using an aspect to select a "fat pointer"
+> representation that includes the necessary static link. (AI12-0025-1
+> proposed allowing "Unchecked_Access" with such a representation in
+> order to allow a more general version of the anonymous
+> access-to-subprogram. We rather abandoned that idea years ago, but the
+> issue of contracts for such types suggests re-raising it.)
+
+The original Ada 9X idea, before we went for anonymous access-to-object types,
+was to have "limited" access types, which did not allow assignment, and hence
+did not create dangling reference problems.  I think the same idea could be
+generalized to access-to-subprogram types.  A "limited access-to-subprogram"
+type could be used for subprogram pointers that could not be assigned, and would
+be a place for a precondition.
+
+A more radical idea is to get rid of "access" completely and talk about
+"subprogram types."  Bob Duff pushed a bit for that originally, and it should
+probably be on the table.  These would of course be of a limited type again.
+This is somewhat related to lambda expressions, aka function expressions.
+
+I think introducing limited access types would probably be less disruptive, if
+somewhat less elegant.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, April  5, 2017  10:12 PM
+
+...
+> > Therefore, I think we would have to reconsider again the idea of
+> > "named anonymous access-to-subprogram types" (with better
+> > terminology!!!), essentially using an aspect to select a "fat pointer"
+> > representation that includes the necessary static link. (AI12-0025-1
+> > proposed allowing "Unchecked_Access" with such a representation in
+> > order to allow a more general version of the anonymous
+> > access-to-subprogram. We rather abandoned that idea years ago, but
+> > the issue of contracts for such types suggests re-raising it.)
+>
+> The original Ada 9X idea, before we went for anonymous
+> access-to-object types, was to have "limited" access types, which did
+> not allow assignment, and hence did not create dangling reference
+> problems.
+
+That's what an anonymous access-to-subprogram is essentially. Making it a
+limited type causes limited elementary types, which I think causes issues with
+parameter passing (how does by-copy parameter passing work with a limited
+type?). That's why we used accessibility instead to prevent assignment.
+
+> I think the same idea could be
+> generalized to access-to-subprogram types.  A "limited
+> access-to-subprogram" type could be used for subprogram pointers that
+> could not be assigned, and would be a place for a precondition.
+
+We already have such a thing, we just stupidly tied it to anonymous-ness. I
+don't think there is any particular issue in generalizing it with syntax and/or
+an aspect. Except perhaps in coming up with a name. The obvious names "general"
+and "universal" already have been stolen, er, used for other things. I suppose
+we could get really weird and use "all":
+
+     type General_Subp is access all procedure;
+
+But of course "all" is a bit weird for a type that only allows very limited
+assignment.
+
+> A more radical idea is to get rid of "access" completely and talk
+> about "subprogram types."  Bob Duff pushed a bit for that originally,
+> and it should probably be on the table.
+> These would of course be of a limited type again.  This is somewhat
+> related to lambda expressions, aka function expressions.
+
+I've thought about that several times, too. The problem is that the semantics
+end up 98% the same as access-to-subprogram (some form), the only difference is
+removing some 'Accesses and the occasional .all from the source when using this.
+Not at all convinced that is worth the hefty load of definitional work.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, April  5, 2017  10:49 PM
+
+> ... Making it a
+> limited type causes limited elementary types, which I think causes
+> issues with parameter passing (how does by-copy parameter passing work
+> with a limited type?). That's why we used accessibility instead to
+> prevent assignment.
+
+We already have limited types that are passed by copy -- limited private types
+where the full type is elementary.  So I don't see this as such a stretch.
+
+> ... I suppose we could get really weird and use "all":
+>
+>      type General_Subp is access all procedure;
+
+    type General_Subp is limited access procedure ...;
+
+seems like the obvious syntax (to me!).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April  6, 2017  12:09 AM
+
+> > ... Making it a
+> > limited type causes limited elementary types, which I think causes
+> > issues with parameter passing (how does by-copy parameter passing
+> > work with a limited type?). That's why we used accessibility instead
+> > to prevent assignment.
+>
+> We already have limited types that are passed by copy -- limited
+> private types where the full type is elementary.  So I don't see this
+> as such a stretch.
+
+Those aren't immutably limited though...
+
+> > ... I suppose we could get really weird and use "all":
+> >
+> >      type General_Subp is access all procedure;
+>
+>     type General_Subp is limited access procedure ...;
+>
+> seems like the obvious syntax (to me!).
+
+...while anything with "limited" in the syntax IS immutably limited.
+
+Such a type can only be build-in-place, and there are no build-in-place by-copy
+parameters!
+
+You want something that doesn't have assignment_statements, but does allow all
+other sorts of assignment. That's clearly new, at least outside of limited
+private types (which are not types at all, just a view). And those cause all
+kinds of anomalies that I doubt that we want to repeat.
+
+I suppose you could say something like a "limited access" type declares a
+limited partial view of an access-to-subprogram type, and that there is also a
+non-limited anonymous full view that has assignment. Seems groddy, though.
+
+The full view of a type that is limited and still has assignment (not
+build-in-place) would definitely be a new idea semantically.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, April  6, 2017  1:29 AM
+
+>>> ... I suppose we could get really weird and use "all":
+>>>
+>>>      type General_Subp is access all procedure;
+>>
+>>     type General_Subp is limited access procedure ...;
+>>
+>> seems like the obvious syntax (to me!).
+>
+> ...while anything with "limited" in the syntax IS immutably limited.
+
+Today that is true.  But we could just as easily say that "any composite type
+that has "limited" in its syntax is immutably limited."  Or better, "any
+composite type that is immutably limited is passed by reference, and built in
+place."
+
+> Such a type can only be build-in-place, and there are no
+> build-in-place by-copy parameters!
+
+Easy enough to narrow the rules to make this work.
+
+> You want something that doesn't have assignment_statements, but does
+> allow all other sorts of assignment. That's clearly new, at least
+> outside of limited private types (which are not types at all, just a
+> view). And those cause all kinds of anomalies that I doubt that we want to repeat.
+>
+> I suppose you could say something like a "limited access" type
+> declares a limited partial view of an access-to-subprogram type, and
+> that there is also a non-limited anonymous full view that has assignment.
+> Seems groddy, though.
+>
+> The full view of a type that is limited and still has assignment (not
+> build-in-place) would definitely be a new idea semantically.
+
+It doesn't have assignment *statements*, but like other limited types (in Ada
+2012), it allows assignment as part of initialization.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Thursday, April  6, 2017  11:27 AM
+
+> But I do wonder why
+> access-to-subprogram is special in this regard, but renames and
+> generic formal subprograms do not allow new pre/post.
+
+It seems worth noting that contract information in general is in a much worse
+state for these guys than for other callable constructs because the
+result/parameter subtypes cannot be trusted.
+
+Some_Subprogram'Access requires subtype conformance.
+
+>  BTW, Steve, are you volunteering to write such an AI???
+
+I'd like some assurance first that such an AI might have some reasonable chance
+of being approved. If the group feels that this is a terrible idea even before
+diving into details, then I'd rather not try to work out those details. Subject
+to that caveat, I'd be glad to work on this AI.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April  6, 2017  4:09 PM
+
+> > But I do wonder why
+> > access-to-subprogram is special in this regard, but renames and
+> > generic formal subprograms do not allow new pre/post.
+>
+> It seems worth noting that contract information in general is in a
+> much worse state for these guys than for other callable constructs
+> because the result/parameter subtypes cannot be trusted.
+>
+> Some_Subprogram'Access requires subtype conformance.
+
+That's true, but it seems to make having contracts on these more important -
+there is no other way to enforce a contract on a formal subprogram (since
+subtypes and predicates can't be trusted).
+
+Also, in a perverse sort of way, the fact that there might be other
+preconditions on the actual than the ones you know about seems less nasty for a
+generic formal subprogram when you already know that there might be subtypes and
+predicates enforced on the call that you don't know about. That seems much more
+jarring for access-to-subprogram where that's not true.
+
+> >  BTW, Steve, are you volunteering to write such an AI???
+>
+> I'd like some assurance first that such an AI might have some
+> reasonable chance of being approved. If the group feels that this is a
+> terrible idea even before diving into details, then I'd rather not try
+> to work out those details. Subject to that caveat, I'd be glad to work
+> on this AI.
+
+I've heard no one say that they think it is a terrible idea. I'm sure not
+everyone is convinced, but a good AI writeup should fix that. :-)
+
+For me personally, work on Nonblocking and thinking about Global makes it clear
+to me that you can't think about subprogram contracts unless you handle formal
+subprograms and access-to-subprogram somehow. And the totally dynamic scheme
+that we currently have I suppose qualifies as "somehow", but only if you are
+completely uninterested in the value of contracts! A "contract" between a caller
+and a callee that the caller doesn't know about is hardly a contract at all: its
+the sort of contract that only an intellectual property lawyer could love. :-)
+:-)
+
+Allowing the specification of contracts on these entities, plus the adoption of
+"style rules" - perhaps ones that can be enforced by an outside tool - is the
+only way to bring the advantages of contracts to such features.
+
+Any sort of static checking (whether its part of the Ada language or enforced by
+outside tools) requires contracts on formal subprograms and
+access-to-subprogram. [Almost all of the complications for Nonblocking come from
+dealing with these areas.] I can't imagine that we really want to not worry
+about having the ability to make some form of static checking on these
+contracts.
+
+Ergo, I find this one of the highest priority contract AIs, probably right
+behind Global and Nonblocking. (It's higher than the others because unlike them,
+this one can get finished. :-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April  6, 2017  3:56 PM
+
+...
+> > The full view of a type that is limited and still has assignment
+> > (not
+> > build-in-place) would definitely be a new idea semantically.
+>
+> It doesn't have assignment *statements*, but like other limited types
+> (in Ada 2012), it allows assignment as part of initialization.
+
+I suspect that we both have failed to look at the forest instead of the trees.
+That is, what problem are we trying to solve and dos this solve it? I'm pretty
+sure that we ended up rejecting this idea when we did "anonymous
+access-to-subprogram" because it didn't prevent all of the things that we needed
+to prevent. The same thing happened when we tried to use limit access types to
+implement references -- in the end, it didn't help.
+
+So it doesn't really pay to talk about whether or not limited access could be
+made to work until we're sure it solves the problem. (I'm pretty sure it
+doesn't, not by itself at least.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, April  6, 2017  4:03 PM
+
+Agreed, we should focus on that first.  I suspect if we are only trying to use
+them instead of anonymous access-to-subprograms, the challenges are simpler.  In
+particular, there are no run-time accessibility checks associated with anonymous
+access-to-subprograms, and no 'Unchecked_Access.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April  6, 2017  4:55 PM
+
+...
+> > So it doesn't really pay to talk about whether or not limited access
+> > could be made to work until we're sure it solves the problem. (I'm
+> > pretty sure it doesn't, not by itself at least.)
+>
+> Agreed, we should focus on that first.  I suspect if we are only
+> trying to use them instead of anonymous access-to-subprograms, the
+> challenges are simpler.  In particular, there are no run-time
+> accessibility checks associated with anonymous access-to-subprograms,
+> and no 'Unchecked_Access.
+
+Correct. Perhaps we need to decide what precisely we want to do before spending
+effort on feature design. So let me toss out some possible goals. (For these
+exercise I'm going to call these "closure access types" in the hopes of
+decoupling the feature from any syntax. What I mean by that is the underlying
+access type that implements anonymous access-to-subprogram parameters.)
+
+   (1) Allow a separate declaration for closure access types, so that we can
+       give properties of the type as needed (contracts in particular, but
+       also possibly conventions, alignment, or anything else that can get
+       defined by an aspect);
+   (2) Allow giving a name for closure access types, so one does not have to
+       repeat a given profile in many subprogram declarations;
+   (3) Allow closure access types in more contexts (local objects?
+       components? etc.);
+   (4) Allow 'Unchecked_Access for subprograms;
+   (5) Allow/require C interoperability;
+   (6) Allow interconversion with other access-to-subprogram types.
+
+Analysis: (1) is the current issue. (2) was an issue during the development of
+"anonymous access-to-subprogram parameters" (from Erhard in particular), but we
+got hung up on terminology ("named anonymous access-to-subprogram type" is an
+obvious non-starter) and we never really looked at the issue seriously. I think
+any solution has to handle at least (1) and (2).
+
+(4) and implicitly (3) was the issue in AI12-0025-1. It's certainly something
+that can be done, but whether it is worth it is unknown.
+
+(5) I think we can leave to compilers, since by definition standard C doesn't
+have this issue (no nested subprograms). For a C implementation that allows such
+an extension (as GCC does), the implementation should and will come up with a
+solution. (1) of course will help as it would allow conventions to be specified.
+
+(6) I think is a bad idea for closure access types. It's impossible in general
+to convert *to* a closure access type from a regular access-to-subprogram type
+that doesn't have the closure information -- you don't know what it is. The
+other direction can also be problematical, as one might use a wrapper to
+"correct" the profile of some routines for a regular access-to-subprogram type
+(this is what Janus/Ada does to "hide" the generic parameter data for a shared
+generic body), but one probably isn't doing that for a closure access type (for
+Janus/Ada, the generic parameter data is part of the closure, this is similar to
+what is done for formal subprograms and for protected objects declared inside of
+a generic unit).
+
+If we're just trying to do (1) and (2), then "limited" access types don't buy us
+anything, as we use infinite accessibility to make almost all conversions
+illegal (which implicitly disallows assignment outside of parameter passing);
+we'd still need that in any case. We would have to make using the name of a
+closure access type illegal anywhere other than as the subtype of a parameter.
+This would be a weird restriction, but it's easy to describe and implement. (But
+note that some rules are probably missing because previously there was no
+declaration, meaning that some combinations were impossible. As soon as there's
+a declaration, they become possible and we have to worry about them.)
+
+If we wanted to avoid the weird restriction, and allow the name of a closure
+access type in most/all places, then making the type "limited" might help. In
+that case, the "build-in-place" restrictions would have to apply to this type
+(even though it wouldn't, officially at least, be built-in-place since it is a
+by-copy type, and it wouldn't be immutably limited). We'd need some sort of
+accessibility check on 'Access (sort of similar to the one for access
+discriminants) that the object/component can't outlive the subprogram. And we'd
+also have to prevent problematic conversions somehow; the infinite accessibility
+trick couldn't be used anymore given the need to have a real accessibility check
+on 'Access (we'd need the real level to be visible in order to be able to
+describe that check). "Limited" wouldn't be a help for that per-se (although I
+suppose we could use it as a hook to hang a Legality Rule).
+
+Anyway, my $2 worth. (Definitely more than $0.50 worth. ;-)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April  7, 2017  10:13 PM
+
+>    (1) Allow a separate declaration for closure access types, so that 
+> we can give properties of the type as needed (contracts in particular, 
+> but also possibly conventions, alignment, or anything else that can 
+> get defined by an aspect);
+>    (2) Allow giving a name for closure access types, so one does not 
+> have to repeat a given profile in many subprogram declarations;
+>    (3) Allow closure access types in more contexts (local objects?
+> components? etc.);
+>    (4) Allow 'Unchecked_Access for subprograms;
+
+In filing this mail, I spent some time thinking about these issues, and now
+have the perfect solution. ;-) Besides, actually trying to constructively talk
+about what we're trying to accomplish seems to have ended discussion
+completely, probably because it's more fun to pointlessly yell at each other...
+
+Anyway, it strikes me that a lot of the complication of accessibility checking
+comes from worrying about unlikely cases of nesting and intermediate levels of
+accessibility. In real programs, 98% of the access types are at library level,
+and almost of the rest are local (in the current scope). One can simplify
+accessibility simply into "local" and "non-local", apply nasty checks to the
+latter, and that's about it.
+
+Moreover, we don't need any checks for things that necessarily are going to
+disappear before the local scope (like parameters, locals of called routines,
+and the like). [Note that other sorts of closures: generators, lambdas, and
+the like, destroy this property and essentially make accessibility checks
+impractical. Another reason such things are inappropriate for Ada - but I
+digress.]
+
+Also recall that we need to prevent conversions to other kinds of
+access-to-types. We currently use accessibility for that, but there are two
+issues: the conventions of the subprograms might be different for the two
+kinds of type, and in some cases that insufficient information is available
+to construct the appropriate closure. Note that just banning the conversion
+is not enough, because you also need to ban the similar Obj.all'Access.
+
+So here is a very rough proposal:
+
+    Adding "all" into an access-to-subprogram type gives one a subprogram
+    closure access type. (Both the syntax and this naming isn't very
+    satisfying, hopefully someone will make better suggestions --- but I need
+    something for this writeup.) An anonymous access-to-subprogram parameter
+    type is also a subprogram closure access type.
+
+    Objects of a subprogram closure access type are divided into two groups:
+    local and non-local. The designation of an object depends on where it is
+    viewed from; thus the designation may change during the lifetime of the
+    object. Local objects of a subprogram closure access type are stand-alone
+    objects of the type that belong to the innermost-enclosing master (a
+    runtime view) and parameters of the type of calls that belong to the
+    innermost-enclosing master.
+
+    Assignments to local objects of a subprogram closure access type are
+    unrestricted. Assignments to non-local objects cannot be of 'Access of a
+    non-library level subprogram (a legality check). Moreover, assignments to
+    non-local objects include a check that the value is either null or the
+    designated subprogram is of library level (runtime check). If
+    Subp'Unchecked_Access is assigned to a subprogram closure object, the
+    subprogram is considered library level (and the program is erroneous if it
+    is called after it ceases to exist).
+
+    For the conversion of a subprogram closure access type to some other kind
+    of access type or vice versa, a check is made that the represented
+    subprogram is library-level (or that the value is null). (This is a
+    runtime check to avoid contract problems.) If the prefix of 'Access or
+    'Unchecked_Access is a dereference of an access-to-subprogram type, we
+    make the same check on the prefix of the dereference.
+
+---
+
+As far as I can tell, that's all that's required. "Local" objects always live
+longer than anything that can be put into them; once you're inside of some
+nested scope they're no longer local and checks are needed. Other objects only
+allow library-level subprograms (always safe) or null or Unchecked_Access
+(buyer beware!), or an subprogram put into them while they were local.
+
+This idea supports all of (1)..(4). Dropping (4) [that is, not supporting
+Unchecked_Access] doesn't change it at all.
+
+Note that Tucker's limited access type doesn't work for (4), since it wouldn't
+allow putting an arbitrary subprogram into a data structure (on a buyer beware
+basis, of course).
+
+It turns out that Tucker's limited access type doesn't work (completely) even
+without (4), as it would allow local allocators to stuff local subprograms into
+global data structures:
+
+      -- Library level:
+      type Clo_Sub_Ptr is access all procedure;
+      type Some_Rec is record
+          ...
+          SP : Clo_Sub_Ptr;
+      end record;
+      type SR_Ptr is access Some_Rec;
+      Root : SR_Ptr;
+
+      procedure Something is
+          Obj : Natural := 0;
+          procedure Fooey is
+          begin
+             ... do something with Obj ...
+          end Fooey;
+          Local : constant Clo_Sub_Ptr := Fooey'Access; -- Should be legal.
+      begin
+          Root := new Some_Rec'(..., SP => Fooey'Access);
+              -- This allocator is legal, even if Clo_Sub_Ptr is limited,
+              -- since Fooey'Access could be built-in-place and
+              -- meets the restrictions of 7.5.
+          ...
+      end Something;
+
+   begin
+      Something;
+      Root.SP.all; -- Uses non-existent Obj.
+   end;
+
+To prevent this, you still need some sort of accessibility check on the
+allocator. But if you have such a check, you can use it on other assignments
+as well, so there's no advantage (to me at least) in banning
+assignment_statements. (Of course, assignment statements really are only
+useful if 'Unchecked_Access is available, but why ban something for no
+reason?)
+
+Anyway, enough musings for today. I think the main thing this exercise shows
+is that it doesn't make much sense to worry about this until we've decided
+in or out for lamdbas and generators -- because either would totally destroy
+the model of this feature and would require a major redesign.
+
+****************************************************************
