@@ -1,0 +1,248 @@
+!standard 3.4(2/2)                                  17-04-14  AI12-0223-1/00
+!class Amendment 17-04-14
+!status work item 17-04-14
+!status received 17-01-11
+!priority Low
+!difficulty Hard
+!subject The co-dervation problem
+!summary
+
+** TBD.
+
+!problem
+
+The containers are tagged types, with the idea that they would support
+extension if needed. But it turns out that one can't really extend them
+sensibly. Consider what happens if you try.
+
+The obvious way to create an extension of a container would be something
+like:
+
+    package P is
+       package My_Map_Pkg is new Ada.Containers.Ordered_Maps (Positive, My_Rec);
+
+       type Map_Rec is new My_Map_Pkg.Map with private;
+
+       type Map_Rec_Cursor is new My_Map_Pkg.Cursor;
+
+       -- New and overridden operations here.
+
+    private
+       ...
+    end P;
+
+The problem is that the inherited operations are NOT the ones we want. For the
+derivation making type Map_Rec, we have inherited primitive operations on
+Map_Rec and on My_Map_Pkg.Cursor (that is, the new map and the old cursor).
+For the derivation making type Map_Rec_Cursor, we have inherited primitive
+Operations on My_Map_Pkg.Vector and on Map_Rec_Cursor (that is, the old map
+and the new cursor). That is certainly not what we want, for either type.
+
+The only workaround would be to declare all of the operations we want and then
+manually call the correct original operations, very tedious and error-prone.
+(Plus we still have all of those junk operations declared and visible, meaning
+lots of potential errors in use could go undetected.)
+
+This problem comes up anytime you have an ADT and an associated handle, with
+operations on both. For tagged types, one can mitigate the problem if the
+"handle" is a raw access type, by using an access-to-classwide type for the
+handle. But that eliminates any compile-time checking, moving everything to
+runtime checks (with the usual resulting problems - insufficient testing could
+leave a time-bomb in the code).
+
+Ada is all about compile-time checking, so there should be a way to do this
+that preserves it.
+
+!proposal
+
+The following does not work in all cases, but it is presented as a starting
+point for a solution:
+
+When one has two types that are tied together, it doesn't make sense to
+derive them separately. Therefore, we provide co-derivation, where multiple
+types are derived at once.
+
+The syntax would be:
+    type defining_identifier {, defining_identifier} is new
+       derived_type_definition {, derived_type_definition};
+
+[Note: "and" probably would have been better syntax, but since interfaces use
+that, we're stuck with ','.]
+
+For a co-derivation, the primitives inherited are those that are primitive
+on either type, and that both types appearing in the profile are replaced as
+described in 3.4. The bodies of the new routines are the original routines
+called with parameters of both types converted as needed.
+
+For the example given in the problem, that would give:
+
+    type Map_Rec, Map_Rec_Cursor is new
+       My_Map_Pkg.Map with private, My_Map_Pkg.Cursor;
+
+This is known not to work in various cases.
+
+The most important is that it doesn't make sense for dispatching. If one of
+the types is tagged (both cannot be tagged, as that would imply a type
+primitive for two tagged types, which is not allowed in Ada), then one would
+get inherited dispatching routines.
+
+For instance, with the above declaration, we'd inherit delete, which is
+defined as:
+
+   procedure Delete (Container : in out Map;
+                     Position  : in out Cursor);
+
+which would be inherited as:
+
+   procedure Delete (Container : in out Map_Rec;
+                     Position  : in out Map_Rec_Cursor);
+
+However, a dispatching call on My_Map_Pkg.Map'Class would call:
+
+   procedure Delete (Container : in out Map_Rec;
+                     Position  : in out My_Map_Pkg.Cursor);
+
+which doesn't exist.
+
+One could imagine limiting this feature to untagged types, but that doesn't
+seem to be very helpful. One could also imagine somehow banning dispatching
+from the root type to make this work, but that also seems to be a weird (and
+potentially incompatible in the case of existing code like the containers)
+restriction.
+
+Steve Baird notes that there might be issues with generic formal derived types
+causing emergence of routines that aren't declared. Probably generic matching
+could fix that. He also noted similar issues with deriving from abstract root
+types with abstract routines.
+
+!wording
+
+** TBD.
+
+!discussion
+
+An industrial Ada user reported the following:
+
+We have a "design pattern" here of handles being class-wide, when a specific
+type would be much better. Procedure X has an object of a specific type, it's
+upward converted to a class-wide type for passing as a parameter to procedure
+Y. Y downward converts it back to the specific type - indeed can only handle
+that specific type. A hole has been created where there is the potential to
+call Y with an actual of the wrong specific type, which would fail the Tag
+Check and crash with a Constraint Error.
+
+This is an example of how existing OOP practice forces users away from static
+strong typing into dynamic type checks. Better would be a "post-OOP" practice
+that uses strong static typing everywhere. (All we have to do is figure it
+out. ;-)
+
+!example
+
+(See Problem and Proposal.)
+
+!ASIS
+
+The new capabilities will need ASIS support.
+
+!ACATS test
+
+ACATS B-Test and C-Tests will be needed to check that the new capabilities
+are supported.
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, January 11, 2017  6:48 PM
+
+I mentioned this problem in an aside to Tucker, but it probably deserves a
+first-class examination.
+
+The containers are tagged types, with the idea that they would support
+extension if needed. But it turns out that one can't really extend them
+sensibly. Consider what happens if you try.
+
+The obvious way to create an extension of a container would be something
+like:
+
+    package P is
+       package My_Map_Pkg is new Ada.Containers.Ordered_Maps (Positive, My_Rec);
+
+       type Map_Rec is new My_Map_Pkg.Map with private;
+
+       type Map_Rec_Cursor is new My_Map_Pkg.Cursor;
+
+       -- New and overridden operations here.
+
+    private
+       ...
+    end P;
+
+The problem is that the inherited operations are NOT the ones we want. For the
+derivation making type Map_Rec, we have inherited primitive operations on
+Map_Rec and on My_Map_Pkg.Cursor (that is, the new map and the old cursor).
+For the derivation making type Map_Rec_Cursor, we have inherited primitive
+Operations on My_Map_Pkg.Vector and on Map_Rec_Cursor (that is, the old map
+and the new cursor). That is certainly not what we want, for either type.
+
+The only workaround would be to declare all of the operations we want and then
+manually call the correct original operations, very tedious and error-prone.
+(Plus we still have all of those junk operations declared and visible, meaning
+lots of potential errors in use could go undetected.)
+
+[Aside: I had a version of this problem in early Claw versions, when a "type
+Handle is new Dword;" caused all kinds of routines that were accidentally
+primitive on Dword to get derived. Which I found out when trying to debug some
+unrelated problem; looking at a compiler symboltable dump I realized that
+there were many unintended routines in it. I ended up moving Dword into a
+subpackage to prevent any uses of it from being primitive.]
+
+This problem comes up anytime you have an ADT and an associated handle, with
+operations on both. That seems pretty common to me, especially as the "handle"
+might just be an explicit access type that points at the original type.
+
+[Yes, this exhibit N in the long list of reasons that we should have had all
+of the container operations having a container parameter. If that had been the
+case, we'd just be losing a bit of type checking by using the first derivation
+alone, annoying but not necessarily catastrophic. It seems too late to fix
+that problem, though. Unless we want to add overloaded versions of Next and
+First and the like (we already have Reference and the like, and for Vectors,
+we have all of the index versions) -- but that's not a general solution, it
+would only help the containers.]
+
+---
+
+I once tried to work out a proposal for "co-derivation", with the intent of
+handling this problem. It has issues with dispatching, sadly. I'll present the
+idea here in the hopes that someone can think of something better.
+
+The basic idea is that the two types above have to be derived at the same
+time. It doesn't make sense to derive them separately because they're joined
+at the hip. So I proposed a co-derivation, that would look something like:
+
+    type Map_Rec, Map_Rec_Cursor is new
+       My_Map_Pkg.Map with private, My_Map_Pkg.Cursor;
+
+[Note: "and" probably would have been better syntax, but since interfaces use
+that, we're stuck with ','.]
+
+The basic idea is that the primitives inherited are those that are primitive
+on either type, and that both types appearing in the profile are replaced as
+described in 3.4. The bodies of the new routines are the original routines
+called with parameters of both types converted as needed.
+
+This works fine for untagged types, as far as I can tell (but Steve may be
+able to disprove that optimistic assumption :-).
+
+However, for tagged types, it's unclear how to deal with dispatching (since
+one of the types necessarily has to be untagged, and we don't have any
+"co-dispatching" anyway). Arguably, you don't want dispatching in this case
+(the handle would almost always be the wrong type), but that seems
+unfortunate on basic principles. (And you do want tagged types, so that you
+can use the containers and especially prefix notation.)
+
+Anyway, an idea to consider. Something seems to be needed to handle this sort
+of problem in the general case, because it is frequent and the existing
+solutions are lengthy and error-prone.
+
+****************************************************************
+
