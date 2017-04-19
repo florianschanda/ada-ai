@@ -1,0 +1,694 @@
+!standard 3.5(55.1/4)                                  17-04-18  AI12-0225-1/01
+!class binding interpretation 17-04-18
+!status work item 17-04-18
+!status received 17-03-22
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Prefix of Obj'Image
+!summary
+
+The prefix of the Image attribute can be an object or value, but it cannot
+have a universal real type.
+
+!question
+
+3.5(55.1/4) starts: "For a prefix X that denotes an object of a scalar type
+[(after any implicit dereference)], the following attributes are defined:"
+
+This rule only allows objects as the prefix of the attribute; it does not
+allow values. For instance, the following are illegal:
+
+    Limit : constant := 100;
+
+    Max : constant Natural := 100;
+
+    Put (Limit'Image); -- Error: (1)
+
+    Put (Max'Image); -- OK.
+
+    Put (Natural'(Limit)'Image); -- Error: (2)
+
+    Put (Natural'(100)'Image); -- Error: (3)
+
+    Put (Natural'(Max)'Image); -- OK.
+
+    Put (Natural(100)'Image); -- Error: (4)
+
+    Put (Natural(Max)'Image); -- Error: (5)
+
+All of (1) through (5) are currently values, so with the above wording
+they are illegal. (The prefix of an attribute is always a value conversion,
+which is a value, so it is not allowed by the current rule, as illustrated in
+(4) and (5).)
+
+Should this be changed? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Replace 3.5(55.1/4) with:
+
+For a prefix X of a scalar type other than *universal real* or *universal
+fixed*[ (after any implicit dereference)], the following attributes are
+defined:
+
+AARM Reason: We do not allow universal real or fixed types as the details
+of the result depends on the properties of the type, so a specific nominal
+subtype is needed. On the other hand, the desired string for an integer
+type does not depend upon the type, so we can allow any integer type.
+Such a type is evaluated as type root_integer (as all universal integer
+runtime operations are), so Constraint_Error may be raised if the magnitude
+of the value is too large.
+
+!discussion
+
+AI12-0124-1 implies that a value was intended as a legal prefix. It says in
+the discussion that "any expression can be wrapped in a qualification or type
+conversion in order to make it a name". For that to be work, the prefix of
+Image would have to allow values as well as objects. Thus, we repair the
+wording.
+
+---
+
+The current rules in 4.9 [4.9(7)] do not make any Image attributes static;
+we do not propose to change that here (or in AI12-0201-1). We mention it here
+so it doesn't surprise anyone, and for the next item.
+
+---
+
+The question of whether to allow universal values as the prefix of Image is
+interesting. The format of real'Image depends on the properties of the type
+(specifically the digits or aft of the type). Thus we cannot allow universal
+real prefixes.
+
+On the other hand, the format of an integer value does not depend upon the
+type. Thus, the result is well-defined for all integer types (including
+universal integer). However, we do have to worry about the range of the
+operation. We don't want to force compilers to support arbitrary-sized values
+at runtime (especially as Image is never static as noted above).
+
+** TBD: Since universal integer expressions are evaluated as if they belong to
+type root_integer, we don't need special rules about the range;
+Constraint_Error may be raised if the value is outside of the range
+System.Min_Int .. System.Max_Int. ** End TBD: 8.6(29) does NOT have the needed
+effect; we may decide to change it or may decide to fix things here.
+
+---
+
+Note that the worst case of the object form:
+    Natural'(14)'Image
+is only one character longer than the similar subtype form:
+    Natural'Image(14)
+
+So it is possible that some style guides (and programmers) will recommend
+consistently using the object/value form over the subtype form. We don't want
+the frustrate such usages with arbitrary restrictions on the use of 'Image.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, March 22, 2017  7:03 PM
+
+3.5(55.1/4) starts: "For a prefix X that denotes an object of a scalar type
+[(after any implicit dereference)], the following attributes are defined:"
+
+I've been having a lusty debate with myself as to whether or not we intended
+that exact rule. (This matters in the ACATS test I'm constructing.) The AI
+discussion notes:
+
+Note that the prefix of an attribute has to be a name, but any expression can be
+wrapped in a qualification or type conversion in order to make it a name. (Of
+course, in that case, the advantage of not having to know the subtype name has
+disappeared.)
+
+That seems to imply that we expected (almost) any expression to be usable as the
+prefix of Image, but that we expected some of them to be useless.
+
+The problem is (of course) that not all expressions are objects, so some
+expressions that are values but not objects aren't allowed  by the current
+wording:
+
+    Limit : constant := 100;
+
+    Max : constant Natural := 100;
+
+    Put (Limit'Image); -- Illegal (1)
+
+    Put (Max'Image); -- OK.
+
+    Put (Natural'(Limit)'Image); -- Illegal (2)
+
+    Put (Natural'(100)'Image); -- Illegal (3)
+
+    Put (Natural'(Max)'Image); -- OK.
+
+    Put (Natural(100)'Image); -- Illegal (4)
+
+    Put (Natural(Max)'Image); -- Illegal (5)
+
+Case (1) has to be illegal as it doesn't identify a unique subtype for the
+attribute. Case (2) and (3) are only illegal, however, because they represent
+values, not objects - there's no problem finding the subtype. Similarly, since a
+type conversion appearing as a prefix is a value conversion, it always
+represents a value and thus both (4) and (5) are illegal.
+
+The qualification of Max is an object (by 4.7(3.1/3)), so that is OK.
+
+All of the above are legal in the traditional form:
+    Put (Natural'Image(Limit));
+so it's seems inconsistent that they're not allowed here.
+
+OTOH, the primary advantage of the object form is to avoid having to read/write
+the subtype name, so using a prefix that necessarily contains the subtype name
+seems to eliminate that advantage. I could imagine that we were not concerned
+about supporting such forms, as their main value seems to be in making
+obfuscated Ada contests more enjoyable. :-)
+
+OT3H, The !discussion quoted above mentions using a type conversion as a
+possible technique, but that's always illegal with the wording given. So it
+would seem that the author (that would have been me) had missed a consequence of
+the wording.
+
+OT4H, this whole discussion seems like angels on a pinhead. There doesn't seem
+to be any attributes that explicitly work on values; the closest I can find is
+A'First, which says "For a prefix A of an array type (after any implicit
+dereference)". So the correct wording isn't obvious. The current wording was
+lifted from X'Valid (which probably explains why it is object-centric).
+
+So, what do you think? Which one of the following should the wording have been?
+ (A) For a prefix X of a scalar type[ (after any implicit dereference)], the
+     following attributes are defined:
+ (B) For a prefix X that denotes an object or value of a scalar type[ (after any
+     implicit dereference)], the following attributes are defined:
+ (C) For a prefix X that denotes an object of a scalar type[ (after any implicit
+     dereference)], the following attributes are defined:
+
+P.S. I was going to write this B-Test as is an easy companion to the C-Test and
+it would check off a box in our coverage documents. Which I guess goes to show
+that nothing is easy when it comes to Ada...
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, March 22, 2017  7:16 PM
+
+...
+>     Limit : constant := 100;
+>
+...
+>     Put (Limit'Image); -- Illegal (1)
+>
+...
+> Case (1) has to be illegal as it doesn't identify a unique subtype for
+> the attribute.
+
+I should note that this could also cause another "pinheads on an angel" ;-)
+discussion: are the scalar attributes defined for types "universal integer" and
+"universal real"?? We didn't have the decide that for earlier versions of Ada,
+as the universal types don't have names and thus can't be prefixes. However,
+here they're implicit, and "Limit'Image" should be legal if-and-only-if Image is
+defined for universal integer.
+
+If we change the wording as noted in the previous question, then we also have to
+decide if we expect (1) above to be legal as well. (That potentially means a
+run-time effect, although I can't think of any reason for the largest integer
+type not to be supported anyway).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, March 22, 2017  7:30 PM
+
+> 3.5(55.1/4) starts: "For a prefix X that denotes an object of a scalar
+> type [(after any implicit dereference)], the following attributes are defined:"
+>
+> I've been having a lusty debate with myself as to whether or not we
+> intended that exact rule. ...
+
+I certainly have no problem with changing this to say "denotes an object or
+value..."
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, March 22, 2017  7:54 PM
+
+(1) With that wording, or more similar to the wording used for array attributes
+    (which seems to be the closest case)?
+(2) Is the attribute defined for universal integer? Universal real? In the
+    latter case, which is the value of S'Digits or S'Aft to use?? Do we need to
+    explicitly answer this question in the AARM? (It doesn't seem obvious to
+    me.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, March 22, 2017  8:17 PM
+
+Ugh.  Perhaps "prefix of a scalar type other than a universal real type" (i.e.
+no Universal_Fixed or Universal_Real).  This will allow X'Length'Image, but not
+T'Delta'Image, which seems fine.  Hmmm, even Universal_Integer is a pain, if
+someone writes something like String'Size'Image.  So probably disallow all
+universal types.  That way there is no need for implementations to do any
+heroics to handle gigantic or super-precise values.  Final suggestion: "prefix
+of a scalar type other than a universal type"
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, March 22, 2017  9:46 PM
+
+That's fine by me, but I don't think that there is a problem with super-large
+integer values: Image is never static (it is not covered by 4.9(7), and
+AI12-0201-1 doesn't propose to change this -- although maybe it should have, I
+never considered Image at all with that AI - anyway, different question), and
+the evaluation of runtime universal types uses the largest available integer
+type (I thought that the RM said this somewhere, but I can't find it - but it's
+hard to imagine what else it could be). So universal integer 'Image isn't a
+problem (other than it might raise Constraint_Error for really big values).
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Thursday, March 23, 2017  4:28 AM
+
+> (1) With that wording, or more similar to the wording used for array
+> attributes (which seems to be the closest case)?
+> (2) Is the attribute defined for universal integer? Universal real? In
+> the latter case, which is the value of S'Digits or S'Aft to use?? Do
+> we need to explicitly answer this question in the AARM? (It doesn't
+> seem obvious to me.)
+
+My opinion is:
+
+Leave it as is until a real user complains. We should not waste time on features
+whose only purpose is to save a few keystrokes and where no user ever noticed
+the problem (if there is a problem at all).
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, March 23, 2017  12:13 PM
+
+I just think the distinction between objects and values is lost on many users,
+and we allow 'Last, 'First, etc., on names that denote array values, so why not
+allow 'Image on names that denote scalar values.  If anything, the compiler has
+to do *additional* checking to disallow values, which seems really silly.
+X'Image is meant to be equivalent to <type-of-X>'Image(X), and clearly in this
+latter form, X can denote a value rather than an object.  If we restrict a name
+in some context to denote an "object," it really ought to be something that
+relies on a memory cell of some sort to exist, such as 'Address, 'Size, or
+'Alignment.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, March 23, 2017  7:46 PM
+
+> I just think the distinction between objects and values is lost on
+> many users, and we allow 'Last, 'First, etc., on names that denote
+> array values, so why not allow 'Image on names that denote scalar
+> values.
+
+I tend to agree with this sentiment. Particularly the first part, because given
+the various changes in Ada 95 and Ada 2012, that distinction is lost on many Ada
+language lawyers as well. I for one can detect no reason for what is an object
+and what is a value in Ada 2012. More in a moment.
+
+> ... If anything, the compiler
+> has to do *additional* checking to disallow values, which seems really
+> silly.
+
+But you're definitely wrong here. First of all, one has to check for things that
+are neither objects nor values nor subtypes in any case (package names,
+procedure calls, etc.), and that's the bulk of the test. At least as
+importantly, compilers already have a template for allowing just objects from
+other attributes (most likely, there is an existing subprogram that makes that
+check), but there isn't likely to be such a template for "scalar object or
+value" (the array case most likely not allowing named numbers or numeric
+literals as those can't possibly be an array object). So it's definitely more
+work to allow "object or array".
+
+> X'Image is meant to be equivalent to
+> <type-of-X>'Image(X), and clearly in this latter form, X can denote a
+> value rather than an object.  If we restrict a name in some context to
+> denote an "object," it really ought to be something that relies on a
+> memory cell of some sort to exist, such as 'Address, 'Size, or
+> 'Alignment.
+
+But in Ada 2012, almost everything is an object. The only expressions that are
+never objects in Ada 2012 + TC1 are numeric and access literals, named numbers,
+value conversions of elementary types, membership tests, short circuit control
+forms, some attributes, and parenthized expressions. Why those particular things
+are values, but things like logical operators, qualifications of objects, and
+even the discrete Pos attribute deliver objects is beyond my understanding.
+
+Consider object renaming, which like the name says, requires an object.
+
+    Ren1 : Natural renames Natural'(1);  -- Illegal, not object.
+    Ren2 : Natural renames Natural'(+1); -- Legal, "+1" is equivalent to a function call "+"(1), and the
+					 -- result object of a function call is clearly an object [3.3(13)].
+    Ren3 : Natural renames Natural(+1);  -- Illegal, not object (value conversion isn't an object).
+    Ren4 : Natural renames Natural'First;-- Illegal, not object.
+    Ren5 : Natural renames Natural'Val(1); -- Legal, object. (Val denotes a function.)
+    Ren6 : Boolean renames Boolean'(A and B); -- Legal, object. ("and" is a function.)
+    Ren7 : Boolean renames Boolean'(A and then B); -- Illegal, not object ("and then" is an operation, not a function.)
+
+I have to wonder if it would make more sense to clean up this mess rather than
+bothering to change any attributes. After all, the fact that function calls
+return objects don't suddenly make compilers stick every scalar intermediate
+value into memory -- a compiler only materializes the return object if it
+matters (as in the legal renamings above).
+
+In particular, value conversion of composite types now (optionally in some
+cases) creates an anonymous object, that was to fix a problem someone reported
+caused by the accessibility of components of by-reference types when the actual
+is a value conversion. (One guess as to which someone would care about that
+case.) A tiny bit of additional wording and we could have an object for all
+value conversions. (Doing that alone would get rid of the Image case that I was
+most concerned about - the bizarre difference between Ren2 and Ren above.)
+
+In any case, we need to decide rules because compilers will enforce whatever
+rules we decide upon, and more importantly, the ACATS is likely to test whatever
+rules we decide on. I've already tortured Ed with the C-Test for X'Image:
+     if Enum'Pred(E1)'Image /= "A" then
+and
+     if Der'(V1 - 88)'Image /= "-64" then
+Both of which are clearly objects by the RM and neither of which worked. (I'd
+guess that the same would be true for MY favorite compiler, once I get around to
+writing the needed backend code.)
+
+Speaking as a user, I'm likely to use only the object form of Image once it is
+available in my favorite compiler. I'd revert to the old form only if no other
+choice is available -- hopefully that won't happen often. Having
+     Put (Limit'Image);
+rejected because I happened to declare Limit as a named number will not likely
+to anything for my mood (which is rarely good when I'm writing debugging code
+anyway :-).
+
+[Editor's note: The value vs. object thread continues in AI12-0226-1.]
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, March 28, 2017  8:17 AM
+
+> Ugh.  Perhaps "prefix of a scalar type other than a universal real type" (i.e.
+> no Universal_Fixed or Universal_Real).  This will allow X'Length'Image, but not
+> T'Delta'Image, which seems fine.  Hmmm, even Universal_Integer is a pain, if
+> someone writes something like String'Size'Image.  So probably disallow all
+> universal types.  That way there is no need for implementations to do any
+> heroics to handle gigantic or super-precise values.  Final suggestion: "prefix
+> of a scalar type other than a universal type"
+
+Or "prefix of an object or value of a scalar type other than a universal type"
+
+****************************************************************
+
+From: Justin Squirek
+Sent: Monday, April 10, 2017  2:44 PM
+
+While implementing the proposed feature (ai12-0124-1) to apply the 'Image
+attributes to object references (as in GNAT's 'Img) I came across a conundrum.
+
+Consider the following case:
+
+Put_Line ((if Some_Condition then 12 else X)'Image);
+
+There is a possibility here that the prefix could be a unnamed literal or an
+object. Should such a thing be allowed or should these scenarios be considered
+illegal as 'Img does currently?
+
+The conservative approach would be to disallow it, but I think this is a decent
+enough use-case to warrant discrete and numeric literals to be allowed as a
+prefix - like in the below example:
+
+Put_Line (14'Image);
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, April 10, 2017  2:50 PM
+
+> The conservative approach would be to disallow it, but I think this is
+> a decent enough use-case to warrant discrete and numeric literals to
+> be allowed as a prefix - like in the below example:
+>
+> Put_Line (14'Image);
+>
+
+Attribute references require something that is syntactically a "name" as a
+prefix.  So we are considering allowing:
+
+    Integer'(14)'Image
+
+or
+
+    Integer'(if Some_Condition then 12 else X)'Image
+
+There is some ongoing debate whether the prefix "name" of 'Image must denote an
+"object," but there is no interest, as far as I know, in allowing something that
+is not syntactically a "name" as a prefix.  That might be a bit of an earthquake
+in some Ada parsers.
+
+****************************************************************
+
+From: Justin Squirek
+Sent: Monday, April 10, 2017  2:51 PM
+
+I see, thanks for the clarification. Perhaps an exception could be made for
+conditional expressions?
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, April 10, 2017  3:26 PM
+
+Quite unlikely.  It is easy enough to write:
+
+    Put_Line ((if Some_Condition then " 12" else X'Image));
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, April 10, 2017  3:28 PM
+
+> I see, thanks for the clarification. Perhaps an exception could be
+> made for conditional expressions?
+
+The prefix of an attribute has been a "name" since the beginning of time - at
+least since Ada-80. We'd need a VERY important reason to change that, not just
+because someone would find it convenient.
+
+This doesn't seem to rise to that level of importance, as it is just a
+convenience feature. Especially as there are two workarounds:
+   (1) Make the prefix a qualified expression or type conversion; or
+   (2) Use the subtype form of 'Image.
+
+Some ARG members appear to be against even allowing the prefix to be a value
+(which I find surprising, since so far as I recall no one specifically intended
+the prefix to be restricted to an object, that just happened because of the
+wording I chose to copy when I proposed adding the attribute). The concern is
+spending too much effort on the language just to save a few characters of
+typing. I want to fix my initial mistake, and that becomes less likely if other
+stuff gets loaded into it.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, April 10, 2017  3:30 PM
+
+> While implementing the proposed feature (ai12-0124-1) to apply the
+> 'Image attributes to object references ...
+
+BTW, this is not "a proposed feature". It was included in the 2016 Corrigendum,
+so it has been approved all the way up to the top of ISO and is an official part
+of the Ada Standard (one that is now tested by the ACATS, given I included tests
+for it in the last batch of updates on March 31st).
+
+****************************************************************
+
+From: Justin Squirek
+Sent: Monday, April 10, 2017  3:44 PM
+
+>> I see, thanks for the clarification. Perhaps an exception could be
+>> made for conditional expressions?
+>
+> The prefix of an attribute has been a "name" since the beginning of
+> time - at least since Ada-80. We'd need a VERY important reason to
+> change that, not just because someone would find it convenient.
+
+The counter-argument would be that conditional expressions are a new addition to
+the language an the why they are often used (almost like an anon function) means
+that perhaps attributes, among other things, should be revised to see this as a
+common use case. But, as you and Tucker point out, an intuitive set of semantic
+rules are not always worth pursing.
+
+> This doesn't seem to rise to that level of importance, as it is just a
+> convenience feature. Especially as there are two workarounds:
+>    (1) Make the prefix a qualified expression or type conversion; or
+>    (2) Use the subtype form of 'Image.
+>
+> Some ARG members appear to be against even allowing the prefix to be a
+> value (which I find surprising, since so far as I recall no one
+> specifically intended the prefix to be restricted to an object, that
+> just happened because of the wording I chose to copy when I proposed
+> adding the attribute). The concern is spending too much effort on the
+> language just to save a few characters of typing. I want to fix my
+> initial mistake, and that becomes less likely if other stuff gets loaded into it.
+
+Dang, thats a shame :/
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, April 10, 2017  4:03 PM
+
+> The counter-argument would be that conditional expressions are a new
+> addition to the language an the why they are often used (almost like
+> an anon function) means that perhaps attributes, among other things,
+> should be revised to see this as a common use case. But, as you and Tucker
+> point out, an intuitive set of semantic rules are not always worth pursing.
+> ...
+
+Not sure I see this the same way.  Having a new feature obey different rules
+than various old features makes the language less uniform (and hence less
+"intuitive" IMHO), and it is like an updated house where you can easily tell the
+"new" parts from the "old" parts -- something that would generally be considered
+an architectural failure.  If we were to allow conditional expressions, then why
+not aggregates?  Why not any parenthesized expressions?  Arguing that one
+feature is new and the other is old is not a good argument, except perhaps when
+you are worrying about the impact of an incompatibility.  When a new user comes
+to the language, they don't know what features are new and old, so they would
+likely be surprised and confused by non-uniformities based on relative newness
+of the feature.
+
+So if you want to provide arguments for a change to the syntax, it has to be
+compelling, and has to end up with a language that is at least as uniform as the
+original language.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, April 14, 2017  4:21 PM
+
+> The conservative approach would be to disallow it, but I think this is
+> a decent enough use-case to warrant discrete and numeric literals to
+> be allowed as a prefix - like in the below example:
+>
+> Put_Line (14'Image);
+
+This would presume that all Image functions for all integer types map to a
+single implementation/defintion. Else I ask: is the type of "14" shortshort,
+nibble, byte, universial_big, my_very_own128, or maybe just Integer.
+
+What about -14'Image ?  I guess someone might be surprised.
+
+What about 3.1452'Image vs. 3.14E0'Image ?
+
+Is all this well defined?
+
+No, the simple case, easily qualified, does not warrant all these questions.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April 14, 2017  5:58 PM
+
+Playing Devil's advocate:
+
+> > The conservative approach would be to disallow it, but I think this
+> > is a decent enough use-case to warrant discrete and numeric literals
+> > to be allowed as a prefix - like in the below example:
+> >
+> > Put_Line (14'Image);
+>
+> This would presume that all Image functions for all integer types map
+> to a single implementation/defintion. Else I ask:
+> is the type of "14" shortshort, nibble, byte, universial_big,
+> my_very_own128, or maybe just Integer.
+
+It's universal integer, that's well-defined by the Ada standard. And the
+representation of integer Image is not type dependent (read the rules), so
+that's not a problem either.
+
+> What about -14'Image ?  I guess someone might be surprised.
+
+That's a function call, but it's type is also universal integer. No one would be
+surprised.
+
+The only question would be one of magnitude: is a compiler required to be able
+to handle
+
+    555_555_555_555_555_555_555_555_555_555_555_555_555_555_555_555'Image
+
+And that we have to answer anyway if we allow any values.
+
+> What about 3.1452'Image vs. 3.14E0'Image ?
+
+Here's where the problem comes from: the representation of 'Image for real types
+IS type-dependent. So one cannot allow Obj'Image on universal real or universal
+fixed.
+
+> Is all this well defined?
+>
+> No, the simple case, easily qualified, does not warrant all these
+> questions.
+
+We still have all of them even without a syntax change. We have to define:
+
+    Max : constant := 42;
+
+    Integer'(14)'Image
+    Max'Image
+
+somehow, or explicitly decide these should be illegal (and give a
+justification). The justification for not answering the questions to date
+(because Randy copied wording from Obj'Valid rather than Arr'First for no
+particular reason) doesn't hold any water. :-)
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Saturday, April 15, 2017  6:59 PM
+
+>> What about -14'Image ?  I guess someone might be surprised.
+> That's a function call, but it's type is also universal integer. No
+> one would be surprised.
+
+Ah, but doesn't it parse as  "-(14'Image)" ?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, April 17, 2017  9:57 PM
+
+I admit that I didn't consider how hypothetical syntax that we'd never consider
+adopting would actually parse. Obviously, the above is illegal today, and I was
+thinking that the grammar for an attribute would be "expression'identifier".
+Perhaps that couldn't be made to work, and if that is the case, then that's
+another reason not to worry about such expressions.
+
+My personal concern is that
+    Natural'(12)'Image
+work, since I expect at least some people would change exclusively to the object
+form. In this worst case it is one ' longer than the original subtype form, and
+in most cases it is shorter. So why be forced to remember two forms of the same
+thing??
+
+Moreover, I never intended the above not to work in my proposal. And we never
+considered whether or not that should work; it just happened to be illegal
+because of the wording I copied. A stupid reason to make language decisions...
+
+****************************************************************
