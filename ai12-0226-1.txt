@@ -1,0 +1,240 @@
+!standard 3.3(11.1/3)                                  17-04-18  AI12-0226-1/01
+!standard 3.3(12)
+!standard 3.3(21/3)
+!standard 3.3(22)
+!standard 3.3(23.7/3)
+!standard 3.10(9/3)
+!standard 4.6(58.1/4)
+!standard 4.6(58.4/4)
+!class Amendment 17-04-18
+!status work item 17-04-18
+!status received 17-03-23
+!priority Low
+!difficulty Easy
+!subject Generalize expressions that are objects
+!summary
+
+Value conversions represent objects in the same way as a function call
+represents an object. A parenthesized expression of an object represents
+an object.
+
+!problem
+
+After various changes in Ada 95 and Ada 2012, there is no rhyme nor reason
+to the difference between expressions that represent objects and those
+that represent values. Consider the following:
+
+    Limit : constant := 10;
+    Max   : constant Natural := 10;
+
+    Ren1 : Natural renames Natural'(1);  -- Illegal, not object.
+    Ren2 : Natural renames Natural'(+1); -- Legal, "+1" is equivalent to a
+                                         -- function call "+"(1), and the result
+                                         -- result object of a function call
+                                         -- is clearly an object [3.3(13)].
+    Ren3 : Natural renames Natural(+1);  -- Illegal, not object (value
+                                         -- conversion isn't an object).
+    Ren4 : Natural renames Natural'First;-- Illegal, not object.
+    Ren5 : Natural renames Natural'Val(1); -- Legal, object. (Val denotes a
+                                         -- function.)
+    Ren6 : Natural renames Natural'(Max);-- Legal, object.
+    Ren7 : Natural renames Natural'(Limit); -- Illegal, not object. (A named
+                                         --    number is not an object.)
+    Ren8 : Natural renames Max;          -- Legal, object.
+    Ren9 : Natural renames (Max);        -- Illegal, not object. (A parenthesized
+                                         -- expression is not an object,
+                                         -- regardless of what is
+                                         -- parenthesized.)
+    RenA : Boolean renames Boolean'(A and B); -- Legal, object. ("and" is
+                                              -- a function.)
+    RenB : Boolean renames Boolean'(A and then B); -- Illegal, not object
+                                  -- ("and then" is an operation, not a function.)
+
+How many of you got this right? We should at least fix the worst warts of this
+list.
+
+!proposal
+
+(See Summary.)
+
+!wording
+
+[The definition of object:]
+
+Add after 3.3(11.1/3):
+
+* a value conversion;
+
+Modify 3.3(12):
+
+* a component, slice, {parenthesized expression}, or view conversion
+  of another object.
+
+[Note: "expression" of parenthesized expression is in the syntax font.]
+
+[The definition of constants:]
+
+Modify 3.3(21/3):
+
+*  the object denoted by a {value conversion, }function_call{,} or
+   [an] aggregate;
+
+Modify 3.3(22/3):
+
+* a selected_component, indexed_component, slice, {parenthesized expression},
+  or view conversion of a constant.
+
+[The definition of known to be constrained:]
+
+Modify 3.3(23.7/3):
+
+* it is part of the object denoted by a {value conversion, }function_call{,}
+  or aggregate; or
+{* it is a parenthesized expression where the expression denotes a view of a
+   composite object that is known to be constrained;}
+
+Modify 3.10(9/3):
+
+A view of an object is defined to be aliased if it is defined by an
+object_declaration, component_definition, parameter_specification, or
+extended_return_object_declaration with the reserved word aliased, or by a
+renaming of an aliased view. In addition, the dereference of an
+access-to-object value denotes an aliased view, as does a view conversion (see
+4.6) of an aliased view. {A parenthesized expression where the expression
+denotes an aliased view is an aliased view.} The current instance of an
+immutably limited type (see 7.5) is defined to be aliased. Finally, a formal
+parameter or generic formal object of a tagged type is defined to be aliased.
+[Aliased views are the ones that can be designated by an access value.]
+
+Modify 4.6(58.1/4):
+
+Evaluation of a value conversion [of a composite type] either creates a new
+anonymous object Redundant[(similar to the object created by the evaluation
+of an aggregate or a function call)] or yields a new view of the operand
+object without creating a new object:
+
+Add after 4.6(58.4/4):
+
+If the target type is an elementary type, then a new object is created;
+
+Add after AARM 4.6(58.b.1/4):
+
+AARM Implementation Note: The new temporary object need not be materialized
+in most cases; it should be handled like the return object of a predefined
+operator. Generally, whether the object exists can only be detected if it
+is renamed (as an elementary type cannot be controlled).
+
+!discussion
+
+A value conversion looks much like a function call and similar to a qualified
+expression, both of which represent objects (the latter only if the expression
+is already an object). Therefore, we treat it consistently and make it an
+object as well. Note that most of the needed wording was already added by
+AI12-0027-1. We expect that compilers will materialize this temporary object
+only when it is required, as is typically done for the result object of
+predefined operators.
+
+We also make the result of a parenthesized object an object, so that
+parenthesized expressions and qualified expressions have the same static
+semantics.
+
+The other kinds of expressions that are not objects are:
+
+ * numeric literals;
+ * the literal null;
+ * named numbers;
+ * membership tests;
+ * short circuit control forms;
+ * attributes that are not defined as functions.
+
+We considered defining everything to be an object, but it seemed strange that
+a literal like 12 or null would be an object. Named numbers are intended to
+work like literals. There doesn't seem to be much use to renaming boolean
+expression, so we didn't change either of those, either. And changing a number
+of attribute definitions seemed like dimishing returns.
+
+!ASIS
+
+[Not sure. It seems like some new capabilities might be needed for operators,
+but I didn't check - Editor.]
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the new capabilities are supported.
+
+
+!appendix
+
+[The following thread is forked from the discussion filed in AI12-0225-1.]
+
+From: Randy Brukardt
+Sent: Thursday, March 23, 2017  7:46 PM
+
+> I just think the distinction between objects and values is lost on
+> many users, and we allow 'Last, 'First, etc., on names that denote
+> array values, so why not allow 'Image on names that denote scalar
+> values.
+
+I tend to agree with this sentiment. Particularly the first part, because given
+the various changes in Ada 95 and Ada 2012, that distinction is lost on many Ada
+language lawyers as well. I for one can detect no reason for what is an object
+and what is a value in Ada 2012. More in a moment.
+
+...
+> X'Image is meant to be equivalent to
+> <type-of-X>'Image(X), and clearly in this latter form, X can denote a
+> value rather than an object.  If we restrict a name in some context to
+> denote an "object," it really ought to be something that relies on a
+> memory cell of some sort to exist, such as 'Address, 'Size, or
+> 'Alignment.
+
+But in Ada 2012, almost everything is an object. The only expressions that are
+never objects in Ada 2012 + TC1 are numeric and access literals, named numbers,
+value conversions of elementary types, membership tests, short circuit control
+forms, some attributes, and parenthized expressions. Why those particular things
+are values, but things like logical operators, qualifications of objects, and
+even the discrete Pos attribute deliver objects is beyond my understanding.
+
+Consider object renaming, which like the name says, requires an object.
+
+    Ren1 : Natural renames Natural'(1);  -- Illegal, not object.
+    Ren2 : Natural renames Natural'(+1); -- Legal, "+1" is equivalent to a function call "+"(1), and the
+                                         -- result object of a function call is clearly an object [3.3(13)].
+    Ren3 : Natural renames Natural(+1);  -- Illegal, not object (value conversion isn't an object).
+    Ren4 : Natural renames Natural'First;-- Illegal, not object.
+    Ren5 : Natural renames Natural'Val(1); -- Legal, object. (Val denotes a function.)
+    Ren6 : Boolean renames Boolean'(A and B); -- Legal, object. ("and" is a function.)
+    Ren7 : Boolean renames Boolean'(A and then B); -- Illegal, not object ("and then" is an operation, not a function.)
+
+I have to wonder if it would make more sense to clean up this mess rather than
+bothering to change any attributes. After all, the fact that function calls
+return objects don't suddenly make compilers stick every scalar intermediate
+value into memory -- a compiler only materializes the return object if it
+matters (as in the legal renamings above).
+
+In particular, value conversion of composite types now (optionally in some
+cases) creates an anonymous object, that was to fix a problem someone reported
+caused by the accessibility of components of by-reference types when the actual
+is a value conversion. (One guess as to which someone would care about that
+case.) A tiny bit of additional wording and we could have an object for all
+value conversions. (Doing that alone would get rid of the Image case that I was
+most concerned about - the bizarre difference between Ren2 and Ren above.)
+
+...
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, March 28, 2017  8:21 AM
+
+> Consider object renaming, which like the name says, requires an object.
+>
+>    Ren1 : Natural := Natural'(1);  -- Illegal, not object.
+>    Ren2 : Natural := Natural'(+1); -- Legal, "+1" is equivalent to a function call "+"(1), and the
+>                                    -- result object of a function call is clearly an object [3.3(13)].
+
+This is probably worth a new thread.  It's certainly the kind of thing that gets
+new Ada programmers tearing their hair out.
+
+****************************************************************
+
