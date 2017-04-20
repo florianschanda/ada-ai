@@ -1,0 +1,455 @@
+!standard 3.3(23.7/3)                                  17-04-19  AI12-0228-1/01
+!standard 3.10(9/3)
+!class binding interpretation 17-04-19
+!status work item 17-04-19
+!status received 17-03-27
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Properties of qualified expressions used as names
+!summary
+
+Properties of a qualified object pass through a qualified expression used
+as a name. Specifically, "aliased" and "known to be constrained" are not
+changed by a qualified expression.
+
+!question
+
+Consider the following:
+
+    type Info is record
+        Indent : aliased Natural;
+        ...
+    end record;
+
+    ...
+
+    function PI return Info;
+    type Acc_Cnst_Nat is access constant Natural;
+    Ptr_CNat : Acc_Cnst_Nat;
+
+    Ren_Indent  : Natural renames PI.Indent;
+    Ren_QIndent : Natural renames Natural'(PI.Indent);
+
+    Ptr_CNat := Ren_Indent'Access; -- OK.
+    Ptr_CNat := Ren_QIndent'Access; -- ????? (OK by this AI.)
+
+The rename of Ren_QIndent is legal, as a qualified expression of an object is
+an object (4.7(3.1/3)). However, Ren_QIndent'Access does not appear to be
+legal, as the renames does not appear to be of an aliased view: a qualified
+expression is none of the things in the list in the first sentence of
+3.10(9/3).
+
+Is this intended? (No.)
+
+A similar issue exists for Known to be Constrained.
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add after 3.3(23.7/3):
+
+* it is a qualified expression where the operand denotes a view of a
+  composite object that is known to be constrained;
+
+Modify 3.10(9/3):
+
+A view of an object is defined to be aliased if it is defined by an
+object_declaration, component_definition, parameter_specification, or
+extended_return_object_declaration with the reserved word aliased, or by a
+renaming of an aliased view. In addition, the dereference of an
+access-to-object value denotes an aliased view, as does a view conversion (see
+4.6) of an aliased view. {A qualified expression where the operand
+denotes an aliased view is an aliased view.} The current instance of an
+immutably limited type (see 7.5) is defined to be aliased. Finally, a formal
+parameter or generic formal object of a tagged type is defined to be aliased.
+[Aliased views are the ones that can be designated by an access value.]
+
+!discussion
+
+Note that this is similar to the way new kinds of objects are handled in
+AI12-0226-1. We want type conversions, qualified expressions, and
+parenthesized expressions to change the properties of an object as little as
+possible.
+
+---
+
+An example of the problem with "Known to be constrained":
+
+     TYPE R0 (D : INTEGER) IS
+          RECORD
+               F : INTEGER := D;
+          END RECORD;
+     TYPE REC (D : INTEGER := 1) IS
+          RECORD
+               F1 : INTEGER;
+               F2 : R0(D); -- Discriminant-dependent component
+          END RECORD;
+     type Other_Rec is record
+        F1 : Integer;
+        F2 : R0(0);
+     end record;
+     function Func return Rec;
+     function Func return Other_Rec;
+
+     XX : R0 renames Func.F2; -- Ambiguous
+     XY : R0 renames Rec'(Func).F2; -- ??? (OK by this AI.)
+     XZ : R0 renames Other_Rec'(Func).F2; -- OK.
+
+The declaration of XY is currently illegal, as Rec'(Func) is not something is
+that is "Known to be constrained". Without the fix of this AI, you're out of
+luck if you really need XY.
+
+This is the sort of problem for which qualified expressions were changed to
+names in the first place. It would make no sense to make compilers implement
+a rather complicated change and then not allow it to work in some contexts.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+ACATS tests should be created to check that both changes work. (Perhaps
+additional cases added to existing tests.)
+
+!appendix
+
+From: Randy Brukardt
+Sent: Monday, March 27, 2017  11:47 PM
+
+Consider the following:
+
+    type Info is record
+        Indent : aliased Natural;
+        ...
+    end record;
+
+    ...
+
+    PI : Info;
+    type Acc_Cnst_Nat is access constant Natural;
+    Ptr_CNat : Acc_Cnst_Nat;
+
+    Ren_PI : Info renames PI;
+    Ren_QPI : Info renames Info'(PI);
+       -- This renames is legal as PI is an object, and a qualified expression of an object is an object.
+
+    Ptr_CNat := Ren_PI.Indent'Access; -- OK.
+    Ptr_CNat := Ren_QPI.Indent'Access; -- ??
+    Ptr_CNat := Info'(PI).Indent'Access; -- ??
+
+I think the second and third Access attributes are legal as 3.10(9/3) says:
+
+A view of an object is defined to be aliased if it is defined by an
+object_declaration, component_definition, parameter_specification, or
+extended_return_object_declaration with the reserved word aliased, or by a
+renaming of an aliased view. In addition, the dereference of an access-to-object
+value denotes an aliased view, as does a view conversion (see 4.6) of an aliased
+view. The current instance of an immutably limited type (see 7.5) is defined to
+be aliased. Finally, a formal parameter or generic formal object of a tagged
+type is defined to be aliased. [Aliased views are the ones that can be
+designated by an access value.]
+
+The component in both of these cases is "defined by a component_definition ...
+with the reserved word aliased", so I think we're OK. [If you disagree tell me
+ASAP since I have this in a new ACATS test.]
+
+But now consider:
+
+    Ren_Indent  : Natural renames PI.Indent;
+    Ren_QIndent : Natural renames Natural'(PI.Indent);
+
+    Ptr_CNat := Ren_Indent'Access; -- OK.
+    Ptr_CNat := Ren_QIndent'Access; -- ?????
+
+Here, the second access does not appear to be legal, as the renames does not
+appear to be of an aliased view: a qualified expression is none of the things in
+the list in the first sentence of 3.10(9/3).
+
+Similarly:
+
+    Ptr_CNat := Natural'(PI.Indent)'Access; -- ????
+
+doesn't appear legal, either.
+
+We may want to consider adding qualified expressions to the list of things that
+can be aliased (with a rule like the one for renames), to be more consistent. It
+might be helpful to qualify the prefix of 'Access since it can be overloaded (it
+only works for access-to-constant, though), and it seems weird that it isn't
+allowed there as it isn't aliased (even though objectness is passed through, and
+aliased is passed through renames).
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Tuesday, March 28, 2017  8:04 AM
+
+Presumably an oversight. Yes, a qualified expression ought to be/act as a
+special case of view conversion, in this case a "view conversion" to the type
+that it already has.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Tuesday, March 28, 2017  9:10 AM
+
+Agreed, so long as we remember that a qualified expression is a name that
+denotes a constant view (even if the operand denotes a variable -- RM
+4.7(3.1/3)), whereas a view conversion provides a variable view, if the operand
+denotes a variable.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 31, 2017  2:25 AM
+
+I was about to write a long-needed test for "known to be constrained" in object
+renames. Of course, since I was thinking about qualified expressions earlier
+this week, my first thought went there. So, taking part of an ancient test that
+I was planning to upgrade:
+
+     TYPE R0 (D : INTEGER) IS
+          RECORD
+               F : INTEGER := D;
+          END RECORD;
+     TYPE REC (D : INTEGER := 1) IS
+          RECORD
+               F1 : INTEGER;
+               F2 : R0(D); -- Discriminant-dependent component
+          END RECORD;
+
+     RV1 : REC := ...;
+     RC1 : CONSTANT REC := ...;
+
+     X2  : R0 renames RV1.F2;   -- ERROR: R1 is not known to be constrained.
+     X3  : R0 renames RC1.F2;   -- OK.
+
+So, what about:
+
+     XUgh : R0 renames REC'(RC1).F2; -- ???
+     XXX  : R0 renames REC'(RV1).F2; -- Better be illegal.
+
+Since qualified expressions aren't in the list for "known to be constrained",
+both of the above have to be illegal (following the letter of the standard). But
+of course that is silly, qualifying a "known to be constrained" thing shouldn't
+wipe that property away (in either direction).
+
+Erhard had suggested following the model of view conversions here. But view
+conversions aren't included in "known to be constrained" at all. The AARM note
+cryptically says that they "aren't relevant".
+
+After some puzzlement, I realized that that is because view conversions are only
+for tagged types (other than in the very limited context of actuals to "in out"
+and "out" parameters). And all discriminated tagged types are indefinite or
+immutably limited (mutable tagged types aren't allowed). Since "indefinite" and
+"immutably limited" are the second and third bullets for "known to be
+constrained", there are no other view conversions that need to be covered by
+this rule. It would have been nice if this was explained somewhere (the AI just
+repeats this AARM note).
+
+[Aside: the fact that view conversions don't generally exist for untagged types
+make them a lousy model for qualified expressions or anything else that can
+happen generally for untagged types. End aside.]
+
+Now for a brief diversion: The AARM note mentioned earlier says "the current
+instance of a type" is one of the other cases that "aren't relevant". Again I
+wondered why that is, and again the AI is no help. In this case, the reason is
+that the current instance is a value in aspect specifications (like a type
+invariant), so it can't be used in any "known to be constrained" contexts [in
+particular, as the prefix of 'Access]. Inside of a type declaration, the current
+instance can only be used in an immutably limited type, meaning it is already
+covered. So I think we're OK. (I think Steve originally missed the type
+invariant case; when he designed the "known to be constrained" wording, we
+hadn't yet decided to insist that the current instance is a value.)
+
+I have no idea why "objects of a formal discriminated private type" are
+excluded; hopefully there is a good reason. End diversion.
+
+Anyway, it looks like qualified expressions need to be handled here ("known to
+be constrained"). If we do generally expand the definition of "object" further,
+we need to consider any such changes here as well.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, March 31, 2017  1:12 PM
+
+> Erhard had suggested following the model of view conversions here. But
+> view conversions aren't included in "known to be constrained" at all.
+> The AARM note cryptically says that they "aren't relevant".
+
+View conversion is an odd choice, since the whole point of a view conversion is
+to preserve the writability of the operand, whereas a qualified expression
+provides a constant view.
+
+In any case, I see no need to add qualified expressions to the
+known-to-be-constrained cases.  It just adds more complexity to something that
+is already pretty subtle.
+
+> ... Anyway, it looks like qualified expressions need to be handled
+> here ("known to be constrained"). If we do generally expand the definition of "object"
+> further, we need to consider any such changes here as well.
+
+I think we should add them to the AARM list of things we do *not* permit in a
+context requiring something that is known-to-be-constrained.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 31, 2017  3:12 PM
+
+> In any case, I see no need to add qualified expressions to the
+> known-to-be-constrained cases.  It just adds more complexity to
+> something that is already pretty subtle.
+
+I think you answered this too fast. ;-)
+
+The result of a function call is "known to be constrained". One can rename the
+result of a function call. The reason that we made qualified expressions a name,
+and had them pass through object-ness, is so that they can be used to
+disambiguate function calls as needed.
+
+Taken together, it seems to me that these facts require that "known to be
+constrained" allow qualified expressions of items that are "known to be
+constrained". Otherwise one gets nonsense.
+
+     function Func return Rec;
+
+     X98 : R0 renames Func.F2;  -- OK.
+     X99 : R0 renames Rec'(Func).F2; -- Not OK???
+
+If one imagines a case where Func is overloaded such that the qualification is
+needed to remove an ambiguity, then one cannot make the rename legal (either it
+is ambiguous or the component usage is illegal). That's silly, and defeats the
+purpose of allowing qualified expressions to be names and objects in the first
+place. (And it was some Tucker guy that wanted that, I think to eliminate this
+sort of anomaly.)
+
+> > ... Anyway, it looks like qualified expressions need to be handled
+> > here ("known to be constrained"). If we do generally expand the
+> > definition of "object" further, we need to consider any such changes
+> > here as well.
+>
+> I think we should add them to the AARM list of things we do
+> *not* permit in a context requiring something that is
+> known-to-be-constrained.
+
+As noted above, qualified expressions ARE relevant to the use of "known to be
+constrained", so they don't make sense in the current note. Something on the
+line of: "Similarly, qualified expressions are not known to be constrained,
+because we're too lazy to add them even though they can matter in the intended
+use of the term." :-)
+
+****************************************************************
+
+From: Ed Schonberg
+Sent: Friday, March 31, 2017  3:20 PM
+
+>>>     RV1 : REC := ...;
+>>>     RC1 : REC := ...;
+>>>
+>>>     X2  : R0 renames RV1.F2;   -- ERROR: R1 is not known to be constrained.
+>>>     X3  : R0 renames RC1.F2;   -- OK.
+
+Did you miss “constant” in the declaration for RC1 above? [Editor's note: The
+correction was applied to the original message to reduce confusion in future
+readers.]
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 31, 2017  4:12 PM
+
+Yes, obviously. Thanks for noticing.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, March 31, 2017  3:25 PM
+
+> The result of a function call is "known to be constrained". One can
+> rename the result of a function call. The reason that we made
+> qualified expressions a name, and had them pass through object-ness,
+> is so that they can be used to disambiguate function calls as needed.
+
+True, but in a renaming, there is no ambiguity, since the context is so
+explicit. Similarly, you need to know the target access type when using 'Access.
+The reason *not* to do it is that it changes a variable into a constant view,
+which I believe is bound to cause confusion when people use a qualified
+expression on top of a variable, and then rename it or take 'Access.  It also
+forces implementations to do more work in a context where disambiguation is
+almost never needed.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 31, 2017  4:41 PM
+
+> True, but in a renaming, there is no ambiguity, since the context is
+> so explicit.
+
+Huh? Of course ambiguity is possible. If it wasn't, we'd never have needed to make a qualified expression a name in the first place, because qualifying the expression as a whole is enough to make the "context explicit".
+
+> Similarly, you need to know the target access type when using 'Access.
+> The reason *not* to do it is that it changes a variable into a
+> constant view, which I believe is bound to cause confusion when people
+> use a qualified expression on top of a variable, and then rename it or
+> take 'Access.
+
+There's never a requirement to qualify a variable; there IS a requirement in
+some cases to qualify a function call.
+
+> It also forces implementations to do more work in a context where
+> disambiguation is almost never needed.
+
+This I agree with, but then why did we make a qualified expression a name in the
+first place? You can say exactly the same thing about it.
+
+Lest you miss what I was talking about, imagine the following declarations:
+
+     TYPE R0 (D : INTEGER) IS
+          RECORD
+               F : INTEGER := D;
+          END RECORD;
+     TYPE REC (D : INTEGER := 1) IS
+          RECORD
+               F1 : INTEGER;
+               F2 : R0(D); -- Discriminant-dependent component
+          END RECORD;
+     type Other_Rec is record
+        F1 : Integer;
+        F2 : R0(0);
+     end record;
+     function Func return Rec;
+     function Func return Other_Rec;
+
+     XX : R0 renames Func.F2; -- Ambiguous
+     XY : R0 renames Rec'(Func).F2; -- Illegal, not "known to be constrained" (according to Tucker)
+     XZ : R0 renames Other_Rec'(Func).F2; -- OK.
+
+If XY is really what you want, you're out of luck. And note that the context
+here is no help.
+
+But at least as concerning to me here is that you seem to not care that this
+change is needed to make "known to be constrained" complete in this case. We
+already have a variety of cases that probably would never happen outside of
+ACATS tests included in "known to be constrained" (for instance, a "constant
+return object in an extended return" -- who the heck is renaming that??), and it
+seems bizarre to leave out a case that clearly is relevant just because it would
+be a bit more work. Also remember that this rule also comes into play in other
+cases than just renames/'Access: at least in iterators and generic actual in out
+objects. It just doesn't make sense to leave any case out that can come up.
+
+(Also: I think any discussion of qualifying variables is a red herring: outside
+of ACATS tests, anyone qualifying variables is confused and it doesn't really
+matter if they stay that way.)
+
+It comes down to, if using a qualified expression as a name is important enough
+to have in the language in the first place, then it needs to be as complete as
+possible to minimize surprises.
+
+****************************************************************
