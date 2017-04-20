@@ -1,0 +1,286 @@
+!standard 4.4(10)                                      17-04-19  AI12-0227-1/01
+!standard 8.6(29)
+!class binding interpretation 17-04-19
+!status work item 17-04-19
+!status received 17-04-19
+!priority Low
+!difficulty Easy
+!qualifier Omission
+!subject Evaluation of nonstatic universal expressions when no operators are involved
+!summary
+
+Nonstatic universal integer expressions are always evaluated at runtime as
+values of type root_integer; similarly, nonstatic universal real expressions
+are always evaluated at runtime as values of type root_integer
+
+!question
+
+8.6(29) ensures that operators of universal types that have to be evaluated
+at runtime can always be evaluated using the largest possible type. For
+instance, a runtime universal integer expression will be evaluated using
+type root_integer (which has the range System.Min_Int .. System.Max_Int).
+This means that it is possible to raise Constraint_Error for a value out of
+this range.
+
+AI95-0186-1 (for which we decided to make no language change) gives an
+example like the following:
+
+    generic
+       type Mod is mod <>;
+    package Gen is
+       OK : constant Boolean := Mod'Modulus > 127;
+    end Gen;
+
+Since a generic formal type is never static, this comparison operator is
+evaluated at runtime, having type root_integer. If Mod'Modulus is outside
+of the base range of root_integer (which can happen if the actual is a
+modular type having a modulus of System.Max_Binary_Modulus), the use of
+Mod'Modulus can raise Constraint_Error.
+
+However, there appears to be no such rule that applies to an expression
+that doesn't contain an operator. For instance, consider:
+
+    generic
+       type Mod1 is mod <>;
+       type Mod2 is mod <>;
+    package Gen is
+       Upper : constant Mod2 := Mod2'Val(Mod1'Pos(Mod1'Last));
+    end Gen;
+
+If Mod1'Modulus = System.Max_Binary_Modulus, Mod1'Pos(Mod1'Last) will be
+outside of the base range of root_integer. However, there does not appear to
+be any rule which specifies the properties of the runtime evaluation of the
+universal integer portion of this expression. Can this example raise
+Constraint_Error? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+Add after 4.4(10):
+
+An expression [note: NOT in the syntax font] of a universal type is evaluated
+as if it has type root_integer (for universal_integer) or root_real (otherwise)
+unless the context identifies a specific type (in which case that type is used).
+
+AARM Ramification: This has no effect for static expressions; the value may
+be arbitrarily small or large since no specific type is expected for any
+expression to which this rule specifies one of the root types. The only effect
+of this rule is to allow Constraint_Error to be raised if value is outside of
+the base range of root_integer or root_real.
+
+AARM Reason: This rule means that implementations don't have to support
+unlimited range math at runtime for universal expressions. Note that
+universal expressions for which the context doesn't specify a specific
+type are quite rare; attribute prefixes and results are the only known cases.
+(For operators, 8.6 already specifies that the operator of a root type
+get used, which provides a specific type.)
+
+!discussion
+
+It would clearly be madness to require an implementation to support
+extra-range runtime math solely for the purpose of evaluating universal
+integer expressions. Once the substantial work of implementing such math
+was expended, one would hope that users could have the benefit -- but in
+such a case, universal expressions would still have to even more range.
+Ultimately, the implementer would be required to fully support runtime
+unlimited range math, a requirement that we're not ready to make on Ada
+compilers. And even if we did make such a requirement, it wouldn't make
+sense for it only to apply to a handful of rarely encountered expressions.
+
+If it surprises you that there isn't another solution, read the proposed
+rules in the ultimately rejected AI95-0186-1 to see the level of complication
+required to even dent the problem.
+
+Given that implementers are not likely to be supporting extra math operations
+just for these expressions, we have no choice but to allow Constraint_Error
+to be raised for any value outside of the largest possible type (root_integer
+for integer types). Note that Constraint_Error is not required, but it is
+possible.
+
+This issue becomes more important given the the prefix expression of the Image
+attribute can be universal integer (see AI12-0225-1). For instance:
+
+    generic
+       type Mod is mod <>;
+    package Gen is
+       Img : constant String := Mod'Modulus'Image;
+    end Gen;
+
+Evaluation of the prefix of the Image attribute can raise Constraint_Error if
+the modulus of the actual type is outside of the range of root_integer.
+
+---
+
+We can't use a preference rule like 8.6(29) in these cases, as there is no
+ambiguity to resolve for attribute results and prefixes. Instead, we
+explicitly say that universal expressions are evaluated using types
+root_integer and root_real.
+
+Alternatively, we could have put a more specific rule after 4.1.4(11),
+something like:
+
+The result of a attribute defined to be of a universal type is evaluated as if
+it has type root_integer (for universal_integer) or root_real (otherwise) if
+the context does not specify that the attribute has a specific type. Similarly,
+the prefix of an attribute that has a universal type is evaluated as if
+it has type root_integer (for universal_integer) or root_real (otherwise).
+
+This covers the only known ways to cause this problem; it's less likely to
+introduce a bug, but it's more likely to leave a bug in case some other way
+to cause this issue appears or gets introduced.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Randy Brukardt
+Sent: Wednesday, April 19, 2017  10:20 PM
+
+Attached find an AI created out of a private e-mail discussion. It was
+inspired by the possible issue of a prefix of an Image attribute having a
+universal type, but after research I found other ways to create the problem
+ -- thus we decided on a separate AI.
+
+Note that as far as I can tell, all compilers actually do this (an alternative
+is madness), they just don't have any RM justification for doing so.
+
+As always, comments welcome.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, April 19, 2017  10:28 PM
+
+> Note that as far as I can tell, all compilers actually do this (an 
+> alternative is madness), they just don't have any RM justification for 
+> doing so.
+
+Evidence for this is supplied by the attached test program. (If you have
+access to some non-GNAT compiler, please try it.)
+
+GNAT raises Constraint_Error for the two 'Val subcases, but not for the
+'Modulus test (probably GNAT evaluates that at compile-time when the
+instance is expanded).
+
+Janus/Ada raises Constraint_Error for the first 'Val subcase, and triggers
+bugs in the other two cases: first, the generic 'Modulus for the
+Max_Binary_Modulus case has value zero rather than raising an exception.
+(That's actually the value that it is supposed to have, except that a program
+isn't supposed to be able to see that value - Constraint_Error ought to have
+been generated instead.) Second, Modulus/2 case generated an unsigned/signed
+operation - which automatically gets converted to the next larger signed type
+-- except that such a type doesn't exist, so a code generator error occurred
+instead. This second bug is a direct consequence of trying to implement this
+without raising Constraint_Error.
+
+--- Test Program ---
+
+with Ada.Text_IO;
+with System;
+procedure AI12_227 is
+   Passed : Boolean := True;
+
+   type A_Mod is mod System.Max_Binary_Modulus;
+   type B_Mod is mod 2**8;
+
+   function Ident_A_Mod (Val : in A_Mod) return A_Mod is
+   begin
+      return Val;
+   end Ident_A_Mod;
+
+   function Ident_B_Mod (Val : in B_Mod) return B_Mod is
+   begin
+      return Val;
+   end Ident_B_Mod;
+
+   generic
+       type Mod1 is mod <>;
+       type Mod2 is mod <>;
+   procedure Gen (Max_Mod : in Boolean);
+
+   procedure Gen (Max_Mod : in Boolean) is
+   begin
+      declare
+         Upper : Mod2;
+      begin
+	 Upper := Mod2'Val(Mod1'Pos(Mod1'Last));
+	 if Upper /= Mod2'Last then
+	    Ada.Text_IO.Put_Line ("** Pos-Val result incorrect");
+	    Passed := False;
+	 end if;
+      exception
+	 when Constraint_Error =>
+	    if Max_Mod then
+		Ada.Text_IO.Put_Line ("-- Constraint_Error raised by Pos-Val");
+	    else
+		Ada.Text_IO.Put_Line ("** Constraint_Error raised by Pos-Val");
+		Passed := False;
+	    end if;
+      end;
+      begin
+	 if Mod1'Modulus < 127 then
+	    Ada.Text_IO.Put_Line ("** Modulus result incorrect");
+	    Passed := False;
+	 end if;
+      exception
+	 when Constraint_Error =>
+	    if Max_Mod then
+		Ada.Text_IO.Put_Line ("-- Constraint_Error raised by Modulus");
+	    else
+		Ada.Text_IO.Put_Line ("** Constraint_Error raised by Modulus");
+		Passed := False;
+	    end if;
+      end;
+      declare
+         Middle : Mod2;
+      begin
+	 Middle := Mod2'Val(Mod1'Modulus / 2);
+	 if Middle /= Mod2'Val(Mod2'Modulus / 2) then
+	    Ada.Text_IO.Put_Line ("** Mod-Val result incorrect");
+	    Passed := False;
+	 end if;
+     exception
+	 when Constraint_Error =>
+	    if Max_Mod then
+		Ada.Text_IO.Put_Line ("-- Constraint_Error raised by Mod-Val");
+	    else
+		Ada.Text_IO.Put_Line ("** Constraint_Error raised by Mod-Val");
+		Passed := False;
+	    end if;
+      end;
+   end Gen;
+
+begin
+   Ada.Text_IO.Put_Line ("--- Test program for AI12-0227-1");
+
+   declare
+      subtype Dyn is B_Mod range 0 .. Ident_B_Mod (B_Mod'Last);
+      procedure Inst is new Gen (Dyn, Dyn);
+   begin
+      Inst (Max_Mod => False);
+   end;
+
+   declare
+      subtype Dyn is A_Mod range 0 .. Ident_A_Mod (A_Mod'Last);
+      procedure Inst is new Gen (Dyn, Dyn);
+   begin
+      Inst (Max_Mod => True);
+   end;
+
+   if Passed then
+      Ada.Text_IO.Put_Line ("--- Passed");
+   else
+      Ada.Text_IO.Put_Line ("*** Failed");
+   end if;
+
+end AI12_227;
+
+****************************************************************
