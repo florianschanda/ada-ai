@@ -696,7 +696,7 @@ like other languages.
 ****************************************************************
 
 From: Randy Brukardt
-Sent: Monday, January 9, 2016  6:45 PM
+Sent: Monday, January 9, 2017  6:45 PM
 
 (Replying to an old thread that I must have missed back in October:)
 
@@ -779,5 +779,645 @@ mandatory for this feature.)
 
 Tucker's idea seems to fit with the existing syntax of the language, and seems
 to be sufficient for the job.
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Sunday, February 12, 2017  6:45 AM
+
+Thank you for your answer Randy, and sorry I took so long to answer ! I have
+been swamped with other work at AdaCore, currently depiling my ARG work pile :)
+
+>> case C is
+>>    when CC : (Connected, <>, (True, <>, <>)) =>
+>>       Put_Line ("Connected ! Session Id is "
+>>                 & CC.Session_Id & " Ping time is "
+>>                 & C.Ping_Info.Last_Ping_Time'Image);
+>>                 --  Woops, I used the original name rather than the matched
+>>                 --  name ! The compiler will silently ignore my error.
+> What error? C and CC are views of the same object, and clearly have 
+> the same value. If there is an error here, it is declaring CC in the 
+> first place (see below).
+
+We at least agree on that, in that case :) CC is useless. My example was
+probably not such a good one. See below.
+
+> One would want these shorthands in cases where the name of the 
+> original object is too complex. If, for instance, the original object 
+> was a function call with parameters, then the shorthand makes sense:
+>
+> case Get_Connection (From => Server) is
+>   ... -- Rest as above.
+>
+> But in this case, if you mistyped the identifier, the compiler will 
+> give you an error. So I don't see any real problem with mistakes here.
+
+This is not about mistyping, it is about accessing a component that is
+statically valid, but dynamically invalid due to discriminants. Let me
+amend a previous example:
+
+C, C2 : Connection_Info
+
+case C is
+   when (Connected, <>, <>, (True, <>, <>)) =>
+      Print_Ping_Time (C2.Ping_Info.Ping_Time)
+
+Here you're accessing the wrong object altogether (C2). This is valid Ada, so
+it is pretty impossible to emit a warning, even though the code is clearly
+wrong. Arguably the programmer should have used more descriptive names. He
+should also have not made errors. The job of the compiler is to help him, and
+that's a great opportunity to do so.
+
+With introducing a binding, both writing the code and checking it is easier:
+
+C, C2 : Connection_Info
+
+case C is
+   when (Connected, <>, <>, (True, <>, <Ping_Time>)) =>
+      Print_Ping_Time (Ping_Time)
+
+
+> Keep in mind that every identifier (and every entity for that matter) 
+> that one declares adds to the cognitive load of the reader. You really 
+> shouldn't do it unless it actually helps reading the code. (Exactly 
+> where that line is obviously is a personal choice, but it is far away 
+> from renaming a single character identifier.)
+
+Yes, I agree with that line of reasoning. The C/CC example was a straw-man, of
+the alternative proposal I don't like. In the example above, I feel like the
+"Ping_Time" binding that is introduced, both by it's strong locality and
+because of the static guarantees associated to it, helps the user understand
+the code and make sure it's correct.
+
+>> Having to repeat the path is less readable and more error prone. You go
+>> through the trouble of expressing the pattern, just to have to repeat the 
+>> logic underneath, effectively writing the paths twice, once in 
+>> aggregate syntax, the other in prefix syntax.
+> Arguably, that's a good thing.
+
+Let's argue then :) I see no benefit in repeating the path, only potential for
+errors, both for the writer and for the reader of the code.
+
+> BTW, Ada doesn't currently allow positional <> aggregate components, 
+> and I'd suggest that we retain that rule here. (Assuming you really 
+> want to model these patterns as aggregates.) [Especially as many style 
+> guides ban positional record aggregates altogether.] Therefore, your 
+> example would have to be written something like:
+>
+> case Get_Connection (From => Server) is
+>     when CC : (State => Connected, Server => <>,
+>                Session_Id => <>,
+>                Ping_Info => (Has_Ping_Info => True, Last_Ping_Time => <>,
+>                              Last_Ping_Id => <>)) =>
+>         Put_Line ("Connected ! Session Id is "
+>                   & CC.Session_Id & " Ping time is "
+>                   & CC.Ping_Info.Last_Ping_Time'Image);
+>
+> So the names you need are already in the source. Declaring more names 
+> would just be more noise.
+
+This does not make sense. The introduction of new names is used to introduce
+new bindings. If you have a record "Line" with two "Points" components, who
+themselves have X and Y components, if you want to match on the 4 subvalues
+the components names are not going to be enough.
+
+> [Aside: in writing the above, I see that your original example doesn't have
+> enough components (the Server component seems to have been left out). Which
+> is why many style guides require component names ... ;-)]
+
+>> Statically ensuring that the accessed information is correct will be much
+>> more work for the compiler.
+> There seems to be no need to do that. Again, this is just a different view
+> of an existing object, we really should not care which of those views is
+> accessed.
+
+The point of this feature, in my mind, is that you match the 
+discriminants and the components at the same time. So every new binding 
+you introduce is statically guaranteed to correspond to something in the 
+matched value.
+
+If you combine that with:
+
+1. A style rule (that can easily be statically checked) that it is 
+forbidden to access variable components of a record via the regular dot 
+notation, eg. you have to use matching.
+2. A legality rule that it is forbidden to mutate the object that you're 
+matching upon (similar to the rule about renamings of discriminated 
+records component if I remember correctly)
+
+Then you get a style of programming where it is possible to statically 
+guarantee that the user cannot illegally access a component of a 
+discriminated record. This is the situation in languages such as OCaml, 
+and it is a highly desirable one IMHO.
+
+I think it is possible to reach this goal without introducing new 
+bindings, eg. you need to check the components paths used  inside case 
+branches, but the specification and implementation of such a feature 
+will be harder as far as I can tell.
+
+>> Not to mention, that would be (yet another) feature that we don't implement
+>> like other languages.
+> You already know what I think about that: if you want to use some other
+> language, do that. Don't try to mess up Ada with the exact features of other
+> languages; whatever we do should fit into the Ada model and not look like it
+> was stolen from someone else. (That's why some form of case coverage is
+> mandatory for this feature.)
+
+Yes, I agree that similarity to other languages is not a strong 
+argument. However, there often was a good reason why a feature was 
+expressed in a certain way in another language, especially when this 
+language is a language where the type safety was given a lot of thought, 
+as ML and Haskell are. We should take some time to consider it. Here the 
+reason of introducing new bindings is not (solely) expressivity, it's 
+safety, a characteristic we care deeply about.
+
+> Tucker's idea seems to fit with the existing syntax of the language, and
+> seems to be sufficient for the job.
+
+I strongly disagree with that. Tucker's idea is insufficient to 
+guarantee safety, which is one of the key points of this  feature, not 
+expressivity. I'm waiting for a counter argument :)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, February 13, 2017  5:10 PM
+
+> Thank you for your answer Randy, and sorry I took so long to answer ! 
+> I have been swamped with other work at AdaCore, currently depiling my 
+> ARG work pile :)
+
+Real work being more important than ARG fun -- what a concept! :-)
+ 
+...
+> This is not about mistyping, it is about accessing a component that is 
+> statically valid, but dynamically invalid due to discriminants. Let me 
+> amend a previous example:
+> 
+> C, C2 : Connection_Info
+> 
+> case C is
+>    when (Connected, <>, <>, (True, <>, <>)) =>
+>       Print_Ping_Time (C2.Ping_Info.Ping_Time)
+> 
+> Here you're accessing the wrong object altogether (C2). This is valid 
+> Ada, so it is pretty impossible to emit a warning, even though the 
+> code is clearly wrong.
+
+Well, it's only clearly wrong if you know the intent; I have parallel objects
+like this all the time (often in writing list process). Which I suppose is
+your point.
+
+BTW, you've again ignored the fact that <> can only appear in named notation,
+and I think that really does make a difference in these examples. (Not to
+mention that your example has seven components when written this way, not
+six. :-)
+
+> Arguably the
+> programmer should have used more descriptive names. He should also 
+> have not made errors. The job of the compiler is to help him, and 
+> that's a great opportunity to do so.
+> 
+> With introducing a binding, both writing the code and checking it is 
+> easier:
+> 
+> C, C2 : Connection_Info
+> 
+> case C is
+>    when (Connected, <>, <>, (True, <>, <Ping_Time>)) =>
+>       Print_Ping_Time (Ping_Time)
+> 
+> 
+> > Keep in mind that every identifier (and every entity for that 
+> > matter) that one declares adds to the cognitive load of the reader. 
+> > You really shouldn't do it unless it actually helps reading the 
+> > code. (Exactly where that line is obviously is a personal choice, 
+> > but it is far away from renaming a single character identifier.)
+> 
+> Yes, I agree with that line of reasoning. The C/CC example was a 
+> straw-man, of the alternative proposal I don't like. In the example 
+> above, I feel like the  "Ping_Time" binding that is introduced, both 
+> by it's strong  locality and because of the static guarantees 
+> associated to it, helps the user understand the code and make sure 
+> it's correct.
+
+What guarantees? It seems to me that you need those guarantees anytime you
+have any sort of binding (the form doesn't matter). That is, the Tucker-style
+binding needs the same guarantees.
+
+> >> Having to repeat the path is less readable and more error prone. 
+> >> You go through the trouble of expressing the pattern, just to have 
+> >> to repeat the logic underneath, effectively writing the paths 
+> >> twice, once in aggregate syntax, the other in prefix syntax.
+> > Arguably, that's a good thing.
+> 
+> Let's argue then :) I see no benefit in repeating the path, only 
+> potential for errors, both for the writer and for the reader of the 
+> code.
+> 
+> > BTW, Ada doesn't currently allow positional <> aggregate components, 
+> > and I'd suggest that we retain that rule here. (Assuming you really 
+> > want to model these patterns as aggregates.) [Especially as many 
+> > style guides ban positional record aggregates altogether.] 
+> > Therefore, your example would have to be written something like:
+> >
+> > case Get_Connection (From => Server) is
+> >     when CC : (State => Connected, Server => <>,
+> >                Session_Id => <>,
+> >                Ping_Info => (Has_Ping_Info => True, Last_Ping_Time => 
+> >                              <>, Last_Ping_Id => <>)) =>
+> >         Put_Line ("Connected ! Session Id is "
+> >                   & CC.Session_Id & " Ping time is "
+> >                   & CC.Ping_Info.Last_Ping_Time'Image);
+> >
+> > So the names you need are already in the source. Declaring more 
+> > names would just be more noise.
+> 
+> This does not make sense. The introduction of new names is used to 
+> introduce new bindings. If you have a record "Line"
+> with two "Points" 
+> components, who themselves have X and Y components, if you want to 
+> match on the 4 subvalues the components names are not going to be 
+> enough.
+
+What doesn't make sense? You already have to have the component names in the
+pattern, adding binding names as well is likely be confusing rather than
+helpful.
+
+Side-comment here: The way you have the binding defined, it doesn't seem
+possible to pass a larger part of the matched record to a subprogram.
+Consider a modification of the above:
+
+ case Get_Connection (From => Server) is
+     when CC : (State => Connected, Server => <>,
+                Session_Id => <>,
+                Ping_Info => (Has_Ping_Info => True, Last_Ping_Time => 
+                              <>, Last_Ping_Id => <>)) =>
+         Put_Line ("Connected ! Session Id is "
+                   & CC.Session_Id & Display_Ping_Info (CC.Pinf_Info));
+
+In this case, we're using an existing routine to generate the details about
+the Ping_Information. That's pretty common (after all, one of the likely
+reasons for having a subrecord is that it gets independently processed). I
+don't see any way of doing this with your binding short of going back and
+copying the original selecting information.
+
+...
+> The point of this feature, in my mind, is that you match the 
+> discriminants and the components at the same time. So every new 
+> binding you introduce is statically guaranteed to correspond to 
+> something in the matched value.
+> 
+> If you combine that with:
+> 
+> 1. A style rule (that can easily be statically checked) that it is 
+> forbidden to access variable components of a record via the regular 
+> dot notation, eg. you have to use matching.
+> 2. A legality rule that it is forbidden to mutate the object that 
+> you're matching upon (similar to the rule about renamings of 
+> discriminated records component if I remember correctly)
+
+It has to be the latter, especially in your scheme -- it is essentially a
+renaming of a discriminant-dependent component, so the same rules have to
+apply. (We adopted that rule for iterators, for instance, for similar
+reasons.) That means that the selecting expression would have to be "known
+to be constrained".
+
+And this is what I was talking about above: this is a property of *any*
+binding in such a matching (so long as some discriminant-dependent components
+are involved); it doesn't really matter about the syntax involved. If you have
+any non-box matching on a discriminant or discriminant-dependent component,
+you can't allow the item to be mutable lest the promise implicit in the
+declaration be violated.
+
+So the safety issue is the same either way; it doesn't depend on how the
+binding(s) are defined.
+
+...
+> I think it is possible to reach this goal without introducing new 
+> bindings, eg. you need to check the components paths used inside case 
+> branches, but the specification and implementation of such a feature 
+> will be harder as far as I can tell.
+
+It's easy, I described it above. It's all in terms of existing Ada terminology
+("known to be constrained", "discriminant-dependent component", etc.). It
+might have to apply to multiple records (which I believe is already the case
+for renames), but nothing hard or weird about that.
+
+...
+> > Tucker's idea seems to fit with the existing syntax of the language, 
+> > and seems to be sufficient for the job.
+> 
+> I strongly disagree with that. Tucker's idea is insufficient to 
+> guarantee safety, which is one of the key points of this feature, not 
+> expressivity. I'm waiting for a counter argument :)
+
+Tucker's idea combined with a "known-to-be-constrained" rule works fine to
+guarantee safety (as it is the same as an object rename), and indeed that
+seems necessary for any sort of binding. So that ends up identical either way.
+
+OTOH, your proposal doesn't seem to allow both partial matching AND direct
+access to the enclosing (sub)record that contains that matching. That seems
+to be *less* functionality and *more* complexity. Which makes it a no-brainer
+to me, YMMV. ;-)
+
+****************************************************************
+
+From: Raphael Amiard
+Sent: Tuesday, February 14, 2017  5:10 PM
+
+>> Thank you for your answer Randy, and sorry I took so long to answer ! 
+>> I have been swamped with other work at AdaCore, currently depiling my 
+>> ARG work pile :)
+> Real work being more important than ARG fun -- what a concept! :-)
+
+It's all fun, with varying degrees of "urgent" attached :)
+
+>> case C is
+>>     when (Connected, <>, <>, (True, <>, <>)) =>
+>>        Print_Ping_Time (C2.Ping_Info.Ping_Time)
+>>
+>> Here you're accessing the wrong object altogether (C2). This is valid 
+>> Ada, so it is pretty impossible to emit a warning, even though the 
+>> code is clearly wrong.
+> Well, it's only clearly wrong if you know the intent; I have parallel 
+> objects like this all the time (often in writing list process). Which 
+> I suppose is your point.
+
+It's not only clearly wrong if you know the intent: It's clearly wrong if
+your goal is to disallow access to a discriminant dependent component, when
+you don't statically know that this access is correct (which is the case
+above), then you should not access it, regardless of the intent.
+
+> BTW, you've again ignored the fact that <> can only appear in named 
+> notation, and I think that really does make a difference in these examples.
+> (Not to mention that your example has seven components when written 
+> this way, not six. :-)
+
+Yes, sorry about that, I did not completely ignore it, I think I altered some
+of them, and not all, very sloppy of me...
+
+>> Yes, I agree with that line of reasoning. The C/CC example
+>> was a straw-man, of the alternative proposal I don't like. In
+>> the example above, I feel like the  "Ping_Time" binding that
+>> is introduced, both by it's strong  locality and because of
+>> the static guarantees associated to it, helps the user
+>> understand the code and make sure it's correct.
+> What guarantees?
+
+The ones outlined above: You can statically check that a components exists 
+before accessing it.
+
+> What doesn't make sense? You already have to have the component names in the
+> pattern, adding binding names as well is likely be confusing rather than
+> helpful.
+
+In that case, we're talking about a point record with no discriminant, so we 
+don't care about safety, so it's completely a style issue, which is by essence 
+subjective. I can't find a concrete example to discuss so let's agree this is 
+not a case that is interesting for this discussion.
+
+> Side-comment here: The way you have the binding defined, it doesn't seem
+> possible to pass a larger part of the matched record to a subprogram.
+> Consider a modification of the above:
+>
+>   case Get_Connection (From => Server) is
+>       when CC : (State => Connected, Server => <>,
+>                  Session_Id => <>,
+>                  Ping_Info => (Has_Ping_Info => True, Last_Ping_Time =>
+>                                <>, Last_Ping_Id => <>)) =>
+>           Put_Line ("Connected ! Session Id is "
+>                     & CC.Session_Id & Display_Ping_Info (CC.Pinf_Info));
+>
+> In this case, we're using an existing routine to generate the details about
+> the Ping_Information. That's pretty common (after all, one of the likely
+> reasons for having a subrecord is that it gets independently processed). I
+> don't see any way of doing this with your binding short of going back and
+> copying the original selecting information.
+
+To be clear, I'm not arguing that top level binding is useless, in fact many 
+languages with pattern matching do propose it. I'm arguing that it is not a 
+substitute for sub components bindings, for the reasons outlined before.
+
+This example of yours, while arguably expressive, also shows why it would be 
+hard to guarantee the property I have outlined above - no access to fields if 
+you can't guarantee their legality statically. You would have to keep a shape of 
+the whole data structure, with known and unknown discriminants, possibly across 
+indirectly nested case statements. This is flow analysis at this stage, and 
+probably something you don't want to make mandatory at the language level.
+
+>> If you combine that with:
+>>
+>> 1. A style rule (that can easily be statically checked) that it is
+>> forbidden to access variable components of a record via the
+>> regular dot
+>> notation, eg. you have to use matching.
+>> 2. A legality rule that it is forbidden to mutate the object
+>> that you're
+>> matching upon (similar to the rule about renamings of discriminated
+>> records component if I remember correctly)
+> It has to be the latter, especially in your scheme -- it is essentially a
+> renaming of a discriminant-dependent component, so the same rules have to
+> apply. (We adopted that rule for iterators, for instance, for similar
+> reasons.) That means that the selecting expression would have to be "known
+> to be constrained".
+
+My list is inclusive, not exclusive. Of course 2. has to be guaranteed with 
+Tuck's proposal and with mine. However it is not the main point. The main point 
+is 1., because this is what will allow to enforce the invariant that no 
+component of a discriminated record is accessed if we don't know statically that 
+it is correct.
+
+With the rule enforced, the code at the beginning:
+
+C, C2 : Connection_Info
+
+case C is
+    when (Connected, <>, <>, (True, <>, <>)) =>
+       Print_Ping_Time (C2.Ping_Info.Ping_Time)
+
+
+Would be illegal because C2.Ping_Info.Ping_Time would fall under this rule.
+
+If this was really the intent of your code, you'd have to write:
+
+C, C2 : Connection_Info
+
+case C is
+    when (Connected, <>, <>, (True, <>, <>)) =>
+       Print_Ping_Time
+         (case C2 is
+            when (Connected, <>, <>, <>, (True, <>, <PT>)) => PT)
+            when others => No_Ping_Time)
+
+
+It is more verbose, which is in this case a good thing ! You're ensuring that 
+the programmer handles the error case explicitly.
+
+> So the safety issue is the same either way; it doesn't depend on how the
+> binding(s) are defined.
+
+Only because we're not talking about the same safety issue.
+
+>> I strongly disagree with that. Tucker's idea is insufficient to
+>> guarantee safety, which is one of the key points of this feature, not
+>> expressivity. I'm waiting for a counter argument :)
+> Tucker's idea combined with a "known-to-be-constrained" rule works fine to
+> guarantee safety (as it is the same as an object rename), and indeed that
+> seems necessary for any sort of binding. So that ends up identical either
+> way.
+
+It does not, as explained above, guarantee safety of an accessed component of a 
+discriminated record if that component depends on the discriminant.
+
+> OTOH, your proposal doesn't seem to allow both partial matching AND direct
+> access to the enclosing (sub)record that contains that matching.
+
+It does. You just have to put your result in a declare block. You're not usually 
+one to argue that this added verbosity is actually a big deal I think !
+
+declare
+   CC : Connection_Info := Get_Connection (From => Server)
+begin
+  case CC is
+      when (State => Connected, Server => <>,
+            Session_Id => <>,
+            Ping_Info => (Has_Ping_Info => True, Last_Ping_Time =>
+                          <>, Last_Ping_Id => <>)) =>
+          Put_Line ("Connected ! Session Id is "
+                    & CC.Session_Id & Display_Ping_Info (CC.Pinf_Info));
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, February 14, 2016  4:16 PM
+
+> To be clear, I'm not arguing that top level binding is useless, in fact many 
+> languages with pattern matching do propose it. I'm arguing that it is not a 
+> substitute for sub components bindings, for the reasons outlined before.
+
+Well, you have to be careful about making a proposal too complex. I've learned
+through much bitter experience that if you come up with a fully worked out
+proposal with all of the bells and whistles, you're most likely to end up with
+nothing. It probably would have been better to spring this component matching
+proposal when the rest of this idea is nearly finished... :-)
+
+> This example of yours, while arguably expressive, also shows why it would be 
+> hard to guarantee the property I have outlined above - no access to fields if 
+> you can't guarantee their legality statically. You would have to keep a shape of 
+> the whole data structure, with known and unknown discriminants, possibly across 
+> indirectly nested case statements. This is flow analysis at this stage, and 
+> probably something you don't want to make mandatory at the language level.
+
+Within in one of your case statements (or, for that matter, in the scope of a
+renames of the component), the Legality Rule already guarantees the property
+you want. Indeed, because of the renames solution, there is a way to already
+guarantee the property in Ada today (with an appropriate checking tool, of
+course; sounds like something AdaControl could do).
+
+That is, one could insist that all discriminant dependent components are bound
+with renames before use:
+     Ping_Time : ... renames Get_Connection (From => Server).Ping_Info.Last_Ping_Id;
+Combined with appropriate "if"s/assertions, you can be guaranteed that the
+component exists and is safe. (Indeed, with a proper tool, you really shouldn't
+need to do anything, as a tool can relatively easily prove this property if it is
+provable at all.)
+
+...
+> >> 1. A style rule (that can easily be statically checked) that it is 
+> >> forbidden to access variable components of a record via the regular 
+> >> dot notation, eg. you have to use matching.
+...
+> The main point is 1., because this is what will allow to enforce the 
+> invariant that no component of a discriminated record is accessed if 
+> we don't know statically that it is correct.
+
+At least in my code, it is common to have a subprogram that works on a single
+variant. For instance, the routine I was working on yesterday (slightly
+modernized):
+
+    procedure Lookup_Allocator (Expr : in Node_Ptr)
+       with Pre => Expr.Kind = Allocator;
+
+    procedure Lookup_Allocator (Expr : in Node_Ptr) is
+    begin
+        Lookup_Expr (Expr.Allocator_Type); -- The component is discriminant-dependent.
+        ...
+    end Lookup_Allocator;
+
+With your rule, you'd have to wrap this entire body in one of your case
+statements, and presumably have an "others" clause with an Internal_Error
+call. But that completely defeats the purpose of the precondition (violating
+our style rule: "never repeat the precondition in the body"), and would add a
+lot of extra verbiage to the code.
+
+So that seems like a very silly rule to have in general. I could see having it
+in code that is inside of a case statement, but that seems too limited to be
+of much use. And clearly, any barely competent tool could prove that the
+component use is safe (at least in the absence of some other task causing
+mischief).
+
+> With the rule enforced, the code at the beginning:
+> 
+> C, C2 : Connection_Info
+> 
+> case C is
+>     when (Connected, <>, <>, (True, <>, <>)) =>
+>        Print_Ping_Time (C2.Ping_Info.Ping_Time)
+> 
+> 
+> Would be illegal because C2.Ping_Info.Ping_Time would fall under this 
+> rule.
+> 
+> If this was really the intent of your code, you'd have to write:
+> 
+> C, C2 : Connection_Info
+> 
+> case C is
+>     when (Connected, <>, <>, (True, <>, <>)) =>
+>        Print_Ping_Time
+>          (case C2 is
+>             when (Connected, <>, <>, <>, (True, <>, <PT>)) => PT)
+>             when others => No_Ping_Time)
+> 
+> 
+> It is more verbose, which is in this case a good thing ! 
+> You're ensuring that the programmer handles the error case explicitly.
+
+Seriously, this looks like madness to me. No sane programmer is ever going
+to write the second just to meet some style rule. (Especially if they have to
+put all of the component names into the patterns!)
+
+...
+> It does not, as explained above, guarantee safety of an accessed 
+> component of a discriminated record if that component depends on the 
+> discriminant.
+
+That's not a worthwhile goal if it requires writing gallons of unnecessary
+code, especially in the precondition/predicate/assertion cases.
+
+> > OTOH, your proposal doesn't seem to allow both partial matching AND direct
+> > access to the enclosing (sub)record that contains that matching.
+> 
+> It does. You just have to put your result in a declare block. You're not
+> usually one to argue that this added verbosity is actually a big deal I
+> think !
+> 
+> declare
+>    CC : Connection_Info := Get_Connection (From => Server) begin
+>   case CC is
+>       when (State => Connected, Server => <>,
+>             Session_Id => <>,
+>             Ping_Info => (Has_Ping_Info => True, Last_Ping_Time =>
+>                           <>, Last_Ping_Id => <>)) =>
+>           Put_Line ("Connected ! Session Id is "
+>                     & CC.Session_Id & Display_Ping_Info (CC.Pinf_Info));
+
+If that's acceptable, then you don't need any binding mechanism and the
+complications that it brings.
+
+Besides, if you're really willing to write a lot of code, you don't need this
+feature at all, so that simplifies it down to nothing -- the ultimate simple
+solution. ;-)
 
 ****************************************************************

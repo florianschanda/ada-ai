@@ -18,6 +18,9 @@ checks described in English. These would be better written as preconditions,
 which would make them available to compilers for optimization and to proof
 tools, as well as being less ambiguous for human readers.
 
+** Must add some text about the missing reading operations -- see the January 2017
+mail in this AI **
+
 !proposal
 
 (See summary.)
@@ -1072,6 +1075,207 @@ them, so it wouldn't be as necessary to suppress them).
 This seems to me to be the best way to fix the performance problem caused by
 the checking. But that presumes that we're sure that the performance problem
 is caused solely by the checking.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, January 11, 2017  7:33 PM
+
+[The quote is from the e-mail discussion of AI12-0215-1 - Editor.]
+
+>Yes, this exhibit N in the long list of reasons that we should have had all
+>of the container operations having a container parameter.
+
+It strikes me that it might make sense to put on the record all of these
+reasons. We're talking about a routine like:
+
+    function Next (Position : Cursor) return Cursor;
+
+(1) This routine (and its relatives) is not primitive for the container type,
+    so it doesn't get inherited by derivation. Thus derivation of the
+    container type is incomplete and rather useless;
+
+(2) One can't use the prefixed notation to call this routine (Cursor is not
+    tagged, and you wouldn't want it to be the prefix anyway);
+
+(3) The Global aspect for this routine is problematic, as we have to include
+    any container object of the correct type. (The object being read not being
+    part of the specification.) That means we either need some unusual Global
+    specification for this case, or we have to fall back to "reads all", which
+    is far from ideal. (Recall that Cursor is a private type, from outside of
+    the package it doesn't appear to designate anything.)
+
+(4) Reading and writing the container is not symmetric. One uses different
+    parameter lists for each. (This is mitigated somewhat by the Ada 2012
+    Reference routine and the indexed notation - probably most new code will
+    use that, but of course the original routines still can be used.)
+
+---
+
+If, instead, the routine had been declared as (I'm showing the precondition,
+which would have been written in English in Ada 2005/12):
+
+    function Next (Container : Map; Position : Cursor) return Cursor
+       with Pre => (if not Cursor_Belongs_To_Container (Container, Position)
+                    then raise Program_Error);
+
+The routine is primitive, so (1) and (2) are eliminated (in particular,
+prefixed notation can be used). The precondition eliminates (3); we only need
+to include global container state (the storage pool, at a minimum) in the
+Global aspect [and nothing at all for the bounded containers). (4) is
+eliminated as Element and Replace have the same type profile (different modes,
+of course).
+
+The only negative is expressed by the precondition: a check is needed that the
+cursor belongs to the container. Of course as a precondition this can often be
+eliminated. [It's likely that an earlier precondition or postcondition will
+have previously checked/asserted this fact, and this could easily be a stable
+property that doesn't change for most routines.]
+
+---
+
+A possibility here would be to add the necessary additional routines. For the
+Maps, there are only 6 routines that could be added (2 Nexts, 2 Previouses,
+Key, and Element) -- the others are operators which obviously can't have more
+parameters. [The next three parameter "<" that I see will be the first. ;-)]
+That would allow applications that care about Global or want to uniformly use
+prefixed notation or to do a derivation to work usefully, and won't (I think)
+equire any other code to change. [It would be only incompatible with anyone
+hat decided to add these themselves somewhere; that might make some calls
+ambiguous. That's the normal problem from added new routines.]
+
+I'm thinking that adding these routines might be a good idea, especially for
+the purposes of AI12-0112-1 (which intends to add Pre/Post/Global/Nonblocking/
+Stable_Properties to all of the containers, along with some additional
+routines to support those, and remove English text where possible). The nasty
+Global aspect for the existing routines seems to be justification enough (and
+the other reasons add importance). Any objections to adding them to the next
+draft of AI12-0112-1???
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, January 12, 2017  3:46 PM
+
+[From mail found about AI12-0215-1 - Editor.]
+
+> > My initial thought was that this is fine, (with the obvious caveat 
+> > that this is a tagged type, so there has to be a null extension on 
+> > the
+> > type) but then I remembered that you can't usefully derive
+> a type in a containers package.
+> 
+> This seems more of a failing of the structure of the containers 
+> packages, and doesn't argue against the value of the feature more 
+> generally.  As you mention below, and we have discovered for other 
+> reasons in the context of SPARK, having cursor operations that don't 
+> take the associated container as a parameter create numerous problems 
+> when it comes to doing anything "formal" with the containers.
+
+I take it from this that you agree with my suggestion to add the missing
+container reading operations so that derivation and formal analysis work
+appropriately? (I made that a separate thread, that no one seems to have
+commented on so far.) We can't get rid of the existing operations for obvious
+reasons, but we could add ones that work "right" and formal uses could just
+ignore the ones without a container parameter. (That seems like a more
+practical solution than defining a completely separate set of containers that
+have better behavior.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, January 12, 2017  4:31 PM
+
+[Just the reply to the above message, see AI12-0215-1 for the whole
+thread - Editor.]
+
+> ... I take it from this that you agree with my suggestion to add the 
+> missing container reading operations so that derivation and formal 
+> analysis work appropriately? (I made that a separate thread, that no 
+> one seems to have commented on so far.)
+
+Yes, I agree with that proposal.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Sunday, January 15, 2017  6:01 PM
+
+> If, instead, the routine had been declared as (I'm showing the 
+> precondition, which would have been written in English in Ada 2005/12):
+> 
+>     function Next (Container : Map; Position : Cursor) return Cursor
+>        with Pre => (if not Cursor_Belongs_To_Container (Container, Position)
+>                     then raise Program_Error);
+
+I have often thought that those ops should take a Container param.
+
+The SPARK folks at AdaCore designed "formal containers" to be used with
+proofs. Not proving the implementation of the container is correct, but
+proving that clients obey the pre/post. They came to the same conclusion. They
+tried to keep their interface similar to the language-defined ones, but they
+found the need to add the Container params.
+
+> I'm thinking that adding these routines might be a good idea, 
+> especially for the purposes of AI12-0112-1 (which intends to add 
+> Pre/Post/Global/Nonblocking/Stable_Properties to all of the 
+> containers, along with some additional routines to support those, and 
+> remove English text where possible). The nasty Global aspect for the 
+> existing routines seems to be justification enough (and the other 
+> reasons add importance). Any objections to adding them to the next draft of
+> AI12-0112-1???
+
+I don't object to adding those routines, but I think I object to AI12-0112-1.
+Sounds like a lot of useless work for little gain.
+
+And if we do that, it should be done by hacking on an existing container
+implementation, with regression testing.  There's no way ARG can get it right
+in a vacuum.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, January 16, 2017  7:59 PM
+
+> I don't object to adding those routines, but I think I object to 
+> AI12-0112-1.  Sounds like a lot of useless work for little gain.
+> 
+> And if we do that, it should be done by hacking on an existing 
+> container implementation, with regression testing.
+> There's no way ARG can get it right in a vacuum.
+
+Why? It certainly doesn't hurt to try the changes in an implementation, but I 
+don't think there is much chance that much beyond a handful of typos would be
+found.
+
+For Pre and Nonblocking, this is just replacing English rules with
+specifications. It's rather rote; all of the preconditions are of the form
+"(if Some_Predicate (Container) then raise Some_Exception)", combined with
+"and then". Any cut-and-errors would be clearly obvious (failing the Dewar
+rules). Besides, we're planning to use Nonblocking in the entire Ada library
+(it doesn't work if that's not done), so whether or not a containers overhaul
+is done isn't relevant to it.
+
+For Post/Stable_Properties, we're also encoding the English rules; there's a
+bit more risk of omission but again errors would be clearly obvious
+(requiring an obvious nonsense property).
+
+Global could be more of a problem, but there I think we have to be very
+conservative; no existing implementation is going to help much there, as the
+rules have to allow far more than any single implementation needs --
+regardless of design.
+
+If there is any risk, it is in the English wording changes (deleting too much
+certainly would be possible). But if you look at the prototype AI12-0112-1,
+you'll see that the descriptions of the container operations are *much* more
+understandable. Getting the English for what really was code was very
+difficult and probably isn't exactly right. Most likely, we'll fix some errors
+by this exercise (and probably fix some errors in existing implementations,
+too, if our experience with containers ACATS tests is any guide). [Indeed, by
+making these checks first-class preconditions, we will eliminate most of the
+need for ACATS tests on those checks, which are annoying to write, and only
+important if someone has screwed up. That would allow redirecting that effort
+elsewhere.]
 
 ****************************************************************
 

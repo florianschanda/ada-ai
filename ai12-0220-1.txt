@@ -52,6 +52,26 @@ and not also doing it for formal subprograms, as I do not want to create
 incentives to use access-to-subprogram values (fully dynamic) instead of
 formal subprograms (with static checking for some properties) - RLB
 
+----
+
+[A snippet from my mail to Jeff on this topic - Editor.]
+
+Note that this semantics for access-to-subprogram is not that unusual. A
+wrapper subprogram also might "add" a precondition to an existing routine.
+For instance, if we have:
+    procedure P with Pre => (Some_Expr_A);
+
+If we then define:
+    procedure Wrap with Pre => (Some_Expr_B) is
+    begin
+        P;
+    end Wrap;
+
+A call on Wrap will effectively enforce both (Some_Expr_B) (from the call to
+Wrap) and (Some_Expr_A) (from the call to P inside of Wrap). That's the same
+thing that is happening here. You could even imagine each of the 'Access
+references creating such a wrapper.
+
 !ASIS
 
 None needed.
@@ -752,5 +772,182 @@ Anyway, enough musings for today. I think the main thing this exercise shows
 is that it doesn't make much sense to worry about this until we've decided
 in or out for lamdbas and generators -- because either would totally destroy
 the model of this feature and would require a major redesign.
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, April 14, 2017  12:55 PM
+
+> A more radical idea is to get rid of "access" completely and talk 
+> about "subprogram types."  Bob Duff pushed a bit for that originally, 
+> and it should probably be on the table.  These would of course be of a 
+> limited type again.  This is somewhat related to lambda expressions, 
+> aka function expressions.
+
+In the end, I think this is much preferable to subprogram access types (even
+if the implemention is likely to be the same). Generic formal subprograms
+were on the right track there already: get rid of exposing the by-reference
+nature of the type. Of course, they are by-reference types. It has the charm
+that it is a new class of types and thus we can come up with its own rules
+that need not necessarily match up with named or anonymous access types.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, April 14, 2017  1:13 PM
+
+I've always thought that:
+
+    procedure P(...; Action: not null access procedure(X: Elem));
+
+"not null access" is an annoying bit of noise.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April 14, 2017  3:39 PM
+
+I agree "access" is noise, but not necessarily the "not null". Because I often
+use:
+
+    procedure P (...; Logger : access procedure (Msg : String) := null);
+
+to provide an optional debugging log. This is the best way (IMHO) to add
+debugging to Pure and Preelaborated packages (in the latter case, Ada 2012
+has another option, but for code portable to non-GNAT compilers the above is
+best). There is no logging if the subprogram is null (this is often the normal
+case).
+
+Without the null, one has to use a dummy routine and that could be
+substantially more expensive (calls dumping pipelines on modern machines) and
+surely clutters the code - one has to come up with a name and declaration
+location for the dummy.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, April 14, 2017  4:27 PM
+
+> I agree "access" is noise, but not necessarily the "not null". Because 
+> I often use:
+> 
+>     procedure P (...; Logger : access procedure (Msg : String) := null);
+> 
+> to provide an optional debugging log. This is the best way (IMHO) to 
+> add debugging to Pure and Preelaborated packages (in the latter case, 
+> Ada 2012 has another option, but for code portable to non-GNAT 
+> compilers the above is best).
+
+I never do that.  I don't want to scatter "if Logger /= null..."
+all over the place.  Plus it just seems kludgy -- if you want a procedure
+that does nothing, then write a procedure that does nothing.  Plus null might
+mean something else (e.g. "send the logs to a default location").
+
+>... There is no logging if the subprogram is null (this is often the  
+>normal case).
+
+For logging, yes.  But it's not often you want a do-nothing default for
+anon-access-to-subp params.
+
+> Without the null, one has to use a dummy routine and that could be 
+> substantially more expensive (calls dumping pipelines on modern 
+> machines) and surely clutters the code
+
+Clutters the code less than "if Logger /= null".
+
+>... - one has to come up with a name and
+
+procedure Do_Nothing(...) is (null);
+
+> declaration location for the dummy.
+
+Before the first occurrence of Do_Nothing'Access in the same package spec.
+
+Anyway, presumably "X: not null access procedure(...)" will still be legal.
+I would strongly object if "X: procedure(...)" allowed X to be null.
+
+****************************************************************
+
+From: Bob Duff
+Sent: Friday, April 14, 2017  4:48 PM
+
+> For logging, yes.  But it's not often you want a do-nothing default 
+> for anon-access-to-subp params.
+
+FWIW, in the gnat sources, I see about 230 anon-access-to-subp params.
+About 228 have "not null", and most of those are in the containers packages.
+About 2 do not have "not null", and default to null.
+
+I say "about" because I'm doing textual searching, and could have gotten a
+few false positives or negatives.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, April 14, 2017  5:21 PM
+
+For what it is worth in ParaSail, there are subprogram values, and a "null"
+procedure value does nothing.  So you don't have to check for it explicitly.
+A "null" function returns "null" so you can't use it in a context where the
+null value is not permitted as a result.
+
+This relies on the fact that all ParaSail types have an associated "null"
+value, which is only permitted in certain contexts (i.e. when the modifier
+"optional" is used -- so instead of "not null" there is "allows null").
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April 14, 2017  5:22 PM
+
+> I never do that.  I don't want to scatter "if Logger /= null..."
+> all over the place.  Plus it just seems kludgy -- if you want a 
+> procedure that does nothing, then write a procedure that does nothing.
+
+I don't want a routine that does nothing, I don't want any logging at all.
+That's not quite the same thing. Setting up a logging string can be quite
+expensive (involving Image and concats); not doing all of that when it is
+not needed can matter (if the routine is otherwise cheap).
+
+And yes, it's annoying to put "Logger /= null" or "if Trace then" all over,
+but that gives better performance than the "simple" solution. We were very
+consistent about that in the Janus/Ada compiler (almost to the point of
+harming readability) to avoid sapping performance with stuff that isn't going
+to get executed (the code size used to matter, too).
+
+...
+> For logging, yes.  But it's not often you want a do-nothing default 
+> for anon-access-to-subp params.
+
+I would have just said "it's not often you want ... anon-access-to-subp
+params." I only use them in this instance because the restrictions on Pure
+and Preelaborated packages make the normal solution impossible.
+
+...
+> Anyway, presumably "X: not null access procedure(...)" will still be 
+> legal.  I would strongly object if "X:
+> procedure(...)" allowed X to be null.
+
+I would strongly object to allowing "X : procedure(...)"; no more anonymous
+parameter types for me. (Fool me once, fool me twice...) Besides, the entire
+point of this discussion is to add a place to hang a precondition, so a type
+declaration is required or we're not even solving the problem.
+
+As for
+    type Logger_Type is procedure (Msg : String);
+
+I'm ambivalent. Allowing null "feels" wrong, but not allowing it seems to make
+managing data structures containing components of this type harder.
+(And what's the default initialization in that case??)
+
+****************************************************************
+
+From: Jeam-Pierre Rosen
+Sent: Friday, April 14, 2017  11:47 PM
+
+> For what it is worth in ParaSail, there are subprogram values, and a 
+> "null" procedure value does nothing.
+
+Too bad you didn't call it "OM" ...
 
 ****************************************************************
