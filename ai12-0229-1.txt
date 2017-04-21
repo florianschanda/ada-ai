@@ -1,0 +1,820 @@
+!standard 8.5.6(0)                                    17-04-19  AI12-0229-1/01
+!class Amendment 17-04-19
+!status work item 17-04-19
+!status received 17-03-24
+!priority Low
+!difficulty Medium
+!subject Type renaming
+!summary
+
+Type renaming is defined.
+
+!problem
+
+When constructing packages from of formal signature packages, generic
+instantiations,  and the like, the need often arises to include the declarations
+of an instance in the new package.
+
+This can be done by renaming each entity in the package (which is very tedious),
+or by derivation (which introduces additional types for no good reason).
+
+What is needed is a way to make the appropriate declarations automatically.
+
+   generic
+   package GP is
+      type A is Integer;
+      type B is Integer;
+      function F(X : A, Y : B) return B;
+      An_Excep : exception;
+   end GP;
+
+   with GP;
+   package Enclosing is
+      package Inst is new GP;
+      <Some new construct>; -- Make all of the primitive operations within Inst
+                            -- directly visible in Enclosing, as though they
+                            -- were renamed-as-body.
+   end Enclosing;
+
+This means that from the *outside* of the enclosing package, you can name the
+declarations from the instance using, for example "Enclosing.F".
+
+!proposal
+
+Add a type renaming feature; this works much like a derived type but it allows
+multiple types to be renamed at a time. This is outlined here in pseudo-wording.
+
+Syntax
+
+    type defining_identifier {, defining_identifier} renames type_name {, type_name}
+       [aspect_specification];
+
+[Note: This is closely related to the proposed syntax in AI12-0226-1; the main
+difference is that this feature is believed to work semantically, and the
+AI12-0226-1 is not believed to work.]
+
+Static Semantics
+
+A subtype with no additional constraints of each type_name is declared with the
+corresponding defining_identifier.
+
+A rename of each primitive subprogram of any of the type_names is declared (the
+renaming has the same defining_designator, parameter names and subtypes, and
+result subtype as the original primitive subprogram). Unlike a normal subprogram
+renames, if the primitive subprogram is a dispatching subprogram, the renamed
+subprogram is also a dispatching subprogram.
+
+AARM Ramification: If a subprogram is primitive for more than one of the type
+names, it is declared only once.
+
+In addition, for each type_name T that denotes a tagged type, each subprogram
+that is declared immediately within the declarative region in which an ancestor
+type of T is declared and that operates on a class-wide type that covers T is
+renamed (again, renaming has the same defining_designator, parameter names and
+subtypes, and result subtype as the original subprogram).
+
+AARM Reason: These are the same subprograms that a use all type clause would
+make directly visible.
+
+AARM To Be Honest: If the defining_designator for a subprogram is an expanded
+name, the renamed routine will be named with the right-most designator only.
+
+Legality Rules
+
+The number of defining_identifiers shall be the same as the number of
+type_names.
+
+Redundant[A type renaming is illegal if any subtype or subprogram that it
+declares is an illegal homograph of some other declaration.] [This is redundant
+because the rules in 8.3 would have this effect; I think it needs to be repeated
+here, though.]
+
+!wording
+
+** TBD.
+
+!discussion
+
+This feature declares locally all of the subprograms that a "use all type"
+clause would make visible. That makes them available as if they had been
+declared locally (indeed they HAVE been declared locally). The effect could be
+described as a "transitive use clause", but the semantics are really that of
+renaming.
+
+The one divergence for a pure renaming model is with respect to dispatching. A
+renaming declaration is dispatching if and only if it is primitive for the type.
+That means that when type renaming is used as intended, a renamed subprogram
+would not retain its dispatching characteristics. This would be bad, as a call
+like Enclosing.F (A'Class(Obj)) would be illegal, while a call to Enclosing.Inst
+(A'Class(Obj)) would be legal.
+
+Some ARG members (including the author) believe that the existing semantics is a
+mistake, as it prioritizes pathological cases over a reasonable usage. It's too
+late to fix that (there is too much chance of incompatiblities), but we can at
+least have new features work right. Therefore, the newly subprograms have ALL of
+the properties of the original, including dispatching.
+
+---
+
+The capability to rename multiple types at once is necessary as a subprogram may
+be primitive for multiple types.
+
+In particular, using the declarations of the example in the !problem,
+      type A, B renames Inst.A, Inst.B;
+is not the same as
+      type A renames Inst.A;
+      type B renames Inst.B;
+
+In the first case, only one copy of F is declared. In the second case, each
+renames declares a copy of F (thus the second renaming in the second example is
+illegal).
+
+Since using such a renaming on a container instance would need to rename both
+the container and the cursor, this multiple form is necessary and will be
+commonly used.
+
+---
+
+We considered and rejected a similar full package contents renaming facility.
+Such a facility have to would rename contained non-overloadable entities as well
+as overloadable ones. (The only non-overloadable entities that type renaming can
+rename are the subtypes themselves, and for those the identifiers can be changed
+if needed.)
+
+The possibility of conflicts is much higher with non-overloadable entities,
+since they will conflict with anything with their defining_identifier. (An
+overloadable entity will only conflict with something with the same designator
+and profile).
+
+This causes a maintenance problem. If a new non-overloadable declaration is
+added to a package, it could cause errors in otherwise unrelated packages that
+happen to have a package contents renaming.
+
+It has been argued that this already happens with package use clauses. However,
+a package use clause only has effect within a single compilation unit.
+Therefore, the only usages that might have to change are local usages; in almost
+all cases, all that is needed is to prefix the usage with the appropriate
+package name.
+
+A package content renaming facility would be different, however. The primary purpose of such a facility is to provide a more
+convinient view for CLIENTS of the package containing the package contents renaming construct. As such, if unrelated program
+maintenance made the package contents renaming facility illegal, the package owner would be faced with two unpleasant choices:
+either remove the package contents renaming construct (breaking all clients that depend upon it), or remove/rename the
+conflicting declaration (breaking all clients that used that declaration). This is a ripple-like effect, as now many (and often all)
+of the clients also need changing.
+
+This problem is severe enough that it would make changing the language-defined packages very difficult, as any significant change
+ - especially to non-overloadable entities - would be significantly incompatible. A similar problem would apply to third-party
+libraries like GTKAda.
+
+Additionally, this facility is likely to be used frequently on containers packages. But an instance of any Ada language-defined
+container would always conflict with another if both used a package contents renaming construct -- they both would contain the
+non-overloadable constant No_Cursor, for one example.
+
+Since type renaming only renames subprograms that are related to the renamed type(s), the scope of conflicts is much more restricted.
+(In the motivating case of types declared in a generic instantiation, there cannot be any conflicting operations declared before
+the instance.) Moreover, having two subprograms with the same name and profile, but different purposes, is a problem regardless of
+how the subprograms are called. One of the subprograms ought to be changed in such a case anyway. In addition, if the routines
+actually have the same function (as might happen if a previously separate routine is added to a generic unit), the error will point
+out the duplicate declaration (and removing it would not affect clients). Thus, an error in a type renaming probably really reflects
+an error (either of design or duplication), and thus will not be common.
+
+Thus we judge that the maintenance hazards from the proposed type renaming construct are low enough to live with, while the hazards from
+a package contents renaming are unacceptable.
+
+[Aside: This analysis suggests that no one should use constants of an ADT in a package specification, as such constants are not
+overloadable. Instead, a parameterless function should be used; such a function would be made visible by "use all type" and
+renamed by type renaming, while neither happens for a constant. In a perfect world, objects would overload like functions (the fact that
+a constant can be replaced by a function shows a model for doing so), but this seems too risky for Ada at this time. So one should avoid
+constants if the equivalent function would be primitive.
+
+If this feature is adopted, the author feels that we ought to consider changing
+the constants in the containers packages to functions (with Global => null to
+reinforce that all calls return the same value) so that they would be included
+in any type renamings. (That is a good idea even without type renaming, as
+that would help "use all type" as well.) It would be compatible in all but the
+most unusual circumstances - a "use all type" of a container, another No_Cursor
+of some other type available via a use clause, and used in a overloaded call
+where only the use of No_Cursor disambiguated it.]
+
+!example
+
+The example in the !proposal using the new construct.
+
+   with GP;
+   package Enclosing is
+      package Inst is new GP;
+      type A, B renames Inst.A, Inst.B;
+        -- Make all of the primitive operations of Inst.A and Inst.B (in this
+        -- case, F) directly visible in Enclosing, as though they were
+        -- renamed-as-body.
+      An_Excep : exception renames Inst.An_Excep;
+   end Enclosing;
+
+!ASIS
+
+New functions needed, details TBD.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the new capabilities are supported.
+
+!appendix
+
+From: Tucker Taft
+Sent: Friday, March 24, 2017  7:57 PM
+
+One of our engineers who has been building a new version of the containers
+libraries using formal package signatures and various mix-ins, has come upon a
+need for, what I would call, a "transitive use clause."  This issue has come up
+before in various guises.  The idea is that you instantiate a generic package,
+and then you want *all* of the declarations from the instance, to become
+declarations of the enclosing package (effectively like renames)  A derived type
+declaration can sometimes do that, but as we know it runs into trouble if there
+are multiple types in the generic package.
+
+Here is a simple example:
+
+    generic
+    package GP is
+        type A is Integer;
+        type B is Integer;
+        function F(X : A, Y : B) return B;
+        An_Excep : exception;
+    end GP;
+
+    package Enclosing is
+       package Inst is new GP;
+       <transitive> use Inst;  -- Make all visible declarations within Inst
+                               -- directly visible in Enclosing, as though they
+                               -- were renamed
+                               -- (actual syntax to be suggested below)
+    end Enclosing;
+
+This means that from the *outside* of the enclosing package, you can name the
+declarations from the instance using, e.g.  "Enclosing.An_Excep"
+
+This is also related to past notions of "type renaming," etc.
+
+After trying various syntaxes (e.g. "use all Inst"), my suggestion is the
+following general pattern:
+
+    use_clause [with renames];
+
+That is, any kind of "use" clause can be treated as a set of renames by
+appending "with renames" on the end, effectively making it transitive.
+
+So a type rename would be:
+
+    use all P.T with renames;
+
+The above example would be:
+
+    use Inst with renames;
+
+etc.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 24, 2017  8:21 PM
+
+> One of our engineers who has been building a new version of the
+> containers libraries using formal package signatures and various
+> mix-ins, has come upon a need for, what I would call, a "transitive
+> use clause." This issue has come up before in various guises.  The
+> idea is that you instantiate a generic package, and then you want
+> *all* of the declarations from the instance, to become declarations of
+> the enclosing package (effectively like renames)  A derived type
+> declaration can sometimes do that, but as we know it runs into trouble
+> if there are multiple types in the generic package.
+
+Have you forgotten the vast amount of effort we put into this idea the last time
+around? The last idea was called "integrated packages" (see AI12-0135-2), but
+all of the ideas we tried was essentially this (some sort of automated
+renaming). We ended up abandoning it because we couldn't seem to eliminate the
+ripple and Beaujolais effects (at least that's my memory).
+
+I recall that my conclusion at the time was that the only real solution was to
+allow much more overloading in Ada, as in that case the ripple and Beaujolais
+effects become manageable (if the only things that get hidden are those with
+matching profiles, the odds of trouble are substantially lessened, especially as
+subprograms and objects with the exact same profile are suspicious anyway). I
+recall investigating the feasibility of making objects and exceptions
+overloadable (the main problem with doing that is fear - in that one can't prove
+the absence of problems, at best one can say that no problems have been
+noticed).
+
+In any case, this was a can of wiggling worms in the 2006 to 2009 timeframe, and
+I think we'd need some new insights to reopen something that we've already
+(unsuccessfully) spent substantial amounts of effort on. (And I'd definitely
+want to start with the previously vetted proposal rather than some
+new-but-almost-identical idea that would require dealing with the entire set of
+problematic examples again...)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, March 24, 2017  8:28 PM
+
+> Have you forgotten the vast amount of effort we put into this idea the
+> last time around? The last idea was called "integrated packages" (see
+> AI12-0135-2), but all of the ideas we tried was essentially this (some
+> sort of automated renaming). We ended up abandoning it because we
+> couldn't seem to eliminate the ripple and Beaujolais effects (at least that's my memory). ...
+
+I think this is actually a simpler proposal, with very well defined semantics,
+i.e. namely that of a series of renames.  The "use ... with renames" would be
+illegal if any of the renames would have been illegal.  So I don't see any
+Ripple or Beaujolais effects.  Feel free to prove me wrong!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, March 24, 2017  9:02 PM
+
+> I think this is actually a simpler proposal, with very well defined
+> semantics, i.e. namely that of a series of renames.
+> The "use ... with renames" would be illegal if any of the renames
+> would have been illegal.
+
+Ah: you didn't say that in the first place. I assumed that was TBD.
+
+> So I don't see any Ripple
+> or Beaujolais effects.  Feel free to prove me wrong!
+
+I suspect that your idea would prove to be unusable, because with any
+interesting package, there are constants, exceptions, and generics declared, and
+those will frequently conflict. (Remember, they're not overloadable so any use
+of the same name is deadly.) Not to mention zilllions of operators. I'm pretty
+sure we tried and discarded that scheme when developing with integrated
+packages.
+
+It's probably safe, but very frequently existing code would become illegal
+because of maintenance. (For instance, if we had this, we couldn't add any new
+declarations to the containers for fear that it would make lots of existing code
+illegal -- and there's no easy workaround like there is for the regular use
+clause.) That's certainly a form of ripple effect.
+
+If you seriously want to bring this proposal, you really ought to go look at the
+old proposals and see what the fatal objections were and how your proposal deals
+with them. That's a big job that I don't particularly want to do.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, March 24, 2017  10:02 PM
+
+> I suspect that your idea would prove to be unusable, because with any
+> interesting package, there are constants, exceptions, and generics
+> declared, and those will frequently conflict. (Remember, they're not
+> overloadable so any use of the same name is deadly.) Not to mention zilllions of operators.
+> I'm pretty sure we tried and discarded that scheme when developing
+> with integrated packages.
+
+This is used when you are constructing one package on top of an existing
+package.  You would use this when you really want *all* of the existing package
+(or all of the symbols made use-visible for a use-type with renames).  If you
+only want some of them, then you can use explicit renames.  And you are in
+charge of what other declarations you have in the enclosing package, so you will
+need to choose them carefully.
+
+> It's probably safe, but very frequently existing code would become
+> illegal because of maintenance. (For instance, if we had this, we
+> couldn't add any new declarations to the containers for fear that it
+> would make lots of existing code illegal -- and there's no easy
+> workaround like there is for the regular use clause.) That's certainly a form of ripple effect.
+
+That is already true for normal "use" clauses, that is, they can make things
+invisible when there are non-overloadable declarations introduced.  We worry
+about this a bit, but it doesn't seem to be a huge problem in practice.  I
+suspect the same thing would be true here.
+
+> If you seriously want to bring this proposal, you really ought to go
+> look at the old proposals and see what the fatal objections were and
+> how your proposal deals with them. That's a big job that don't
+> particularly want to do.
+
+Can you remind me what was the number of that old AI?
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Saturday, March 25, 2017  12:35 AM
+
+> I suspect that your idea would prove to be unusable, because with any
+> interesting package, there are constants, exceptions, and generics
+> declared, and those will frequently conflict.
+
+And especially, you can't have two use with renames for two instantiations of
+the same generic package, because you are guaranteed to have conflicts.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, March 25, 2017  7:16 AM
+
+I suppose, but that doesn't seem like an interesting use-case.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, March 25, 2017  8:05 PM
+
+???
+
+I see this as a way of creating coherent abstractions out of containers and
+other generics (where otherwise the instance breaks the abstraction into extra
+confusing packages).
+
+It's not unusual for an abstraction to contain an array of the basic
+abstraction. (That is, the abstraction includes T and array of T.) If one was to
+use a container to define T and a vector container instead of array of T, and
+wanted them presented as an integrated abstraction then this sort of use is a
+necessary part. (Especially as container-of-private doesn't work directly and
+has to be "re-integrated" after-the-fact.)
+
+So this doesn't seem like an unusual occurrence. It seems like the capability
+would be of rather narrow utility with a strict legal/illegal setup. Remember
+that every Ada.Container contains a Null_Cursor object, so any two container
+instances would conflict this way (at least with your original proposal). And
+that almost all I/O packages include renamed exceptions. Many package contain
+generic iterators called "Iterator". And so on.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, March 25, 2017  8:26 PM
+
+> This is used when you are constructing one package on top of an
+> existing package.  You would use this when you really want
+> *all* of the existing package (or all of the symbols made use-visible
+> for a use-type with renames).  If you only want some of them, then you
+> can use explicit renames.  And you are in charge of what other
+> declarations you have in the enclosing package, so you will need to
+> choose them carefully.
+
+I think you usually want all of them but one or two that causes problems. A
+vector container has 120+ declarations in it, and you'd usually want all of the
+overloadable ones and possibly a few more, but you may not want every one. An
+all-or-nothing construct has very little flexibility.
+
+> > It's probably safe, but very frequently existing code would become
+> > illegal because of maintenance. (For instance, if we had this, we
+> > couldn't add any new declarations to the containers for fear that it
+> > would make lots of existing code illegal -- and there's no easy
+> > workaround like there is for the regular use clause.) That's
+> > certainly a form of ripple effect.
+>
+> That is already true for normal "use" clauses, that is, they can make
+> things invisible when there are non-overloadable declarations
+> introduced.  We worry about this a bit, but it doesn't seem to be a
+> huge problem in practice.
+
+It's not a huge problem because the workaround is easy and local: just add some
+dot notation or qualification and you're set. (And even so it's enough of a
+problem that I almost never use "use" package clauses in new code. Even of
+packages that would otherwise qualify as common enough, like Ada.Strings.Fixed.
+And I spent time removing use clauses from Janus/Ada code...but I realize that
+personal experience isn't that compelling an argument.)
+
+> I suspect the same thing would be true here.
+
+But not here. There is no workaround that will not affect clients (a much bigger
+problem). The only workarounds possible are to change the conflicting
+declaration so it doesn't conflict (which will certainly break any client that
+depends on the original declaration), or to remove the integrated package (which
+obviously will break any client using anything declared in it). Depending on
+what it is, that could be just a minor pain, or a full-blown disaster. In any
+case, a much more concerning problem.
+
+The last time, I concluded that use clauses (of any sort) on non-overloadable
+items are trouble, and they're more trouble the more "integrated" or
+"transitive" that they get. The "use clause cancelation" of Ada 83 is a ticking
+time bomb; it's only saving grace is that any other solution would be worse. The
+"correct" solution is to overload everything, so there almost never is complete
+cancelation. (But that is too scary for Ada, I think.)
+
+As such, I'd be more interested in a true type-renaming proposal than anything
+related to packages (which necessarily brings in non-overloadable items).
+Especially as a type-renaming proposal would only drag in overloadable things
+that are primitive -- precisely those that would be very hard to conflict with
+(it would require having two entities with the same profile, containing at least
+one parameter/result of the renamed type -- that would be dubious in any case).
+
+> > If you seriously want to bring this proposal, you really ought to go
+> > look at the old proposals and see what the fatal objections were and
+> > how your proposal deals with them. That's a big job that don't
+> > particularly want to do.
+>
+> Can you remind me what was the number of that old AI?
+
+I did that in my original message: it's in the original e-mail you quoted and is
+still quoted above. I did put the wrong year in the number though: its an AI05,
+not an AI12.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, March 25, 2017  10:57 PM
+
+> ... Especially as a type-renaming proposal would only drag in
+> overloadable things that are primitive -- precisely those that would
+> be very hard to conflict with (it would require having two entities
+> with the same profile, containing at least one parameter/result of the
+> renamed type -- that would be dubious in any case).
+
+The "use all type P.T with renames;" was the one that was meant to be roughly
+equivalent to a type renaming, as it would only produce renamings on the
+primitives and class-wides of P.T.
+
+I realize Steve's concern about "obj.op" notation is a bit of a red herring,
+since the type of the object is not changing with these renames, and so Obj.<op>
+would still be looking in the package where the type of Obj was declared (rather
+than renamed), and that isn't moving either.
+
+I suppose the interesting question is: would any new operations declared after
+the "use all type P.T with renames" be usable with Obj.Op notation for objects
+of type P.T?  I think the answer is "no."
+
+>> Can you remind me what was the number of that old AI?
+>
+> I did that in my original message: it's in the original e-mail you
+> quoted and is still quoted above. I did put the wrong year in the number though:
+> its an AI05, not an AI12.
+
+i.e. AI05-0135-2
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Saturday, March 25, 2017  11:02 PM
+
+>> [not cc'ing entire list because this is corner case stuff, at least
+>> at this point]
+
+I don't think it is a corner, unfortunately.
+
+>>
+>> On 03/24/2017 06:28 PM, Tucker Taft wrote:
+>>> I think this is actually a simpler proposal, with very well defined
+>>> semantics, i.e. namely that of a series of renames.
+>>
+>> I believe that if you rename a subprogram, then you usually lose the
+>> ability to call it via a dispatching call. ...
+>
+> Interesting.  That is certainly a concern.
+
+Though not if you are using "Obj.Op" notation, I suppose, or if you are making
+the operations visible via "use all type."  But it would be a problem if you
+tried to use Enclosing.Op or made the operations visible via a "conventional"
+use clause.
+
+We could of course say that these guys are still callable via a dispatching
+call, but now they are no longer perfectly equivalent to renames.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Saturday, March 25, 2017  11:30 PM
+
+...
+> I realize Steve's concern about "obj.op" notation is a bit of a red
+> herring, since the type of the object is not changing with these
+> renames, and so Obj.<op> would still be looking in the package where
+> the type of Obj was declared (rather than renamed), and that isn't
+> moving either.
+
+Steve's concern was about dispatching, which isn't tied to a particular calling
+notation. You're right that Obj.Op wouldn't be a problem, but Pack.Op would
+(assuming Pack is the location of the type renaming) - without some change
+somewhere, that would *not* be a dispatching call. (That would be especially
+trouble for an abstract root class, although I have some trouble imagining such
+a class getting type-renamed.)
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Sunday, March 26, 2017  1:13 AM
+
+>  And I spent time removing use clauses from Janus/Ada code...
+To bad you didn't notice that AdaSubst (another ASIS tool from Adalog) has a
+function to just do that.
+
+TBH: it's a recent addition.
+
+http://www.adalog.fr/compo/adasubst_ug.html
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, March 27, 2017  7:57 PM
+
+[Replying to a Steve Baird message sent privately - Editor.]
+
+>> I believe that if you rename a subprogram, then you usually lose the
+>> ability to call it via a dispatching call.
+>>
+>> For example, the Gnat compiler (correctly, IMO) rejects
+>>
+>>      package Pkg is
+>>         type T is tagged null record;
+>>         procedure Op (X : T);
+>>      end Pkg;
+>>
+>>      procedure P (Y : Pkg.T'Class) is
+>>        procedure Renamed_Op (X : Pkg.T) renames Pkg.Op;
+>>      begin
+>>        Pkg.Op (Y); -- legal
+>>        Renamed_Op (Y); -- illegal
+>>      end;
+>
+> If renames were disallowed as primitive operations, then we could
+> avoid this problem; but that's not going to happen.
+
+That would create its own surprises, I would think, since you can complete a
+primitive subprogram declaration with a rename.
+
+> I view this as a mistake (i.e., a rename shouldn't differ from the
+> renamed  subp in this important property), but not one that we can
+> easily correct now.
+
+But you could argue alternatively that a renaming declaration should be
+equivalent to a regular declaration.  So you can't win either way.  I suppose
+one way to support both would be to allow you to rename a dispatching operation
+as though it were a class-wide operation:
+
+    procedure Renamed_Classwide_Op (X : Pkg.T'Class) renames Pkg.Op;
+
+This to some extent makes sense if we think of the declaration of a primitive op
+of a tagged type as producing an implicit declaration of a classwide operation.
+I believe at one point in the Ada 9X process, we used that model, but it seemed
+to be too confusing at the time.  In retrospect, I think it might have been a
+clearer model.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March 27, 2017  5:09 PM
+
+> >  And I spent time removing use clauses from Janus/Ada code...
+> To bad you didn't notice that AdaSubst (another ASIS tool from Adalog)
+> has a function to just do that.
+
+(1) Your tools couldn't handle the Janus/Ada source which heavily depends on old
+    Janus/Ada extensions (especially the Condcomp feature).
+(2) Most of what I've been doing is replacing "use <some package>; -- For
+    operators" (or some variation of that comment) with "use type <some
+    subtype>;" (while ensuring that it was actually needed at all, not all of
+    them are). While this would be possible to automate, it would be hard enough
+    that it probably wouldn't pay (there's not that many of those use clauses).
+
+A tool would be more help in determining if any of the "global" uses clauses
+(those that are repeated in every context clause) are actually needed, but
+that's close to busy-work. (Can't spend too much time improving the source code
+as opposed to improving the actual compiler!)
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, March 27, 2017  5:49 PM
+
+...
+> > If renames were disallowed as primitive operations, then we could
+> > avoid this problem; but that's not going to happen.
+>
+> That would create its own surprises, I would think, since you can
+> complete a primitive subprogram declaration with a rename.
+
+That's where you (the Ada 9x team) went wrong. You're right in a vacuum, but if
+you think about it, doing that is a near pathology. First, if the rename is a
+true completion, there is no problem since the subprogram spec controls all of
+the properties; completions aren't primitive anyway.
+
+And the case where the rename is acting as a specification is (nearly?)
+pathological. That's because you can't rename a subprogram from outside of the
+package in this way: it has to have a parameter of the type, and that clearly
+can't be declared until after the type itself is declared. (Children and the
+like are too late.)
+
+In Ada 95, I could imagine such a capability to be useful to share bodies of
+operations. But that is only likely to be useful if the body is empty (how often
+is sharing a body that does something going to work? Hardly ever). And of course
+null procedures are a better way to declare empty bodies. So this is going to be
+useful so rarely that it would be better to have banned such renames (as the
+workaround of declaring a real body and calling the other routine isn't that
+hard) than to the current rule (which also require a lot of rather useless
+compiler work, especially as SAIC thought that it was a good thing to test in
+the ACATS).
+
+So, essentially, Ada 95 broke a useful capability (renaming primitives outside
+of a package) in order to support a useless capability (creating primitives by
+renaming). Obviously, this is 20-20 hindsight and it's too late to fix (making
+the declaration of a primitive renames illegal would probably affect precisely
+zero non-ACATS programs, but making non-local renames dispatching could break
+something - I don't think it is a pure extension).
+
+> > I view this as a mistake (i.e., a rename shouldn't differ from the
+> > renamed  subp in this important property), but not one that we can
+> > easily correct now.
+>
+> But you could argue alternatively that a renaming declaration should
+> be equivalent to a regular declaration.
+
+You could argue that, but it wouldn't be true for any other property of a
+subprogram (in particular, the parameter subtypes) so it is strange for it to be
+true for just this property. (You could also argue that the way renames work is
+already a mistake, so compounding that further is a bad idea. That would be hard
+to argue, which tends in the direction that renames itself is a bad idea...)
+
+> So you can't win either way.
+
+Exactly. All renames semantics causes problems.
+
+> I suppose one way to support both would be to allow you to rename a dispatching
+> operation as though it were a class-wide operation:
+>
+>     procedure Renamed_Classwide_Op (X : Pkg.T'Class) renames Pkg.Op;
+>
+> This to some extent makes sense if we think of the declaration of a
+> primitive op of a tagged type as producing an implicit declaration of
+> a classwide operation.  I believe at one point in the Ada 9X process,
+> we used that model, but it seemed to be too confusing at the time.  In
+> retrospect, I think it might have been a clearer model.
+
+At this point, I thought the way to support both was to cook up a "type
+renaming" feature that does the right thing.
+
+It seems to me (warning: musings coming without much prior critical thought)
+that "type renaming" is essentially the same as a derived type without actually
+creating a separate type. That is, a new name for the type occurs, and all of
+the primitive operations are locally inherited at that place much the same as
+they would for a derived type (without the type conversion on a call, of
+course). If the operations are inherited rather than renamed, we don't need the
+answer the question about dispatching. (This of course assumes that the
+inherited operations work like any inherited dispatching operations outside of a
+potentially primitive scope -- that is that they dispatch, but you can't add any
+new ones [or in this case, have any overriddings, either]).
+
+[Obviously, if you can live with a new type, then a derived type itself provides
+everything sensible and no new feature helps.]
+
+For non-primitive routines, it seems that explicit renames is probably the best
+way to go about this, as that allows renaming only what is needed, prevents
+maintenance-caused conflicts, and allows adjustments to single entities to work
+around conflicts with minimal impact.
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Monday, March 27, 2017  11:57 PM
+
+> A tool would be more help in determining if any of the "global" uses
+> clauses (those that are repeated in every context clause) are actually
+> needed
+Adacontrol:
+check unnecessary_use_clause
+
+This will detail use clauses for packages that are not used at all, those where
+all uses of elements are already qualified, those that are used only for
+operators...
+
+****************************************************************
+
+From: Justin Squirek
+Sent: Tuesday, March 28, 2017  8:44 AM
+
+> A tool would be more help in determining if any of the "global" uses
+> clauses (those that are repeated in every context clause) are actually
+> needed, but that's close to busy-work. (Can't spend too much time
+> improving the source code as opposed to improving the actual
+> compiler!)
+
+Hi Randy, I am actually working on implementing such a feature right now to
+detect unneeded use clauses (use type and use package) - so there's no need to
+make any sort of tool.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April 20, 2017  10:39 PM
+
+Here is a write-up of a possible type renaming facility. I didn't try to write
+formal wording, so it is somewhat of a bastard write-up at the moment. But it
+seemed worthwhile to do this exercise to have something concrete to discuss to
+determine if there is enough interest in the idea to proceed.
+
+Note that for Ada 2012, we tried to defined integrated packages for this need.
+When that didn't work out, we invented "use all type". This essentially takes
+"use all type" a step further by declaring all of the routines locally, so
+they can be accessed that way.
+
+Restricting the feature to overloadable entities only seems necessary to avoid
+significant maintenance issues. (Of course, making objects and their cousins,
+exceptions, overloadable would also help, but probably is too scary to
+seriously consider).
+
+As always, comments and brickbats welcome (the latter so long as they miss
+me. ;-)
+
+****************************************************************
