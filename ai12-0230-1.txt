@@ -1,0 +1,412 @@
+!standard D.2.6(9/2)                                  15-06-05  AI12-0230-1/01
+!standard D.2.6(9.1/3)
+!standard D.2.6(29/2)
+!standard D.3(4)
+!standard D.3(7)
+!class Amendment 15-06-05
+!status work item 15-06-05
+!status received 15-05-02
+!priority Low
+!difficulty Medium
+!subject Deadline Floor Protocol
+!summary
+
+A mechanism is proposed to allow tasks, dispatched according to the rules of EDF
+(Earliest Deadline First), to control their access to shared protected objects
+via the use of the Deadline Floor protocol.
+
+!problem
+
+[Editor's note: Numbers in square brackets here represent references, which can
+be found at the end of the !discussion section.]
+
+Ada currently supports EDF scheduling and Protected Object (PO) sharing via an
+implementation of the Stack Resource Protocol (SRP). At the 2013 and 2015 IRTAW
+Workshops [4,5] it was accepted that the Deadline Floor Protocol (DFP) [1,2,3]
+has many advantages over the SRP and that it should be incorporated into a
+future version of the language, and that ideally the support for SRP should be
+deprecated.
+
+For Ravenscar-like tasks with no self-suspension there is a static relationship
+between a task's relative and absolute deadlines. For general tasks the notion
+of a minimum relative deadline is needed to enforce the rules for DFP.
+
+!proposal
+
+The DFP has all the key properties of SRP; specifically, causing at most a
+single blocking effect from any task with a longer relative deadline, which
+leads to the same worst-case blocking in both protocols. However, DFP is
+conceptually more straightforward, is easier to implement, and has less run-time
+overheads [2,3,6].
+
+Under the DFP, every protected object has a relative deadline equal to the
+shortest relative deadline of any task that uses it. The relative deadline of a
+protected object is called its deadline floor. All tasks also have a minimum
+relative deadline (which will usually be static, just as a task has a base
+priority that is usually fixed).
+
+The key idea of the DFP is that the absolute deadline (as used for EDF
+scheduling) of a task can be temporarily shortened while accessing a protected
+object. Given a task with absolute deadline d that accesses a resource with
+deadline floor DF at time t, the absolute deadline of the task is (potentially)
+reduced according to d := min(d, t+DF) while holding the resource.
+
+The action of the protocol on a single processor with tasks that do not
+self-suspend results in a single block per task, deadlock free execution and the
+protocol works for nested calls on protected objects (PO). While a task accesses
+a PO its deadline is reduced so that no newly released tasks can preempt it and
+then access the PO. See [1,2,3] for details and proof of the key properties.
+This is equivalent to the use of a priority ceiling; again the only tasks that
+can preempt a task executing within a protected object are tasks that are
+guaranteed not to use that object (unless there is a program error, which can be
+caught at run-time).
+
+As with the priority ceiling protocol, an actual lock is not strictly required
+to provide mutual exclusion for POs when a single processor is used and tasks
+are well behaved (e.g. do not self-suspend while executing within a PO, and have
+the correct relationship between relative deadline and absolute deadline).
+However, due to the common use of multiprocessors, and the requirements for
+resilience, a lightweight mutex lock is proposed for DFP (this was the
+recommendation from the discussion at the last IRTAW [5]).
+
+With restricted tasks that conform to the Ravenscar Profile, and which do not
+self-suspend, the Minimum_Relative_Deadline would be identical to the usual
+Relative_Deadline parameter. But for tasks that do self-suspend a distinct
+aspect would be beneficial.
+
+To embed the rules for the DFP within Ada, the following issues must be
+addressed:
+
+1) All tasks must have a minimum relative deadline assigned via an aspect or a
+   routine defined in a library package.
+
+2) Protected objects must have also a relative deadline (floor) assigned via an
+   aspect.
+
+3) Default relative deadline values must be defined for tasks and protected
+   objects (and their types).
+
+4) Rules for EDF scheduling must be extended to include a new locking policy:
+   Deadline_Floor_Locking (ÒFloor_LockingÓ by itself could be confusing).
+
+5) Rules for EDF scheduling need simplifying to remove the Ôacross prioritiesÕ
+   feature of the current definition.
+
+6) For completeness (and parity with priority ceilings) means of modifying the
+   relative deadline attribute of tasks and protected objects should be defined.
+
+Each of these topics will now be covered.
+
+1)
+The easiest way to introduce minimum relative deadlines to tasks is via the
+addition of new items to Ada.Dispatching.EDF:
+
+with Ada.Real_Time;
+with Ada.Task_Identification;
+package Ada.Dispatching.EDF is
+  .....
+  subtype Relative_Deadline is Real_Time.Time_Span;
+  Default_Minimum_Relative_Deadline : constant
+      Relative_Deadline :=
+      Real_Time.Time_Span_Last;
+  procedure Set_Minimum_Relative_Deadline
+     (D : in Relative_Deadline;
+      T : in Ada.Task_Identification.Task_Id :=
+      Ada.Task_Identification.Current_Task);
+  function Get_Minimum_Relative_Deadline (T :
+      Ada.Task_Identification.Task_Id :=
+      Ada.Task_Identification.Current_Task)
+      return Relative_Deadline;
+end Ada.Dispatching.EDF;
+
+In would make sense for the existing subprogram, Delay_Until_And_Set_Deadline,
+to be modified to take the task's Minimum_Relative_Deadline aspect as the
+default value of Deadline_Offset.
+
+A simple means of delaying a sporadic task on an entry and have its absolute
+deadline assigned when the task is next released will be necessary.
+
+2)
+Each PO needs a Deadline_Floor attribute that can be set on the creation of a PO
+by an aspect. The Relative_Deadline aspect already exists, so can be reused to
+set the deadline floors. This is identical to the way that the priority aspect
+is used both for task priority and PO ceiling priority.
+
+3)
+Default_Deadline : constant Deadline :=
+  Real_Time.Time_Last; -- already defined
+Default_Minimum_Relative_Deadline : constant
+  Relative_Deadline :=
+  Real_Time.Time_Span_Last;
+Default_Deadline_Floor : constant Relative_Deadline :=
+  Real_Time.Time_Span_Zero;
+
+4) and 5)
+Currently, EDF dispatching is supported via the policy EDF_Across_Priorities. A
+range of priorities is needed to account for the different priority ceilings
+needed for the protected objects. The tasks themselves only execute at the base
+priority of this range when they are not executing within a protected action.
+All ready queues are ordered by the (absolute) deadline of the ready tasks.
+
+To prevent confusion, and to emphasize the fact that with the new protocol only
+a single priority is needed for all EDF dispatched tasks (regardless of the
+number of protected objects they use), it is proposed to have a new dispatching
+policy. And to accommodate hierarchical dispatching the new policy is defined as
+EDF_Within_Priorities.
+
+Wording is not yet attempted as agreement in principle is needed and a number of
+other issues need to be considered such as whether deadline inheritance should
+occur during a rendezvous and task activation, and whether entry queues can be
+deadline ordered.
+
+With EDF_Within_Priorities, all tasks with the same priority compete for the
+processor using the rules for EDF dispatching. The ready queue is ordered by
+active deadline. A collection of EDF dispatched tasks and the set of protected
+objects they use/share will all have the same priority (and ceiling priority).
+But they will have different relative deadlines (and deadline floors).
+
+A task that has not been given an explicit deadline or relative deadline will
+get the default values of Default_Deadline and
+Default_Minimum_Relative_Deadline. The default value for the deadline floor of
+any protected object is 0 (actually Time_Span_Zero). This will have the effect
+of making all protected actions non-preemptive, as does the default priority
+ceiling (unless tasks are released with deadlines in the past).
+
+Locking policies are applied to a whole partition using the Locking_Policy
+pragma. The ARM defines the single policy Ceiling_Locking. As deadline floor
+locking is orthogonal to ceiling locking, the two could be used together (in
+hierarchical scheduling where there is both fixed priority and EDF dispatching).
+Indeed the definition of Ceiling_Locking could be expanded to include the rules
+for the deadline floor protocol. However, to make the definition of the new
+protocol clearer a new locking policy is defined: Deadline_Floor_Locking. But
+note that Ceiling_Locking and Deadline_Floor_Locking can be used together (and
+may need a new locking policy that is both ceiling and floor locking Ñ see
+!discussion).
+
+Just as a task has a base and active priority, with EDF_Within_Priorities and
+Deadline_Floor_Locking a task has an active (absolute) deadline and a base
+(absolute) deadline. The dispatcher uses active deadline to determine execution
+order.
+
+The rules for EDF_Within_Priorities with Deadline_Floor_Locking are as follows:
+
+o Whenever a task is executing outside a protected action, its active deadline
+  is equal to its base deadline.
+
+o When a task executes a protected action its active deadline will be reduced to
+  (if it is currently greater than) 'now' plus the deadline floor of the
+  corresponding protected object; 'now' is obtained via use of the real-time
+  clock (i.e. the clock that supports the Ada.Real_Time library package).
+
+o When calling a protected entry or procedure a lock is obtained on the
+  associated protected object.
+
+o When a task completes a protected action its active deadline returns to the
+  value it had on entry, and the lock is released.
+
+o When a task calls a protected operation, a check is made that (absolute
+  deadline - release time) of the task is not less than the deadline floor of
+  the object. On a uniprocessor the lock should also be available. Program_Error
+  is raised if this check fails.
+
+With this definition of a new locking policy, the definition of Ceiling_Locking
+can return to its pre-2005 wording.
+
+6)
+In the same way that a protected object can contain code to change its ceiling
+priority - to take effect when the calling task exits the protected object, it
+can have its deadline floor updated by an assignment to the Relative_Deadline
+attribute. A task can also change its minimum relative deadline.
+
+
+!wording
+
+
+!discussion
+
+Much discussion concerning the Deadline Floor protocol can be found in the
+references [1,2,3].
+
+One of the advantages of the new EDF_Within_Priorities policy is that it unifies
+Ada's use of priority as the primary dispatching policy. It is no longer
+necessary to reserve a range of priorities for a single EDF domain. If we ignore
+the non-preemptive policy, we now have a clear means of supporting mixed
+scheduling in a hierarchical manner:
+
+o At all times, the task at the head of the highest priority non-empty ready
+  queue is the one chosen to be executed.
+
+o Each ready queue has its own discipline to determine which task is at its
+  head.
+
+The disciplines supported are: FIFO, Round Robin (RR) and now EDF; i.e.
+FIFO_Within_Priorities, Round_Robin_Within_Priorities, and
+EDF_Within_Priorities.
+
+Tasks with different priorities and different dispatching policies can share
+access to protected objects by a combination of Ceiling_Locking and
+Deadline_Floor_Locking. When a task enters such a PO its active priority is
+raised to the ceiling value and its active deadline is reduced to the floor
+value.
+
+References
+
+[1] A. Burns,
+A Deadline-Floor Inheritance Protocol for EDF Scheduled Real-Time Systems with
+Resource Sharing, Department of Computer Science, University of York,
+YCS-2012-476, 2012.
+
+[2] A. Burns, M. Gutierrez, M. Aldea and M. Gonzalez Harbour,
+A Deadline-Floor Inheritance Protocol for EDF Scheduled Embedded Real-Time
+Systems with Resource Sharing, IEEE Transactions on Computers, 64(5), 1241-1253,
+2015.
+
+[3] M. Aldea, A. Burns, M. Gutierrez and M. Gonzalez Harbour,
+Incorporating the Deadline Floor Protocol in Ada, ACM SIGAda Ada Letters, Proc.
+of IRTAW 16, XXXIII(2),49-58, 2013.
+
+[4] A.J. Wellings,
+Session Summary: Locking protocols, ACM SIGAda Ada Letters, Proc IRTAW 16,
+XXXIII(2): pp 123-125, 2013.
+
+[5] A.J. Wellings,
+Session Summary: Deadline floor protocol, Ada User Journal,
+IRTAW 18, 37(3), 169-170, 2016.
+
+[6] H. Almatary, N.C. Audsley and A. Burns,
+Reducing the Implementation Overheads of IPCP and DFP,
+Proceeding of IEEE Real-Time Systems Symposium, 2015.
+
+!example
+
+** TBD.
+
+!ASIS
+
+[Not sure. It seems like some new capabilities might be needed for operators,
+but I didn't check - Editor.]
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the new capabilities are supported.
+
+
+!appendix
+
+From: Alan Burns
+Sent: Tuesday, May 2, 2017  4:59 AM
+
+The attached AI [this is version /01 of the AI - Editor] comes from prolonged
+consideration by the real-time folk on support for EDF scheduling; in particular
+the issue of sharing protected object effectively. A new protocol, the
+Deadline-Floor Protocol (DFP), has been developed that is consider to be better
+than the Stack Resource Protocol (SRP) on which Ada is based.
+
+The attached AI starts the process of moving DFP into Ada (and removing SRP).
+
+I am sure there will be comments!
+
+I assume Randy will give this a number etc.
+Looking forward to dicussions
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Thursday, June 1, 2017  10:25 AM
+
+> But for tasks that do self-suspend a distinct aspect would be
+> beneficial.
+
+The AI says/claims this, but does not explain what this benefit for tasks that
+self-suspend actually is. And yet, this seems to be crucial for the merits of
+the proposal, since my cursory reading so far created the impression that rather
+than talking (higher) ceiling priority, we are now reading (lower) deadline
+floor, and as one is the inverse of the other, nothing really has changed except
+words of explanation.
+
+So what is this benefit that warrants the change?
+
+****************************************************************
+
+From: Alan Burns
+Sent: Friday, June 2, 2017  2:30 AM
+
+Get back to next week
+
+****************************************************************
+
+From: Alan Burns
+Sent: Monday, June 5, 2017  3:02 AM
+
+There are really no benefits of tasks that self-suspend. All real-time
+abstractions for tasks assume that they do not self suspend. Hence the abstract
+definition of the deadline-floor protocol assumes that they do not.
+
+However, as you know, programmers can do what they wish, so for programs that
+have tasks that do self-suspend the protocol has to be resilient.
+
+So the point of the Deadline-floor protocol is to give a much easier to
+understand and efficient means for real-time tasks dispatched via EDF to share
+access to protected objects. Self-suspension is not really an issue (just needs
+to be covered in the definition).
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 5, 2017  8:17 PM
+
+> The attached AI comes from prolonged consideration ...
+
+A few thoughts on the AI noted upon skimming it while filing it:
+
+(1) The AI states "... and that ideally the support for SRP should be
+deprecated."
+
+But the rest of the AI is written as if the support for SRP will be completely
+removed. "Deprecation" in Ada means "moving to Annex J"; we almost never remove
+anything.
+
+We might be able to make an exception in this case (since I don't know of any
+implementations that actually support EDF, so there is no possibility of
+breaking existing code by removing the previous version -- but that has to be
+verified, not just asserted by someone).
+
+In any case, the AI seems to go beyond the IRTAW recommendation (which certainly
+does not suggest removal). Has the IRTAW position changed (in which case the AI
+should say that)? Or is this just the author going beyond the recommendation??
+Surely it matters whether obsolescence or removal is proposed, and the AI needs
+to be crystal-clear on which is proposed and needs a very strong justification
+for removal if that is the recommendation.
+
+(2) There's no such thing as a !reference section. These !thingys are intended
+(and used) by various automated tools; one does not get to create new ones
+without involving the editor and ARG (because the number of tools that would
+need updates). I put the references at the end of the !discussion section and
+added a note to point out that they're there.
+
+I'll also note that AIs are not papers! Since there are no URLs associated with
+the references, there's no useful way to refer to them. So if I, for instance,
+wanted to read about the justification for these changes, it would be impossible
+(in my case, I do have the Ada Letters issue somewhere, but one can hardly
+assume that). In such a case, one would hope that more of the justification
+would make it into the AI proper. (Nothing wrong with referencing something
+outside for details, but it seems wrong to give no idea at all.)
+
+(3) The proposal seems to be adding another locking policy. In such a case,
+you'll have to explain how that policy works with all of the other existing
+protocols (since one specifies locking policy and dispatching policy
+separately). Moreover, that's critical if one wants to support mixed EDF and
+FIFO policies via Priority_Specific_Dispatching -- since locking policies are
+partition-wide. (Unless you want to define Priority_Specific_Locking!!)
+
+(4) "Wording is not yet attempted as agreement in principle is needed and a
+number of other issues need to be considered such as whether deadline
+inheritance should occur during a rendezvous and task activation, and whether
+entry queues can be deadline ordered."
+
+The first part is fine at this stage, but I don't understand the "other issues"
+part. If IRTAW doesn't know what should happen, how the heck are na‹ve ARG
+members such as myself supposed to figure it out? Sounds like the blind leading
+the deaf or something like that. :-)
+
+****************************************************************
