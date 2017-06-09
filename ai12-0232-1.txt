@@ -1,0 +1,663 @@
+!standard 13.11(21)                                    17-06-08  AI12-0232-1/01
+!standard 13.11.4(21/3)
+!standard 13.11.4(31/3)
+!class binding interpretation 17-06-08
+!status work item 17-06-08
+!status received 17-06-08
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Rules for pure generic bodies
+!summary
+
+** TBD.
+
+!question
+
+10.2.1(16) (which was replaced, as part of ai95-0366) says:
+
+    A pure library_item is a preelaborable library_item that does not
+    contain the declaration of any variable or named access type, except
+    within a subprogram, generic subprogram, task unit, or protected unit.
+
+However, the rewording doesn't seem to have the same effect.
+
+In particular, 10.2.1(15.1/3-15.5/3) give rules for a pure compilation unit.
+10.2.1(15.6/3) gives a special rule for generic bodies.
+
+But nothing seems to apply to nested generic bodies. For a generic in a package
+or generic package, it seems that some rule ought to apply. Is there a rule
+missing? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+** TBD.
+
+!discussion
+
+E-mail discussion suggests that there is a similar problem with Preelaboration.
+The form of the preelaboration wording goes back to Ada 95 (it has not been
+substantially changed). The main difference is that it talks about "elaborable
+constructs" rather than "compilation units".
+
+The author guesses that most readers quickly learn to apply 10.2.1(5-9/2)
+recursively (as a practical matter, it has to be applied that way when reading
+code or writing a compiler; it's necessary to look inside of every nested
+construct with non-trivial elaboration). It's possible to read those rules
+as applying through some sort of magic, which would leave the question about
+generic bodies unanswered. But that doesn't make much sense (and no actual
+compilers seem to operate that way).
+
+Probably the best fix here is to explicitly say that 10.2.1(5-9/2) is recursive,
+by adding after 10.2.1(9/3):
+
+   * The elaboration of any elaborable construct that is not preelaborable.
+
+Then the existing generic body rule clearly applies (and any future rules on
+new kinds of entities will apply as well).
+
+---
+
+The Ada 95 wording clearly bans variables in generic specifications. The
+current Pure wording does not. AI95-0366-1 seems to imply this is on purpose;
+AI05-0035-1 reverses that in the text, but not in the actual wording chosen.
+
+Clearly, a generic specification that contains a variable declaration could
+never, ever be instantiated as Pure. OTOH, the existing 10.2.1(15.6/3) rule
+really serves as an assume-the-worst rule; we can recheck in the instance
+for the specification.
+
+So what do we want to do? If we really want to ensure that a pure generic unit
+can be instantiated as Pure, then we need to enforce at least some of the
+rules in a generic specification. ** The author has no idea what to do here.
+
+** What fix to apply to for the original question depends on the answer to
+this question, so the author is punting.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+ACATS B-Tests ought to check that Pure (and Preelaborate?) rules are applied
+to nested generics as required.
+
+!appendix
+
+From: Tucker Taft
+Sent: Saturday, May 13, 2017  4:35 PM
+
+The RM rules in 10.2.1 for what makes a generic package body "pure" seem
+inadequate to ensure that an instance of such a generic, when given suitable
+actuals, can be pure.  The problem is there is no mention of nested generic
+bodies.  Here are the relevant rules from 10.2.1:
+
+(15.1/3) A pure compilation unit is a preelaborable compilation unit whose
+elaboration does not perform any of the following actions:
+
+(15.2/2) * the elaboration of a variable declaration;
+
+          ...
+
+(15.6/3)  A generic body is pure only if elaboration of a corresponding instance
+body would not perform any such actions presuming any composite formal types
+have nonvisible components whose default initialization evaluates an allocator
+of an access-to-variable type.
+
+   ...
+
+(17/3)   ... The declaration and body of a declared pure library unit, and all
+subunits that are elaborated as part of elaborating the library unit, shall be
+pure. ...
+
+---
+
+The above rules don't really indicate which generic bodies need to be pure.  If
+a generic is nested inside a subprogram, presumably it doesn't need to be pure.
+On the other hand, if a generic body is nested inside another generic body that
+is required to be pure, must it also be pure?  I think the intent is yes, but
+nowhere does it say that.
+
+So I think we need to add something to the list of prohibited actions, such as:
+
+  (15.5.1) * the elaboration of a generic body that is not pure;
+
+This will ensure that a generic body nested in a generic body must pass the
+rules for being pure, while a generic body nested in a subprogram has no such
+requirement.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 15, 2017  7:37 PM
+
+> The RM rules in 10.2.1 for what makes a generic package body "pure"
+> seem inadequate to ensure that an instance of such a generic, when
+> given suitable actuals, can be pure.  The problem is there is no
+> mention of nested generic bodies.
+...
+> The above rules don't really indicate which generic bodies need to be
+> pure.  If a generic is nested inside a subprogram, presumably it
+> doesn't need to be pure. On the other hand, if a generic body is
+> nested inside another generic body that is required to be pure, must
+> it also be pure?  I think the intent is yes, but nowhere does it say
+> that.
+
+Why do you think the intent is "yes"? I don't (off-hand) see any need for that;
+the nested generic body is not elaborated as part of the instance of the outer
+body. We don't require anything else nested to be pure unless it is in fact
+elaborated (as you acknowledge by mentioning the inside a subprogram case).
+
+> So I think we need to add something to the list of prohibited actions,
+> such as:
+>
+>   (15.5.1) * the elaboration of a generic body that is not pure;
+>
+> This will ensure that a generic body nested in a generic body must
+> pass the rules for being pure, while a generic body nested in a
+> subprogram has no such requirement.
+
+Such a rule would be incompatible (uncertain if that would matter in practice,
+but clearly the possibility makes the bar higher for a change). So I think you
+need a strong case as to why that would be desirable. (Especially as the Pure
+categorization is useless in practice and hopefully will be effectively replaced
+in Ada 2020 by the Global aspect.)
+
+Again, we have a case of a solution without an actual problem. I realize we all
+do it, but given that we're trying hard to enforce that on outside suggestions,
+we at least could try to provide some idea of what the problem is for our
+in-house suggestions. (I don't mean to target Tuck on this one -- it's a
+reminder to everyone.)
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, May 15, 2017  9:05 PM
+
+...
+> Why do you think the intent is "yes"? I don't (off-hand) see any need
+> for that; the nested generic body is not elaborated as part of the
+> instance of the outer body. We don't require anything else nested to
+> be pure unless it is in fact elaborated (as you acknowledge by
+> mentioning the inside a subprogram case).
+
+Because if you don’t, I believe you have a contract violation.  Presumably the
+point of the original rule about generic bodies was that if you instantiate such
+the outer generic, you know just from looking at the actuals whether the
+instance is pure.  But if we allow nested generic bodies to be impure, then in
+fact you could be wrong.  E.g.:
+
+   generic
+   package Outer is
+      pragma Pure(Outer);
+      generic
+      package Inner is
+         procedure Dummy;
+      end Inner;
+   end Outer;
+
+   package body Outer is
+       function Complicated(S : String) return Integer is
+       begin
+            return Integer’Value(S);
+       end Complicated;
+
+       package body Inner is
+           Evil_Global : Integer := Complicated(“12345”);
+           procedure Dummy is begin null; end Dummy;
+      end Inner;
+   end Outer;
+
+
+package Outer_Inst is new Outer;
+pragma Pure(Outer_Inst);  —  Legal or not?
+
+package Inner_Inst is new Outer_Inst.Inner; pragma Pure(Inner_Inst);  — Legal or
+not?
+
+>
+>> So I think we need to add something to the list of prohibited
+>> actions, such as:
+>>
+>>  (15.5.1) * the elaboration of a generic body that is not pure;
+>>
+>> This will ensure that a generic body nested in a generic body must
+>> pass the rules for being pure, while a generic body nested in a
+>> subprogram has no such requirement.
+>
+> Such a rule would be incompatible (uncertain if that would matter in
+> practice, but clearly the possibility makes the bar higher for a
+> change). So I think you need a strong case as to why that would be desirable.
+> (Especially as the Pure categorization is useless in practice and
+> hopefully will be effectively replaced in Ada 2020 by the Global
+> aspect.)
+
+See above.  I believe the Preelaborate() pragma has exactly the same problem.
+
+> Again, we have a case of a solution without an actual problem. I
+> realize we all do it, but given that we're trying hard to enforce that
+> on outside suggestions, we at least could try to provide some idea of
+> what the problem is for our in-house suggestions. (I don't mean to
+> target Tuck on this one -- it's a reminder to everyone.)
+
+I would also claim that the current rule about what it means for a generic body
+to be pure is only relevant if the generic is itself a library unit.  For a
+generic package nested in a pure library package, there is nothing that links
+the definition of what a “pure” generic body is to the rules for what it means
+for the enclosing library package to be pure.  So I believe the suggested rule
+is needed even just to make it a requirement that a generic body nested in a
+non-generic declared-pure library package is pure.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Tuesday, May 16, 2017  5:15 PM
+
+...
+> > Why do you think the intent is "yes"? I don't (off-hand) see any
+> > need for that; the nested generic body is not elaborated as part of
+> > the instance of the outer body. We don't require anything else
+> > nested to be pure unless it is in fact elaborated (as you
+> > acknowledge by mentioning the inside a subprogram case).
+>
+> Because if you don't, I believe you have a contract violation.
+> Presumably the point of the original rule about generic bodies was
+> that if you instantiate such the outer generic, you know just from
+> looking at the actuals whether the instance is pure.  But if we allow
+> nested generic bodies to be impure, then in fact you could be wrong.
+> E.g.:
+>
+>    generic
+>    package Outer is
+>       pragma Pure(Outer);
+>       generic
+>       package Inner is
+>          procedure Dummy;
+>       end Inner;
+>    end Outer;
+>
+>    package body Outer is
+>        function Complicated(S : String) return Integer is
+>        begin
+>             return Integer'Value(S);
+>        end Complicated;
+>
+>        package body Inner is
+>            Evil_Global : Integer := Complicated("12345");
+>            procedure Dummy is begin null; end Dummy;
+>       end Inner;
+>    end Outer;
+
+I might be dense, but I don't see any problem with this. (***)
+
+> package Outer_Inst is new Outer;
+> pragma Pure(Outer_Inst);  -  Legal or not?
+
+Sure, the inner generic isn't elaborated as part of this, so there is no
+problem. (And you don't re-enforce Legality Rules in an instance body, so any
+rules about the body are moot.)
+
+> package Inner_Inst is new Outer_Inst.Inner; pragma Pure(Inner_Inst);
+> - Legal or not?
+
+No, this isn't declared Pure.
+
+The only problem I see here is that the only way to make an inner generic
+declared pure is to make it a child generic instead. That's a bit odd but not a
+big deal. (It could be easily fixed by allowing aspect Pure on a nested generic
+unit -- a better semantics anyway -- but that would take quite a bit of
+wording.)
+
+> >> So I think we need to add something to the list of prohibited
+> >> actions, such as:
+> >>
+> >>  (15.5.1) * the elaboration of a generic body that is not pure;
+> >>
+> >> This will ensure that a generic body nested in a generic body must
+> >> pass the rules for being pure, while a generic body nested in a
+> >> subprogram has no such requirement.
+> >
+> > Such a rule would be incompatible (uncertain if that would matter in
+> > practice, but clearly the possibility makes the bar higher for a
+> > change). So I think you need a strong case as to why that would be desirable.
+> > (Especially as the Pure categorization is useless in practice and
+> > hopefully will be effectively replaced in Ada 2020 by the Global
+> > aspect.)
+>
+> See above.  I believe the Preelaborate() pragma has exactly the same
+> problem.
+
+I don't think so, because 10.2.1(10/2-10.4/2) applies to all generic bodies. (It
+definitely doesn't have any restriction to library level bodies). It's an
+assume-the-worst rule -- and it really does assume-the-worst. It appears that
+the problem that you are worried about is unique to aspect Pure, and only for
+properties that are unique to that aspect.
+
+I do think we need to find out what existing compilers do with such generic
+units, because the suggested rule has the possibility of being *very*
+incompatible with existing code. If compilers are enforcing rules similar to the
+suggested one already, then there may not be a real problem, but if they aren't,
+we're at risk of breaking chunks of real code that might be very hard to fix
+(especially for Pure).
+
+Could you create such a test program, or do I have to do everything? :-)
+
+> > Again, we have a case of a solution without an actual problem. I
+> > realize we all do it, but given that we're trying hard to enforce
+> > that on outside suggestions, we at least could try to provide some
+> > idea of what the problem is for our in-house suggestions. (I don't
+> > mean to target Tuck on this one -- it's a reminder to everyone.)
+>
+> I would also claim that the current rule about what it means for a
+> generic body to be pure is only relevant if the generic is itself a
+> library unit.  For a generic package nested in a pure library package,
+> there is nothing that links the definition of what a "pure" generic
+> body is to the rules for what it means for the enclosing library
+> package to be pure.
+> So I believe the suggested rule is needed even just to make it a
+> requirement that a generic body nested in a non-generic declared-pure
+> library package is pure.
+
+I think it's fairly clear that nested generic units are never Pure or
+Preelaborated (with the current rules). That's consistent (as noted previously)
+but one can argue that it isn't a good idea.
+
+If there is a compatibility problem, I think I'd rather fix the root problem
+(nested generics aren't cateogizable) than add a hack that could break a lot of
+existing code. But neither solution is particularly pretty.
+
+(***) Hmmm, it appears from 10.2.1(10/2), the generic you declare above is
+illegal. The call of Complicated is a "call to a subprogram" that is not one of
+the things listed in 10.2.1(7/5-7.4/5), and it is executed during the
+elaboration of an instance of Inner. So Inner is not preelaborable. So what's
+the problem? All of the declarations of a preelaborated unit have to be
+preelaborable (that includes the subprograms, but their contents don't matter as
+the elaboration of a subprogram does nothing other than set the elaborated
+flag).
+
+You appear to be reading the rules as if preelaboration only applies to the
+top-level unit. But that doesn't make any sense, since it would allow the
+elaboration of various nested declarations that happen to be units (such as
+tasks, PTs, etc.) to do bad things. That surely can't be intended. And
+10.2.1(10/2) clearly adds to the normal rules; it applies to any generic body
+that is elaborated.
+
+I could see a bit of clarification in the AARM (if you can read the rules wrong,
+they're obviously not as clear as they should be). We've had this particular
+discussion a couple times in the past, and have previously concluded that there
+is nothing wrong (I'm certain that came up in the context of AI95-0403-1) so I
+don't think we should do this same dance again.
+
+Perhaps there is something missing specific to Pure (I didn't try to figure that
+out), but I certainly think that Preelaborate is fine. And your generic is not
+legal because it is not preelaborable.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Thursday, May 18, 2017  9:40 PM
+
+Well we seem to agree that as the RM is currently written, the only way to be
+sure a generic is pure is for it to be a library unit, with a pragma Pure on it.
+I find that completely at odds with my sense of the intent.  At a bare minimum I
+would have expected a generic declared inside a declared-pure library package is
+required to be pure.  I would also go further to say that for a generic package
+to be pure, any generic nested inside it (but not inside a nested subprogram or
+task body or declare statement) must also satisfy the requirements for being
+pure.
+
+I would agree we should check what compilers do with the case example I
+suggested.  I would claim that the outer generic package body should fail when
+compiled, because the inner generic package body is not pure.
+
+I ran the following against GNAT and AdaMagic and both complained (even though
+there were no instantiations in sight):
+
+  generic
+  package Outer is
+     pragma Pure(Outer);
+     generic
+     package Inner is
+        procedure Dummy;
+     end Inner;
+  end Outer;
+
+  package body Outer is
+      function Complicated(S : String) return Integer is
+      begin
+           return Integer'Value(S);
+      end Complicated;
+
+      package body Inner is
+          Evil_Global : Integer := abs(12345); -- := Complicated("12345");
+          procedure Dummy is begin null; end Dummy;
+     end Inner;
+  end Outer;
+
+Interestingly, AdaMagic is an Ada 95 compiler, and its error message reflected
+the old wording of this section:
+
+10.2.1(16) (now replaced, as part of ai95-0036):
+
+    A pure library_item is a preelaborable library_item that does not
+    contain the declaration of any variable or named access type, except
+    within a subprogram, generic subprogram, task unit, or protected unit.
+
+This makes it clear that in Ada 95, the prohibition of declaring variables
+extended into nested generic packages.  There is nothing in ai95-0036 to suggest
+that it was intentional to allow nested generic packages to be impure in Ada
+2005, so I believe the rewording created this hole that no one ever noticed.
+GNAT still enforces the old rule.
+
+So with AdaMagic (relevant to Green Hills and PTC ObjectAda) and GNAT both
+rejecting nested impure generics, I don’t believe we have any significant
+incompatibilities to worry about.
+
+I reviewed the wording for Preelaborate, and I still believe that it has the
+same hole with respect to nested generics.  There is nothing in the current
+wording that I could find that requires generic packages that are not library
+units to be preelaborable, even when nested within a pre-elaborated package.
+All it says is that the declaration and body of a library unit with a pragma
+Preelaborate shall be preelaborable, which is defined by what it must *not* do
+during its elaboration.  But of course elaborating a generic unit does nothing
+at all, so I believe we need to explicitly disallow elaborating a
+non-preelaborable generic package.  Hence I believe this wording fix is needed
+here as well, and I have verified there is no compatibility issue for GNAT or
+AdaMagic with this one either.  I replaced the call on “abs” with the call on
+“complicated” and changed the pragma Pure to pragma Preelaborate, and both GNAT
+and AdaMagic complained.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, May 18, 2017  10:30 PM
+
+...
+> I ran the following against GNAT and AdaMagic and both complained
+> (even though there were no instantiations in sight):
+
+Thanks for doing this.
+
+>   generic
+>   package Outer is
+>      pragma Pure(Outer);
+>      generic
+>      package Inner is
+>         procedure Dummy;
+>      end Inner;
+>   end Outer;
+>
+>   package body Outer is
+>       function Complicated(S : String) return Integer is
+>       begin
+>            return Integer'Value(S);
+>       end Complicated;
+>
+>       package body Inner is
+>           Evil_Global : Integer := abs(12345); -- := Complicated("12345");
+>           procedure Dummy is begin null; end Dummy;
+>      end Inner;
+>   end Outer;
+>
+> Interestingly, AdaMagic is an Ada 95 compiler, and its error message
+> reflected the old wording of this section:
+>
+> 10.2.1(16) (now replaced, as part of ai95-0036):
+>
+>     A pure library_item is a preelaborable library_item that does not
+>     contain the declaration of any variable or named access type, except
+>     within a subprogram, generic subprogram, task unit, or protected unit.
+>
+> This makes it clear that in Ada 95, the prohibition of declaring
+> variables extended into nested generic packages.
+> There is nothing in ai95-0036 to suggest that it was intentional to
+> allow nested generic packages to be impure in Ada 2005, so I believe
+> the rewording created this hole that no one ever noticed.  GNAT still
+> enforces the old rule.
+
+That seems relevant (and it's specific to pure).
+
+> So with AdaMagic (relevant to Green Hills and PTC ObjectAda) and GNAT
+> both rejecting nested impure generics, I don't believe we have any
+> significant incompatibilities to worry about.
+
+Certainly possible.
+
+> I reviewed the wording for Preelaborate, and I still believe that it
+> has the same hole with respect to nested generics.
+> There is nothing in the current wording that I could find that
+> requires generic packages that are not library units to be
+> preelaborable, even when nested within a pre-elaborated package.
+
+Here I disagree. Since a generic body is never elaborated, the only way that
+10.2.1(10/2) could mean anything at all is if it applies as an additional
+requirement to any generic body within the elaborable construct. Otherwise, we'd
+have the nonsense of a non-preelaborable construct that is part of a
+preelaborable construct. 10.2.1(10/2) is not conditional! It applies to any
+generic body in a preelaborable construct.
+
+(Yes, that probably disallows a non-preelaborable generic body inside of a
+subprogram inside of a preelaborable unit. So what? No one outside of ACATS
+tests ever writes a generic unit in a subprogram.)
+
+> All it says is that the declaration and body of a library unit with a
+> pragma Preelaborate shall be preelaborable, which is defined by what
+> it must *not* do during its elaboration.  But of course elaborating a
+> generic unit does nothing at all, so I believe we need to explicitly
+> disallow elaborating a non-preelaborable generic package.
+> Hence I believe this wording fix is needed here as well, and I have
+> verified there is no compatibility issue for GNAT or AdaMagic with
+> this one either.  I replaced the call on "abs"
+> with the call on "complicated" and changed the pragma Pure to pragma
+> Preelaborate, and both GNAT and AdaMagic complained.
+
+I don't believe any wording fix is required for preelaborate; we had this
+discussion years ago and reached that conclusion then. OTOH, if we're going to
+screw up this carefully constructed wording again [;-)] (and clearly we need to
+do that for Pure), it wouldn't hurt to clarify that 10.2.1(10/2) applies to any
+generic body within an elaborable construct. Even though it is obvious, and even
+if it wasn't the Dewar rule clearly applies.
+
+P.S. I really do mean "screw up", too. Everytime we look at this section, people
+want to change all kinds of rules in it because it is very hard to understand
+but the changes always end up making it worse than it started. (Or end up
+wasting a lot of time.) Thus I'm resistant to messing with this clause...
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, May 19, 2017  9:04 AM
+
+I would suggest we continue discussion of this face-to-face in Vienna, as I
+believe a “white board” or equivalent could help resolve this one.
+
+****************************************************************
+
+From: Jeff Cousins
+Sent: Tuesday, May 23, 2017  8:52 AM
+
+yes, we'll discuss over a whiteboard, but so far my sympathies are with Randy.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, June 9, 2017  1:32 AM
+
+...
+> So I think we need to add something to the list of prohibited actions,
+> such as:
+>
+>   (15.5.1) * the elaboration of a generic body that is not pure;
+>
+> This will ensure that a generic body nested in a generic body must
+> pass the rules for being pure, while a generic body nested in a
+> subprogram has no such requirement.
+
+In writing this up, it struck me that you pointed out that the Ada 95 wording
+was:
+
+    A pure library_item is a preelaborable library_item that does not
+    contain the declaration of any variable or named access type, except
+    within a subprogram, generic subprogram, task unit, or protected unit.
+
+That asks the question of what about generic package specifications? We didn't
+let them have variable declarations in Ada 95, and it doesn't make sense to
+allow them now (what is the point of a pure generic that you can never
+instantiate as pure??).
+
+AI95-0366-1 seems to imply that not enforcing these rules in generic units was
+intended, but AI05-0035-1 makes it clear that they do apply. AI05-0035-1 then
+added the generic body rule you are commenting on. But there seems to be no rule
+that applies to generic specifications (anywhere). So the text and wording of
+AI05-0035-1 is inconsistent.
+
+So now I'm more confused than ever.
+
+Variables should always be banned from pure generic specs, since nothing about
+the actuals can turn them into constants. OTOH, the other rules could depend on
+the actuals. Yuck.
+
+---
+
+BTW, I've concluded that our difference of opinion over 10.2.1(10/2) boils down
+to whether one thinks that 10.2.1(5-9) is applied recursively, or not. My view
+is that it is nonsense without such an application, as you don't get to look
+willy-nilly inside of anything convenient. And it is talking about "elaborable
+constructs", so the only way to enforce it at all on a library unit is to look
+inside of other "elaborable constructs" (since object declarations, nested
+packages, and the like are "elaborable constructs"). As a compiler implementor,
+that's the only possible way to read these rules (you have to write a recursive
+function to figure out this rule).
+
+OTOH, since that isn't explicit in the wording, I suppose it is possible to read
+these as meaning that there is some sort of magic scope going on here that lets
+one look in anything.
+
+So, to head that off, perhaps it would be better to add a final bullet to that
+list (after 10.2.1(9/3)):
+
+    * The elaboration of any elaborable construct that is not preelaborable.
+
+which make it crystal-clear that these rules are applied recursively. (Which
+would also head off the occasional question from Ada newbys about this.)
+
+Then 10.2.1(10/2) can clearly be read as an additional rule about a specific
+elaborable construct (it has to be read that way, as otherwise it would never
+apply to anything - 10.2.1(5-9) appear complete otherwise).
+
+A similar fix doesn't work for Pure, sadly, because it talks about compilation
+units rather than elaborable constructs. We could fix that by changing it to
+talk about program units, but then we still have the issue of variables in
+generic specifications.
+
+Sigh. These categorizations are not worth the mess.
+
+****************************************************************
+
+
+
