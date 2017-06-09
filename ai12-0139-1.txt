@@ -1,4 +1,4 @@
-!standard A(3/4)                             16-06-09   AI12-0139-1/03
+!standard A(3/4)                             17-06-08   AI12-0139-1/04
 !standard A.18(5)
 !class Amendment 14-10-13
 !status work item 14-10-13
@@ -20,7 +20,7 @@ thread-safe. They should be. In particular, the Container libraries
 are thread-unsafe, yet often used for communicating among concurrent
 threads. The same is true for "simpler" data structures provided by
 standard libraries such as vectors or the variants of strings. It is
-rather dangerous to leave the user in the dark about whether a particular 
+rather dangerous to leave the user in the dark about whether a particular
 library package is thread-safe or not.
 
 !proposal
@@ -28,7 +28,7 @@ library package is thread-safe or not.
 We propose to add a variant of the Ada Standard library that is required to be
 thread-safe.
 
-We define the package Ada.Safe as a new root for a duplicate of
+We define the package Ada.Task_Safe as a new root for a duplicate of
 the entire Ada library and postulate thread-safeness for the entire
 content of the package, including its child units.
 
@@ -36,7 +36,7 @@ content of the package, including its child units.
 
 Add as A (2.1) :
 
-In addition, the package Ada.Safe is predefined. It contains
+In addition, the package Ada.Task_Safe is predefined. It contains
 duplicates of all child units of the package Ada listed above. Syntax
 and semantics of all declarations and specifications are identical,
 except for the different root of the unit hierarchy and the behaviour in the
@@ -46,25 +46,34 @@ specific packages in this International Standard.
 In addition to the semantics of package Ada and its child units, the
 effects of concurrent invocations of all subprograms, protected
 operations, and primitive operations defined within the child units of
-Ada.Safe shall be the same as the effects of some [arbitrary]
+Ada.Task_Safe shall be the same as the effects of some [arbitrary]
 sequence of the same invocations.
 
-Causing a call to any operation of the library from within the library, e.g., 
+Causing a call to any operation of the library from within the library, e.g.,
 by callback mechanisms, is a bounded error. The call may perform as specified
-or it may deadlock[, in which case implementations are allowed to raise 
-Program_Error].  
+or it may deadlock[, in which case implementations are allowed to raise
+Program_Error].
 
 
-Add as A (3.2.1 and 3.2.2) :   
+Add as A (3.2.1 and 3.2.2) :
 -- Note to ARG: this is within Implementation Requirements
 
-Within Ada.Safe and its child units, implementations shall ensure
+Within Ada.Task_Safe and its child units, implementations shall ensure
 the implied atomicity of operations on global resources and the
 visibility of changes across the boundaries of concurrent units as
 implied by atomic changes to shared resources.
 
-Implementation should provide for mutual exclusion at a high degree of
-granularity. 
+The implementation should provide for mutual exclusion at a fine
+degree of granularity, at a minimum of at least one lock per object of
+each type with task-safe operations. For containers, the Stable nested
+package will acquire exclusive access to the underlying upon creation,
+with no further synchronization associated with individual operations.
+<<< I have no idea what the last sentence tries to say, but I copied
+it faithfully from the minutes. What Stable nested package and what
+underlying ... ? If I guess at what it is traing to say, it would completely
+void the purpose of this AI, since the creator task would own the container
+exclusively forever and this would explicitly prevent shared use of
+the container by multiple tasks altogether. >>>
 
 <<< Note to ARG: the following is a prototyping of a more specific
 semantics for a given package.  I randomly chose Hashed_Maps.>>
@@ -73,25 +82,26 @@ semantics for a given package.  I randomly chose Hashed_Maps.>>
 container packages contain dynamic semantics under the heading of
 static semantics. E.g. A.18.24 (7/3). Which I why I did not bother
 distinguishing either, but I did leave out the heading of "static
-semantics" present in other packages.
+semantics" present in other packages.>>>
 
 Add a package
 
-A.18.X The Generic Package Ada.Safe.Containers.Hashed_Maps
+A.18.X The Generic Package Ada.Task_Safe.Containers.Hashed_Maps
 
-The language-defined generic package Ada.Safe.Containers.Hashed_Maps
+The language-defined generic package Ada.Task_Safe.Containers.Hashed_Maps
 provides a map with the same operations as the package
 Containers.Hashed_Maps (see A.18.5), with the added semantics that
 concurrent operations are synchronized so that modifying accesses
 preclude any concurrent accesses. Concurrent reads are non-blocking.
- 
+
 The declaration of the generic library package
-Safe.Containers.Hashed_Maps has the same contents and semantics as
+Task_Safe.Containers.Hashed_Maps has the same contents and semantics as
 Containers.Hashed_Maps except:
 
-No tampering checks are performed. 
-AARM note: the intent is that tampering is prevented by the 
-synchronization rules.
+No tampering checks are performed.
+<<< Note to ARG. The following paragraph is written so that tampering code
+ blocks temporarily rather than fail permanently. If I did not catch all
+cases, let me know and please provide words to include the missed ones.>>>
 
 Any operation that modifies a map, cursor or iterator instance blocks
 while any other operation on the same map instance or any cursor or
@@ -115,16 +125,16 @@ major disadvantages:
 
 1. The user would carry the burden of having to check for each subunit
 whether it is thread-safe or not, and if not, whether an alternative
-exists and, if so, under which name. Thus, cognitive burden to the user 
+exists and, if so, under which name. Thus, cognitive burden to the user
 is high.
 
 2. Chances to make existing units thread-safe are very low, since the
 consensus seems to be that the added execution cost should not be part
 of the default behavior.
 
-3. The implementation burden of making individual units thread-safe may be 
+3. The implementation burden of making individual units thread-safe may be
 considerably higher than an overall scheme (which, with very coarse lock
-granularity, allows automated generation of the implementation). 
+granularity, allows automated generation of the implementation).
 
 4. Ultimately only the implementer knows whether deep down in the
 implementation thread-unsafe mechanisms, e.g., a fault handling
@@ -141,29 +151,31 @@ The global approach has the following advantages:
 1. Switching between thread-safe and thread-unsafe versions is done by
 altering the package prefixes. With good "use"-clauses, the change can
 be confined to the "with/use"-clauses.
- 
+
 2. The protected notion extends across child units and it does so
 intentionally, since there are child units in the Ada library whose
 semantics interact via shared resources. The thread-safeness
 therefore needs to extend across child units.
- 
+
 3. Implementations can start with coarse-grained locks and trivial
-implementations and gradually refine the locks in those areas where 
+implementations and gradually refine the locks in those areas where
 they believe that a higher degree of concurrency is needed by customers.
 
 4. Nothing stands in the way of users, who want to use the
 thread-unsafe versions and "roll their own" protection against
 destructive data races.
- 
-It is intentional that the types defined in the child units of
-package Ada are incompatible with types defined in child units of
-package Ada.Safe. We want to avoid any mixing with all the 
-ensuing semantic complications.
+
+It is intentional that the types defined in the child units of package
+Ada are incompatible with types defined in child units of package
+Ada.Task_Safe. We want to avoid any mixing with all the ensuing
+semantic complications. In particular access types shall not be able
+to designate objects from both kinds of packages (for obvious
+reasons).
 
 The semantic specification is intentionally focused only on the needed effect,
-leaving the actual realization to the implementations. Given this freedom, 
-all callbacks of library operations from within the library are at risk to 
-cause deadlocks. It is questionable whether lock granularity can be specified 
+leaving the actual realization to the implementations. Given this freedom,
+all callbacks of library operations from within the library are at risk to
+cause deadlocks. It is questionable whether lock granularity can be specified
 tightly enough for deterministic behavior at reasonable implementation effort.
 
 This approach allows later refinements when the community feels that
@@ -189,8 +201,8 @@ access shared data concurrently"-model (as opposed ot the transaction
 model now put into the semantics to also deal with tampering).
 
 !examples
-  
-Any existing code calling library operations from within concurrent tasks. 
+
+Any existing code calling library operations from within concurrent tasks.
 
 !ASIS
 
@@ -1320,7 +1332,7 @@ fixed, unless we make it per-task, I suppose, which is certainly not providing
 cases these will not be equivalent in functionality.
 
 Perhaps the fundamental question is: What is the real problem this AI is trying
-to solve? 
+to solve?
   It might really help if the "!problem" presented some examples of real
 problems that typical programmers face, and discussed some of the alternative
 solutions already available, and the cases where the existing solutions are
@@ -1331,9 +1343,9 @@ particularly painful.
 From: Erhard Ploedereder
 Sent: Wednesday, October 14, 2015  11:14 AM
 
-> The whole notion of "Current_Output" and friends is bizarre in a 
-> multi-threaded program, so that one really can't be fixed, unless we 
-> make it per-task, I suppose, which is certainly not providing 
+> The whole notion of "Current_Output" and friends is bizarre in a
+> multi-threaded program, so that one really can't be fixed, unless we
+> make it per-task, I suppose, which is certainly not providing
 > "equivalent" thread-safe functionality.
 
 Well, with two threads writing a string to Current_Output, I would rather
@@ -1403,12 +1415,12 @@ From: Randy Brukardt
 Sent: Monday, July 11, 2016  8:30 PM
 
 Not sure if Erhard ever got proper answers to his questions in this draft, so
-here they are... 
+here they are...
 
 Erhard Ploedereder wrote:
 
-> I have one question: I suspect that the set of "tampering" 
-> operations is the set of all "modifying" accesses to maps, cursors and 
+> I have one question: I suspect that the set of "tampering"
+> operations is the set of all "modifying" accesses to maps, cursors and
 > iterators.
 > True or false? i.e., are there modifying ops that are not tampering?
 
@@ -1416,7 +1428,7 @@ Tampering covers modification of the container (that is, insert, delete, etc.)
 but not modification of the data of an element IN the container. Specifically,
 tampering allows writing the contents of an element (otherwise, one couldn't
 write a loop that changes all elements of a container, a capability that seems
-important). 
+important).
 
 I suspect that means that tampering isn't enough for concurrency purposes, but
 I do think it is a proper subset (so the rules given in your proposal are
@@ -1446,6 +1458,158 @@ for packages. (Such a fix would be a lot of work, and it would provide exactly
 no benefit to Ada users or implementers. Only true pedants would care.) So the
 text in this case should all be under Static Semantics, even though that is of
 course nonsense.
+
+***************************************************************
+
+From: Erhard Ploederder
+Sent: Wednesday, June 7, 2017  9:08 PM
+
+Here is AI12-0139-1, updated to  /04. (My homework).
+
+I edited as requested in the minutes, my related questions are marked in the
+text of the AI. I added a few clarifications.
+
+The minutes propose that the types of the old and new packages should be
+compatible. I did not make that change, because this then would allow mixing
+operations from Task_Safe and original packages to work on the same objects.
+Clearly, this cannot possibly work, if the former protect by lock but the other
+do not. On the contrary, these types need to be kept apart "at all cost".
+
+Raphael did not propose a specific set of packages, so a narrowing to a subset
+of packages has not happened yet.
+
+Presumably, at least all container packages should be included. However, there
+are obvious candidates, for which the dual version is unnecessary. Pure packages
+with subprograms that have only scalar parameters are one example. What is
+better, though? Uniformity, by having the copy regardless with an implementation
+that merely replicates the existing package or parsimoniousness, avoiding the
+copying by an implementer and making the user search in both branches for a
+package of the functionality (s)he likes?
+
+Note that renaming of packages cannot be made an implementation choice; it would
+have to be prescribed semantics, because of the type issues.
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Wednesday, June 7, 2017  10:30 PM
+
+...
+> The minutes propose that the types of the old and new packages should
+> be compatible. I did not make that change, because this then would
+> allow mixing operations from Task_Safe and original packages to work
+> on the same objects.
+> Clearly, this cannot possibly work, if the former protect by lock but
+> the other do not. On the contrary, these types need to be kept apart
+> "at all cost".
+
+I think you missed the point of this part of the minutes.
+
+The vast majority of language-defined types are either elementary or "open"
+composite (that is, not any sort of abstraction, like type String). For those
+types, there could be no difference between a "locking" version and a "normal"
+version, because there is not going to be any locking in any case. What would a
+"locking" type Boolean do that is different from the regular version? Hopefully
+nothing.
+
+In that case, having a proliferation of types that are identical in ALL
+semantics seems like a bad thing. I don't want two versions of Integer, or
+Boolean, or Interfaces.C.Int, or Ada.Strings.Alignment, with all of the problems
+of deciding what to use and the issues of interoperability.
+
+You're right of course that the types that actually have some locking semantics
+should be different. But there should not be that many such types. (That of
+course depends on which packages end up with Task_Safe versions.)
+
+Ideally, one could use, say, the Task_Safe Text_IO with the normal vector
+container, as the performance characteristics of these packages are going to be
+very different. I doubt that anyone would want to use a fully locked container
+implementation in any code that proves to matter to performance. (Of course,
+there is a lot of non-performance critical code out there, so that doesn't have
+anything to do with whether or not these packages are a good idea in the first
+place.)
+
+***************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, June 8, 2017  11:27 PM
+
+> I edited as requested in the minutes, my related questions are marked
+> in the text of the AI. I added a few clarifications.
+
+From the AI:
+
+... For containers, the Stable nested package will acquire exclusive access to
+the underlying upon creation, with no further synchronization associated with
+individual operations.
+
+<<< I have no idea what the last sentence tries to say, but I copied it
+faithfully from the minutes. What Stable nested package and what underlying ...
+? If I guess at what it is traing to say, it would completely void the purpose
+of this AI, since the creator task would own the container exclusively forever
+and this would explicitly prevent shared use of the container by multiple tasks
+altogether. >>>
+
+The Stable subpackages are the ones proposed in AI12-0111-1 to eliminate
+tampering and other overhead. The idea of the note was to ensure that the Stable
+views, at least, are efficiently implemented (that is, get the lock when the
+Stable view is created). Note that a Stable view is essentially the same as
+getting setting the tampering flag: no changes to the container are allowed
+while it exists. (Of course, one still can change components of an element;
+tampering/Stable only prevents adding/removing/changing the bounds/discriminants
+of elements.)
+
+The creator package is one that would never own a stable view of a container;
+that's only usable for *reading* a container. Writing operations are only
+possible when no other task owns a Stable view (or it doing any thing that
+requires a tampering check; they're rather equivalent) - presumably they'd be
+locked out.
+
+In any case, this is in addition to the fine-grained locking of individual
+operations; it's not exclusive! (If no one uses Stable views, or we don't end up
+adding them, the sentence has no effect at all.)
+
+----
+
+From the AI:
+
+<<< Note to ARG: Semi-unrelated RM observation: Several of the present container
+packages contain dynamic semantics under the heading of static semantics. E.g.
+A.18.24 (7/3). Which I why I did not bother distinguishing either, but I did
+leave out the heading of "static semantics" present in other packages.>>>
+
+I think I've previously answered this, but the RM never uses Dynamic Semantics
+to describe language-defined packages. This seems like a mistake - virtually
+everything about such packages are Dynamic Semantics - but it would be a
+terrible idea to have a few packages with Dynamic Semantics heading and most
+without. (And changing all of them is impractical because the old Scribe
+describes these as sections, with @begin and @end parts: they're not headers
+that can be moved easily -- the only way to change the classification of an
+existing paragraph is to delete it and reinsert it somewhere else -- which
+necessarily changes the paragraph numbers.)
+
+----
+
+From the AI:
+
+No tampering checks are performed.
+<<< Note to ARG. The following paragraph is written so that tampering code
+blocks temporarily rather than fail permanently. If I did not catch all cases,
+let me know and please provide words to include the missed ones.>>>
+
+You do know that means that a task that does something that would fail a
+tampering check (it's own) would deadlock instead in the Task_Safe version?
+That's about the nastiest way for a task to fail; we had massive problems with
+this in Claw (the programs in question were actually wrong, but figuring that
+out from a deadlock was near impossible). We ended up putting some of lock waits
+on timers so that they would raise an exception rather than deadlock. That was
+OK for Claw (where a delay of more than a couple seconds processing the GUI is
+essentially the same as a failure as the GUI would be non-responsive), but it
+probably wouldn't be OK for the containers (whether a 10 second delay is
+acceptable or not is not something the implementer can know).
+
+Based on that experience, I personally think anything that is designed to fail
+by deadlock is unusable. YMMV.
 
 ***************************************************************
 
