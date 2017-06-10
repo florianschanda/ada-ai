@@ -1,0 +1,412 @@
+!standard 13.11(21)                                    17-06-09  AI12-0233-1/01
+!standard 13.11.4(21/3)
+!standard 13.11.4(31/3)
+!class binding interpretation 17-06-09
+!status work item 17-06-09
+!status received 17-04-13
+!priority Low
+!difficulty Medium
+!qualifier Omission
+!subject Pre'Class for hidden operations of private types
+!summary
+
+
+!question
+
+Considering the following case:
+
+    package Q is
+       type Root_Type is tagged record
+          G : Integer := 0;
+          ...
+       end record;
+       function Is_Printable(R : Root_Type) return Boolean;
+       procedure Print(R : Root_Type)
+         with Pre'Class => R.G > 0;
+           -- dispatching op with a Pre'Class aspect
+    end Q;
+
+    private with Q;
+    package P is
+       type T is private;
+       procedure Print(X : T)
+         with Pre => Is_Valid(X);
+           -- primitive op with a "Pre" aspect
+
+       function Is_Valid(X : T) return Boolean;
+       ...
+    private
+       type T is new Q.Root_Type with record ...;
+       --  inherited procedure Print overridden at this point
+       ...
+    end P;
+
+    with P;
+    procedure Test is
+       Z : P.T;
+    begin
+       Print(Z);  --  (1)
+    end;
+
+Is Pre'Class checked here? (Yes.)
+
+!recommendation
+
+(See Summary.)
+
+!wording
+
+[Editor's note: There doesn't seem to be a need to change wording, if in fact
+the group agrees with the analysis in the !discussion. In that case, this AI
+needs to be rewritten as a Ramification.]
+
+!discussion
+
+The current wording of 6.1.1(38/4) says:
+
+   "The class-wide precondition check for a call to a subprogram or entry S
+   consists solely of checking the class-wide precondition expressions that
+   apply to the denoted callable entity (not necessarily to the one that is
+   invoked). ..."
+
+Because this says the "callable entity," that implies that Pre'Class is
+checked, even though the caller has no idea that this is going to happen
+(without looking in the private part).
+
+---
+
+Note that this case can happen for any private type or private extension,
+so long as the type extended is different than the ancestor type (if any)
+given in the partial view. It's not only an issue for untagged private types.
+
+---
+
+There are two conflicting principles involved with checking preconditions:
+
+1) A Precondition is a requirement upon the caller. As such, the caller has to
+   know the terms of the contract.
+
+2) The callee who sees a set of preconditions should be able to trust these
+   preconditions, otherwise they are worthless.
+
+These principles conflict in many cases (for dispatching calls, for calls
+through access-to-subprogram types, for calls to formal subprograms, for calls
+to renamed subprograms). In every such case, Ada has chosen (2) over (1).
+
+For instance, for a call through an access-to-subprogram value, the caller
+does not know the precondition (if any), but the callee can depend that any
+preconditions that it knows about have been checked.
+
+We've been very careful to preserve this principle, even going to the length
+of requiring some preconditions to be checked twice as in AI12-0195-1. So it
+makes sense that we would do so here as well.
+
+Assuming we continue that principle, the only other alternative is to make
+the subprogram declaration illegal (since the declaration is implicit, so
+such a rule really affects the type declaration). That would be incompatible,
+but only at the margins (only for routines with non-trivial preconditions
+that are overriding). ** I'm not going to look at this possibility further,
+but it may be worth considering. After all, that's how similar cases with
+interfaces were resolved. **
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+
+!appendix
+
+From: Tucker Taft
+Sent: Thursday, April 13, 2017  9:25 AM
+
+The question is whether Pre'Class should be checked when calling a (visible)
+primitive of a private untagged type T, if the full type is a type extension and
+the primitive overrides a dispatching operation inherited from an ancestor, and
+the dispatching operation has a Pre'Class aspect.
+
+Considering the following case:
+
+    package Q is
+       type Root_Type is tagged record
+          G : Integer := 0;
+          ...
+       end record;
+       function Is_Printable(R : Root_Type) return Boolean;
+       procedure Print(R : Root_Type)
+         with Pre'Class => R.G > 0;
+           -- dispatching op with a Pre'Class aspect
+    end Q;
+
+    private with Q;
+    package P is
+       type T is private;
+       procedure Print(X : T)
+         with Pre => Is_Valid(X);
+           -- primitive op with a "Pre" aspect
+
+       function Is_Valid(X : T) return Boolean;
+       ...
+    private
+       type T is new Q.Root_Type with record ...;
+       --  inherited procedure Print overridden at this point
+       ...
+    end P;
+
+    with P;
+    procedure Test is
+       Z : P.T;
+    begin
+       Print(Z);  --  is Pre'Class checked here?
+    end;
+
+The current wording of 6.1.1(38/4) says:
+
+   "The class-wide precondition check for a call to a subprogram or entry S
+   consists solely of checking the class-wide precondition expressions that
+   apply to the denoted callable entity (not necessarily to the one that is
+   invoked). ..."
+
+Steve has convinced me that because this says the "callable entity," that
+implies that Pre'Class is checked, even though the caller has no idea that this
+is going to happen (without looking in the private part).  The problem with this
+is that there is no straightforward way to "weaken" the precondition on "Print"
+in the above scenario, to for example, allow the printing of objects of type P.T
+that are default initialized (because the G field is default initialized to
+zero, which violates the inherited Pre'Class).  You cannot specify a weaker
+Pre'Class on the spec of P.Print, because at that point P.T is untagged.  And
+you cannot specify a weaker Pre'Class on the body of P.Print, because we don't
+allow Pre'Class on a body with a separate spec.
+
+There seems no particular danger in omitting the check on Pre'Class, so long as
+the implementor of P.Print understands that the Pre'Class aspect will not always
+be checked, since in some views of P.Print, P.T is untagged.  Generally when
+writing the body of a dispatching operation, you have to assume the worst about
+which Pre'Class will be checked, since you can reach it via any ancestor's
+"view" of the operation.  It seems like the untagged partial view should have
+equal weight here, so that no Pre'Class is checked if the call is via such an
+untagged view.
+
+In general, it seems bad if the caller of an operation is unaware of what
+classwide precondition checks are performed.  We had designed Pre'Class so that
+the caller only had to worry about the Pre'Class of the interface through which
+they were reaching the operation.  An untagged "interface" to an operation seems
+like it could follow an analogous rule, meaning that no Pre'Class should be
+checked when using that "interface."
+
+Thoughts?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Thursday, April 13, 2017  11:20 PM
+
+> The question is whether Pre'Class should be checked when calling a
+> (visible) primitive of a private untagged type T, if the full type is
+> a type extension and the primitive overrides a dispatching operation
+> inherited from an ancestor, and the dispatching operation has a
+> Pre'Class aspect.
+...
+> Thoughts?
+
+I have plenty of those, but no answers. :-) Copying Steve's laundry list format:
+
+(1) My initial reaction without thinking is "of course, why not?".
+
+(2) "In general, it seems bad if the caller of an operation is unaware of what
+classwide precondition checks are performed." I don't buy this. The model in Ada
+has always been that the called routine always gets its preconditions checked,
+but the caller (that is, the human writing the call) may not know about some of
+those checks.
+
+In particular, the caller has no idea what preconditions will be check for a
+call through an access-to-subprogram value, for a call to a generic formal
+subprogram (the writer of the call cannot know anything about the actuals if any
+instance), nor for a dispatching call (since the called routine might have some
+"Pre"s as well as some Pre'Class).
+
+The situation might be different for some static tool (like SPARK), but for Ada,
+preconditions are checked dynamically.
+
+(3) Untagged private types completed with tagged types cause all kinds of
+semantic anomolies. One more, in a corner case, doesn't seem like an issue.
+
+(4) But why are you concerned specifically with untagged private types? It seems
+like the problem is more with privacy than with untagged/tagged. That is, if you
+make the type a tagged private type, doesn't the same thing happen??
+    private with Q;
+    package P2 is
+       type T is tagged private;
+       procedure Print(X : T)
+         with Pre => Is_Valid(X);
+           -- primitive op with a "Pre" aspect
+
+       function Is_Valid(X : T) return Boolean;
+       ...
+    private
+       type T is new Q.Root_Type with record ...;
+       --  inherited procedure Print overridden at this point
+       ...
+    end P2;
+
+Off hand, I don't see anything that would make this illegal (and I'd hope that
+it wasn't illegal). The caller isn't going to know about the Pre'Class on a call
+of Print in this case either.
+
+(5) "There seems no particular danger in omitting the check on Pre'Class, so
+long as the implementor of P.Print understands that the Pre'Class aspect will
+not always be checked..." This last part seems like nonsense to me. I outlined
+the model that I have above, and that is that the implementer of a routine can
+always be assured that the preconditions that they know about have been
+evaluated (or in the case of Pre'Class, possibly some stronger precondition).
+There's no case where some precondition doesn't get evaluated. We've had several
+AIs recently trying to preserve this principle (you authored the last one -
+AI12-0195-1). It would be odd to throw that principle out the window for a
+corner case. And such a principle is only really useful if it is always
+true...else we should have just given up on it right away.
+
+(6) "The problem with this is that there is no straightforward way to "weaken"
+the precondition on "Print" in the above scenario..."  That's true, but this is
+a case that almost never happens in practice. In almost all real cases, you need
+to strengthen the precondition, meaning one either uses Pre or just puts an
+exception raise in the body. That's because the "interface" is going to be
+general, and the various specific implementations will have their own (typically
+additional) requirements. It's not a very good interface if it is enforcing
+requirements not needed by the abstraction! "Weakening" primarily happens in
+examples constructed to illustrate how LSP works - in practice, a class-wide
+precondition is never changed (although the routines it calls might change).
+
+(7) This doesn't appear to be the sort of thing that would happen by accident.
+If it did (by not using overriding indicators), it's far more likely that the
+fact that the routine is overriding and thus can be called by dispatching calls
+would be a problem rather than whether or not the class-wide precondition is
+invoked. Moreover, the problem (if there is a problem) is easily avoidable when
+identified: just change the name of the routine. I'd expect such problems to
+show up early when there is essentially no cost to such a change, and surely the
+entire package specification is under control of the developer. To the extent
+that this does happen, it's another indictment of the Ada 95 model of
+inheritance, which forces us to allow accidental overriding with all of the
+problems that happen.
+
+---
+
+I thought I had a rather neutral take on this question, but that doesn't appear
+to be the way this worked out when I wrote it up! I guess the only thing I don't
+know is quite how this interacts with static analysis (presumably, we want our
+preconditions to be compatible with the SPARK ones, and not have any rules that
+force SPARK to do something different than Ada requires). So I'm still not
+making a decision at this point, but I would lean strongly toward the
+interpretation that Steve gives for the semantics.
+
+Other thoughts??
+
+****************************************************************
+
+From: Jean-Pierre Rosen
+Sent: Friday, April 14, 2017  2:32 AM
+
+1) A Precondition is a requirement upon the caller. As such, the caller has to
+   know the terms of the contract.
+
+2) The callee who sees a set of preconditions should be able to trust these
+   preconditions, otherwise they are worthless.
+
+And yes, these two nice principles are in contradiction for the present case...
+So, I don't know.
+
+Note that the situation is /not/ the same as with class-wide contract on
+interfaces; the callee knows about the interfaces that the type inherits, so he
+knows about the possible weakening of preconditions introduced by the
+interfaces. But he doesn't know that his type has been used as an implementation
+by some far-away guy.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April 14, 2017  3:50 PM
+
+A nice summary. But it makes the choice clear to me. In Ada, whenever these
+principles have conflicted (and that's happened often), we've consistently
+chosen 2).
+
+Specifically, in pre for dispatching calls, for access-to-subprogram types, and
+for generic formal subprograms, the caller has no idea what preconditions might
+be enforced (in general; one could make assumptions about the actual subprogram
+called in all of these cases). So 1) is violated in the general case. But the
+rules are such that 2) is never violated, and when we've found cases where that
+would happen, even marginally (as in AI12-0195-1) we've changed the rules.
+
+So in this case as well, we should preserve 2) and forget 1).
+
+I note on the side that all of the cases where 1) is violated can be prevented
+by programming style rules. So a tool like AdaControl could (for instance) flag
+all uses of Pre on dispatching routines. The case in question also could be
+detected by a programming style rule (and enforced by a tool), so no one has to
+live with violations of 1). [Although eliminating all formal subprograms and
+access-to-subprograms seems pretty draconian to me; if we allowed Pre on this
+things, then the rule could be narrowed - which clearly would be better.]
+
+****************************************************************
+
+From: Erhard Ploedereder
+Sent: Friday, April 14, 2017  4:14 PM
+
+I happen to believe that a model that tells the caller "The routine might have
+preconditions, but I don't tell you which" is disgustingly flawed.
+
+I'd rather have draconian rules such as
+ 'Access on a subprogram is illegal if the subprogram has preconditions.
+A subprogram with preconditions cannot be passed to a generic formal  parameter.
+
+Everything else seems like asking the caller to play Russian roulette with
+indirect calls.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, April 14, 2017  5:15 PM
+
+SPARK deals with this by having various rules, such as Pre'Class => Pre and
+disallowing non-trivial Pre when it can't be checked.  We could recommend
+something like that for all Ada code if we start supporting Pre's on
+access-to-subprogram types, generic formals, etc. It is tricky when we don't
+expect the average Ada compiler to do proofs of any sort. You end up having to
+do redundant checks to be sure the implication rules have been properly
+followed.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, April 14, 2017  5:29 PM
+
+> I happen to believe that a model that tells the caller "The routine
+> might have preconditions, but I don't tell you which"
+> is disgustingly flawed.
+
+That's Ada, though.
+
+> I'd rather have draconian rules such as  'Access on a subprogram is
+> illegal if the subprogram has preconditions.
+> A subprogram with preconditions cannot be passed to a generic formal
+> parameter.
+
+Those would make fine style rules, enforced by something like AdaControl. But
+those would be far too incompatible to adopt now. Besides, you'd also have to
+adopt a rule banning any specific Pre or Post from primitive routines of tagged
+types. And probably some more.
+
+> Everything else seems like asking the caller to play Russian roulette
+> with indirect calls.
+
+Shrug. No worse than the case before adding preconditions, when you'd have a
+comment and some in-body check raising an exception if a routine is misused.
+With indirect calls of all sorts, you have no real opportunity to know the
+(entire) precondition and you have to rely on runtime checks. That goes back to
+Ada 83.
+
+Obviously, the situation is different once static analysis gets involved. But I
+don't think we're going to start requiring Ada compilers to do proofs.
+
+****************************************************************
+
