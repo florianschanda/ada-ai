@@ -1,0 +1,471 @@
+!standard C.6(14/3)                                  17-06-09  AI12-0234-1/01
+!class Amendment 17-06-09
+!status work item 17-06-09
+!status received 17-05-19
+!priority Low
+!difficulty Easy
+!subject Compare-and-swap for atomic objects
+!summary
+
+!problem
+
+Lock-free structures are all the rage these days. If one wanted to construct
+such a structure in Ada, one might use Atomic objects. But Ada does not
+provide any compare-and-swap operation (or other read-write locked operations,
+like atomic increment). The RM has Implementation Advice that package
+Machine_Code include such operations - C.1(11-12), but that is the absolute
+opposite of a portable operation.
+
+!proposal
+
+(See Summary.)
+
+!wording
+
+** TBD. The author is not going to try to propose anything here, as people
+more knowledgeable about common machine architectures should do that. He notes
+that he mainly is aware of test-and-set operations and never heard of
+compare-and-swap until this discussion. :-)
+
+!discussion
+
+It seems that the solution will need to be generic, in order to work with any
+atomic type. For that to make sense, it seems necessary to allow aspect Atomic
+to be given on a formal type, in order to require any actual type is indeed
+atomic. The alternative of just saying that if the type is not atomic, then the
+operation isn't either, seems error-prone.
+
+--
+
+Author's note: One thing I learned from this discussion is that at least some
+the literature uses "Lock-Free" to mean "free of deadlocks and livelocks"
+rather than the obvious meaning of "has no locks". Those are two wildly
+different things! Surely a tool could determine if a protected object is
+deadlock free; whether the implementation contains locks obviously out of the
+hands of tools. Moreover, almost all synchronized data has something that is
+acting like a lock (that is, some synchronization data); the exact form of
+that data should be irrelevant outside of performance concerns.
+
+!ASIS
+
+No ASIS effect.
+
+!ACATS test
+
+An ACATS C-Test is needed to check that the new capabilities are supported.
+
+
+!appendix
+
+!topic Lock-free data structures
+!reference Ada 202x RM9
+!from Steven-Stewart-Gallus 17-05-19
+!keywords lock-freedom concurrency tasking hard-real time !discussion
+
+Will Ada 202x have support for lock-free data structures?  An API along the
+style of the GNAT Lock_Free pragma or a generic package like I made at
+https://sstewartgallus.com/git?p=linted.git;a=blob;f=src/ada-core/src/linted-gcc
+_atomics.ads;h=a87061e74aa3a7badcfcd7cd0f0f5c0f2abe1908;hb=HEAD that mirrors
+C++'s support might be useful.  Also, a function for x86's pause instruction or
+similar would be useful.
+
+This would all be useful for hard-real time platforms that need very strict
+timing guarantees.
+
+The Lock_Free pragma would probably be easiest for formalizing in SPARK and
+such.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May 19, 2017  5:15 PM
+
+> Will Ada 202x have support for lock-free data structures?
+
+No idea; no one has formally asked until 30 minutes ago. In particular, the
+real-time folks at IRTAW have not (yet?) forwarded any proposals in this idea.
+Generally, we let them take the lead on real-time issues.
+
+And in any case, it is the wrong question. A lock-free data structure is a
+specific solution, not a problem or capability. Ada already provides a wide
+variety of ways to write data structures for multitasking, from the very low
+level (aspects Atomic and Volatile) to the nicely abstract (protected objects
+and rendezvous).
+
+We need to know what cannot be done with the existing features.
+
+No one seems interested in explaining what they cannot do in Ada, but rather
+seem interested in following the herd to use solutions cooked up for languages
+that don't have the abstract multitasking capabilities of Ada. In many cases,
+there are better ways to do in Ada what you might have to do in some low-level
+manner in some other language. (And that's often true in other areas of Ada as
+well -- OOP in particular.)
+
+In particular, I'd like to know the following. (Aside: I always tell people that
+I know just enough about multitasking to be dangerous, so please humor me if you
+think these things are obvious.)
+
+What capabilities (precisely) are missing from Ada in order for it to directly
+support low-level lock-free data structures? We most certainly would not want to
+add a bunch of new low-level capabilities, but rather would want to extend the
+existing facilities to better support low-level lock-free data structures. It
+seems obvious to me that Ada needs a portable atomic test-and-set operation, but
+I don't know if that is enough nor whether that is really practical. Nor is the
+best form to define that obvious (it would have to be implemented as a built-in
+in order to get the intended special semantics, which complicates
+implementation).
+
+And the even more important question: in general use, what can you do with a
+lock-free data structure that you cannot do with a protected object? After all,
+if you can use a PO to accomplish your task, you should do that as it is far
+more abstract and portable than any particular implementation could be. And by
+using a PO, you are letting the compiler chose the most efficient way to
+implement your data structure for your target rather than making an assumption
+that very well may be wrong. (Programmers are notoriously bad at determining the
+efficiency of code and the importance of efficiency of particular code.)
+
+Your thoughts (and anyone's, for that matter) on this topics would help guide
+thinking on these topics.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Friday, May 19, 2017  5:30 PM
+
+Note that AdaCore supports a pragma Lock_Free that can be applied to protected
+types to cause them to use lock-free primitives (or complain if not possible):
+
+  http://docs.adacore.com/gnat_rm-docs/html/gnat_rm/gnat_rm/implementation_defined_pragmas.html#pragma-lock-free
+
+Be that as it may, I sympathize with having access to a Compare_And_Swap
+primitive applicable to atomic objects, since most hardware supports that at
+this point, and from it you can implement essentially any lock-free structure.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May 19, 2017  6:34 PM
+
+Thanks Tuck; I was aware of that.
+
+That just seems to me to be an inversion -- the compiler ought to select the
+best implementation, not make the user guess what implementation is best on
+their target. (I realize this sort of inversion is ingrained in computing;
+aspect Inline is another example of this sort of inversion -- and I don't like
+it much either.)
+
+It seems clear that there is a hole when creating low-level algorithms (no
+test-and-set), it's much less obvious that there is such a hole for protected
+objects (after all, most of anything in a program is not performance critical,
+so restructuring your data structures to fit some lock-free profile just makes
+your code harder to understand in most cases). And one assumes that compilers do
+the best they can for a data structure and don't just fall back on some general
+algorithm. (What compiler vendor wants to generate slower than necessary
+code???)
+
+****************************************************************
+
+From: Steven Stewart-Gallus
+Sent: Saturday, May 20, 2017  3:11 PM
+
+>> Will Ada 202x have support for lock-free data structures?
+>
+> No idea; no one has formally asked until 30 minutes ago. In particular, the
+> real-time folks at IRTAW have not (yet?) forwarded any proposals in this
+> idea. Generally, we let them take the lead on real-time issues.
+
+Does anyone know how I would get into contact with them?
+
+> And in any case, it is the wrong question. A lock-free data structure is a
+> specific solution, not a problem or capability.
+
+I'm sorry I meant capabilities for implementing lock-free data  structures.
+Standard library support for common data structures is an entirely separate
+question.  Under current standard Ada it is not possible to implement certain
+data structures that guarantee forward progress among all threads without
+delving into low-level assembly.
+
+> Ada already provides a wide variety of ways to write data structures
+> for multitasking, from the very low level (aspects Atomic and
+> Volatile) to the nicely abstract (protected objects and rendezvous).
+
+Unfortunately, current Atomics support does not provide for
+compare_and_exchange primitives and similar and so cannot support  user-written
+lock-free data structures.
+
+> We need to know what cannot be done with the existing features.
+
+Atomic swaps, compare_and_swaps and processor specific thread yield
+instructions.  Also, less strongly ordered atomics that are less expensive.
+
+> No one seems interested in explaining what they cannot do in Ada, but rather
+> seem interested in following the herd to use solutions cooked up for
+> languages that don't have the abstract multitasking capabilities of Ada. In
+> many cases, there are better ways to do in Ada what you might have to do in
+> some low-level manner in some other language. (And that's often true in
+> other areas of Ada as well -- OOP in particular.)
+
+You realize the standard library has to be implemented somewhere right?
+On some platforms there is no Ada standard library or a very reduced set  of
+capabilities and people have to implement such capability themselves. And as
+stated previously, there is NO way to implement the timing  guarantees such as
+lock-freedom or wait-freedom in standard Ada.  Also,  these capabilities cannot
+be used inside interrupts or signal handlers.
+
+> In particular, I'd like to know the following. (Aside: I always tell people
+> that I know just enough about multitasking to be dangerous, so please humor
+> me if you think these things are obvious.)
+>
+> What capabilities (precisely) are missing from Ada in order for it to
+> directly support low-level lock-free data structures? We most certainly
+> would not want to add a bunch of new low-level capabilities, but rather
+> would want to extend the existing facilities to better support low-level
+> lock-free data structures. It seems obvious to me that Ada needs a portable
+> atomic test-and-set operation, but I don't know if that is enough nor
+> whether that is really practical. Nor is the best form to define that
+> obvious (it would have to be implemented as auilt-in in order to get the
+> intended special semantics, which complicates implementation).
+
+The C++ and C standards have a somewhat reasonable API.  I gave an  example of
+two possible APIs.  The Lock_Free pragma of GNAT and the  generic package
+wrapper over intrinsics provided by GCC.
+
+I think the Lock_Free pragma approach might be easiest for static  analysers
+such as SPARK to analyze and so would be most suited for  hard-real time
+support.  On the other hand, it wouldn't work for  wait-freedom requirements.
+
+The barest mimimal requirements are probably atomic exchange, atomic  compare
+and exchange and nop or yield instruction.  All else can be  implemented using
+them.  However, certain atomics cannot be implemented  in a wait-free way
+without being built in and instead must be lock-free.
+
+> And the even more important question: in general use, what can you do with a
+> lock-free data structure that you cannot do with a protected object? After
+> all, if you can use a PO to accomplish your task, you should do that as it
+> is far more abstract and portable than any particular implementation could
+> be. And by using a PO, you are letting the compiler chose the most efficient
+> way to implement your data structure for your target rather than making an
+> assumption that very well may be wrong. (Programmers are notoriously bad at
+> determining the efficiency of code and the importance of efficiency of
+> particular code.)
+
+You cannot guarantee special properties such as wait-freedom, or  lock-freedom.
+
+****************************************************************
+
+From: Florian Weimer
+Sent: Monday, May 22, 2017  6:27 AM
+
+> That just seems to me to be an inversion -- the compiler ought to
+> select the best implementation, not make the user guess what
+> implementation is best on their target.
+
+In some cases, lock-free implementations are required for correctness. For
+example, in glibc, we allegedly cannot use the GCC atomic built-ins because they
+could be implemented with locks, and that wouldn't give us the wrong behavior.
+
+With that background, this GNAT-specific assertion that the compiler must use
+lock-free operations is useful.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, May 22, 2017  1:31 PM
+
+Could you explain this further? Why would it matter how synchronization is
+accomplished? I would have expected that would be an implementation detail.
+
+****************************************************************
+
+From: Florian Weimer
+Sent: Tuesday, May 23 2017  2:16 PM
+
+It's very visible with POSIX shared mappings (either anonymous or file-backed).  It would matter with I/O memory mappings, too.
+
+It also affects the program semantics when signals are involved.
+Lock-based implementations of atomics can deadlock too easily.
+
+The problems are so numerous that it's been concluded (at least on the glibc
+side) that if the architecture does not support certain atomics, the only way to
+emulate them if required is with a kernel assist.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Wednesday, May 24, 2017  1:33 PM
+
+One interesting side note about lock-free vs. wait-free — a relatively recent
+paper documented some research which showed that the effort to produce a
+“wait-free” structure was rarely worthwhile.  Most “lock-free” structures were
+nearly wait free, without incurring all the complexity of a true “wait-free”
+algorithm.  See the paper by Alistarh, Censor-Hillel, and Shavit:
+
+   "Are Lock-Free Concurrent Algorithms Practically Wait-Free?”
+
+   https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/paper-18.pdf
+
+In any case, I support coming up with a simple standard Ada package for compiler
+implementors to provide access to Compare-and-Swap and perhaps a few additional
+operations.
+
+****************************************************************
+
+From: Hadrien Grasland
+Sent: Wednesday, May 24, 2017  4:04 PM
+
+If you go down the route of exposing hardware compare-and-swap operations, I
+would recommend also exposing other widely supported read-modify-write
+operations, such as swap or fetch-increment/decrement. They are less general
+than CAS, but where applicable, they enable better algorithms (no ABA issues, no
+expensive fail-and-retry loop).
+
+One example of application for atomic swap is triple buffering (producer
+transactionally updates a shared RAM value whenever it feels like it, consumer
+can access the latest update at any point in time), and one example of
+application for fetch-increment/decrement is reference counting.
+
+****************************************************************
+
+From: Stephen Michell
+Sent: Wednesday, May 24, 2017  5:51 PM
+
+Some of the IRTAW members participate in ARG. In particular, Alan Burns, Brad
+Moore and myself participate. IRTAW holds a workshop approximately every 18-24
+months. The last one was held in Benicassim, Spain in April 2016. The next one
+will either be in the fall of 2017 or spring of 2018.
+
+IRTAW has been resistant to putting such mechanisms into the Ada language,
+preferring instead to permit Ada to use such mechanisms to make mechanisms such
+as protected types/objects, tasks, etc. more efficient.
+
+The mechanism to interface with IRTAW is to watch for the announcement of the
+next workshop and submit a position paper to attempt to get the issue on the
+agenda and to come and participate. If you want, I will communicate with the
+organizer of the next workshop and ensure that interested people receive a
+direct email announcing the workshop when it is issued.
+
+****************************************************************
+
+From: Dirk Craeynest
+Sent: Thursday, May 25, 2017  4:24 AM
+
+And if you would like to interact even sooner with IRTAW members, and the Ada
+community in general, you should consider to attend the annual Ada-Europe
+conference.
+
+The 22nd International Conference on Reliable Software Technologies - Ada-Europe
+2017 - will be held in less than a month (12-16 June 2017) in Vienna, Austria.
+For more info, see: <http://www.ada-europe.org/conference2017>.
+
+****************************************************************
+
+From: Florian Weimer
+Sent: Friday, May 26, 2017  2:51 PM
+
+> If you go down the route of exposing hardware compare-and-swap
+> operations, I would recommend also exposing other widely supported
+> read-modify-write operations, such as swap or fetch-increment/decrement.
+> They are less general than CAS, but where applicable, they enable
+> better algorithms (no ABA issues, no expensive fail-and-retry loop).
+
+And you also need a memory model which goes beyond the current signaling
+concept.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May 26, 2017  4:00 PM
+
+?? Atomic objects themselves force sequential actions; there's no "signalling"
+involved. And C.6 makes it clear that may require barriers or fences. What else
+makes sense (whatever the rules are have to make sense in a wide variety of
+contexts)?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Friday, May 26, 2017  4:57 PM
+
+A couple of quick thoughts on this thread...
+
+..
+>  > Ada already provides a wide variety of ways to write data
+> structures  > for multitasking, from the very low level (aspects
+> Atomic and  > Volatile) to the nicely abstract (protected objects and
+> rendezvous).
+>
+>  Unfortunately, current Atomics support does not provide for
+> compare_and_exchange primitives and similar and so cannot support
+> user-written lock-free data structures.
+>
+>  > We need to know what cannot be done with the existing features.
+>
+>  Atomic swaps, compare_and_swaps and processor specific thread yield
+> instructions.  Also, less strongly ordered atomics that are less
+> expensive.
+
+Thanks, that's in part what I was looking for (and expected as well).
+
+>  > No one seems interested in explaining what they cannot do in Ada,
+> but rather  > seem interested in following the herd to use solutions
+> cooked up for  > languages that don't have the abstract multitasking
+> capabilities of Ada. In  > many cases, there are better ways to do in
+> Ada what you might have to do in  > some low-level manner in some
+> other language.
+> (And that's often true in  > other areas of Ada as well -- OOP in
+> particular.)
+>
+>  You realize the standard library has to be implemented somewhere
+> right?
+
+The standard library is always going to be implementation-specific (and often
+target-specific as well); there is very little of the GNAT standard library code
+that would work on Janus/Ada, for one example.
+
+Thus, there (A) is no need for portability in the implementation of the standard
+library (meaning that the Ada Standard isn't particularly relevant there) and
+(B) depending on implementation-specific features is fine. Which means that is a
+terrible example!
+
+>  On some platforms there is no Ada standard library or a very reduced
+> set  of capabilities and people have to implement such capability
+> themselves.
+
+Which brings one back to the original question, why isn't a protected object
+good enough for that?
+
+>  And as stated previously, there is NO way to implement the timing
+> guarantees such as lock-freedom or wait-freedom in standard Ada.
+
+I'm very skeptical that any useful timing guarantees could ever be made in a
+high-level language. I can't tell how long a piece of sequential code produced
+by my compiler will take to run even on the various Intel machines I have here
+(it seems to vary as much as a factor of 4 from what I would estimate). Truly
+portable code that runs on many different processors would be beyond
+predictable. Mixing that in with the different costs of synchronization on
+different targets and nothing but the most trivial can have any guarantee.
+
+But I'm at the limits of my knowledge here. While it seems to me that the actual
+implementation of a protected object should not matter (if it has the correct
+form, it cannot by itself cause deadlock or livelock, and that form can be
+easily checked by a tool), lots of other people seem to differ. Perhaps they're
+all focused on the wrong thing (I certainly think so), but obviously I may be
+missing some key information.
+
+...
+>  You cannot guarantee special properties such as wait-freedom, or
+> lock-freedom.
+
+I'd argue that it's not the job of a programming language to guarantee anything,
+especially when it comes to timing. (These properties seem misnamed as they
+generally are meant to make timing guarantees rather than an implementation
+guarantee. I can see no reason that a properly implemented lock could not make
+the same guarantee.)  And the implementation of a protected object doesn't
+really matter in terms of whether those properties hold -- it's just the form of
+the contents that matters. That seems easy to check with tools like SPARK.
+
+Anyway, I've said enough, I'll let others more knowledgeable weigh in if they
+want.
+
+****************************************************************
+
