@@ -1,4 +1,4 @@
-!standard 5.5.2 (2/3)                              16-10-03    AI12-0119-1/02
+!standard 5.5.2 (2/3)                              17-06-10    AI12-0119-1/03
 !class Amendment 14-06-20
 !status work item 14-06-20
 !status received 14-06-17
@@ -7,8 +7,8 @@
 !subject Parallel operations
 !summary
 
-New syntax and semantics to facilitate parallelism via Parallel Loops
-and Parallel Blocks 
+New syntax and semantics to facilitate parallelism via Parallel Loops,
+Parallel Blocks, and Parallel Reduction Expressions.
 
 !problem
 
@@ -27,61 +27,62 @@ in the code as a task.
 
 !proposal
 
-This proposal depends on the facilities for aspect Global (AI12-0079-1) 
+This proposal depends on the facilities for aspect Global (AI12-0079-1)
 and for aspect Potentially_Blocking (AI12-0064-1).
-Those proposals allow the compiler to statically determine where 
+Those proposals allow the compiler to statically determine where
 parallelism may be introduced without introducing data races.
 
-This proposal informally introduces the semantic notion of a Parallel 
-OPportunity (POP) and a tasklet to the language. POPs are places in 
-program text where work can be spawned to parallel executing workers 
-that work in concert to correctly execute the algorithm. Tasklets are 
-the notational (logical) units within a task that are executed in 
+This proposal informally introduces the semantic notion of a Parallel
+OPportunity (POP) and a tasklet to the language. POPs are places in
+program text where work can be spawned to parallel executing workers
+that work in concert to correctly execute the algorithm. Tasklets are
+the notational (logical) units within a task that are executed in
 parallel with each other.
 
 The goals of this proposal are:
-- To permit existing programs to benefit from parallelism through 
-  minimal restructuring of sequential programs into ones that permit 
+- To permit existing programs to benefit from parallelism through
+  minimal restructuring of sequential programs into ones that permit
   more parallel execution;
-- To support the development of complete programs that maximize 
+- To support the development of complete programs that maximize
   parallelism;
-- To efficiently guide the compiler in the creation of effective 
-  parallelism (without oversubscription) with minimal input from the 
+- To efficiently guide the compiler in the creation of effective
+  parallelism (without oversubscription) with minimal input from the
   programmer;
-- To support the parallel reduction of results calculated by parallel 
-  computation; 
-- To avoid syntax that would make a POP erroneous or produce noticeably 
+- To support the parallel reduction of results calculated by parallel
+  computation;
+- To avoid syntax that would make a POP erroneous or produce noticeably
   different results if executed sequentially vs in parallel.
 
 An important part of this model is that if the compiler is not able to
-verify that the parallel computations are independent, then a warning 
+verify that the parallel computations are independent, then a warning
 will be issued at compile time (See AI12-0079-1 and AI12-0064-1 for
-ways on how this can happen). 
+ways on how this can happen).
 
-Note that in this model the compiler will identify any code where a 
-potential data race occurs (following the rules for concurrent access 
-to objects as specified in the Language Reference Manual RM 9.10(23), 
-and point out where objects cannot be guaranteed to be independently 
-addressable. If not determinable at compile-time, the compiler may 
+Note that in this model the compiler will identify any code where a
+potential data race occurs (following the rules for concurrent access
+to objects as specified in the Language Reference Manual RM 9.10(23),
+and point out where objects cannot be guaranteed to be independently
+addressable. If not determinable at compile-time, the compiler may
 insert run-time checks to detect data overlap.
 
-Another issue is the underlying runtime. In this model, tasklets are 
-orthogonal to tasks. Regardless of implementation, tasklets are 
-considered to execute in the semantic context of the task where they 
-have been spawned, which means that any operation that identifies a 
-task, such as those in Task_Identification, will identify the task in 
-which the tasklet is spawned. On the other hand, calls by different 
+Another issue is the underlying runtime. In this model, tasklets are
+orthogonal to tasks. Regardless of implementation, tasklets are
+considered to execute in the semantic context of the task where they
+have been spawned, which means that any operation that identifies a
+task, such as those in Task_Identification, will identify the task in
+which the tasklet is spawned. On the other hand, calls by different
 tasklets of the same task into the same protected object are treated as
-different calls resulting in distinct protected actions; therefore 
-synchronization between tasklets can be performed using non-blocking 
-protected operations. Note that this is consistent with the current 
-standard which already supports multiple concurrent calls by a single 
-task in the presence of the asynchronous transfer of control capability 
+different calls resulting in distinct protected actions; therefore
+synchronization between tasklets can be performed using non-blocking
+protected operations. Note that this is consistent with the current
+standard which already supports multiple concurrent calls by a single
+task in the presence of the asynchronous transfer of control capability
 (RM 9.7.4 (23)).
 
-There are two areas of this proposal; one that introduce capabilities 
-for parallel blocks and another that introduces capabilities for 
-parallel loops.
+There are three areas of this proposal; one that introduce capabilities
+for parallel blocks, another that introduces capabilities for
+parallel loops, and another that introduces capabilities for parallel
+reduction.
 
 Parallel Blocks
 ---------------
@@ -91,287 +92,363 @@ algorithm may be executed in parallel with each other.
 
 Semantics: A parallel block statement encloses two or more sequences of
 statements (two or more "parallel sequences") separated by the reserved
-word "and".  Each parallel sequence represents a separate tasklet, but 
-all within a single Ada task. Task identity remains that of the 
-enclosing Ada task, and a single set of task attributes is shared 
-between the tasklets. 
+word "and".  Each parallel sequence represents a separate tasklet, but
+all within a single Ada task. Task identity remains that of the
+enclosing Ada task, and a single set of task attributes is shared
+between the tasklets.
 
-With respect to the rules for shared variables (see RM 9.10(13)), two 
-actions occurring within two different parallel sequences of the same 
-parallel block are not automatically sequential, so execution can be 
-erroneous if one such action assigns to an object, and the other reads 
-or updates the same object or a neighboring object that is not 
+With respect to the rules for shared variables (see RM 9.10(13)), two
+actions occurring within two different parallel sequences of the same
+parallel block are not automatically sequential, so execution can be
+erroneous if one such action assigns to an object, and the other reads
+or updates the same object or a neighboring object that is not
 independently addressable from the first object.  The appropriate use of
-atomic, protected, or task objects (which as a group we will call 
-synchronized objects) can be used to avoid erroneous execution. 
+atomic, protected, or task objects (which as a group we will call
+synchronized objects) can be used to avoid erroneous execution.
 
-In addition, the new Global and Potentially_Blocking aspects may be 
-specified to enable the static detection of such problems at compile 
-time (see AI12-0079-1 and AI12-0064-1). 
+In addition, the new Global and Potentially_Blocking aspects may be
+specified to enable the static detection of such problems at compile
+time (see AI12-0079-1 and AI12-0064-1).
 
-Any transfer of control out of one parallel sequence will initiate the 
+Any transfer of control out of one parallel sequence will initiate the
 aborting of the other parallel sequences not yet completed.  Once all
-other parallel sequences complete normally or abort, the transfer of 
+other parallel sequences complete normally or abort, the transfer of
 control takes place.  If multiple parallel sequences attempt a transfer
 of control before completing, one is chosen arbitrarily and the others
 are aborted.
 
-If an exception is raised by any of the parallel sequences, it is 
-treated similarly to a transfer of control, with the exception being 
-propagated only after all the other sequences complete normally or due 
-to abortion.  If multiple parallel sequences raise an exception before 
-completing, one is chosen arbitrarily and the others are aborted. The 
-parallel block completes when all of the parallel sequences complete, 
-either normally or by being aborted. 
+If an exception is raised by any of the parallel sequences, it is
+treated similarly to a transfer of control, with the exception being
+propagated only after all the other sequences complete normally or due
+to abortion.  If multiple parallel sequences raise an exception before
+completing, one is chosen arbitrarily and the others are aborted. The
+parallel block completes when all of the parallel sequences complete,
+either normally or by being aborted.
 
-Note that aborting a tasklet need not be preemptive, but should prevent 
+Note that aborting a tasklet need not be preemptive, but should prevent
 the initiation of further nested parallel blocks or parallel loops.
 
 Parallel Loops
 --------------
 
 A common approach to parallelizing loops is to break the loop iterations
-into chunks where each chunk consists of a subset of the entire 
+into chunks where each chunk consists of a subset of the entire
 iteration set, and may be as small as a single iteration, up to as large
 as the entire number of iterations, or somewhere in-between. In Ada,
-each chunk becomes a separate tasklet. 
+each chunk becomes a separate tasklet.
 
-This proposal gives the programmer some degree of control over the
-parallelization of for loops into appropriately sized chunks, but
-without requiring that they specify the exact chunk size or the number
-of chunks. In addition, to deal with data dependences, this proposal
-supports per-thread copies of relevant data, and a mechanism of reducing
-these multiple copies down to a final result at the end of the 
-computation. This mechanism is called reduction. 
-
-The multiple copies are combined two at a time and thus involves either a 
-function that accepts two partial results, returning a combined result, or a 
-procedure that accepts two partial results where at least one of the parameters
-is an in out parameter, that accepts a partial result, and contains the 
-combined result upon return. The subprogram that is used to combine the results
-is called a reducer. A reducer identifies an associative operation. A reducer
-does not need to be commutative, as it is expected that the implementation
-will support non-commutative reductions, such as vector concatentation.
-
-Reduction result variables must be initialized in the declaration statement.
-The multiple copies of the partial results are each initialized by assigning 
-the same value that was assigned to the result variable for its declaration. 
-It is important that this initial value does not affect the result of the 
-computation. This value is called the Identity value, and depends upon the 
-operation applied by the reducer. For example, if the reduction result type is
-Integer, and the reducer is addition, then the Identity value needs to be zero,
-since adding zero to any value does not affect the value. Similarly, if the 
-reducer is multiplication, then the Identity value needs to be one, since 
-multiplying any Integer value by 1 does not affect the value. If the result 
-type is a vector and the reducer is concatenation, the the Identity value needs
-to be an empty vector, since concatenating an empty vector to another vector 
-does not affect the value of the other vector.
-
-To specify the reducer for a result variable, a new aspect, Reducer may be
-applied to the declaration of the result variable. The Reducer aspect denotes
-either a function with the following specification:
-
-    function reducer_name (L, R : in Result_Type) return Result_Type;
-
-or a procedure with the following specification:
-
-    procedure reducer_name (Target, Source : in out Result_Type);
-
-We could allow the compiler to implicitly determine reducers for simpler 
-operations such as integer addition based on the operations applied inside
-the loop, but it was thought to be better to require all reducers to be
-explicitly specified by the programmer for each reduction result. This makes
-it more clear that parallel reductions are being applied for the reader, 
-and should make it easier for the compiler as well. Only one reducer aspect
-may be applied to a single result declaration.
+The implementation is expected to determine appropriate values for the
+number of chunks and the size of each chunk for each parallel loop, without
+these having to be specifed by the programmer.
 
 To indicate that a loop is a candidate for parallelization, the reserved
-word "parallel" may be inserted immediately after the word "for"
-in a "for" loop. Such a loop will be broken into chunks, where each chunk is 
-processed sequentially. If reduction is involved in the loop, then the
-names of the reduction result variables are specified in a comma separated
-list enclosed by parens immediately following the reserved word "parallel".
-The parens are not specified if reduction is not involved in the loop.
-The reduction list serves two purposes; It assists the reader to identify what 
-reductions, if any, are to occur during loop execution, and it notifies the 
-compiler that references to the listed variables in a global scope are not 
-expected to be a source of data races, and that special treatment in the form 
-of reduction management code needs to be generated. It also indirectly informs 
-the compiler about the data types that need to be involved in the reduction.
+word "parallel" may be inserted immediately after the word "in" or "of"
+in a "for" loop, at the point after where the "reverse" reserved word is
+allowed. Such a loop will be broken into chunks, where each chunk is
+processed sequentially.
 
-e.g. A parallel loops that calculates the minimum, maximum, and sum of all
-values in an array.
-
-declare
-  Min_Value : Integer with Reducer => Integer'Min := Integer'Last;
-  Max_Value : Integer with Reducer => Integer'Max := Integer'First;
-  Sum       : Integer with Reducer => "+"         := 0; 
-begin
-  for parallel (Min_Value, Max_Value, Sum) I in 1 .. 1_000_000 loop
-     Min_Value := Integer'Min(@, Arr(I));
-     Max_Value := Integer'Max(@, Arr(I));
-     Sum       := @ + Arr(I);
-  end loop;
-end;
-
-Note that the same rules presented for parallel blocks above apply to 
-the update of shared variables and the transfer of control to a point 
-outside of the loop, and for this purpose each iteration (or chunk) is 
+Note that the same rules presented for parallel blocks above apply to
+the update of shared variables and the transfer of control to a point
+outside of the loop, and for this purpose each iteration (or chunk) is
 treated as equivalent to a separate sequence of a parallel block.
 
-This AI could also attempt to define parallel loops for generalized loop
-iteration, but that is a big enough a topic that it deserves its own AI.
-This AI is big enough as it is, so it will only deal with for loops with
-loop_parameter specifications, but probably a similar approach could be
-applied to deal with iterator_specifications.
+Reduction Expressions
+---------------------
 
+A Reduction Expression is a syntactic construct, similar to a quantified
+expression that can be used to combine a set of values into a single result.
+This mechanism is called reduction.
 
-Additional Capabilities for Parallel Loops
-------------------------------------------
+Indeed, a quantified expression can be viewed as being a special purpose
+Reduction Expression that applies an operation, the Predicate, to a set of values
+to reduce the predicate results to a single Boolean result.  A Reduction expression
+is a more general syntactic form where there is less constraint on the type of
+operation to be applied to the set of values, and the operation can produce result
+types other than Boolean values.
 
-There are certain problems where additional syntax may be needed to support
-the parallelism. In most cases, the choice of parallelism implementation does 
-not matter. For such cases, typically a dynamic approach that allows for
-load balancing of the cores can be applied, where if an executor assigned to
-a core completes its work earlier than the others, it can "steal" or obtain
-work from the other executors. For certain problems however, the programmer 
-needs to be able to specify that dynamic load balancing needs to be disabled, 
-to ensure that work is evenly divided among the available executors, and that 
-each executor will only process a single chunk of the loop iterations. An example
-of such a problem is the prefix scan, otherwise known as a cumulative sum,
-where a result array is to be generated that will contain a cumulative sum
-of an input array where each element in the array contains the sum of the
-corresponding element in the input array with the cumulative sum for the
-previous element in the result array.
+Semantics: A Reduction Expression looks like a quantified expression, except
+that the quantifier keyword ("all" or "some") is not present, and the predicate
+expression is replaced with a function call that returns a constrained, nonlimited
+type, that is called the combiner_function_call. The Reduction expression must involve
+a function call having at least one parameter of the same type as the type of the
+Reduction expression. The combiner function is called iteratively to accumulating a
+single result, which becomes the result of the Reduction Expression. The accumulation
+of the result occurs as the result of each iteration is implicitly fed back as an input
+parameter to a function for each subsequent call. The implicit parameter is identified
+syntactically in the call based on the "<>" box notation syntax, except that the box
+notation encloses the initial value to be used for the first call to the function, since
+at that point there would otherwise be no existing value to pass into the function. The
+initial value also serves to be the result of the reduction expression for the case when
+there are no iterations performed (E.g. For the case when a when a
+loop_parameter_specification for a Reduction Expression specifies a null range).
 
-The most obvious solution is to perform two passes, where the first pass
-is a parallel loop, that breaks the input array into chunks and creates an
-intermediate array representing the final cumulative sum of each chunk.
+To indicate that a Reduction Expression is a candidate for parallelization, the
+reserved word "parallel" may be inserted immediately after where the "reverse"
+reserved word is allowed. Similar to the way Parallel Loops are broken into chunks,
+a Parallel Reduction expression will also have chunking applied, where each chunk
+is processed sequentially. For each chunk, an accumulator result is generated that is
+local to the tasklet, and for the first call to the subprogram for each chunk the
+initial value is used to initialize the local accumulated result. As the chunk results
+are calculated in parallel, the result of the Reduction Expression is generated by
+combining/reducing the final function results of each chunk by applying a Reducer
+function for the Reduction Expression. The Reducer function for a parallel Reduction
+expression is a function that accepts two parameters where both parameters are of the
+same type, and returns a result of that same type, which is also the type of the
+Reduction expression. The Combiner function must have a Reducer aspect specified for
+its declaration if the function itself is not a Reducer function. The Reducer aspect
+identifies another function that is to be used to combine multiple chunk results into
+the final result of the Reduction expression. The multiple results are combined two at
+a time.
 
-This intermediate array then is processed sequentially using the cumulative
-sum algorithm to update the intermediate array to have the cumulative sum of 
-the cumulative sum chunks from the first pass.
+The initial value specified by the programmer must match (be confirming to) the
+value of the Identity aspect associated with the Reducer function for the Reduction
+Expression, if the Reducer function has the aspect. The Identity aspect of a function
+identifies a value of the same type as the function result. If the Identity aspect is not
+associated with the Reducer function, then the Initial value specified by the
+programmer is assumed to be correct.
 
-The second pass then is another parallel loop that adds the cumulative sums from
-the intermediate array to each corresponding chunk as determined in pass 1.
+The Reducer function is expected to generate an associative result based on the input
+parameters. A Reducer function does not need to be commutative (e.g. vector concatenation),
+as it is expected that the implementation will ensure that the results are combined in
+a manner that is consistent with sequentially applying the Reducer function to the
+chunk results in iteration order. If the parallel keyword is not present in the Reduction
+Expression, then sequential computation is assumed and the Reducer aspect does not need to
+be specified for the combiner function.
 
-It is important that the chunking for both parallel loops are the same, and
-that each chunk is associated with a single executor.
+For parallel Reductions Expressions, it is important that the value of the Identity
+aspect associated with a function does not affect the result of the computation. For
+example, if the reduction result type is Integer and the reducer is addition, then the
+Identity value should be zero, since adding zero to any value does not affect the value.
+Similarly, if the reducer is multiplication then the Identity value should be one, since
+multiplying any Integer value by 1 does not affect the value. If the result
+type is a vector and the reducer is concatenation, then the Identity value should
+be an empty vector, since concatenating an empty vector to another vector does
+not affect the value of the other vector.
 
-To support this, another aspect called Parallelism can be applied to a 
-type declaration or subtype declaration for a discrete_subtype_definition,
-where the discrete_subtype_definition is to be used as part of a
-loop_parameter_specification. Such a declaration is called a
-parallel_loop_iteration_subtype. The Parallelism aspect can be specified as
-either "Dynamic" or "Fixed", where Dynamic indicates that the chunking can occur
-dynamically during the execution of the loop, and "Fixed" indicates that the
-chunking of the loop is determined prior to loop execution, where each 
-available executor is given approximately the same amount of loop iterations to
-process, and each executor is assigned only a single chunk of the iteration.
-The default for the Parallelism aspect is implementation defined.
-
-In addition it will be necessary to be able to query the implementation to
-determine the number of executors that are associated with a parallel loop.
-This can be obtained by querying a new attribute that is associated with a
-parallel_loop_iteration_subtype, called Executor_Count. The implementation
-can normally be relied upon to choose a reasonable value for this attribute,
-but it would also be useful to allow the programmer to specify this value via
-the attribute, or via an aspect of the same name.
-
-Finally, it would also be necessary to be able to associate the currently
-executing chunk with a numeric executor id value. This would allow the 
-programmer to specify where intermediate results are to be placed for the 
-cumulative sum problem for example.
-
-To support this, a new attribute Executor_Id may be applied to query the 
-defining_identifier of a loop_parameter_specification. The Executor_Id value
-is a value of type univeral_integer and is non-negative ranging from 1 to the
-value of Executor_Count.
-
-With these additional features the above algorithm for cumulative sum can be
-programmed as;
-
-declare
-   subtype Loop_Iterations is Arr'First .. Arr'Last
-      with Parallelism    => Fixed,
-           Executor_Count => System.Multiprocessors.Number_Of_CPUs + 1;
-
--- Note + 1 is used above because in the 2nd parallel loop below, the first
--- core exits early leaving an idle core. We would like to keep all cores
--- busy.
-
-   Intermediate : array (1 .. Loop_Iterations'Executor_Count) of Integer
-      := (others => 0);
-
-   Sum : Integer := 0;
-begin
-
-   for parallel I in Loop_Iterations'Range loop
-       Intermediate(I'Executor_Id) := @ + Arr(I);
-       Cum(I) := @ + Intermediate(I);
-   end loop;
-
-   -- Sequential exclusive scan phase
-   for I of Intermediate loop
-      Sum := @ + I;
-      I := Sum;
-   end loop;
-
-   for parallel I in Loop_Iterations'Range loop
-      if I = 1 then
-         exit;
-      end if;
-      Cum(I) := @ + Intermediate(I'Executor_Id - 1);
-   end loop; 
-end;
+Note that the same rules presented for parallel blocks above apply to
+the update of shared variables, and for this purpose each iteration (or chunk) is
+treated as equivalent to a separate sequence of a parallel block.
 
 !wording
 
 Append to Introduction (28)
-"A parallel block statement requests that two or more sequences of 
+"A parallel block statement requests that two or more sequences of
  statements should execute in parallel with each other."
 
-Replace 5.5(3/3) with
-iteration_scheme ::= while condition
-   | for [parallelism_specification] loop_parameter_specification
-   | for iterator_specification
+Modify 4.4(1/3)
 
-parallelism_specification ::= parallel [reduction_list]
+"In this International Standard, the term "expression" refers
+to a construct of the syntactic category expression or of any of the following
+categories: choice_expression, choice_relation, relation, simple_expression,
+term, factor, primary, conditional_expression, quantified_expression
+{, reduction_expression}."
 
-reduction_list ::= (name{,name})
+Modify 4.4(7/3)
 
-Add after 5.5(5)
+"primary ::=
+   numeric_literal | null | string_literal | aggregate {| <reduction_identity>}
+ | name | allocator | (expression)
+ | (conditional_expression) | (quantified_expression) {| (reduction_expression)}"
+
+Add 4.4(15.h)
+
+"Wording Changes from Ada 2012
+
+Added Reduction_expression to primary."
+
+Replace 4.5.1(2-3) with
+
+"The following logical operators are predefined for every boolean type T
+
+ function "and"(Left, Right : T) return T with Identity => True
+ function "or" (Left, Right : T) return T with Identity => False
+ function "xor"(Left, Right : T) return T with Identity => False"
+
+ The following logical operators are predefined for every modular type T
+
+ function "and"(Left, Right : T) return T
+ function "or" (Left, Right : T) return T with Identity => 0
+ function "xor"(Left, Right : T) return T with Identity => 0"
+
+ The following logical operators are predefined for every one-dimensional
+ array type T whose component type is a boolean type:
+
+ function "and"(Left, Right : T) return T
+ function "or" (Left, Right : T) return T
+ function "xor"(Left, Right : T) return T"
+
+Add AARM note
+
+"The Identity aspect for the "and" function for modular types is not specified
+ because it is difficult to specify a value that would work for all types.
+ eg. type X is mod 97; We could say that it is T'Last for types where the modulus
+ is a power of 2, for example, but that is not general enough, similarly, we could
+ say that the Identity for the "and" function for a one-dimensional array is
+ T'(others => True), but that only works if T is a constrained array type, so we
+ dont bother trying to specify the Identity aspect for these operations."
+
+Modify 4.5.3(2)
+
+"function "+"(Left, Right : T) return T{ with Identity => T(0)}
+ function "-"(Left, Right : T) return T{ with Reducer => "+"}
+"
+
+Modify 4.5.5(2)
+
+"function "*"  (Left, Right : T) return T{ with Identity => 1}
+ function "/"  (Left, Right : T) return T{ with Reducer => "*"}
+ function "mod"(Left, Right : T) return T
+ function "rem"(Left, Right : T) return T"
+
+Modify 4.5.5(12)
+"function "*"(Left, Right : T) return T{ with Identity => 1.0}
+ function "/"(Left, Right : T) return T{ with Reducer => "*"}
+"
+
+Modify 4.5.5(14)
+"function "*"(Left : T; Right : Integer) return T{ with Reducer => "*"}
+ function "*"(Left : Integer; Right : T) return T{ with Reducer => "*"}
+ function "/"(Left : T; Right : Integer) return T{ with Reducer => "*"}
+"
+
+Modify 4.5.5(19)
+"function "*"(Left, Right : universal_fixed) return universal_fixed{ with Identity => 1.0}
+ function "/"(Left, Right : universal_fixed) return universal_fixed{ with Reducer => "*"
+"
+
+Add Section 4.5.9
+
+"Reduction Expressions"
+
+Reduction expressions provide a way to write a reduction that combines a set of values
+into a single result.
+Syntax
+
+ reduction_identity ::= primary
+
+ reduction_expression ::= for loop_parameter_specification => combiner_function_call
+  | for iterator_specification => combiner_function_call
+
+combiner_function_call ::= function_call
+
+Wherever the Syntax Rules allow an expression, a reduction_expression may be used in
+place of the expression, so long as it is immediately surrounded by parentheses.
+
+Discussion: The syntactic category reduction_expression appears only as a primary that
+is parenthesized. The above rule allows it to additionally be used in other contexts
+where it would be directly surrounded by parentheses. This is the same rule that is
+used for conditional_expressions; see 4.5.7 for a detailed discussion of the meaning and
+effects of this rule.
+
+Name Resolution Rules
+
+The expected type of a reduction_expression is any constrained nonlimited type. The
+combiner_function_call in a reduction_expression is expected to return a result of the
+same type. The type of a reduction_identity included in the combiner_function_call is
+expected to be of the same type as the reduction_expression.
 
 Legality Rules
 
-Each name of the reduction_list shall designate a directly visible 
-object_declaration of a definite, nonlimited subtype.
+The combiner_function_call of a reduction_expression shall include a function call that
+has an explicit_actual_parameter that is a reduction_identity.
+
+The combiner_function_call of a reduction_expression shall have a Reducer_Aspect if the
+reduction_expression includes the keyword parallel.
+
+The value of a reduction_identity associated with a combiner_function_call shall be
+confirming with the Identity aspect of the function designated by the Reducer_Aspect of
+the combiner_function_call if the designated function has the Identity aspect.
+
+Dynamic Semantics
+
+For the evaluation of a reduction_expression, the loop_parameter_specification or
+iterator_specification is first elaborated. The evaluation of a reduction_expression
+then evaluates the combiner_function_call for the values of the loop parameter in the
+order specified by the loop_parameter_specification (see 5.5) or iterator_specification
+(see 5.5.2).
+
+The value of the reduction_expression is determined as follows:
+For the first iteration, the value of the reduction_identity parameter is the value of
+the primary of the reduction_identity. For subsequent iterations, the value of the
+reduction_identity parameter is that of the result of the combiner_function_call for the
+previous iteration. If the Reduction_Expression does not evaluate any iterations, then
+the value of the Reduction_Expression is the value of the primary of the reduction_identity.
+
+Examples
+
+  A reduction expression to calculate the sum of elements of an array
+
+  (for parallel Element of Arr => <0> + Element)
+
+  A reduction expression to calculate the minimum value of an array
+
+  (for parallel X of Arr => Integer'Min(<Integer'Last>,  X))
+
+  A reduction expression to create an unbounded string containing the alphabet
+
+  (for Letter in 'A' .. 'Z' => <Null_Unbounded_String> & Letter)
+
+  A reduction expression to determine how many people in a database are 30 something
+   ThirtySomething : contant Natural :=
+     (for P of parallel Personel => <0> + (if Age(P) > 30 then 1 else 0));
+
+  An expression function that returns its result as a Reduction Expression
+
+   function Fact(N : Natural) return Natural is (for J in 1..N => <1> * J);
+
+  An expression function that computes the Sin of X using Taylor expansion
+   function Sin(X : Float; Num_Terms : Positive := 5) return Float is
+     (for I in 1..Num_Terms => <0.0> + (-1.0)**I * X**(2*I-1)/Float(Fact(2*I-1)));
+
+   A reduction expression that computes taxable income
+
+   Taxable_Income : constant Float := Total_Income +
+     (for Deduction of Deductions => <0.0> - Deduction);
+
+   A reduction expression that outputs the sum of squares
+
+   Put_Line ("Sum of Squares is" & Integer'Image(for I in 1 .. 10 => <0> + I**2));
+
+   A reduction expression to compute the value of Pi in parallel
+
+   Number_Of_Steps : constant := 100_000;
+   Step : constant := 1.0 / Number_Of_Steps;
+
+   Pi : constant Long_Float := Step *
+     (for I in parallel 1 .. Number_Of_Steps =>
+         <0.0> + (4.0 / (1.0 + ((Long_Float (I) - 0.5) * Step)**2)));
+
+Wording Changes from Ada 2012
+Reduction expressions are new.
+
+Modify 5.5(4)
+Loop_parameter_specification ::=
+   defining_identifier in [reverse {[parallel]}] discrete_subtype_definition
 
 (Static Semantics)
 
 A reduction_list specifies that each declaration denoted by each name given
  in the list has the Reducer aspect (see 9.12.xx)
 
-Append to 5.5(9/4)
-[A loop_statement with a parallelism_specification allows each execution of
-the sequence_of_statements to be executed in parallel with each other.]
-if a parallelism_specification has been specified then there may be more than
-one thread of control each with its own loop parameter that covers a
-non-overlapping subset of the values of the discrete_subtype_definition. 
-Each thread of control proceeds independently and concurrently between the 
-points where they interact with other tasks and with each other.
+Modify to 5.5(9/4)
 
-Prior to executing the sequence_of_statements, each thread of control declares
-and elaborates variables local to the thread of control that corresponds to each 
-name in the reduction_list of the parallelism_specification. The type of each
-thread local variable is the same as that of the variable that the name 
-in the reduction list designates. The initial value for each of these thread
-local variables is the same as was assigned to the variable that the name in
-the reduction list designates, in its declaration. As each thread of control
-completes execution of its subset of the discrete_subtype_definition, the 
-thread local variables are reduced into the variables that they designate
-in the reduction_list, by applying the reducer operation identified by the
-reducer aspect for the designated variable. 
+"For the execution of a loop_statement with the iteration_scheme being for
+ loop_parameter_specification, the loop_parameter_specification is first elaborated.
+ This elaboration creates the loop parameter{s} and elaborates the
+ discrete_subtype_definition. {Multiple loop parameters may be created where each loop
+ parameter is associated with a non-overlapping range of the iterations, if the keyword
+ parallel is present, otherwise a single loop parameter is assumed. Each loop parameter
+ can execute concurrently with other loop parameters of the same loop. Each thread of
+ control proceeds independently and concurrently between the points where they interact
+ with other tasks and with each other.} If the discrete_subtype_definition defines a
+ subtype with a null range, the execution of the loop_statement is complete. Otherwise,
+ the sequence_of_statements is executed once for each value of the discrete subtype
+ defined by the discrete_subtype_definition that satisfies the predicates of the subtype
+ (or until the loop is left as a consequence of a transfer of control). Prior to each
+ such iteration, the corresponding value of the discrete subtype is assigned to the loop
+ parameter. These values are assigned in increasing order unless the reserved word
+ reverse is present, in which case the values are assigned in decreasing order.
+"
 
 AARM - An implementation should statically treat the
 sequence_of_statements as being executed by separate threads of control,
@@ -383,28 +460,20 @@ Examples after 5.5(20)
 
 Example of a parallel loop without reduction
 
-for parallel I in Buffer'Range loop
+for I in parallel Buffer'Range loop
    Buffer(I) := Arr1(I) + Arr2(I);
-end loop;
-
-Example of a parallel loop with reduction_list
-
-Alphabet : Character_Vectors.Vector with Reduce => Character_Vectors."&" 
-              := Character_Vectors.Empty_Vector;
-for parallel (Alphabet) Letter in 'A' .. 'Z' loop
-   Alphabet.Append(Letter);
 end loop;
 
 
 "5.6.1 Parallel Block Statements
 
 [A parallel_block_statement encloses two or more sequence_of_statements
-where all the sequence_of_statements can execute in parallel with each 
+where all the sequence_of_statements can execute in parallel with each
 other.]
 
 Syntax
 
-parallel_block_statement ::= 
+parallel_block_statement ::=
     parallel
       sequence_of_statements
     and
@@ -419,7 +488,7 @@ Each sequence_of_statements represents a separate thread of control that
 proceeds independently and concurrently between the points where they
 interact with other tasks and with each other.
 
-AARM - An implementation should statically treat each 
+AARM - An implementation should statically treat each
 sequence_of_statements as a separate thread of control, but whether they
 actually execute in parallel or sequentially should be a determination
 that is made dynamically at run time, dependent on factors such as the
@@ -427,7 +496,7 @@ available computing resources.
 
 Examples
 
-Example of a parallel block statement: 
+Example of a parallel block statement:
 
    parallel
      Foo(Z);
@@ -438,174 +507,218 @@ Example of a parallel block statement:
      Other_Work;
    end parallel;
 
-[Brads comment: I'm not sure was want the following paragraph?]
-Bounded (Run-Time) Errors
-
-It is a bounded error to invoke an operation that is potentially 
-blocking within a sequence_of_statements of a parallel block or loop 
-statement with a parallelism_specification."
 
 Add C.7.1 (5.1)
 
-The Task_Id value associated with each sequence_of_statements of a 
+The Task_Id value associated with each sequence_of_statements of a
 parallel_block_statement or of a loop statement is the same as that of the
 enclosing statement.
 
 AARM - Each sequence_of_statements of a parallel block or parallel loop are
-treated as though they are all executing as the task that encountered the 
+treated as though they are all executing as the task that encountered the
 parallel block or parallel loop statement.
 
 Change 9.10 (13)
 
-"Both actions occur as part of the execution of the same task {unless 
-they are each part of a different sequence_of_statements of a parallel 
-block statement or loop statement with a parallelism_specification.}"
+"Both actions occur as part of the execution of the same task {unless
+they are each part of a different sequence_of_statements of a parallel
+block statement, parallel loop statement, or parallel reduction expression.}"
 
 New section 9.12 Executors and Tasklets
 
-A task may distribute execution across different physical processors in 
+A task may distribute execution across different physical processors in
 parallel, where each execution is a separate thread of control that proceeds
 independently and concurrently between the points where they
 interact with other tasks and with each other. Each separate thread of control
 of a task is an Executor, and the execution that each executor performs between
-synchronization is a tasklet. When a task distributes its execution to a set 
+synchronization is a tasklet. When a task distributes its execution to a set
 of executors, it cannot proceed with its own execution until all the executors
 have completed their respective executions.
 
-A parallel block statemet or loop statement with a parallelism_specification 
-may assign a set of executors to execute the loop, if extra computing resources
+A parallel block statement, parallel loop statement, or parallel reduction expression
+may assign a set of executors to execute the construct, if extra computing resources
 are available.
 
-Each executor is associated with an value that identifies the executor.
-This value is the executor id and of the type universal_integer within the
-range of 1 to the number of executors of the task assigned to the parallel
-block statement or loop statement with a parallelism_specification.
+For a function declaration, the following language-defined representation aspects may
+be specified:
 
-For a prefix S that is of a type declaration or subtype declaration of a 
-discrete_subtype_definition that is referenced in the
-loop_parameter_specification, the following attribute is defined:
-
-S'Executor_Count Yields the number of executors assigned to execute the 
-loop. The value of this attribute is of the type universal_integer.
-Executor_Count may be specified for a type declaration or subtype declaration
-of a discrete_subtype_definition via an attribute_definition_clause. If no
-executors are assigned to the loop, 1 is returned.
-
-For a type declaration or subtype declaration of a discrete_subtype_definition,
-the following language-defined representation aspects may be specified:
-
-Parallelism  The aspect Parallelism specified the underlying parallelism
-semantics of a loop statement with a loop_parameter_specification that 
-references the discrete_subtype_definition of the type declaration or subtype
-declaration. A Parallelism aspect specified as Fixed indicates that each
-executor will execute only a single subset of the discrete_subtype_definition
-for the loop_parameter_specification of the loop, and that this subset
-assignment occur prior to loop execution.
-
-A Parallelism aspect specified as Dynamic indicates that each executor can
-execute multiple subsets of the discrete_subtype_definition for the 
-loop_parameter_specification of the loop, and that the subset assignment may
-occur during the execution of the loop.
-
-Reducer The aspect Reducer either denotes a function with the following
+Reducer The aspect Reducer denotes a function with the following
 specification:
 
  function reducer(L, R : in result_type) return result_type
 
-or denotes a procedure with the following specification:
- procedure reducer (Target, Source : in out result_type)
-
-where result_type statically matches the subtype of the type declaration or 
+where result_type statically matches the subtype of the type declaration or
 subtype declaration.
 
-Only one Reducer aspect may be applied to a single declaration;
+Only one Reducer aspect may be applied to a single function declaration;
 
-For a prefix X that is of a defining_identifier of a 
-loop_parameter_specification the following attribute is defined:
+Identity The aspect Identity denotes a value that is to specified as the Identity_Value
+in a Reduction_Expression if the Combining_Function_Call of the Reduction_Expression
+either has the Identity aspect, or has a Reducer aspect that designates a function that
+has the Identity aspect. An Identity aspect can only be specified for a function
+declaration that has the following form;
 
-X'Executor_Id Yields the id of the executor associated with the 
-attribute reference. The value of this attribute is of type universal_integer,
-and positive and not greater than the number of executors that are assigned by
-the implementation to execute the parallel loop. If no executors are assigned 
-to the loop, then 1 is returned.
+ function reducer(L, R : in result_type) return result_type
 
-Add bullet after 13.1 (8.x)
-   Executor_Count clause
+where result_type statically matches the subtype of the type declaration or
+subtype declaration.
 
-[Brad's comment: I'm not sure we want this paragraph change]
-Modify H.5 (1/2)
+Only one Identity aspect may be applied to a single function declaration;
 
-"The following pragma forces an implementation to detect potentially 
-blocking operations within a protected operation {or within a 
-sequence_of_statements of a parallel_block_statement or loop statement with
-a parallelism_specification}"
+Modify A.4.4 (13-17)
 
-[Brad's comment: I'm not sure we want this paragraph change]
-H.5 (5/2)
+ function Append (Left, Right : in Bounded_String;
+                       Drop        : in Truncation  := Error)
+         return Bounded_String{ with Reducer => "&"};
 
-"An implementation is required to detect a potentially blocking 
-operation within a protected operation {or within a
-sequence_of_statements of a parallel_block_statment or within a
-sequence_of_statements of a loop_statement with a parallelism_specification},
-and to raise Program_Error (see 9.5.1). "
+      function Append (Left  : in Bounded_String;
+                       Right : in String;
+                       Drop  : in Truncation := Error)
+         return Bounded_String{ with Reducer => "&"};
 
-[Brad's comment: I'm not sure we want this paragraph change]
-H.5 (6/2)
-"An implementation is allowed to reject a compilation_unit if a 
-potentially blocking operation is present directly within an entry_body
-or the body of a protected subprogram{, a sequence_of_statements of a
-parallel_block_statement, or a sequence_of_statements of a loop_statement
-with a parallelism_specification}. "
+      function Append (Left  : in String;
+                       Right : in Bounded_String;
+                       Drop  : in Truncation := Error)
+         return Bounded_String{ with Reducer => "&"};
 
-[Editor's note: The following are automatically generated but they're
-left here to provide the summary AARM note for that generator. The K.2
-item are completely automatically generated; the normative wording and
-the summary wording must be identical (and the normative wording needs
-to work in the summary. They cannot be different!]
+      function Append (Left  : in Bounded_String;
+                       Right : in Character;
+                       Drop  : in Truncation := Error)
+         return Bounded_String{ with Reducer => "&"};
 
-After K.1 (22.1/4)
- Executor_Count  Number of executors to be associated with a parallel loop
- that references a discrete_subtype_definition with this aspect specified in
- its loop_parameter_specification. See 9.12.xx
+      function Append (Left  : in Character;
+                       Right : in Bounded_String;
+                       Drop  : in Truncation := Error)
+         return Bounded_String{ with Reducer => "&"};
 
-After K.1 (40/3)
- Parallelism  Indicates the parallelism model applied to a parallel loop.
- See 9.12.xx."
+Modify A.4.4 (21-26)
 
-After K.1 (49/3)
- Reducer   Subprogram to combine two partial results from a parallel loop
- computation. See 9.12.xx
+      function "&" (Left, Right : in Bounded_String)
+         return Bounded_String{ with Identity => Null_Bounded_String};
+
+      function "&" (Left : in Bounded_String; Right : in String)
+         return Bounded_String{ with Reducer => "&"};
+
+      function "&" (Left : in String; Right : in Bounded_String)
+         return Bounded_String{ with Reducer => "&"};
+
+      function "&" (Left : in Bounded_String; Right : in Character)
+         return Bounded_String{ with Reducer => "&"};
+
+      function "&" (Left : in Character; Right : in Bounded_String)
+         return Bounded_String{ with Reducer => "&"};
+
+Modify A.4.5 (15-19)
+
+   function "&" (Left, Right : in Unbounded_String)
+      return Unbounded_String{ with Identity => Null_Unbounded_String};
+
+   function "&" (Left : in Unbounded_String; Right : in String)
+      return Unbounded_String{ with Reducer => "&"};
+
+   function "&" (Left : in String; Right : in Unbounded_String)
+      return Unbounded_String{ with Reducer => "&"};
+
+   function "&" (Left : in Unbounded_String; Right : in Character)
+      return Unbounded_String{ with Reducer => "&"};
+
+   function "&" (Left : in Character; Right : in Unbounded_String)
+      return Unbounded_String{ with Reducer => "&"};
+
+Modify A.18.2 (15/2-18/.2)
+
+
+   function "&" (Left, Right : Vector) return Vector
+     { with Identity => Empty_Vector};
+
+   function "&" (Left  : Vector;
+                 Right : Element_Type) return Vector
+     { with Reducer => "&"};
+
+   function "&" (Left  : Element_Type;
+                 Right : Vector) return Vector
+     { with Reducer => "&"};
+
+   function "&" (Left, Right  : Element_Type) return Vector
+     { with Reducer => "&"};
+
+Add after A.18.3 (32/2)
+
+
+   function "&" (Left, Right : List) return List
+     { with Identity => Empty_List};
+
+   function "&" (Left  : List;
+                 Right : Element_Type) return List
+     { with Reducer => "&"};
+
+   function "&" (Left  : Element_Type;
+                 Right : List) return List
+     { with Reducer => "&"};
+
+   function "&" (Left, Right  : Element_Type) return List
+     { with Reducer => "&"};
+
+Modify A.18.7(55/2)
+
+    function Union (Left, Right : Set) return Set
+     { with Identity => Empty_Set};
+
+
+Modify A.18.7(67/2)
+
+    function Symmetric_Difference (Left, Right : Set) return Set
+    {with Identity => Empty_Set};
+
+Modify A.18.8(27/2)
+
+   function Union (Left, Right : Set) return Set
+     { with Identity => Empty_Set};
+
+Modify A.18.8(35/2)
+    function Symmetric_Difference (Left, Right : Set) return Set
+    { with Identity => Empty_Set};
+
+Modify A.18.9(28/2)
+
+   function Union (Left, Right : Set) return Set
+     { with Identity => Empty_Set};
+
+Modify A.18.9(37/2)
+    function Symmetric_Difference (Left, Right : Set) return Set
+    { with Identity => Empty_Set};
+
 
 !discussion
 
-There is a continuing trend of exponential growth of computational 
-elements embedded on a single chip. This has led to significant 
-challenges for software designers and implementers. Prior to 2005, the 
-increase in transistor count corresponded to a similar increase in CPU 
-clock speed, which boosted performance of sequential algorithms. Since 
+There is a continuing trend of exponential growth of computational
+elements embedded on a single chip. This has led to significant
+challenges for software designers and implementers. Prior to 2005, the
+increase in transistor count corresponded to a similar increase in CPU
+clock speed, which boosted performance of sequential algorithms. Since
 then, CPU clock speeds have leveled off for reasons of practicality, and
 chip manufacturers have instead moved towards multicore technologies as
 a means of achieving performance increases.
 
-As parallel technologies become more prevalent in the form of new 
+As parallel technologies become more prevalent in the form of new
 emerging hardware platforms, safety concerns need to consider the
-paradigm shift from sequential to parallel behaviour.  It is a paradigm 
-that has been for a long time contained within a specialized domain of 
-high-performance computing, but that is now required in all domains of 
-computing systems. 
+paradigm shift from sequential to parallel behaviour.  It is a paradigm
+that has been for a long time contained within a specialized domain of
+high-performance computing, but that is now required in all domains of
+computing systems.
 
 It is important for the programmer to indicate places in the code
-where parallelism is desired, which allows the reader to better 
-understand the algorithm, and allows the programmer to receive 
+where parallelism is desired, which allows the reader to better
+understand the algorithm, and allows the programmer to receive
 confirmation from the compiler whether the desired parallelism is safe,
-or even worthwhile. 
+or even worthwhile.
 
-This proposed model does not define syntax for the explicit 
-parallelization of individual subprogram calls, since such 
-parallelization can be performed implicitly by the compiler, when it 
-knows that the calls are free of side-effects. This is facilitated by 
-annotations identifying global variable usage on subprogram 
-specifications (see AI12-0079-1). 
+This proposed model does not define syntax for the explicit
+parallelization of individual subprogram calls, since such
+parallelization can be performed implicitly by the compiler, when it
+knows that the calls are free of side-effects. This is facilitated by
+annotations identifying global variable usage on subprogram
+specifications (see AI12-0079-1).
 
 Parallel Blocks
 ---------------
@@ -622,48 +735,48 @@ example:
             Z := Sqrt(3.14) / 2.0;
             Y := Bar(Z);
          end parallel;
-            
-         Put_Line(“X + Y=” & Integer'Image(X + Y));
+
+         Put_Line("X + Y=" & Integer'Image(X + Y));
       end;
 
 In this example, the calculation of Z and Y occur sequentially with
-respect to each other, but in parallel with the calculation of X. Note 
-that the compiler, using the rules specified in AI12-0079-1, may 
-complain if the parallel sequences might have conflicting global 
-side-effects. 
+respect to each other, but in parallel with the calculation of X. Note
+that the compiler, using the rules specified in AI12-0079-1, may
+complain if the parallel sequences might have conflicting global
+side-effects.
 
-The parallel block construct is flexible enough to support recursive 
+The parallel block construct is flexible enough to support recursive
 usage as well, such as:
 
    function Fibonacci (N : Natural) return Natural is
-      X, Y : Natural;   
+      X, Y : Natural;
    begin
       if N < 2 then
          return N;
       end if;
 
       parallel
-        X := Fibonacci (N – 2);
+        X := Fibonacci (N - 2);
       and
-        Y := Fibonacci (N – 1);
+        Y := Fibonacci (N - 1);
       end parallel;
 
       return X + Y;
    exception
       when others =>
          Log ("Unexpected Error");
-   end Fibonacci; 
+   end Fibonacci;
 
-We considered allowing the parallel block to be preceded with an 
-optional declare part, and followed with optional exception handlers, 
+We considered allowing the parallel block to be preceded with an
+optional declare part, and followed with optional exception handlers,
 but it was observed that it was more likely to be useful to have objects
-that are shared across multiple parallel sequences to outlive the 
-parallel block, and that having exception handlers after the last 
-parallel sequence could easily be misconstrued as applying only to the 
-last sequence.  Therefore we reverted to the simpler syntax proposed 
+that are shared across multiple parallel sequences to outlive the
+parallel block, and that having exception handlers after the last
+parallel sequence could easily be misconstrued as applying only to the
+last sequence.  Therefore we reverted to the simpler syntax proposed
 above. This simpler syntax is also more congruous with the syntax for
-select statements. Because there are no local declarations, there was 
-also no point in having a statement_identifier (block label) for a 
+select statements. Because there are no local declarations, there was
+also no point in having a statement_identifier (block label) for a
 parallel block. This is actually not entirely true. Allowing an exit
 statement to replace a goto that targets the location following the
 end of the select statement seems useful. To allow such a statement,
@@ -674,147 +787,165 @@ in a parallel block could be the subject of a separate AI.
 Parallel Loops
 --------------
 
-In most compute-intensive applications, a significant proportion of the 
-computation time is spent in loops, either iterating over 
-arrays/container data structures, or systematically searching a large 
-solution space. To benefit from parallel hardware, the computation 
+In most compute-intensive applications, a significant proportion of the
+computation time is spent in loops, either iterating over
+arrays/container data structures, or systematically searching a large
+solution space. To benefit from parallel hardware, the computation
 associated with a loop should be spread across the available processors.
 
-One approach, presuming the iterations of the loop have no data 
-dependences between them, is to treat each iteration of the loop as a 
-separate tasklet, and then have the processors work away on the set of 
+One approach, presuming the iterations of the loop have no data
+dependences between them, is to treat each iteration of the loop as a
+separate tasklet, and then have the processors work away on the set of
 tasklets in parallel. However, this introduces overhead from the queuing
 and de-queuing of work items, and the communication of results from each
-work item. Furthermore, there often are data dependences between 
-iterations, and creating a separate work item for each iteration can 
+work item. Furthermore, there often are data dependences between
+iterations, and creating a separate work item for each iteration can
 introduce excessive synchronization overhead to deal safely with these
 interdependences. Therefore, it is common to break large arrays, and/or
-the loops that iterate over them, into chunks (or slices or tiles), 
-where each chunk is processed sequentially, but multiple chunks can be 
+the loops that iterate over them, into chunks (or slices or tiles),
+where each chunk is processed sequentially, but multiple chunks can be
 processed in parallel with one another.
 
 Note: Allowing the parallel keyword on while loops was considered, but
 was discarded since while loops cannot be easily parallelized, because
 the control variables are inevitably global to the loop.
 
-For example, here is a simple use of a parallelized loop, with an
-array of partial sums (with one element per chunk), which are 
-then summed together (sequentially) to compute an overall sum for the 
-array:
+For example, here is a simple use of a parallelized loop, to add two
+arrays together to produce a result array:
 
- declare
-   subtype Loop_Iterations is Arr'Range with Parallelism => Fixed;
-   Partial_Sum : array (1 .. Loop_Iterations'Executor_Count) of Float
-               := (others => 0.0);
-   Sum : Float := 0.0;
- begin
-   for parallel I in Loop_Iterations'Range loop
-     Partial_Sum(I'Executor_Id) := @ + Arr(I);
-   end loop;
+  for I in parallel Loop_Iterations'Range loop
+    Result (I)  := A(I) + B(I);
+  end loop;
 
-   for J in Partial_Sum'Range loop
-     Sum := Sum + Partial_Sum(J);
-   end loop;
-   Put_Line ("Sum over Arr = " & Float'Image (Sum));
- end;
+Note that the compiler, using the rules specified in AI12-0079-1, may
+complain if the parallel sequences might have conflicting global
+side-effects. We considered extending the syntax to allow reductions to be
+performed with parallel loops, but we discovered that parallel reduction expressions
+can provide the same capability more concisely, so for now we allow parallel loops
+to work if there are no global conflicts. A separate AI could be created to add
+reduction loop capability if it is decided that this is needed. In the meantime,
+Reduction Expressions appear to better fill this need. The main purpose of a loop is
+to apply processing iteratively. The main purpose of a reduction however, is to generate
+a result value. Iteration is a means to achieve that end, but a reduction expression seems
+better suited since it is designed to produce a result value.
 
-In this example, the programmer has merely specified that the 
-Partial_Sum array is to be an array (with each element 
-initialized to 0.0). In this case, the compiler will automatically select the 
-appropriate bounds for the array, depending on the number of chunks 
-chosen for the parallelized loops in which the parallel array is used.
+Reduction Expressions
+---------------------
 
-In the above case, we see I'Executor_Id indicating we are 
-accumulating the sum into a different element of the Partial_Sum in each 
-distinct chunk of the loop.
+A reduction expression provides a concise way to use iteration to combine a set of values
+into a single result.
 
-To illustrate the use of common chunking used between consecutive loops, 
-here is a pair of parallelized loops that produce a new array that is 
-the cumulative sum of the elements of an initial array. The parallel 
-arrays Partial_Sum and Adjust are used to carry data from the first 
-parallelized loop to the second parallelized loop:
+We already have some special purpose reduction expressions in Ada in the form of quantified
+expressions.
 
- declare
-   subtype Iterations := Arr'Range with Parallelism => Fixed;
+Consider:
 
-   Partial_Sum    : array (1 .. Iterations'Executor_Count) of Float
-                                                    := (others => 0.0);
-   Adjust         : array(parallel Partial_Sum'Range) of Float
-                                                    := (others => 0.0);
-   Cumulative_Sum : array (Arr'Range) of Float      := (others => 0.0);
- begin
-   --  Produce cumulative sums within chunks
-   for parallel I in Iterations'Range loop
-     Partial_Sum(I'Executor_Id) := @ + Arr(I);
-     Cumulative_Sum(I) := Partial_Sum(I'Executor_Id);
-   end loop;
+   All_Graduated : constant Boolean :=
+     (for all Student of parallel Class => Passed_Exam (Student));
 
-   --  Compute adjustment for each chunk
-   for J in Partial_Sum'First..Partial_Sum'Last-1 loop
-     Adjust(J+1) := Adjust(J) + Partial_Sum(J);
-   end loop;
-
-   --  Adjust elements of each chunk appropriately
-   for parallel I in Iterations'Range loop
-     Cumulative_Sum(I):= @ + Adjust(I'Executor_Id);
-   end loop;
-
-   --  Display result
-   Put_Line("Arr, Cumulative_Sum");
-
-   for I in Cumulative_Sum'Range loop
-      Put_Line(Float'Image(Arr(I)) & ", " &  
-               Float'Image(Cumulative_Sum(I)));
-   end loop;
- end;
-
-Note that this feature eliminated the need to reference two different 
-elements of the same array (element I and element I – 1) within any of 
-the parallel loop bodies. This reduces expression complexity and 
-eliminates data race issues at chunk boundaries, where the I – 1th 
-element could refer to an element of another chunk.
-
-Note also that chunking is not explicit in parallelized loops, and in 
-the above example, the compiler is free to use as few or as many chunks 
-as it decides is best, though it must use the same number of chunks in 
-the two consecutive parallelized loops because both
-loop_parameter_specifications share the same discrete_subtype_definition.
-The programmer could exercise more control
-over the chunking by explicitly specifying the attribute for Executor_Count
-for the Iterations declaration, rather than allowing it to default.
-For example, if the programmer wanted these parallelized loops to be broken
-into "N" chunks, then the
-declarations could have been:
-
- declare
-   subtype Iterations := Arr'Range with Parallelism => Fixed,
-                                   with Executor_Count => N;
-   ...
+   Someone_Graduated : constant Boolean :=
+     (for some Student of parallel Class => Passed_Exam (Student));
 
 
-Automatic Reduction
--------------------
-As is illustrated above by the first example, it will be common for the
-values of a parallel array to be combined during processing,
-using an appropriate reduction operator. In this case, the Partial_Sum
-parallel array is reduced by "+" into the single Sum value.
+Note that the keyword parallel would now be allowed in quantified expressions since
+for loops and quantified expressions have common syntax for loop parameter specifications.
 
-The use of the Reducer aspect can can eliminate the need to write
-the final reduction loop in the first example, and instead we could have
-written simply:
- declare
-   Sum : Float with Reducer => "+" := 0.0;
- begin
+Here we are in both cases effectively reducing a set of Boolean values into a
+single result using quantified expressions.
 
-   for parallel(Sum) I in Loop_Iterations'Range loop
-     Sum := @ + Arr(I);
-   end loop;
+A similar effect can be written using the more generalized Reduction expression syntax.
 
-   Put_Line ("Sum over Arr = " & Float'Image (Sum));
- end;
+   All_Graduated : constant Boolean :=
+     (for Student of parallel Class => <True> and Passed_Exam (Student));
 
-The operation of the Reducer aspect will automatically be applied as each chunk
-completes execution.
+   Someone_Graduated : constant Boolean :=
+     (for Student of parallel Class => <False> or Passed_Exam (Student));
+
+Here we use "and" and "or" as the combining_function_call of the Reduction expression.
+The initial value plays an important role, since the Identity for "and" must be true,
+and false for "or".
+
+Another concern might be whether parallel loops can generally be written as expressions.
+
+Consider the calculation of Pi:
+
+   Number_Of_Steps : constant := 100_000;
+   Step : constant := 1.0 / Number_Of_Steps;
+
+   Pi : constant Long_Float := Step *
+     (for I in parallel 1 .. Number_Of_Steps =>
+         <0.0> + (4.0 / (1.0 + ((Long_Float (I) - 0.5) * Step)**2)));
+
+One might feel that the readability of this example might be improved if
+temporary variable declarations were to be added for intermediate results.
+For instanced, it might be nice to replace the sub-expression;
+   (1 + ((Long_Float (I) - 0.5) * Step)**2)
+with
+   (1.0 + X**2)
+
+One ordinarily cannot declare variables in an expression, but one can always write a
+function which can be called from an expression.
+
+We might instead decide to write:
+
+   function Pi_Slicer (R : Long_Float; Index : Natural) return Float
+     with Reducer => "+"
+   is
+      X : constant Long_Float := (Long_Float (Index) - 0.5) * Step;
+   begin
+      return R + 4.0 / (1.0 + X ** 2);
+   end Pi_Slicer;
+
+   Pi : constant Long_Float := Step *
+     (for I in parallel 1 .. Number_Of_Steps => Pi_Slicer (<0.0>, I));
+
+Which leaves a simpler looking Reduction Expression to do computation.
+
+Another concern might be about the need to perform multiple reductions at
+the same time.
+
+Consider:
+
+   Sum : Integer := (for parallel Element of Arr => <0> + Element);
+   Min : Integer := (for parallel X of Arr => Integer'Min(<Integer'Last>,  X));
+   Max : Integer := (for parallel X of Arr => Integer'Max(<Integer'First>, X));
+
+Here we have three calculations that occur in parallel, but sequentially with respect
+to each other. The performance benefits of parallelism should be noticeable for larger
+arrays, but one might want to calculate these three results iterating only once through
+the array.
+
+This can be accomplished by creating a composite result type, and writing a user defined
+reducer function.
+
+   type Summary is
+      record
+         Sum : Integer;
+         Min : Integer;
+         Max : Integer;
+      end record;
+
+   -- Identity value for the Reduce function
+   Identity : constant Summary := Summary'(Sum => 0,
+                                           Min => Integer'Last,
+                                           Max => Integer'First);
+
+   -- Reducer function for the Reduction expression
+   function Reduce (L, R : Summary) return Summary with Identity => Identity is
+     (Summary'(Sum => L + R,
+               Min => Integer'Min (L, R),
+               Max => Integer'Max (L, R)));
+
+   -- Combiner function for the Reduction expression
+   function Process (L : Summary; X : Integer) return Summary
+     with Reducer => Reduce is
+       (Summary'(Sum => L.Sum + X,
+                 Min => Integer'Min (L.Min, X),
+                 Max => Integer'Max (L.Max, X)));
+
+   -- Reduction expression to compute all 3 results at once
+   Result : constant Summary :=
+        (for parallel X of Arr => Process (<Identity>, X));
 
 !ASIS
 
@@ -966,11 +1097,11 @@ discussion at the ARG meeting this week.
 
 -----
 
-				Report to WG 9/ARG 
+				Report to WG 9/ARG
  		  on the use of OpenMP for Parallelism in Ada
 
 Stephen Michell
-with contributions from 
+with contributions from
 Luis Miguel Pinho
 Brad Moore
 Tucker Taft
@@ -1004,9 +1135,9 @@ interact with a runtime to implement the algorithm.
 
 In trying to implement OpenMP on an Ada system, one would note that
 the concurrency model is quite different than Ada's. The
-"threads"  that are created interact with other threads that use OpenMP 
-primitives. This means that they will not interact with Ada tasks 
-using Ada tasking primitives. 
+"threads"  that are created interact with other threads that use OpenMP
+primitives. This means that they will not interact with Ada tasks
+using Ada tasking primitives.
 
 For the interoperability with Fortran, C and C++ systems that are
 using OpenMP, an Ada OpenMP capability would be useful, whetehr or not
@@ -1023,7 +1154,7 @@ One can participate in OpenMP as a university, as an individual or as
 a corporate participant. AdaCore was approached to see if they were
 interested in joining OpenMP (and paying fees), but declined. There is
 no point joining as individuals, as individuals cannot propose new
-language specifications for standardization. 
+language specifications for standardization.
 
 This leaves participation through a university. Barcelona
 Supercomputing Group is a participant, and Miguel Pinho has approached them about
@@ -1071,5 +1202,163 @@ or if other directions should be pursued.
 It would probably also be good to discuss whether this parallel loop proposal
 is an improvement over what was written in the previous version of the AI,
 which discussed the use of parallel arrays.
+
+****************************************************************
+
+From: Brad Moore
+Sent: Saturday, June 10, 2017  1:18 AM
+
+[This is version /03 of the AI - Editor.]
+
+Here is a bit of a redesign in the area of parallel loops, and a new approach,
+parallel reduction expressions. The parallel block part is mostly unchanged.
+
+The parallel loop design in much simpler. It now just does parallel iteration,
+leaving parallel reductions to reduction expressions.
+
+We can add reduction back to loops later, possibly in a different AI if we
+decide we need it, but for the time being, it seems like reduction expressions
+are a better fit for the problem.
+
+Parallel reduction expressions are very much similar to quantified expressions,
+which is where I started thinking about this idea. It turns out that Tucker was
+also thinking along these lines in Parasail, as Parasail apparently already has
+this feature.
+
+After some email exchange with the gang of 4, the more this idea evolved, the
+more similar it became to the Parasail approach.
+
+The basic idea is that a Reduction expression applies an operation using
+iteration, where the previous result of the last iteration is fed back as an
+input into the next iteration.
+
+Special syntax, "<value>" is used to indicate where this feedback occurs, which
+also encloses the initial value to be used for the first iteration.
+
+Here are a few examples that are in the AI, to give a basic idea.
+
+    -- Sum of the elements of an array
+    Sum : Integer := (for parallel Element of Arr => <0> + Element);
+
+    -- Minimum value of an array
+    Min : Integer :=
+     (for parallel X of Arr => Integer'Min(<Integer'Last>,  X));
+
+    -- Construct the alphabet
+    Alphabet : Unbounded_String :=
+      (for Letter in 'A' .. 'Z' => <Null_Unbounded_String> & Letter);
+
+    -- Number of people who are 30 or older
+    ThirtySomething : contant Natural :=
+      (for P of parallel database =>
+          <0> + (if Age(P) > 30 then 1 else 0));
+
+    -- Factorial function
+    function Fact(N : Natural) return Natural is
+      (for J in 1..N => <1> * J);
+
+    -- Taxable_Income : constant Float := Total_Income +
+      (for Deduction of Deductions => <0.0> - Deduction);
+
+    --  Compute Taylor expansion for Sin of X
+    function Sin(X : Float; Num_Terms : Positive := 5) return Float is
+      (for I in 1..Num_Terms =>
+         <0.0> + (-1.0)**I * X**(2*I-1)/Float(Fact(2*I-1)));
+
+    -- Compute Pi
+    Number_Of_Steps : constant := 100_000;
+    Step : constant := 1.0 / Number_Of_Steps;
+
+    Pi : constant Long_Float := Step *
+      (for I in parallel 1 .. Number_Of_Steps =>
+          <0.0> + (4.0 / (1.0 + ((Long_Float (I) - 0.5) * Step)**2)));
+
+    -- Print the sum of squares
+    Put_Line ("Sum of Squares is" &
+              Integer'Image(for I in 1 .. 10 => <0> + I**2));
+
+To see the similarity between Quantified expressions and the more general form,
+Reduction expressions, consider:
+
+    -- Quantified expressions about the graduating class
+
+    All_Graduated : constant Boolean :=
+      (for all Student of parallel Class => Passed_Exam (Student));
+
+    Someone_Graduated : constant Boolean :=
+      (for some Student of parallel Class => Passed_Exam (Student));
+
+
+    -- The same result can be obtained by writing these as
+    -- reduction expressions
+
+    All_Graduated : constant Boolean :=
+      (for Student of parallel Class =>
+         <True> and Passed_Exam (Student));
+
+    Someone_Graduated : constant Boolean :=
+      (for Student of parallel Class =>
+         <False> or Passed_Exam (Student));
+
+I've taken a first crack at writing this up, but didn't spend a lot of time
+wordsmithing. I'd hope to first get some feedback in Vienna to see this idea has
+merit.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 12, 2017  5:35 PM
+
+> Here is a bit of a redesign in the area of parallel loops, and a new
+> approach, parallel reduction expressions. The parallel block part is
+> mostly unchanged.
+
+Here's a couple barely informed comments on this.
+
+First, a bit of a rant. It's disconcerting that we get a wildly different
+proposal at each meeting. There's no opportunity to get the details right if we
+change the basic proposal completely between every meeting.
+
+In Pittsburgh, we spent a significant amount of time figuring out the right
+model for reducers. I see here that all of the conclusions of that meeting have
+completely been discarded in favor of what appears on first glance the
+reducer-de-jour. Why should we even spend time trying to figure out this wildly
+different proposal when it seems obvious that whatever we decide will be
+discarded all over again next time?
+
+I want to at least feel like we are making progress toward a solution, rather
+than starting from nearly ground zero with each proposal. End of mini-rant.
+
+...
+> Special syntax, "<value>" is used to indicate where this feedback
+> occurs, which also encloses the initial value to be used for the first
+> iteration.
+
+Regardless of the merits of the proposal itself (which I haven't thought about),
+I don't think angle brackets is going to fly as syntax in Ada. There would be
+substantial confusion with relational operators, which would likely make such
+text unparsable. (We discussed this extensively with some of the assignment
+target proposals; it didn't fly there and I don't see what could have changed in
+8 months.)
+
+You could use square or curly brackets for this, but in any case, such syntax
+doesn't seem very Ada-like. I'd suggest using an attribute or "magic" function
+call as the appropriate syntax.
+
+> Here are a few examples that are in the AI, to give a basic idea.
+>     -- Minimum value of an array
+>     Min : Integer :=
+>      (for parallel X of Arr => Integer'Min(<Integer'Last>,  X));
+
+     Min : Integer :=
+      (for parallel X of Arr => Integer'Min(<Integer'Last'Initial,  X));
+
+or
+
+     Min : Integer :=
+      (for parallel X of Arr => Integer'Min(<Initial(Integer'Last),  X));
+
+Maybe there is a better idea out there (neither of these look very promising),
+but whatever we do needs to look and feel like Ada.
 
 ****************************************************************
