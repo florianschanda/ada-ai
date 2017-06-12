@@ -1,4 +1,4 @@
-!standard 6.1.2(0)                                  16-06-05    AI12-0079-1/03
+!standard 6.1.2(0)                                  17-06-12    AI12-0079-1/04
 !class Amendment 13-06-28
 !status work item 13-06-28
 !status received 13-06-14
@@ -97,12 +97,15 @@ global variables that are tasks, protected objects, or atomic objects.
 variables global to the subprogram, including variables designated by
 access values of types global to the subprogram.
 
+5.  Switch to using the normal Ada parameter modes, in, in out, and out rather
+than Input, In_Out, and Output.
+
 Note that references to global constants do not appear in Global
 annotations. In the absence of a global aspect, a subprogram in a pure
 package is presumed to reference no global variables (Global => null),
 while a subprogram in an impure package is presumed to read and write an
 unspecified set of global variables, including non-synchronized ones
-(Global => (In-Out => all)).
+(Global => in out all).
 
 We also allow a Global aspect on a package, which can be used to establish a
 default for all subprograms declared within the package specification.  The
@@ -137,18 +140,36 @@ Global
       | /global_/attribute_reference
       | global_aspect_definition & /global_/attribute_reference
 
+OLD STYLE:
     primitive_global_aspect_definition ::=
         global_set | (global_mode => global_set{, global_mode => global_set})
 
-    global_mode ::= Input | In_Out | Output
+    global_mode ::= Input | In_Out | Output | Proof_In
 
     global_set ::=
          global_name
        | (global_name{, global_name})
        | ALL | SYNCHRONIZED | NULL
 
+NEW STYLE:
+    primitive_global_aspect_definition ::=
+         NULL
+       | global_mode global_name
+       | global_mode global_designator
+       | (global_mode global_set{, global_mode global_set})
+
+    global_mode ::= in | in out | out | proof in
+
+    global_set ::=
+         global_name {, global_name}
+       | global_designator
+
+    global_designator ::= ALL | SYNCHRONIZED | NULL
+
+------
+
     global_name ::=
-        /variable_/name | /package_/name | /access_/subtype_mark
+        /object_/name | /package_/name | /access_/subtype_mark
       | ACCESS subtype_mark
 
    A /global_/attribute_reference is an attribute_reference with attribute
@@ -160,7 +181,7 @@ Global
    Global aspect for the nearest enclosing program unit. If not
    specified for a library unit, the aspect defaults to "Global => null"
    for a non-generic library unit that is declared Pure, and to "Global
-   => (In_Out => all)" otherwise.
+   => in out all" otherwise.
 
 For a dispatching subprogram or a tagged type, the following language-defined
 aspect may be specified with an aspect_specification (see 13.1.1):
@@ -178,9 +199,11 @@ Global'Class
     Name Resolution Rules
 
 A global_name that does not have the reserved word ACCESS shall resolve
-to statically denote a variable, a package, or an access-to-variable
-subtype. The subtype_mark of a global_name that has the reserved word
-ACCESS shall resolve to denote a subtype.
+to statically denote a variable (or non-preelaborable constant), a
+package (including a limited view of a package), or an
+access-to-variable subtype. The subtype_mark of a global_name that has
+the reserved word ACCESS shall resolve to denote a subtype (possibly
+an incomplete type).
 
     Static Semantics
 
@@ -205,17 +228,13 @@ the rules apply to all of these kinds of entities.
 The sets of global variables associated with a Global aspect can be
 defined explicitly with a primitive_global_aspect_definition or can be
 defined by combining with the sets specified for other entities by
-referring to their Global attribute. The form of
-primitive_global_aspect_definition comprising only "global_set" is
-equivalent to "(Input => global_set)".  If a given global_mode does not
-appear in a given primitive_global_aspect_definition, it is as though it
-included "global_mode => null".  The Input and In_Out global_modes
-together identify the set of global variables that can be read as a side
-effect of an operation.  The In_Out and Output global_modes together
+referring to their Global attribute. The global variables associated
+with any mode can be read as a side
+effect of an operation.  The IN OUT and OUT global_modes together
 identify the set of global variables that can be updated as a side
-effect of an operation.  The overall set of variables associated with
-each global_mode include all variables identified for the mode in the
-primitive_global_aspect_definition, if any, plus all variables
+effect of an operation.  The overall set of objects associated with
+each global_mode include all objects identified for the mode in the
+primitive_global_aspect_definition, if any, plus all objects
 associated with the given mode for the entities identified by the
 prefixes of the /global_/attribute_reference's, if any.
 
@@ -226,13 +245,16 @@ A global_set identifies a *global variable set* as follows:
    * "synchronized" identifies the set of all global variables that are
      either of a protected type, a task type, an atomic type, or a record
      or array all of whose components are "synchronized" in this sense;
-   * "(global_name{, global_name})" identifies the union of the
+   * "global_name{, global_name}" identifies the union of the
      sets of variables identified by the global_name's in the list.
    * for the four forms of global_name:
-     * /variable_/name identifies the specified global variable;
+     * /object_/name identifies the specified global variable (or
+       non-preelaborable constant, which is ignored for the purposes
+       of the remaining rules)
      * /package_/name identifies the set of all variables declared within
        the declarative region of the package having the same accessibility
-       level as the package;
+       level as the package, but not including those within the declarative
+       region of a public child of the package;
      * /access_/subtype_mark identifies the set of (aliased) variables that
        can be designated by values of the given access-to-variable type;
      * ACCESS subtype_mark identifies the set of (aliased) variables that
@@ -247,25 +269,29 @@ primitive_global_aspect_definition, a given entity shall be named at
 most once by a global_name, and the reserved words ALL and SYNCHRONIZED
 shall appear at most once.
 
-If an entity has a Global aspect other than (In_Out => all), then the
+If an entity has a Global aspect other than IN OUT ALL, then the
 associated operation(s) shall read only those variables global to the
-entity that are within the *global variable set* associated with either
-the Input or In_Out global_modes, and the operation(s) shall update only
-those variables global to the entity that are within the *global
-variable set* associated with either the In_Out or Output global_modes.
-This includes any calls occurring during the execution of the operation,
-presuming those calls read and update all global variables permitted by
-their Global aspect (or Global'Class aspect, if a dispatching call).
+entity that are within the *global variable set* associated with the IN,
+IN OUT, or OUT modes, and the operation(s) shall update only those
+variables global to the entity that are within the *global variable set*
+associated with either the IN OUT or OUT global_modes. This includes any
+calls occurring during the execution of the operation, presuming those
+calls read and update all global variables permitted by their Global
+aspect (or Global'Class aspect, if a dispatching call). If a variable
+global to the entity is read that is within the *global variable set*
+associated with the OUT global_mode, it shall be updated somewhere
+within the callable entity (or an entity it calls). The variables global
+to the entity that are within the *global variable set* associated with
+the PROOF IN global_mode shall be read only within an assertion
+expression of the callable entity, or another entity
+that it calls.
 
-For a subprogram that is a dispatching operation of a tagged type T, the
-Input and In_Out modes of its Global aspect shall identify a subset of
-the variables identified by the Input and In_Out modes of the
+For a subprogram that is a dispatching operation of a tagged type T,
+each mode of its Global aspect shall identify a subset of the variables
+identified by the corresponding mode, or by the IN OUT mode, of the
 Global'Class aspect of a corresponding dispatching subprogram of any
-ancestor of T. Similarly, the In_Out and Output modes of its Global
-aspect shall identify a subset of the variables identified by the In_Out
-and Output modes of such Global'Class aspects. A corresponding rule applies
-to the Global aspect of a tagged type T relative to the Global'Class aspect
-of any ancestor of T.
+ancestor of T.  A corresponding rule applies to the Global aspect of a
+tagged type T relative to the Global'Class aspect of any ancestor of T.
 
 For a prefix S that statically denotes a subprogram (including a formal
 subprogram), formal object of an anonymous access-to-subprogram type, or a type
@@ -291,6 +317,11 @@ static analysis.
 
 All of the global in, in-out, and out annotations proposed can be
 statically checked.
+
+We have provided a proof-in mode for use within assertion expressions.
+
+We have allowed reading of "out" mode globals, so long as there is at least
+one update of the global variable as well.
 
 Note that it is possible to lie about the use of globals of subprograms
 and other entities that are imported. This is of course impossible to
@@ -319,11 +350,11 @@ at a later point if it was felt to be important.
 
    package Random is
      procedure Set_Seed(Seed : Float);
-        with Global => (Out => Random);
+        with Global => out Random;
           --  Initialize state of Random package
 
      function Next_Random return Float
-        with Global => (In_Out => Random);
+        with Global => in out Random;
           --  Update state of Random package
    end Random;
 
@@ -837,5 +868,49 @@ referenced during the initialization, adjustment, and finalization operations of
 the type.
 
 [Version /03 of this AI was attached - Ed.]
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, June 12, 2016  6:26 PM
+
+Sorry to be so late.  Hopefully Randy is still in Wisconsin.  [This was version
+/04 of the AI.] I switched over to using in, in out, out.   I now require the
+mode to be specified, even if it is "in", since otherwise the syntax was just
+too funky.  I added "proof in" to support use in assertion expressions, and
+allowed references to limited views of packages and incomplete views of types,
+so "limited with" can be of some use.  I removed public children from what is
+covered by Global => in Pkg_Name, but left the visible part, since with a
+limited view of a package, it wouldn't be possible to refer to individual
+declarations from the visible part.
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 12, 2016  7:48 PM
+
+Generally looks good. Some free association:
+
+(1) Not sure why you have "OLD STYLE" and "NEW STYLE" grammars. It just looks
+confusing. "Old Style" is cheap beer, not something that belongs in an AI. ;-)
+
+(2) The "New Style" grammar contains "proof" explicitly like a reserved word.
+Are you proposing a new reserved word, to fight about unreserved keywords yet
+again (this seems like a perfect use for such a thing), or something else??
+
+(3) "/object_/name identifies the specified global variable (or
+non-preelaborable constant, which is ignored for the purposes of the
+remaining rules)" I'm not sure "ignored" is the right way to put this. I think
+you're trying to say that the possibility of non-preelaborable constants isn't
+mentioned in later rules. But that's a bit weird, because many of the later
+rules talk only about variables, and it would seem easy enough to talk about
+"objects", at least in the three following rules. Or maybe describe them as a
+term covering variables and non-preelaborable constants.
+
+(4) Minor glitch: You ought to only italicize the defining occurrence of a term,
+you've got every occurrence of "global variable set" in italics (signified by
+surrounding by *s). [BTW, wouldn't it be better to call this a "global object
+set", since some constants are included? Rather than telling people to "ignore"
+the possibility of a constant being included? Why lie if you don't have to?]
 
 ****************************************************************
