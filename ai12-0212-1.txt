@@ -1,4 +1,4 @@
-!standard 4.3.5(0)                                  16-12-27  AI12-0212-1/00
+!standard 4.3.5(0)                                  17-06-10  AI12-0212-1/01
 !class Amendment 16-12-27
 !status received 16-06-12
 !priority Low
@@ -6,32 +6,421 @@
 !subject Container aggregates
 !summary
 
-** TBD
+Add syntax to construct container instances.
 
 !problem
 
-?????
+Currently, there are very few constructors for containers. We have for example
+the constant Empty_Set, and To_Set to construct a set containing the specified
+element. The best way to do this now is to manually assemble a new container
+with a series of statements; but this has a number of issues:
+
+   - cannot be used in a subprogram contract (such as a post condition)
+   - can make code harder to read since construction has to be moved to a
+     separate function
+
+An obvious approach would be to add functions that initialise a container from
+an aggregate of a unconstrained array, for example:
+
+   X : Example.Set := Example.From_Array ((1, 2, 3));
+
+However there are a number of drawbacks: the syntax is ugly (double brackets),
+it would not allow comprehensions (only displays), and it would only work for
+array-like containers and not maps.
+
+There are three places where container aggregates may be useful: in ordinary
+code (but here we can just do what we do right now), for the definition of
+constants, and in contracts.
 
 !proposal
 
-(See Summary.)
+Thus, we propose to add new aspect (in the spirit of Constant_Indexing,
+Default_Iterator, and Iterator_Element) along with two new aggregates to use it.
+
+This proposal works for most of the standard containers (Vectors,
+Doubly_Linked_Lists, Hashed_Sets, Ordered_Sets, Hashed_Maps and Ordered_Maps
+including their bounded and indefinite versions). Multiway_Trees are are not
+supported by this proposal.
+
+The syntax is highly inspired by Python (please do not let that put you off), it
+just is more Ada-like than comprehension in, say, Haskell.
+
+In the most simple form (called a display) we just give the elements to add in a
+form very similar to a simple array aggregate:
+
+   X : My_Set := (1, 2, 3);
+
+   --  Equivalent to:
+   X : My_Set := Empty_Set;
+   Include (X, 1);
+   Include (X, 2);
+   Include (X, 3);
+
+The function or constant "Empty_Set" is one of the two things you specify in the
+Comprehension aspect, the procedure "Include" is the other.
+
+Displays are good for defining simple container instances, but often, you might
+want to derive one container from another (a concept that is called
+comprehension). This is vaguely related to a delta aggregate, but neither
+construct can easily emulate the other.
+
+Here we loop over one container and apply some function to each item. Thy
+proposed syntax steals from existing loop and quantifier syntax:
+
+   Y : My_Set := (for Item of X => Item * 2);
+
+   --  Equivalent to:
+   Y : My_Set := Empty_Set;
+   for Item of X loop
+      Include (Y, Item * 2);
+   end loop;
+
+We may also wish to filter the items:
+
+   Z : My_Set := (for Item of X if Item > 1 => Item - 1);
+
+   --  Equivalent to:
+   Z : My_Set := Empty_Set;
+   for Item of X loop
+      if Item > 1 then
+         Include (Z, Item - 1);
+      end if;
+   end loop;
+
+Instead of "if" we could use "|" to mimic common mathematical notation, but it
+is probaby not a good idea to introduce the vertical bar into Ada at this point?
+
+Finally, it is also a common pattern to aggregate multiple containers into one.
+Two approaches are supported. This is the nested (or "product") one:
+
+   W : My_Set := (for A of X =>
+                    for B of X => A * B);
+
+   --  Equivalent to:
+   W : My_Set := Empty_Set;
+   for A of X loop
+      for B of X loop
+         Include (W, A * B);
+      end loop;
+   end loop;
+
+And this is the sequential (or "list") one:
+
+   V : My_Set := (for A of X => A,
+                  for A of X => -A);
+
+   --  Equivalent to:
+   V : My_Set := Empty_Set;
+   for A of X loop
+      Include (V, A);
+   end loop;
+   for A of X loop
+      Include (V, -A);
+   end loop;
+
+The new contract on the set container would be:
+
+   type Set is tagged private
+      with --  currently we have this:
+           Constant_Indexing => Constant_Reference,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Element_Type,
+           --  this is new
+           Comprehension     => (Empty     => Empty_Set,
+                                 Inclusion => Include);
+
+For containers where the Inclusion procedure has 2 parameters, we propose syntax
+using =>:
+
+   M : My_Map := (42 => "foo",
+                  88 => "bar");
+
+So, to summarise:
+* Now aspect on private types specifying an empty default and a procedure
+  with one (element) or two (key and value) parameters
+* Extend aggregate syntax to trigger these
+
+Related changes:
+
+This AI will have some interesting interplay with let expressions and
+generators.
+
+This AI will (trivially) conflict with AI12-0127-1 (partial aggregates) as both
+add a new section to 4.3 and modify the syntax for 4.3.
 
 !wording
 
-** TBD.
+4.3 Aggregates (Syntax)
+
+Change:
+
+   aggregate ::= record_aggregate | extension_aggregate | array_aggregate
+
+To:
+
+   aggregate ::= record_aggregate | extension_aggregate | array_aggregate |
+                 display_aggregate | comprehension_aggregate
+
+Add new section: 4.3.4 Comprehension and Display Aggregates
+
+Syntax
+
+   display_aggregate ::= ( unary_display | binary_display )
+
+   unary_display ::= expression {, expression}
+
+   binary_display ::= binary_association {, binary_association}
+
+   binary_association ::= expression => expression
+
+
+   comprehension_aggregate ::= ( product_comprehension {,
+                                 product_comprehension} )
+
+   product_comprehension ::=
+     item_selector {=> item_selector} => comprehension_item
+
+   item_selector ::= for_iteration_scheme [ if expression ]
+
+   comprehension_item ::= expression | binary_association
+
+Legality Rules
+
+The comprehension aspect can be specified on any type.
+
+The underlying type of a comprehension aggregate or display aggregate must bear
+a Comprehension aspect.
+
+An aggregate for a type with a unary inclusion procedure must use a
+unary_display or expression comprehension_items. An aggregate for a type with a
+binary inclusion procedure must use a binary_display or binary_association
+comprehension_items.
+
+STEVE HELP ME
+- I think the expected type of the aggregate needs to be from the outside
+  context, not the aggregate itself
+- wording to constrain the expected type for all expressions
+
+Static Semantics
+
+STEVE HELP ME THIS IS PROBABLY REALLY WRONG AND PROBABLY NEEDS TO BE IN A
+DIFFERENT PLACE
+
+A Comprehension aspect aspect_mark is "Comprehension", and its aspect_definition
+is a record aggregate with exactly two selectors: "Empty" and "Inclusion".
+
+The expression for choice "Empty" can the name of a constant or a parameterless
+function, and must match the type for which the aspect is defined.
+
+The expression for choice "Inclusion" must be the name of a procedure with two
+(for the unary case) or three parameters (for the binary case). The first
+parameter of the inclusion procedure must be of mode in out and match the type
+for which the aspect is defined.
+
+STEVE HELP ME WITH MAGIC TO MAKE DEFAULT PARAMETERS WORK HERE, NEEDED FOR
+VECTORS FOR EXAMPLE...
+
+Dynamic Semantics
+
+The evaluation of a display_aggregate or comprehension_aggregate starts by
+creating a new object, evaluating the Empty function of the Comprehension aspect
+and assigning its result to the new object.
+
+For a unary_display the unary inclusion procedure is called for each expression
+in order, for a binary_display the binary inclusion procedure is called for each
+pair described by the binary_association.
+
+For a comprehension_aggregate, each product_comprehension is evaluated in order.
+
+STEVE I AM TOTALLY LOST HOW TO WORD THIS, PLEASE MAKE IT LOOP IN THE OBVIOUS WAY
+
+To evaluate a product_comprehension, we iterate over the for_iteration_scheme of
+the first item_selector. If the if expression exists, and evaluates to False, we
+skip to the next item. Each following item_selector is evaluated in a similar
+fashion, and finally the comprehension_item is evaluated and the appropriate
+inclusion procedure is called.
+
+Examples
+
+I KNOW I NEED TO REWORK THESE TO USE EXISTING THINGS IN THE RM
+
+   --  Declares a type with comprehension.
+   type Set_Type is array (0 .. 1000) of Boolean
+     with Comprehension => (Empty     => Empty_Set;
+                            Inclusion => Merge);
+   Empty_Set : constant Set_Type := (others => False);
+   procedure Merge (S : in out Set_Type; N : Integer)
+   with Pre => N in 0 .. 1000;
+
+   --  A unary display
+   S := (1, 2);
+
+   --  is Equivalent to:
+   S := Empty_Set;
+   S.Include (1);
+   S.Include (2);
+
+   --  A binary display
+   M := (12 => "house",
+         14 => "beige");
+
+   --  A simple comprehension
+   S := (for Item in 1 .. 5 => Item * 2)
+
+   --  is equivalent to
+   S := Empty_Set;
+   for Item in 1 .. 5 loop
+      S.Include (Item * 2);
+   end loop;
+
+   --  A comprehension with a predicate
+   S := (for Item in 1 .. 100 if Is_Prime (Item) => Item);
+
+   --  is equivalent to
+   S := Empty_Set;
+   for Item in 1 .. 5 loop
+      if Is_Prime then
+         S.Include (Item);
+      end if;
+   end loop;
+
+   --  A simple comprehension consisting out of two product_comprehensions
+   S := (for Item in 1 .. 5 => Item,
+         for Item in 1 .. 5 => -Item);
+
+   --  Is (mostly, assuming set semantics) equivalent to
+   S := (for Item in -5 .. 5 if Item not in -1 .. 1 => Item);
+
+   --  A product comprehension with more than one item_selector
+   S := (for X in 1 .. 10 => for Y in -1 .. 1 if Y /= 0 => X * Y);
+
+   --  is equivalent to
+   S := Empty_Set;
+   for X in 1 .. 10 loop
+      for Y in -1 .. 1 loop
+         if Y /= 0 then
+            S.Include (X * Y);
+         end if;
+      end if;
+   end if;
+
+   --  An example that combines all aspects of the grammar
+   S := (for Customer of Cusomter_Database if not Customer.Poor =>
+           Customer.Name,
+         for Manager of Managers =>
+            for Staff of Manager.Minions if Staff.Performance >= 3.0 =>
+              Staff.First_Name & Staff.Last_Name);
+
+   --  Is equivalent to
+   S := Empty_Set;
+   for Customer of Cusomter_Database loop
+      if not Customer.Poor =>
+         S.Include (Custoemr.Name);
+      end if;
+   end loop;
+   for Manager of Managers loop
+      for Staff of Manager.Minions loop
+         if Staff.Performance => 3.0 then
+            S.Include (Staff.First_Name & Staff.Last_Name);
+         end if;
+      end loop;
+   end loop;
+
+5.5 Loop Statements (Syntax)
+
+Grammar-refactoring. Change:
+
+   iteration_scheme ::= while condition
+                      | for loop_parameter_specification
+                      | for iterator_specification
+
+To:
+
+   iteration_scheme ::= while condition
+                      | for_iteration_scheme
+
+   for_iteration_scheme ::= for loop_parameter_specification
+                          | for iterator_specification
+
+This allows us to use for_iteration_scheme in the comprehensions directly.
+
+A.18.2 The Generic Package Containers.Vectors
+
+Add the Comprehension aspect to the existing ones on type Vector:
+
+   type Vector is tagged private
+      with Constant_Indexing => Constant_Reference,
+           Variable_Indexing => Reference,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Element_Type,
+           Comprehension     => (Empty     => Empty_Vector,
+                                 Inclusion => Append);
+
+A.18.3 The Generic Package Containers.Doubly_Linked_Lists
+
+Add the Comprehension aspect to the existing ones on type List:
+
+   type List is tagged private
+      with Constant_Indexing => Constant_Reference,
+           Variable_Indexing => Reference,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Element_Type,
+           Comprehension     => (Empty     => Empty_List,
+                                 Inclusion => Append);
+
+A.18.5 The Generic Package Containers.Hashed_Maps
+
+Add the Comprehension aspect to the existing ones on type Map:
+
+   type Map is tagged private
+      with Constant_Indexing => Constant_Reference,
+           Variable_Indexing => Reference,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Element_Type,
+           Comprehension     => (Empty     => Empty_Map,
+                                 Inclusion => Insert);
+
+A.18.6 The Generic Package Containers.Ordered_Maps
+
+Add the Comprehension aspect to the existing ones on type Map:
+
+   type Map is tagged private
+      with Constant_Indexing => Constant_Reference,
+           Variable_Indexing => Reference,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Element_Type,
+           Comprehension     => (Empty     => Empty_Map,
+                                 Inclusion => Insert);
+
+A.18.8 The Generic Package Containers.Hashed_Sets
+
+Add the Comprehension aspect to the existing ones on type Set:
+
+   type Set is tagged private
+      with Constant_Indexing => Constant_Reference,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Element_Type,
+           Comprehension     => (Empty     => Empty_Set,
+                                 Inclusion => Include);
+
+A.18.9 The Generic Package Containers.Ordered_Sets
+
+Add the Comprehension aspect to the existing ones on type Set:
+
+   type Set is tagged private
+      with Constant_Indexing => Constant_Reference,
+           Default_Iterator  => Iterate,
+           Iterator_Element  => Element_Type,
+           Comprehension     => (Empty     => Empty_Set,
+                                 Inclusion => Include);
 
 !discussion
 
-** TBD.
-
 !ASIS
-
-** TBD.
 
 !ACATS test
 
-ACATS B and C-Tests are needed to check that the new capabilities are
-supported.
+ACATS B and C-Tests are needed to check that the new capabilities are supported.
 
 !appendix
 
@@ -77,5 +466,90 @@ Sent: Monday, October 17, 2016  7:02 AM
 
 I have it indeed in my personal notes as an action on me (and I will enlist
 the help of Steve et al).
+
+****************************************************************
+
+From: Florian Schanda
+Sent: Saturday, June 10, 2017  3:58 AM
+
+Steve,
+
+I know it said "with help from Steve" but I didn't really ask you for anything
+since I was somewhat disorganized this interval. Sorry! However, you will
+notice that the proposal includes a number of cries for help now, but I
+figured I should post something vaguely substantial so we have a starting
+point for discussion before we start sorting through the details.
+
+Randy,
+
+Sorry for the lateness, I've not been as active as I had anticipated this
+interval. But I should have more time next interval :/
+
+AI glued below. [Editor's note: this was version /01 of the AI.]
+Enjoy, and see you all in Vienna!
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 12, 2017  6:02 PM
+
+A couple of barely-informed thoughts on this one, too. (I read each of these as
+I file it, thus some quick thoughts on each.)
+
+...
+> Enjoy, and see you all in Vienna!
+
+Yes, and we can discuss the details some more there.
+
+First of all, the basic idea seems sound. Having a couple of aspects to control
+how such aggregates get constructed seems pretty sensible.
+
+...
+
+> Instead of "if" we could use "|" to mimic common mathematical
+> notation, but it is probaby not a good idea to introduce the vertical
+> bar into Ada at this point?
+
+The vertical bar has been used in Ada to compose choice lists from the beginning
+of time. It would be awful to try to use it for something else in the same
+construct (that is, an aggregate). Since a "for" is just a kind of choice
+(recall that we already added that in Ada 202x, see AI12-0061-1), which can be
+used along with other forms of choices, using "|" in the syntax of some other
+kind of choice would be confusing.
+
+...
+> Related changes:
+>
+> This AI will have some interesting interplay with let expressions and
+> generators.
+>
+> This AI will (trivially) conflict with AI12-0127-1 (partial
+> aggregates) as both add a new section to 4.3 and modify the syntax for
+> 4.3.
+
+It clearly interacts with AI12-0061-1 somewhat, as that also defines a "for"
+syntax for aggregates. Probably no actual overlapping rules, but the two
+syntaxes need to "feel" the same.
+
+...
+> The evaluation of a display_aggregate or comprehension_aggregate
+> starts by creating a new object, evaluating the Empty function of the
+> Comprehension aspect and assigning its result to the new object.
+>
+> For a unary_display the unary inclusion procedure is called for each
+> expression in order, for a binary_display the binary inclusion
+> procedure is called for each pair described by the binary_association.
+...
+
+I don't much like the name "unary_display": I'm reading a "display", my compiler
+uses "displays" to implement up-level access to local variables, and I really
+don't see any point in introducing yet another use of the term. We're talking
+about container aggregates, why not call them that??
+
+Re: "in order". Components in an Ada aggregate generally are evaluated in an
+arbitrary order. I think we need to have a really good reason to go away from
+that. So either you need to explain why the unusual rules or adjust this to be
+in an arbitrary order. (Note that the new "for" construct executes in an
+arbitrary order.)
 
 ****************************************************************
