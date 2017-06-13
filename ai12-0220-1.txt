@@ -1,4 +1,4 @@
-!standard 6.1.1(1/4)                                  17-06-09  AI12-0220-1/02
+!standard 6.1.1(1/4)                                  17-06-12  AI12-0220-1/03
 !standard 6.1.1(39/3)
 !class Amendment 17-04-07
 !status work item 17-04-07
@@ -8,11 +8,19 @@
 !subject Pre/Post for access-to-subprogram types
 !summary
 
-** Assigned to Steve Baird
+Allow Pre and Post aspects for access-to-subprogram types.
 
 !problem
 
-** Assigned to Steve Baird
+In order to reason effectively about a subprogram call (perhaps in the context
+of a static analysis tool, perhaps not), more information is needed than just
+the parameter profile. That's why the Pre and Post were invented. But we still
+need to know this sort of contract information even in the case where the
+callee is not known at compile time. In the case of dispatching calls, this
+need was recognized and Pre'Class and Post'Class were invented to meet this
+need. The same need exists for the same reasons in the case of a call via an
+access-to-subprogram value; that need should be met by allowing Pre and Post
+aspects to be specified for an access-to-subprogram type.
 
 !proposal
 
@@ -31,6 +39,12 @@ or an access-to-subprogram type".
 
 Intent: Pre and Post aspects may be specified for access-to-subprogram types.
 
+In 19/3, "applicable to a given subprogram or entry" gets replaced by
+"applicable to a given subprogram, entry, or access-to-subprogram type".
+
+Intent: Pre and Post for access-to-subprogram types get enabled/disabled
+in the same way that other Pre/Post aspects do.
+
 In 28/3 "that denotes a function declaration" becomes "that denotes a
   function declaration or an access-to-function type (that is, an
   access-to-subprogram type whose designated profile is a function profile)".
@@ -45,15 +59,22 @@ Replace 39/3 with:
   For a call via an access-to-subprogram value, precondition and
   postcondition checks performed are as determined by the subprogram or entry
   denoted by the prefix of the Access attribute reference that produced the
-  value. In addition, before any such precondition checks are performed,
-  any precondition associated with the access-to-subprogram type is checked
-  Similarly, after any such postcondition checks are performed, any
-  postcondition associated with the access-to-subprogram type is checked.
+  value. In addition, a precondition check of any precondition expression
+  associated with the access-to-subprogram type is made. Similarly, a
+  postcondition check of any postcondition expression associated with the
+  access-to-subprogram type is made.
+  [Editor's note: I reworded the above in version /03 to use the terms
+  "precondition check" and "postcondition check" in order to bring
+  "enabled" and "arbitrary order" rules into play. That however makes
+  the following a lie. Since Steve tells us this is all about where
+  'Old objects live, it may be better to handle some other way.]
   More specifically, a call via an access-to-subprogram value is
   equivalent (with respect to dynamic semantics) to call to a notional
   "wrapper" subprogram which has the Pre and Post aspects and the profile of the
   access-to-subprogram type and whose body contains (and returns, in the case
-  of a function) only a call to the designated subprogram. [This equivalence,
+  of a function) only a call to the designated subprogram.
+
+AARM Discussion: This equivalence,
   determines, for example, the point at which the constant associated with
   an Old attribute reference in the Post aspect for an access-to-subprogram
   type is elaborated and finalized. Note that in the case of type conversion
@@ -63,7 +84,7 @@ Replace 39/3 with:
   of the conversion are relevant in that case. The same applies in the
   case of a "conversion" (using the term loosely) which is accomplished by
   combining a dereference and a 'Access attribute reference, as in
-  Some_Pointer.all'Access.]
+  Some_Pointer.all'Access.
 
 Intent: This is the heart of the matter - the dynamics semantics of a
   call to Ptr.all where Pre/Post has been specified for Ptr's type.
@@ -98,19 +119,21 @@ immeditely afterwards.
 
 !discussion
 
-** Assigned to Steve Baird
+See questions in the !wording proposal.
+
+---
 
 We also need to consider allowing Pre/Post for formal subprograms (important)
 and for renames (not important, other than to be consistent with formal
-subprograms).
+subprograms). Note that the !problem statement makes the same sense with
+"access-to-subprogram" replaced by "generic formal subprogram".
 
 We also need to consider whether we need to make this available for
 closure access-to-subprogram types (aka anonymous access-to-subprogram
 parameter types), which clearly need this capability and cannot be handled
 by just declaring a named type (which has very different semantics).
 
-This latter issue may be better split to a separate-but-related AI; I'll
-leave that to Mr. Baird.
+This latter issue may be better split to a separate-but-related AI.
 
 ---
 
@@ -143,6 +166,36 @@ A call on Wrap will effectively enforce both (Some_Expr_B) (from the call to
 Wrap) and (Some_Expr_A) (from the call to P inside of Wrap). That's the same
 thing that is happening here. You could even imagine each of the 'Access
 references creating such a wrapper.
+
+!example
+
+      pragma Assertion_Policy (Check);
+      type T1 is access procedure (X : Integer) with Pre => X mod 2 = 0;
+      type T2 is access procedure (X : Integer); -- no Pre specification
+
+      generic
+         with procedure P (X : Integer);
+      package G is
+         procedure Pp (X : Integer) renames P;
+      end G;
+
+      procedure Foo (X : Integer) is ... end;
+
+      procedure Bar is
+          Ptr1 : T1 := Foo'Access;
+          procedure Renamed (X : Integer) renames Ptr1.all;
+
+          package I1 is new G (Foo);
+          package I2 is new G (Ptr1.all);
+      begin
+          Foo (111);                      -- no precondition check
+          Ptr1.all (222);                 -- precondition check performed
+          T2 (Ptr1).all (333);            -- no precondition check
+          T2'(Ptr1.all'Access).all (444); -- no precondition check
+          Renamed (666);                  -- precondition check performed
+          I1.Pp (777);                    -- no precondition check
+          I2.Pp (888);                    -- precondition check performed
+      end;
 
 !ASIS
 
@@ -1038,5 +1091,241 @@ Sent: Friday, June  9, 2017  8:59 PM
 Thanks. We still need a !problem, !summary, and !discussion. And for me at
 least, we need this to work on generic formal subprograms, as those are an
 access-to-subprogram analogue.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, June 12, 2017  2:21 PM
+
+On 06/11/2017 12:10 PM, Tucker Taft wrote (in private correspondence, in reply
+to a slightly earlier version of the proposed wording):
+
+>> Replace 39/3 with:
+>>    For a call via an access-to-subprogram value, precondition and
+>>    postcondition checks performed are as determined by the subprogram or entry
+>>    denoted by the prefix of the Access attribute reference that produced the
+>>    value. In addition, before any such precondition checks are performed,
+>>    any precondition associated with the access-to-subprogram type is checked
+>>    Similarly, after any such postcondition checks are performed, any
+>>    postcondition associated with the access-to-subprogram type is checked.
+
+> Stop here.  Move what comes below into an AARM note of some sort.  It is not
+> adding anything significant, in my view, to the normative wording.  If you
+> think there is something essential that is not covered by the above sentence,
+> then try to identify it and only include that bit.
+> 
+
+I don't think the above portion by itself covers the dynamic semantics of a 'Old
+attribute reference in the postcondition for an access-to-subprogram type. The
+text you are suggesting moving to a note consists of one normative sentence
+followed by some square-bracketed (i.e., redundant, non-normative) text. I'd
+have no objection to moving the non-normative text to an AARM note. For the one
+normative sentence however, I don''t see a cleaner/simpler way to express the
+rules for 'Old.
+
+>>    More specifically, a call via an access-to-subprogram value is
+>>    equivalent (with respect to dynamic semantics) to call to a 
+>> notional
+
+typo: "to call" => "to a call"
+
+>>    "wrapper" subprogram which has the Pre and Post aspects and the profile of the
+>>    access-to-subprogram type and whose body contains (and returns, in the case
+>>    of a function) only a call to the designated subprogram. [This equivalence,
+>>    determines, for example, the point at which the constant associated with
+>>    an Old attribute reference in the Post aspect for an access-to-subprogram
+>>    type is elaborated and finalized. Note that in the case of type conversion
+>>    between two access-to-subprogram types, the Pre and Post aspects of the
+>>    source type of the conversion play no role in any subsequent call via
+>>    the conversion result; only the Pre and Post aspects of the target type
+>>    of the conversion are relevant in that case.]
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, June 12, 2017  4:46 PM
+
+The wording I proposed earlier didn't deal at all with assertion policies and
+the question of whether a given Pre/Post check is enabled.
+
+I think the following remedies this:
+
+In 19/3:
+>  If performing checks is required by the Pre, Pre'Class, Post, or 
+> Post'Class assertion policies (see 11.4.2) in effect  at the point of a
+> corresponding aspect specification applicable to a given subprogram or entry,
+> then the respective precondition or postcondition expressions are considered
+> enabled.
+
+we need to either replace "subprogram or entry" with something like "subprogram,
+entry, or access-to-subprogram type" or perhaps instead simply delete the entire
+"applicable to a given subprogram or entry" qualification.
+
+Then, in the wording I proposed earlier about the dynamics semantics of an
+access-to-subprogram call, replace
+    "any precondition" and "any postcondition"
+with
+    "enabled precondition" and "any enabled postcondition", respectively.
+
+****************************************************************
+
+From: Tucker Taft
+Sent: Monday, June 12, 2017  4:49 PM
+
+> I don't think the above portion by itself covers the dynamic semantics 
+> of a 'Old attribute reference in the postcondition for an 
+> access-to-subprogram type. The text you are suggesting moving to a 
+> note consists of one normative sentence followed by some 
+> square-bracketed (i.e., redundant, non-normative) text. I'd have no 
+> objection to moving the non-normative text to an AARM note.
+
+Please do.
+
+> For the one normative sentence however, I don''t see a cleaner/simpler 
+> way to express the rules for ‘Old.
+
+I am not totally convinced, if ‘Old is really the only problem you are trying
+to solve.  But let’s discuss this live.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, June 12, 2017  5:01 PM
+
+> replace
+>     "any precondition" and "any postcondition"
+> with
+>     "enabled precondition" and "any enabled postcondition",
+
+typo: "enabled precondition" => "any enabled precondition".
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 12, 2017  6:40 PM
+
+> The wording I proposed earlier didn't deal at all with assertion 
+> policies and the question of whether a given Pre/Post check is 
+> enabled.
+
+The existing wording is already very inconsistent about that (as I found out
+trying to piggyback the Stable_Properties aspect on top). I won't mind if we
+scrubbed the wording so that we used consistent language throughout 6.1.1.
+(But that's work :-).
+ 
+> I think the following remedies this:
+> 
+> In 19/3:
+> >  If performing checks is required by the Pre, Pre'Class, Post, or 
+> > Post'Class assertion policies (see 11.4.2) in effect  at
+> the point of a corresponding aspect specification applicable to a 
+> given subprogram or entry, then the respective > precondition or 
+> postcondition expressions are considered enabled.
+> 
+> we need to either replace "subprogram or entry" with something like 
+> "subprogram, entry, or access-to-subprogram type" or perhaps instead 
+> simply delete the entire "applicable to a given subprogram or entry" 
+> qualification.
+
+The qualification is there to emphasize that it is the point of the
+declaration, and not the point of the call, that determines whether or not
+a contract is enabled.
+
+> Then, in the wording I proposed earlier about the dynamics semantics 
+> of an access-to-subprogram call, replace
+>     "any precondition" and "any postcondition"
+> with
+>     "enabled precondition" and "any enabled postcondition", 
+> respectively.
+
+Sounds good, but is that done in the rest of the Dynamic Semantics? I'd hate
+to make it even more inconsistent.
+
+****************************************************************
+
+From: Steve Baird
+Sent: Monday, June 12, 2017  7:19 PM
+
+[Sent summary, problem, and an example. This is version /03 of the AI.
+Also, some wording changes were applied from the mail threads. - Editor.]
+
+---
+
+Incidentally, we probably only want to allow Pre/Post to be specified for a
+*non-derived* access-to-subprogram type. This isn't 100% obvious; perhaps
+allowing the derived case would be useful, but I suggest disallowing it at
+least initially.
+
+Do we need to state that Pre and Post are type-related aspects when specified
+for a type? When used in this way, are Pre and Post nonoverridable (see 13.1.1
+18.2/5)?
+
+****************************************************************
+
+From: Randy Brukardt
+Sent: Monday, June 12, 2017  8:25 PM
+
+> >   We still need a !problem, !summary, and !discussion.
+> !summary
+...
+Now you're just yanking my chain, sending this 2.5 hours after the deadline.
+At least I was waiting for Tucker...
+
+> > And for me at
+> > least, we need this to work on generic formal subprograms, as those 
+> > are an access-to-subprogram analogue.
+
+You didn't explain why you didn't do this. If you substitute "generic formal
+subprogram" for "access-to-subprogram" in your problem statement, it's obvious
+that the same thing is true. (Along with your example, which also demonstrates
+nicely that the contracts of a generic formal subprogram are completely
+unknown.)
+
+...
+> Then, in the wording I proposed earlier about the dynamics semantics 
+> of an access-to-subprogram call, replace
+>     "any precondition" and "any postcondition"
+> with
+>     "enabled precondition" and "any enabled postcondition", 
+> respectively.
+
+I said earlier:
+>Sounds good, but is that done in the rest of the Dynamic Semantics? I'd hate
+to make it even more inconsistent.
+
+Actually, this is unnecessary. Only paras 32, 33, and 35 take about enabled
+expressions; that defines what a precondition check (and postcondition check)
+do. The rest of the dynamic semantics section does not mention enabled/disabled
+and only talks about checks, rather than expressions. The point being that a
+"precondition expression" is enabled/disabled; a "precondition check" checks
+some appliable precondition expressions. These are NOT the same thing, and that
+looks intentional.
+
+Thus your paragraph 39 wording needs to talk about "precondition checks", and
+never just "precondition" alone. So "In addition, before any such precondition
+checks are performed, any precondition associated with the access-to-subprogram
+type is checked." is no good. Better would be something like:
+
+"In addition, before any such precondition checks are performed, a precondition
+check of any precondition expression associated with the access-to-subprogram
+type is made."
+
+Probably could use some wordsmithing, the key though is to talk about the
+"precondition check" so that we're dragging in the parts about "enabled" and
+"arbitrary order" and the like. 
+
+Indeed, is there any reason here to specify an order of checks? Usually such
+checks are in an unspecified order, and that seems fine here. So drop the part
+in commas.
+
+"In addition, a precondition check of any precondition expression associated
+with the access-to-subprogram type is made."
+
+"Similarly, a postcondition check of any postcondition expression associated
+with the access-to-subprogram type is made."
+
+I made this change to the wording in the latest draft; we can discuss further
+in Vienna. (I suspect that there is a better way to handle 'Old than to
+overspecify how checking is done.)
 
 ****************************************************************
